@@ -1,0 +1,34 @@
+# Environment and secrets
+.env
+*.env
+.env.*
+!.env.example
+credentials*
+secrets*
+*.key
+*.pem
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+.pytest_cache/
+
+# Test artifacts
+test/fixtures/*/logs/
+test/fixtures/*/.env
+*.sarif.out
+*.json.out
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
