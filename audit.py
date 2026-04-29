@@ -137,7 +137,7 @@ examples:
     parser.add_argument(
         '--output',
         default='plain',
-        help='Output format(s), comma-separated: plain, json, sarif (default: plain)',
+        help='Output format(s), comma-separated: plain, json, sarif, compliance, rego, kyverno, defectdojo (default: plain)',
     )
     parser.add_argument(
         '--out-file',
@@ -194,6 +194,36 @@ examples:
         default='',
         metavar='TOKEN',
         help='hash bearer token if auth is enabled (for --mode hash)',
+    )
+    # DefectDojo args (used when --output includes "defectdojo")
+    parser.add_argument(
+        '--defectdojo-url',
+        default=None,
+        metavar='URL',
+        help='DefectDojo base URL (or set DEFECTDOJO_URL env var)',
+    )
+    parser.add_argument(
+        '--defectdojo-key',
+        default=None,
+        metavar='KEY',
+        help='DefectDojo API token (or set DEFECTDOJO_API_KEY env var)',
+    )
+    parser.add_argument(
+        '--defectdojo-product',
+        default=None,
+        metavar='NAME',
+        help='DefectDojo product name (default: "M.A.R.K. Sentinel — <target>")',
+    )
+    parser.add_argument(
+        '--defectdojo-engagement',
+        default=None,
+        metavar='NAME',
+        help='DefectDojo engagement name (default: "<profile> — <date>")',
+    )
+    parser.add_argument(
+        '--defectdojo-push-all',
+        action='store_true',
+        help='Push PASS findings to DefectDojo in addition to FAIL/WARN (default: FAIL/WARN only)',
     )
     args = parser.parse_args()
 
@@ -336,6 +366,65 @@ examples:
             out_md = artifacts_dir / f'compliance_{profile["name"].lower().replace(" ", "_")}.md'
             write_compliance_report(str(out_md), findings, profile_name=profile.get('name'))
             print(f"\n[Compliance report written to {out_md}]")
+
+    if 'rego' in output_formats:
+        from output.rego import format_rego
+        rego_text = format_rego(results, profile, str(target), args.mode)
+        out_path = args.out_file
+        if out_path:
+            rego_path = out_path if out_path.endswith('.rego') else out_path + '.rego'
+            with open(rego_path, 'w') as f:
+                f.write(rego_text)
+            print(f"\n[Rego policy written to {rego_path}]")
+        else:
+            print(rego_text)
+
+    if 'kyverno' in output_formats:
+        from output.kyverno import format_kyverno
+        kyverno_text = format_kyverno(results, profile, str(target), args.mode)
+        out_path = args.out_file
+        if out_path:
+            kyverno_path = out_path if out_path.endswith('.yaml') else out_path + '_kyverno.yaml'
+            with open(kyverno_path, 'w') as f:
+                f.write(kyverno_text)
+            print(f"\n[Kyverno policies written to {kyverno_path}]")
+        else:
+            print(kyverno_text)
+
+    if 'defectdojo' in output_formats:
+        from connectors.defectdojo_connector import push_findings as dojo_push
+        dojo_url = args.defectdojo_url or os.environ.get('DEFECTDOJO_URL', '')
+        dojo_key = args.defectdojo_key or os.environ.get('DEFECTDOJO_API_KEY', '')
+        if not dojo_url or not dojo_key:
+            print(
+                "\n[ERROR] DefectDojo output requires --defectdojo-url and --defectdojo-key "
+                "(or DEFECTDOJO_URL / DEFECTDOJO_API_KEY env vars).",
+                file=sys.stderr,
+            )
+        else:
+            print("\nPushing findings to DefectDojo...", end='', flush=True)
+            try:
+                summary = dojo_push(
+                    results=results,
+                    profile=profile,
+                    target=str(target),
+                    mode=args.mode,
+                    url=dojo_url,
+                    api_key=dojo_key,
+                    product_name=args.defectdojo_product or None,
+                    engagement_name=args.defectdojo_engagement or None,
+                    push_passing=args.defectdojo_push_all,
+                )
+                print(f" done.")
+                print(f"  Pushed:  {summary['pushed']} findings")
+                print(f"  Skipped: {summary['skipped']} (PASS/SKIP not pushed)")
+                if summary['errors']:
+                    print(f"  Errors:  {len(summary['errors'])}")
+                    for err in summary['errors']:
+                        print(f"    - {err}")
+                print(f"  Engagement: {summary['engagement_url']}")
+            except Exception as exc:
+                print(f" failed: {exc}", file=sys.stderr)
 
     if args.out_file and 'json' not in output_formats and 'sarif' not in output_formats and output_text:
         with open(args.out_file, 'w') as f:
