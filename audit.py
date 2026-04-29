@@ -1,0 +1,170 @@
+#!/usr/bin/env python3
+"""
+M.A.R.K. Sentinel — AI Security Audit Tool
+Powered by Hash
+
+Usage:
+  python audit.py --mode config --profile smb --output plain
+  python audit.py --mode config --target ./my-app --profile fedramp --output json,plain
+  python audit.py --mode config --fixture test/fixtures/deploy-hardened/ --profile default
+"""
+import argparse
+import json
+import sys
+from pathlib import Path
+
+from connectors.config_connector import scan_directory
+from checks.deploy import run_all as deploy_checks
+from checks.input_safety import run_all as inp_checks
+from checks.output_safety import run_all as out_checks
+from checks.agentic import run_all as agent_checks
+from checks.supply_chain import run_all as supply_checks
+from checks.governance import run_all as gov_checks
+from checks import FAIL, SKIP
+from output.plain_english import format_report
+from output.json_report import format_json
+
+
+BANNER = """
+╔══════════════════════════════════════════════════╗
+║  M.A.R.K. Sentinel — AI Security Audit Tool     ║
+║  Powered by Hash                                 ║
+╚══════════════════════════════════════════════════╝"""
+
+
+def load_profile(name: str) -> dict:
+    profile_path = Path(__file__).parent / 'profiles' / f'{name}.json'
+    if not profile_path.exists():
+        available = [p.stem for p in (Path(__file__).parent / 'profiles').glob('*.json')]
+        print(f"[ERROR] Profile '{name}' not found. Available: {', '.join(available)}", file=sys.stderr)
+        sys.exit(1)
+    with open(profile_path) as f:
+        return json.load(f)
+
+
+def filter_results(results: list, profile: dict) -> list:
+    if profile.get('checks') == 'all':
+        return results
+    allowed = set(profile['checks'])
+    return [r for r in results if r.check_id in allowed]
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description='M.A.R.K. Sentinel — AI Security Audit Tool',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+examples:
+  python audit.py --mode config --profile smb --output plain
+  python audit.py --mode config --target ./my-app --profile default --output json,plain
+  python audit.py --mode config --fixture test/fixtures/deploy-hardened/ --profile default
+        """,
+    )
+    parser.add_argument(
+        '--mode',
+        choices=['config', 'api', 'local', 'docker', 'kubectl'],
+        default='config',
+        help='Scan mode (default: config)',
+    )
+    parser.add_argument(
+        '--target', '--fixture',
+        default='.',
+        metavar='PATH',
+        help='Directory to scan in config mode (default: current directory)',
+    )
+    parser.add_argument(
+        '--profile',
+        default='default',
+        help='Audit profile: smb, fedramp, cmmc, default (default: default)',
+    )
+    parser.add_argument(
+        '--output',
+        default='plain',
+        help='Output format(s), comma-separated: plain, json (default: plain)',
+    )
+    parser.add_argument(
+        '--out-file',
+        default=None,
+        metavar='FILE',
+        help='Write output to this file (in addition to stdout)',
+    )
+    parser.add_argument(
+        '--quiet',
+        action='store_true',
+        help='Suppress banner and progress output',
+    )
+    args = parser.parse_args()
+
+    if not args.quiet:
+        print(BANNER)
+
+    # Mode gating — only config mode in Phase 1
+    if args.mode != 'config':
+        print(f"\n[INFO] '{args.mode}' mode will be available in Phase 2. Running config mode scan.\n")
+        args.mode = 'config'
+
+    profile = load_profile(args.profile)
+    target = Path(args.target).resolve()
+
+    if not target.exists():
+        print(f"[ERROR] Target not found: {target}", file=sys.stderr)
+        sys.exit(1)
+
+    if not args.quiet:
+        print(f"\nTarget:  {target}")
+        print(f"Profile: {profile['name']}  |  Mode: {args.mode}")
+        print(f"{'─' * 52}")
+        print("Scanning...", end='', flush=True)
+
+    ctx = scan_directory(str(target), mode=args.mode)
+
+    if not args.quiet:
+        print(f" {ctx.total_files_scanned} files scanned.\n")
+
+    # Run all check modules
+    results = []
+    results.extend(deploy_checks(ctx))
+    results.extend(inp_checks(ctx))
+    results.extend(out_checks(ctx))
+    results.extend(agent_checks(ctx))
+    results.extend(supply_checks(ctx))
+    results.extend(gov_checks(ctx))
+
+    # Apply profile filter
+    results = filter_results(results, profile)
+
+    # Format and output
+    output_formats = [f.strip().lower() for f in args.output.split(',')]
+
+    output_text = None
+    if 'plain' in output_formats:
+        output_text = format_report(results, profile, str(target))
+        print(output_text)
+
+    if 'json' in output_formats:
+        json_text = format_json(results, profile, str(target), args.mode)
+        if 'plain' not in output_formats:
+            print(json_text)
+        if args.out_file:
+            out_path = args.out_file
+            if not out_path.endswith('.json'):
+                out_path += '.json'
+            with open(out_path, 'w') as f:
+                f.write(json_text)
+            print(f"\n[JSON report written to {out_path}]")
+        elif 'plain' in output_formats:
+            # Also write JSON alongside plain output
+            pass
+
+    if args.out_file and 'json' not in output_formats and output_text:
+        with open(args.out_file, 'w') as f:
+            f.write(output_text)
+        print(f"\n[Report written to {args.out_file}]")
+
+    # Exit code: non-zero if any FAIL
+    has_fail = any(r.status == FAIL for r in results)
+    sys.exit(1 if has_fail else 0)
+
+
+if __name__ == '__main__':
+    main()

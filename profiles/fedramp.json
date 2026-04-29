@@ -1,0 +1,11 @@
+{
+  "name": "FedRAMP Moderate",
+  "description": "FedRAMP Moderate baseline — all 32 checks with NIST 800-53 control mappings emphasized.",
+  "checks": "all",
+  "default_output": "plain",
+  "include_remediation": true,
+  "include_frameworks": true,
+  "severity_threshold": "LOW",
+  "smb_language": false,
+  "framework_emphasis": "fedramp"
+}

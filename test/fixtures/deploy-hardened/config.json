@@ -1,0 +1,23 @@
+{
+  "model": "gpt-4o-2024-11-20",
+  "logging": {
+    "enabled": true,
+    "log_level": "INFO",
+    "log_file": "/var/log/ai-service/app.log",
+    "retention_days": 90,
+    "structured": true
+  },
+  "authentication": {
+    "required": true,
+    "type": "jwt",
+    "api_key_required": true
+  },
+  "rate_limit": {
+    "requests_per_minute": 100,
+    "requests_per_day": 10000,
+    "token_budget": 500000
+  },
+  "https": true,
+  "max_tokens": 4096,
+  "max_input_length": 8192
+}

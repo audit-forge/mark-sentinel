@@ -1,0 +1,10 @@
+{
+  "name": "Default (Full Suite)",
+  "description": "Full 32-check suite across all 6 categories. Includes all framework mappings.",
+  "checks": "all",
+  "default_output": "plain",
+  "include_remediation": true,
+  "include_frameworks": true,
+  "severity_threshold": "LOW",
+  "smb_language": false
+}

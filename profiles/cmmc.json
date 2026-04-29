@@ -1,0 +1,11 @@
+{
+  "name": "CMMC Level 2",
+  "description": "CMMC 2.0 Level 2 profile — all checks with CMMC practice mappings emphasized.",
+  "checks": "all",
+  "default_output": "plain",
+  "include_remediation": true,
+  "include_frameworks": true,
+  "severity_threshold": "LOW",
+  "smb_language": false,
+  "framework_emphasis": "cmmc"
+}

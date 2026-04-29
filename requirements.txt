@@ -1,0 +1,4 @@
+# M.A.R.K. Sentinel — Python dependencies
+# Core engine requires Python 3.9+ stdlib only.
+# pyyaml is optional but recommended for docker-compose.yml parsing.
+pyyaml==6.0.2
