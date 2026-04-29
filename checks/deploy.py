@@ -40,9 +40,11 @@ _AUTH_POSITIVE_RE = [
     re.compile(r'(?i)auth(?:entication)?[_-]?(?:required|enabled)\s*[=:]\s*(?:true|yes|1)'),
     re.compile(r'auth_basic\s+'),
     re.compile(r'(?i)"auth(?:entication)?"\s*:\s*(?:true|"\w)'),
-    re.compile(r'(?i)(?:jwt|oauth2?|api[_-]?key)\b'),
-    re.compile(r'(?i)require[_-]?auth'),
-    re.compile(r'(?i)bearer\s+\$'),
+    re.compile(r'(?i)"api[_-]?key[_-]?required"\s*:\s*true'),
+    re.compile(r'(?i)require[_-]?auth(?:entication)?'),
+    re.compile(r'proxy_set_header\s+Authorization'),
+    re.compile(r'(?i)"middleware"\s*:\s*\[.*(?:auth|jwt|oauth)'),
+    re.compile(r'(?i)oauth2?\s*:\s*\{'),
 ]
 
 _PORT_EXPOSED_RE = re.compile(r'(?m)^\s*-\s*["\']?(?:0\.0\.0\.0:)?(\d+):(\d+)["\']?')

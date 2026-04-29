@@ -1,0 +1,6 @@
+{
+  "model": "gpt-4o",
+  "openai_api_key": "sk-fixtureABCDEFGHIJKLMNOPQRSTUVWXYZ12345678",
+  "debug": true,
+  "log_enabled": false
+}

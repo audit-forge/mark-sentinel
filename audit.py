@@ -23,6 +23,7 @@ from checks.governance import run_all as gov_checks
 from checks import FAIL, SKIP
 from output.plain_english import format_report
 from output.json_report import format_json
+from output.sarif import format_sarif
 
 
 BANNER = """
@@ -80,7 +81,7 @@ examples:
     parser.add_argument(
         '--output',
         default='plain',
-        help='Output format(s), comma-separated: plain, json (default: plain)',
+        help='Output format(s), comma-separated: plain, json, sarif (default: plain)',
     )
     parser.add_argument(
         '--out-file',
@@ -156,7 +157,19 @@ examples:
             # Also write JSON alongside plain output
             pass
 
-    if args.out_file and 'json' not in output_formats and output_text:
+    if 'sarif' in output_formats:
+        sarif_text = format_sarif(results, profile, str(target), args.mode)
+        if not set(output_formats) & {'plain', 'json'}:
+            print(sarif_text)
+        out_path = args.out_file
+        if out_path:
+            if not out_path.endswith('.sarif') and not out_path.endswith('.json'):
+                out_path += '.sarif'
+            with open(out_path, 'w') as f:
+                f.write(sarif_text)
+            print(f"\n[SARIF report written to {out_path}]")
+
+    if args.out_file and 'json' not in output_formats and 'sarif' not in output_formats and output_text:
         with open(args.out_file, 'w') as f:
             f.write(output_text)
         print(f"\n[Report written to {args.out_file}]")
