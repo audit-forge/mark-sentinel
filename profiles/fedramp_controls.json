@@ -1,0 +1,39 @@
+{
+  "AI-DEPLOY-001": ["AC-2", "AC-3", "IA-5", "AU-2"],
+  "AI-DEPLOY-002": ["CM-2", "CM-6", "AC-3"],
+  "AI-DEPLOY-003": ["AU-2", "AU-6", "SI-4"],
+  "AI-DEPLOY-004": ["AC-3", "SC-7", "IA-2"],
+  "AI-DEPLOY-005": ["SC-8", "SC-13", "SI-10"],
+  "AI-DEPLOY-006": ["SC-5", "SC-7", "SI-4"],
+
+  "AI-INP-001": ["SI-10", "PL-2"],
+  "AI-INP-002": ["SI-10", "SC-7"],
+  "AI-INP-003": ["CM-3", "SI-10"],
+  "AI-INP-004": ["SI-10"],
+  "AI-INP-005": ["SI-4", "SC-5"],
+
+  "AI-OUT-001": ["MP-6", "SI-12"],
+  "AI-OUT-002": ["MP-6", "AU-6", "SI-4"],
+  "AI-OUT-003": ["SI-10"],
+  "AI-OUT-004": ["PL-2", "SI-10"],
+  "AI-OUT-005": ["SI-10", "CM-6"],
+
+  "AI-AGENT-001": ["AC-6", "CM-6"],
+  "AI-AGENT-002": ["AC-6", "IR-4"],
+  "AI-AGENT-003": ["SI-10", "CM-3"],
+  "AI-AGENT-004": ["AC-3", "SI-10"],
+  "AI-AGENT-005": ["AU-2", "AU-6", "SI-4"],
+  "AI-AGENT-006": ["SC-7", "SI-10", "AU-6"],
+
+  "AI-SUPPLY-001": ["CM-2", "CM-8", "PL-2"],
+  "AI-SUPPLY-002": ["CM-2", "SI-7"],
+  "AI-SUPPLY-003": ["CM-2", "CM-6", "SI-7"],
+  "AI-SUPPLY-004": ["AU-6", "AC-2"],
+  "AI-SUPPLY-005": ["CM-2"],
+
+  "AI-GOV-001": ["PL-2"],
+  "AI-GOV-002": ["MP-6", "PL-2"],
+  "AI-GOV-003": ["IR-4", "AU-6"],
+  "AI-GOV-004": ["PL-2", "AC-2"],
+  "AI-GOV-005": ["CM-2", "CM-8", "PL-2"]
+}
