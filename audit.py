@@ -83,6 +83,24 @@ def build_scan_context(args):
             target_dir=str(target),
         )
 
+    if mode == "gemini":
+        from connectors.gemini_connector import connect as gemini_connect
+        import os as _os
+        api_key = args.gemini_api_key or _os.environ.get("GEMINI_API_KEY", "")
+        if not api_key:
+            print("[ERROR] --gemini-api-key or GEMINI_API_KEY env var required for --mode gemini", file=sys.stderr)
+            sys.exit(1)
+        model = args.model if args.model != "gpt-4o" else "gemini-1.5-flash"
+        return gemini_connect(api_key=api_key, model=model, target_dir=str(target))
+
+    if mode == "hash":
+        from connectors.hash_connector import connect as hash_connect
+        return hash_connect(
+            host=args.hash_host,
+            token=args.hash_token,
+            target_dir=str(target),
+        )
+
     # config mode
     return scan_directory(str(target), mode="config")
 
@@ -101,7 +119,7 @@ examples:
     )
     parser.add_argument(
         '--mode',
-        choices=['config', 'api', 'local', 'docker', 'kubectl'],
+        choices=['config', 'api', 'local', 'gemini', 'hash', 'docker', 'kubectl'],
         default='config',
         help='Scan mode (default: config)',
     )
@@ -157,6 +175,26 @@ examples:
         metavar='URL',
         help='Ollama host URL (for --mode local, default: http://localhost:11434)',
     )
+    # Gemini args
+    parser.add_argument(
+        '--gemini-api-key',
+        default=None,
+        metavar='KEY',
+        help='Google AI API key (for --mode gemini; or set GEMINI_API_KEY env var)',
+    )
+    # Hash/openclaw args
+    parser.add_argument(
+        '--hash-host',
+        default='http://127.0.0.1:8400',
+        metavar='URL',
+        help='hash runtime host URL (for --mode hash, default: http://127.0.0.1:8400)',
+    )
+    parser.add_argument(
+        '--hash-token',
+        default='',
+        metavar='TOKEN',
+        help='hash bearer token if auth is enabled (for --mode hash)',
+    )
     args = parser.parse_args()
 
     if not args.quiet:
@@ -175,10 +213,15 @@ examples:
             mode_label = f"api ({args.endpoint})"
         elif args.mode == "local":
             mode_label = f"local ({args.ollama_host})"
+        elif args.mode == "gemini":
+            model_label = args.model if args.model != "gpt-4o" else "gemini-1.5-flash"
+            mode_label = f"gemini ({model_label})"
+        elif args.mode == "hash":
+            mode_label = f"hash ({args.hash_host})"
         print(f"\nTarget:  {target}")
         print(f"Profile: {profile['name']}  |  Mode: {mode_label}")
         print(f"{'─' * 52}")
-        if args.mode in ("api", "local"):
+        if args.mode in ("api", "local", "gemini", "hash"):
             print("Connecting and running probes...", end='', flush=True)
         else:
             print("Scanning...", end='', flush=True)
@@ -186,7 +229,7 @@ examples:
     ctx = build_scan_context(args)
 
     if not args.quiet:
-        if args.mode in ("api", "local"):
+        if args.mode in ("api", "local", "gemini", "hash"):
             probe_count = len(ctx.probe_results)
             if ctx.live_error:
                 print(f" connection error: {ctx.live_error}")
@@ -270,6 +313,21 @@ examples:
                     elif isinstance(v, list):
                         for c in v:
                             fmap.append({'framework': k, 'control': c})
+
+                # Augment with FedRAMP/NIST control IDs from a machine-readable mapping file if present
+                try:
+                    fed_map_path = Path(__file__).parent / 'profiles' / 'fedramp_controls.json'
+                    if fed_map_path.exists():
+                        fedmap = json.loads(fed_map_path.read_text())
+                        extra = fedmap.get(f.get('id')) or fedmap.get(getattr(r, 'check_id', ''))
+                        if extra:
+                            for c in extra:
+                                # avoid duplicates
+                                if not any(x for x in fmap if x.get('framework') == 'FedRAMP' and x.get('control') == c):
+                                    fmap.append({'framework': 'FedRAMP', 'control': c})
+                except Exception:
+                    pass
+
                 f['frameworks'] = fmap
                 findings.append(f)
 

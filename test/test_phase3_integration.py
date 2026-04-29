@@ -26,6 +26,8 @@ def test_fedramp_compliance_artifact_exists(tmp_path):
     assert md.exists(), f"Expected compliance md at {md}"
     content = md.read_text()
     assert 'FedRAMP' in content, 'FedRAMP mapping missing in compliance report'
+    # ensure at least one specific FedRAMP control ID appears (sanity check)
+    assert 'AC-3' in content or 'SI-10' in content or 'AU-2' in content, 'FedRAMP control IDs missing in compliance report'
 
 
 def test_cmmc_compliance_artifact_exists(tmp_path):
