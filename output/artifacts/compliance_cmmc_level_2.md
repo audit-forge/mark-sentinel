@@ -1,6 +1,6 @@
 # M.A.R.K. Sentinel — Compliance Report
 Generated: 2026-04-29T12:50:35Z
-Profile: FedRAMP Moderate
+Profile: CMMC Level 2
 
 ## Summary
 Total checks: 32
