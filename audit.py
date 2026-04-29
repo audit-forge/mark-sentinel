@@ -239,6 +239,46 @@ examples:
                 f.write(sarif_text)
             print(f"\n[SARIF report written to {out_path}]")
 
+    # Compliance output (Phase 3)
+    if 'compliance' in output_formats:
+        try:
+            from output.compliance import write_compliance_report
+        except Exception:
+            write_compliance_report = None
+        if write_compliance_report:
+            # Convert CheckResult dataclasses into dicts expected by compliance.generate_compliance_report
+            findings = []
+            for r in results:
+                f = {
+                    'id': getattr(r, 'check_id', ''),
+                    'title': getattr(r, 'title', ''),
+                    'category': getattr(r, 'category', ''),
+                    'severity': getattr(r, 'severity', '').lower(),
+                    'result': getattr(r, 'status', ''),
+                    'description': getattr(r, 'details', ''),
+                    'remediation': getattr(r, 'remediation', ''),
+                    'evidence': getattr(r, 'evidence', []),
+                }
+                frameworks = getattr(r, 'frameworks', {}) or {}
+                # convert frameworks dict to list of {framework,control}
+                fmap = []
+                for k, v in frameworks.items():
+                    if isinstance(v, str):
+                        controls = [c.strip() for c in str(v).split(',')]
+                        for c in controls:
+                            fmap.append({'framework': k, 'control': c})
+                    elif isinstance(v, list):
+                        for c in v:
+                            fmap.append({'framework': k, 'control': c})
+                f['frameworks'] = fmap
+                findings.append(f)
+
+            artifacts_dir = Path(__file__).parent / 'output' / 'artifacts'
+            artifacts_dir.mkdir(parents=True, exist_ok=True)
+            out_md = artifacts_dir / f'compliance_{profile["name"].lower().replace(" ", "_")}.md'
+            write_compliance_report(str(out_md), findings, profile_name=profile.get('name'))
+            print(f"\n[Compliance report written to {out_md}]")
+
     if args.out_file and 'json' not in output_formats and 'sarif' not in output_formats and output_text:
         with open(args.out_file, 'w') as f:
             f.write(output_text)
