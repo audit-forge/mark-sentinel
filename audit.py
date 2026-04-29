@@ -6,10 +6,12 @@ Powered by Hash
 Usage:
   python audit.py --mode config --profile smb --output plain
   python audit.py --mode config --target ./my-app --profile fedramp --output json,plain
-  python audit.py --mode config --fixture test/fixtures/deploy-hardened/ --profile default
+  python audit.py --mode api --endpoint https://api.openai.com/v1 --api-key $OPENAI_API_KEY --model gpt-4o
+  python audit.py --mode local --ollama-host http://localhost:11434 --model llama3 --output plain,sarif
 """
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -50,6 +52,41 @@ def filter_results(results: list, profile: dict) -> list:
     return [r for r in results if r.check_id in allowed]
 
 
+def build_scan_context(args):
+    mode = args.mode
+    target = Path(args.target).resolve()
+
+    if not target.exists():
+        print(f"[ERROR] Target not found: {target}", file=sys.stderr)
+        sys.exit(1)
+
+    if mode == "api":
+        from connectors.api_connector import connect as api_connect
+        api_key = args.api_key or os.environ.get("OPENAI_API_KEY", "")
+        if not args.endpoint:
+            print("[ERROR] --endpoint is required for --mode api", file=sys.stderr)
+            sys.exit(1)
+        if not api_key:
+            print("[WARN] No API key provided. Set --api-key or OPENAI_API_KEY env var.", file=sys.stderr)
+        return api_connect(
+            endpoint=args.endpoint,
+            api_key=api_key,
+            model=args.model,
+            target_dir=str(target),
+        )
+
+    if mode == "local":
+        from connectors.ollama_connector import connect as ollama_connect
+        return ollama_connect(
+            host=args.ollama_host,
+            model=args.model,
+            target_dir=str(target),
+        )
+
+    # config mode
+    return scan_directory(str(target), mode="config")
+
+
 def main():
     parser = argparse.ArgumentParser(
         description='M.A.R.K. Sentinel — AI Security Audit Tool',
@@ -58,7 +95,8 @@ def main():
 examples:
   python audit.py --mode config --profile smb --output plain
   python audit.py --mode config --target ./my-app --profile default --output json,plain
-  python audit.py --mode config --fixture test/fixtures/deploy-hardened/ --profile default
+  python audit.py --mode api --endpoint https://api.openai.com/v1 --api-key sk-... --model gpt-4o
+  python audit.py --mode local --ollama-host http://localhost:11434 --model llama3 --output plain,sarif
         """,
     )
     parser.add_argument(
@@ -71,7 +109,7 @@ examples:
         '--target', '--fixture',
         default='.',
         metavar='PATH',
-        help='Directory to scan in config mode (default: current directory)',
+        help='Directory to scan for config issues (default: current directory)',
     )
     parser.add_argument(
         '--profile',
@@ -94,33 +132,68 @@ examples:
         action='store_true',
         help='Suppress banner and progress output',
     )
+    # API mode args
+    parser.add_argument(
+        '--endpoint',
+        default=None,
+        metavar='URL',
+        help='OpenAI-compatible API endpoint (for --mode api)',
+    )
+    parser.add_argument(
+        '--api-key',
+        default=None,
+        metavar='KEY',
+        help='API key for the endpoint (or set OPENAI_API_KEY env var)',
+    )
+    parser.add_argument(
+        '--model',
+        default='gpt-4o',
+        help='Model name to probe (default: gpt-4o)',
+    )
+    # Local/Ollama args
+    parser.add_argument(
+        '--ollama-host',
+        default='http://localhost:11434',
+        metavar='URL',
+        help='Ollama host URL (for --mode local, default: http://localhost:11434)',
+    )
     args = parser.parse_args()
 
     if not args.quiet:
         print(BANNER)
 
-    # Mode gating — only config mode in Phase 1
-    if args.mode != 'config':
-        print(f"\n[INFO] '{args.mode}' mode will be available in Phase 2. Running config mode scan.\n")
+    if args.mode in ('docker', 'kubectl'):
+        print(f"\n[INFO] '{args.mode}' mode will be available in Phase 3. Running config mode scan.\n")
         args.mode = 'config'
 
     profile = load_profile(args.profile)
     target = Path(args.target).resolve()
 
-    if not target.exists():
-        print(f"[ERROR] Target not found: {target}", file=sys.stderr)
-        sys.exit(1)
-
     if not args.quiet:
+        mode_label = args.mode
+        if args.mode == "api" and args.endpoint:
+            mode_label = f"api ({args.endpoint})"
+        elif args.mode == "local":
+            mode_label = f"local ({args.ollama_host})"
         print(f"\nTarget:  {target}")
-        print(f"Profile: {profile['name']}  |  Mode: {args.mode}")
+        print(f"Profile: {profile['name']}  |  Mode: {mode_label}")
         print(f"{'─' * 52}")
-        print("Scanning...", end='', flush=True)
+        if args.mode in ("api", "local"):
+            print("Connecting and running probes...", end='', flush=True)
+        else:
+            print("Scanning...", end='', flush=True)
 
-    ctx = scan_directory(str(target), mode=args.mode)
+    ctx = build_scan_context(args)
 
     if not args.quiet:
-        print(f" {ctx.total_files_scanned} files scanned.\n")
+        if args.mode in ("api", "local"):
+            probe_count = len(ctx.probe_results)
+            if ctx.live_error:
+                print(f" connection error: {ctx.live_error}")
+            else:
+                print(f" {probe_count} probes run. Config scan: {ctx.total_files_scanned} files.\n")
+        else:
+            print(f" {ctx.total_files_scanned} files scanned.\n")
 
     # Run all check modules
     results = []
@@ -153,9 +226,6 @@ examples:
             with open(out_path, 'w') as f:
                 f.write(json_text)
             print(f"\n[JSON report written to {out_path}]")
-        elif 'plain' in output_formats:
-            # Also write JSON alongside plain output
-            pass
 
     if 'sarif' in output_formats:
         sarif_text = format_sarif(results, profile, str(target), args.mode)
@@ -174,7 +244,6 @@ examples:
             f.write(output_text)
         print(f"\n[Report written to {args.out_file}]")
 
-    # Exit code: non-zero if any FAIL
     has_fail = any(r.status == FAIL for r in results)
     sys.exit(1 if has_fail else 0)
 

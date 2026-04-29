@@ -76,6 +76,12 @@ class ScanContext:
     errors: list = field(default_factory=list)
     total_files_scanned: int = 0
 
+    # Live probe results — populated by api_connector / ollama_connector
+    probe_results: dict = field(default_factory=dict)   # probe_id -> ProbeResult
+    live_endpoint: str = ""
+    live_model: str = ""
+    live_error: str = ""
+
 
 def scan_directory(target_dir: str, mode: str = "config") -> ScanContext:
     ctx = ScanContext(target_dir=str(Path(target_dir).resolve()), mode=mode)
