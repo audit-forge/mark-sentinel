@@ -33,6 +33,12 @@ _INVENTORY_KEYS = ('ai_inventory', 'ai_asset', 'aibom', 'ai-inventory', 'ai-asse
 _OVERSIGHT_KEYS = ('oversight', 'human_review', 'human-oversight', 'ai_governance', 'ai-governance')
 _CHECKSUM_KEYS = ('checksum', '.sha256', '.md5', 'sha256sum', 'model_checksums')
 
+# Kyverno ClusterPolicy/Policy resource kinds
+_KYVERNO_KINDS = frozenset({'ClusterPolicy', 'Policy', 'ClusterPolicyReport', 'PolicyReport'})
+# OPA/Gatekeeper resource kinds and file patterns
+_OPA_KINDS = frozenset({'ConstraintTemplate', 'K8sPSPPrivilegedContainer', 'K8sRequiredLabels'})
+_OPA_FILE_PATTERNS = ('.rego', 'rego')
+
 
 @dataclass
 class ScanContext:
@@ -73,8 +79,18 @@ class ScanContext:
     # Python source files: relative_path -> content
     python_files: dict = field(default_factory=dict)
 
+    # Policy engine artifacts detected in the target directory
+    kyverno_policies: list = field(default_factory=list)   # file paths containing Kyverno policies
+    opa_policies: list = field(default_factory=list)        # .rego files or OPA Gatekeeper manifests
+
     errors: list = field(default_factory=list)
     total_files_scanned: int = 0
+
+    # Live probe results — populated by api_connector / ollama_connector
+    probe_results: dict = field(default_factory=dict)   # probe_id -> ProbeResult
+    live_endpoint: str = ""
+    live_model: str = ""
+    live_error: str = ""
 
 
 def scan_directory(target_dir: str, mode: str = "config") -> ScanContext:
@@ -177,6 +193,18 @@ def _categorize(ctx: ScanContext, rel_path: str, filename: str, name_lower: str,
 
     if any(k in path_lower for k in _OVERSIGHT_KEYS) and rel_path not in ctx.oversight_docs:
         ctx.oversight_docs.append(rel_path)
+
+    # Kyverno policy detection — YAML files containing Kyverno resource kinds
+    if filename.endswith(('.yml', '.yaml')) and rel_path not in ctx.kyverno_policies:
+        if any(f'kind: {k}' in content for k in _KYVERNO_KINDS):
+            ctx.kyverno_policies.append(rel_path)
+
+    # OPA/Gatekeeper detection — .rego files or YAML with Gatekeeper ConstraintTemplate kinds
+    if filename.endswith('.rego') and rel_path not in ctx.opa_policies:
+        ctx.opa_policies.append(rel_path)
+    elif filename.endswith(('.yml', '.yaml')) and rel_path not in ctx.opa_policies:
+        if any(f'kind: {k}' in content for k in _OPA_KINDS):
+            ctx.opa_policies.append(rel_path)
 
 
 # --- File type helpers ---

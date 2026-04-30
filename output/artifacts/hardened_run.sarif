@@ -1,0 +1,1933 @@
+{
+  "$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json",
+  "version": "2.1.0",
+  "runs": [
+    {
+      "tool": {
+        "driver": {
+          "name": "M.A.R.K. Sentinel",
+          "version": "1.0.0-phase1",
+          "informationUri": "https://github.com/audit-forge/mark-sentinel",
+          "rules": [
+            {
+              "id": "AI-DEPLOY-001",
+              "name": "ApiKeysNotExposed",
+              "shortDescription": {
+                "text": "API Keys Not Exposed"
+              },
+              "fullDescription": {
+                "text": "No API keys detected in source files. .gitignore protects .env files."
+              },
+              "helpUri": "https://github.com/audit-forge/mark-sentinel/blob/main/checks/AI-DEPLOY.md#ai-deploy-001",
+              "defaultConfiguration": {
+                "level": "note"
+              },
+              "properties": {
+                "severity": "CRITICAL",
+                "category": "AI-DEPLOY",
+                "frameworks": {
+                  "OWASP LLM": "LLM07",
+                  "FedRAMP": "IA-5",
+                  "NIST AI RMF": "MANAGE 2.2"
+                },
+                "tags": [
+                  "security",
+                  "ai-security",
+                  "ai-deploy"
+                ]
+              }
+            },
+            {
+              "id": "AI-DEPLOY-002",
+              "name": "NoHardcodedCredentialsInModelConfig",
+              "shortDescription": {
+                "text": "No Hardcoded Credentials in Model Config"
+              },
+              "fullDescription": {
+                "text": "No hardcoded credentials detected in config files."
+              },
+              "helpUri": "https://github.com/audit-forge/mark-sentinel/blob/main/checks/AI-DEPLOY.md#ai-deploy-002",
+              "defaultConfiguration": {
+                "level": "note"
+              },
+              "properties": {
+                "severity": "HIGH",
+                "category": "AI-DEPLOY",
+                "frameworks": {
+                  "OWASP LLM": "LLM07",
+                  "FedRAMP": "IA-5, CM-6",
+                  "NIST AI RMF": "MANAGE 2.2"
+                },
+                "tags": [
+                  "security",
+                  "ai-security",
+                  "ai-deploy"
+                ]
+              }
+            },
+            {
+              "id": "AI-DEPLOY-003",
+              "name": "LoggingEnabledAndRetained",
+              "shortDescription": {
+                "text": "Logging Enabled and Retained"
+              },
+              "fullDescription": {
+                "text": "Logging configuration and retention settings found."
+              },
+              "helpUri": "https://github.com/audit-forge/mark-sentinel/blob/main/checks/AI-DEPLOY.md#ai-deploy-003",
+              "defaultConfiguration": {
+                "level": "note"
+              },
+              "properties": {
+                "severity": "HIGH",
+                "category": "AI-DEPLOY",
+                "frameworks": {
+                  "OWASP LLM": "LLM10",
+                  "FedRAMP": "AU-2, AU-11",
+                  "NIST AI RMF": "MEASURE 2.5"
+                },
+                "tags": [
+                  "security",
+                  "ai-security",
+                  "ai-deploy"
+                ]
+              }
+            },
+            {
+              "id": "AI-DEPLOY-004",
+              "name": "AccessControlsOnAiEndpoint",
+              "shortDescription": {
+                "text": "Access Controls on AI Endpoint"
+              },
+              "fullDescription": {
+                "text": "Authentication configuration found in deployment files."
+              },
+              "helpUri": "https://github.com/audit-forge/mark-sentinel/blob/main/checks/AI-DEPLOY.md#ai-deploy-004",
+              "defaultConfiguration": {
+                "level": "note"
+              },
+              "properties": {
+                "severity": "CRITICAL",
+                "category": "AI-DEPLOY",
+                "frameworks": {
+                  "OWASP LLM": "LLM07",
+                  "FedRAMP": "AC-3",
+                  "NIST AI RMF": "GOVERN 1.1"
+                },
+                "tags": [
+                  "security",
+                  "ai-security",
+                  "ai-deploy"
+                ]
+              }
+            },
+            {
+              "id": "AI-DEPLOY-005",
+              "name": "TlsHttpsEnforcedOnAllAiConnections",
+              "shortDescription": {
+                "text": "TLS/HTTPS Enforced on All AI Connections"
+              },
+              "fullDescription": {
+                "text": "TLS configuration found in deployment files."
+              },
+              "helpUri": "https://github.com/audit-forge/mark-sentinel/blob/main/checks/AI-DEPLOY.md#ai-deploy-005",
+              "defaultConfiguration": {
+                "level": "note"
+              },
+              "properties": {
+                "severity": "HIGH",
+                "category": "AI-DEPLOY",
+                "frameworks": {
+                  "OWASP LLM": "LLM08",
+                  "FedRAMP": "SC-8",
+                  "NIST AI RMF": "MANAGE 2.2"
+                },
+                "tags": [
+                  "security",
+                  "ai-security",
+                  "ai-deploy"
+                ]
+              }
+            },
+            {
+              "id": "AI-DEPLOY-006",
+              "name": "RateLimitingConfigured",
+              "shortDescription": {
+                "text": "Rate Limiting Configured"
+              },
+              "fullDescription": {
+                "text": "Rate limiting configuration found in deployment files."
+              },
+              "helpUri": "https://github.com/audit-forge/mark-sentinel/blob/main/checks/AI-DEPLOY.md#ai-deploy-006",
+              "defaultConfiguration": {
+                "level": "note"
+              },
+              "properties": {
+                "severity": "MEDIUM",
+                "category": "AI-DEPLOY",
+                "frameworks": {
+                  "OWASP LLM": "LLM10",
+                  "FedRAMP": "SC-5",
+                  "NIST AI RMF": "MANAGE 2.2"
+                },
+                "tags": [
+                  "security",
+                  "ai-security",
+                  "ai-deploy"
+                ]
+              }
+            },
+            {
+              "id": "AI-INP-001",
+              "name": "SystemPromptCannotBeOverriddenByUserInput",
+              "shortDescription": {
+                "text": "System Prompt Cannot Be Overridden by User Input"
+              },
+              "fullDescription": {
+                "text": "This check requires a live AI connection to send adversarial probes. Run with --mode api or --mode local to evaluate."
+              },
+              "helpUri": "https://github.com/audit-forge/mark-sentinel/blob/main/checks/AI-INP.md#ai-inp-001",
+              "defaultConfiguration": {
+                "level": "none"
+              },
+              "properties": {
+                "severity": "CRITICAL",
+                "category": "AI-INP",
+                "frameworks": {
+                  "OWASP LLM": "LLM01",
+                  "OWASP Agentic": "OAGNT-01",
+                  "FedRAMP": "SI-10",
+                  "NIST AI RMF": "MEASURE 2.6"
+                },
+                "tags": [
+                  "security",
+                  "ai-security",
+                  "ai-inp"
+                ]
+              }
+            },
+            {
+              "id": "AI-INP-002",
+              "name": "DirectPromptInjectionResistance",
+              "shortDescription": {
+                "text": "Direct Prompt Injection Resistance"
+              },
+              "fullDescription": {
+                "text": "This check requires a live AI connection to send adversarial probes. Run with --mode api or --mode local to evaluate."
+              },
+              "helpUri": "https://github.com/audit-forge/mark-sentinel/blob/main/checks/AI-INP.md#ai-inp-002",
+              "defaultConfiguration": {
+                "level": "none"
+              },
+              "properties": {
+                "severity": "HIGH",
+                "category": "AI-INP",
+                "frameworks": {
+                  "OWASP LLM": "LLM01",
+                  "OWASP Agentic": "OAGNT-01",
+                  "FedRAMP": "SI-10",
+                  "NIST AI RMF": "MEASURE 2.6"
+                },
+                "tags": [
+                  "security",
+                  "ai-security",
+                  "ai-inp"
+                ]
+              }
+            },
+            {
+              "id": "AI-INP-003",
+              "name": "IndirectPromptInjectionResistance(rag)",
+              "shortDescription": {
+                "text": "Indirect Prompt Injection Resistance (RAG)"
+              },
+              "fullDescription": {
+                "text": "Indirect/RAG injection testing requires knowledge of the target retrieval pipeline. This check is deferred to Phase 3 \u2014 supply a RAG fixture or document corpus to enable it."
+              },
+              "helpUri": "https://github.com/audit-forge/mark-sentinel/blob/main/checks/AI-INP.md#ai-inp-003",
+              "defaultConfiguration": {
+                "level": "none"
+              },
+              "properties": {
+                "severity": "HIGH",
+                "category": "AI-INP",
+                "frameworks": {
+                  "OWASP LLM": "LLM05",
+                  "OWASP Agentic": "OAGNT-03",
+                  "FedRAMP": "SI-10",
+                  "NIST AI RMF": "MEASURE 2.6"
+                },
+                "tags": [
+                  "security",
+                  "ai-security",
+                  "ai-inp"
+                ]
+              }
+            },
+            {
+              "id": "AI-INP-004",
+              "name": "JailbreakResistance",
+              "shortDescription": {
+                "text": "Jailbreak Resistance"
+              },
+              "fullDescription": {
+                "text": "This check requires a live AI connection to send adversarial probes. Run with --mode api or --mode local to evaluate."
+              },
+              "helpUri": "https://github.com/audit-forge/mark-sentinel/blob/main/checks/AI-INP.md#ai-inp-004",
+              "defaultConfiguration": {
+                "level": "none"
+              },
+              "properties": {
+                "severity": "HIGH",
+                "category": "AI-INP",
+                "frameworks": {
+                  "OWASP LLM": "LLM01",
+                  "OWASP Agentic": "OAGNT-01",
+                  "FedRAMP": "SI-10",
+                  "NIST AI RMF": "MEASURE 2.6"
+                },
+                "tags": [
+                  "security",
+                  "ai-security",
+                  "ai-inp"
+                ]
+              }
+            },
+            {
+              "id": "AI-INP-005",
+              "name": "InputLengthAndTokenLimitsEnforced",
+              "shortDescription": {
+                "text": "Input Length and Token Limits Enforced"
+              },
+              "fullDescription": {
+                "text": "Input limit configuration found in deployment files."
+              },
+              "helpUri": "https://github.com/audit-forge/mark-sentinel/blob/main/checks/AI-INP.md#ai-inp-005",
+              "defaultConfiguration": {
+                "level": "note"
+              },
+              "properties": {
+                "severity": "MEDIUM",
+                "category": "AI-INP",
+                "frameworks": {
+                  "OWASP LLM": "LLM10",
+                  "FedRAMP": "SI-10",
+                  "NIST AI RMF": "MANAGE 2.2"
+                },
+                "tags": [
+                  "security",
+                  "ai-security",
+                  "ai-inp"
+                ]
+              }
+            },
+            {
+              "id": "AI-OUT-001",
+              "name": "ModelDoesNotReturnTrainingDataOnRequest",
+              "shortDescription": {
+                "text": "Model Does Not Return Training Data on Request"
+              },
+              "fullDescription": {
+                "text": "This check requires a live AI connection to send adversarial probes. Run with --mode api or --mode local to evaluate."
+              },
+              "helpUri": "https://github.com/audit-forge/mark-sentinel/blob/main/checks/AI-OUT.md#ai-out-001",
+              "defaultConfiguration": {
+                "level": "none"
+              },
+              "properties": {
+                "severity": "MEDIUM",
+                "category": "AI-OUT",
+                "frameworks": {
+                  "OWASP LLM": "LLM02",
+                  "FedRAMP": "AC-4",
+                  "NIST AI RMF": "MEASURE 2.5"
+                },
+                "tags": [
+                  "security",
+                  "ai-security",
+                  "ai-out"
+                ]
+              }
+            },
+            {
+              "id": "AI-OUT-002",
+              "name": "PiiNotLeakedInResponses",
+              "shortDescription": {
+                "text": "PII Not Leaked in Responses"
+              },
+              "fullDescription": {
+                "text": "This check requires a live AI connection to send adversarial probes. Run with --mode api or --mode local to evaluate."
+              },
+              "helpUri": "https://github.com/audit-forge/mark-sentinel/blob/main/checks/AI-OUT.md#ai-out-002",
+              "defaultConfiguration": {
+                "level": "none"
+              },
+              "properties": {
+                "severity": "CRITICAL",
+                "category": "AI-OUT",
+                "frameworks": {
+                  "OWASP LLM": "LLM02",
+                  "FedRAMP": "AC-4",
+                  "NIST AI RMF": "MEASURE 2.5"
+                },
+                "tags": [
+                  "security",
+                  "ai-security",
+                  "ai-out"
+                ]
+              }
+            },
+            {
+              "id": "AI-OUT-003",
+              "name": "SystemPromptNotDisclosedOnRequest",
+              "shortDescription": {
+                "text": "System Prompt Not Disclosed on Request"
+              },
+              "fullDescription": {
+                "text": "This check requires a live AI connection to send adversarial probes. Run with --mode api or --mode local to evaluate."
+              },
+              "helpUri": "https://github.com/audit-forge/mark-sentinel/blob/main/checks/AI-OUT.md#ai-out-003",
+              "defaultConfiguration": {
+                "level": "none"
+              },
+              "properties": {
+                "severity": "HIGH",
+                "category": "AI-OUT",
+                "frameworks": {
+                  "OWASP LLM": "LLM02",
+                  "FedRAMP": "AC-4",
+                  "NIST AI RMF": "MEASURE 2.5"
+                },
+                "tags": [
+                  "security",
+                  "ai-security",
+                  "ai-out"
+                ]
+              }
+            },
+            {
+              "id": "AI-OUT-004",
+              "name": "ModelRefusalsWorkForHarmfulContent",
+              "shortDescription": {
+                "text": "Model Refusals Work for Harmful Content"
+              },
+              "fullDescription": {
+                "text": "This check requires a live AI connection to send adversarial probes. Run with --mode api or --mode local to evaluate."
+              },
+              "helpUri": "https://github.com/audit-forge/mark-sentinel/blob/main/checks/AI-OUT.md#ai-out-004",
+              "defaultConfiguration": {
+                "level": "none"
+              },
+              "properties": {
+                "severity": "HIGH",
+                "category": "AI-OUT",
+                "frameworks": {
+                  "OWASP LLM": "LLM02",
+                  "FedRAMP": "AC-4",
+                  "NIST AI RMF": "MEASURE 2.5"
+                },
+                "tags": [
+                  "security",
+                  "ai-security",
+                  "ai-out"
+                ]
+              }
+            },
+            {
+              "id": "AI-OUT-005",
+              "name": "OutputSanitizationBeforePassingToDownstreamSystems",
+              "shortDescription": {
+                "text": "Output Sanitization Before Passing to Downstream Systems"
+              },
+              "fullDescription": {
+                "text": "No Python source files found to analyze. Static analysis requires source code in the target directory."
+              },
+              "helpUri": "https://github.com/audit-forge/mark-sentinel/blob/main/checks/AI-OUT.md#ai-out-005",
+              "defaultConfiguration": {
+                "level": "none"
+              },
+              "properties": {
+                "severity": "CRITICAL",
+                "category": "AI-OUT",
+                "frameworks": {
+                  "OWASP LLM": "LLM05",
+                  "FedRAMP": "SI-10",
+                  "NIST AI RMF": "MEASURE 2.5"
+                },
+                "tags": [
+                  "security",
+                  "ai-security",
+                  "ai-out"
+                ]
+              }
+            },
+            {
+              "id": "AI-AGENT-001",
+              "name": "ToolFunctionPermissionsFollowLeastPrivilege",
+              "shortDescription": {
+                "text": "Tool/Function Permissions Follow Least Privilege"
+              },
+              "fullDescription": {
+                "text": "No agent configuration file found (agent_config.json, agent.json, tools.json). Point --target at a directory containing your agent configuration."
+              },
+              "helpUri": "https://github.com/audit-forge/mark-sentinel/blob/main/checks/AI-AGENT.md#ai-agent-001",
+              "defaultConfiguration": {
+                "level": "none"
+              },
+              "properties": {
+                "severity": "CRITICAL",
+                "category": "AI-AGENT",
+                "frameworks": {
+                  "OWASP LLM": "LLM06",
+                  "FedRAMP": "AC-6",
+                  "NIST AI RMF": "GOVERN 6.1"
+                },
+                "tags": [
+                  "security",
+                  "ai-security",
+                  "ai-agent"
+                ]
+              }
+            },
+            {
+              "id": "AI-AGENT-002",
+              "name": "AgentCannotTakeDestructiveActionsWithoutConfirmation",
+              "shortDescription": {
+                "text": "Agent Cannot Take Destructive Actions Without Confirmation"
+              },
+              "fullDescription": {
+                "text": "No agent configuration file found."
+              },
+              "helpUri": "https://github.com/audit-forge/mark-sentinel/blob/main/checks/AI-AGENT.md#ai-agent-002",
+              "defaultConfiguration": {
+                "level": "none"
+              },
+              "properties": {
+                "severity": "CRITICAL",
+                "category": "AI-AGENT",
+                "frameworks": {
+                  "OWASP LLM": "LLM06",
+                  "FedRAMP": "AC-3",
+                  "NIST AI RMF": "GOVERN 6.1"
+                },
+                "tags": [
+                  "security",
+                  "ai-security",
+                  "ai-agent"
+                ]
+              }
+            },
+            {
+              "id": "AI-AGENT-003",
+              "name": "AgentMemoryContextCannotBePoisonedByExternalInput",
+              "shortDescription": {
+                "text": "Agent Memory/Context Cannot Be Poisoned by External Input"
+              },
+              "fullDescription": {
+                "text": "This check requires a live agent session to test memory poisoning via adversarial inputs. Run with --mode api or --mode local to evaluate."
+              },
+              "helpUri": "https://github.com/audit-forge/mark-sentinel/blob/main/checks/AI-AGENT.md#ai-agent-003",
+              "defaultConfiguration": {
+                "level": "none"
+              },
+              "properties": {
+                "severity": "HIGH",
+                "category": "AI-AGENT",
+                "frameworks": {
+                  "OWASP LLM": "LLM01",
+                  "FedRAMP": "SI-7",
+                  "NIST AI RMF": "MANAGE 1.3"
+                },
+                "tags": [
+                  "security",
+                  "ai-security",
+                  "ai-agent"
+                ]
+              }
+            },
+            {
+              "id": "AI-AGENT-004",
+              "name": "Inter-agentTrustNotImplicitlyGranted",
+              "shortDescription": {
+                "text": "Inter-Agent Trust Not Implicitly Granted"
+              },
+              "fullDescription": {
+                "text": "No agent configuration found. N/A for single-agent deployments."
+              },
+              "helpUri": "https://github.com/audit-forge/mark-sentinel/blob/main/checks/AI-AGENT.md#ai-agent-004",
+              "defaultConfiguration": {
+                "level": "none"
+              },
+              "properties": {
+                "severity": "HIGH",
+                "category": "AI-AGENT",
+                "frameworks": {
+                  "OWASP LLM": "LLM06",
+                  "FedRAMP": "AC-3",
+                  "NIST AI RMF": "GOVERN 6.1"
+                },
+                "tags": [
+                  "security",
+                  "ai-security",
+                  "ai-agent"
+                ]
+              }
+            },
+            {
+              "id": "AI-AGENT-005",
+              "name": "AgentActionLogsCapturedAndAuditable",
+              "shortDescription": {
+                "text": "Agent Action Logs Captured and Auditable"
+              },
+              "fullDescription": {
+                "text": "No agent configuration found."
+              },
+              "helpUri": "https://github.com/audit-forge/mark-sentinel/blob/main/checks/AI-AGENT.md#ai-agent-005",
+              "defaultConfiguration": {
+                "level": "none"
+              },
+              "properties": {
+                "severity": "HIGH",
+                "category": "AI-AGENT",
+                "frameworks": {
+                  "OWASP LLM": "LLM06",
+                  "FedRAMP": "AU-2",
+                  "NIST AI RMF": "MEASURE 2.5"
+                },
+                "tags": [
+                  "security",
+                  "ai-security",
+                  "ai-agent"
+                ]
+              }
+            },
+            {
+              "id": "AI-AGENT-006",
+              "name": "AgentCannotExfiltrateDataToUnapprovedEndpoints",
+              "shortDescription": {
+                "text": "Agent Cannot Exfiltrate Data to Unapproved Endpoints"
+              },
+              "fullDescription": {
+                "text": "No agent configuration found."
+              },
+              "helpUri": "https://github.com/audit-forge/mark-sentinel/blob/main/checks/AI-AGENT.md#ai-agent-006",
+              "defaultConfiguration": {
+                "level": "none"
+              },
+              "properties": {
+                "severity": "CRITICAL",
+                "category": "AI-AGENT",
+                "frameworks": {
+                  "OWASP LLM": "LLM06",
+                  "FedRAMP": "AC-4, SC-7",
+                  "NIST AI RMF": "MANAGE 1.3"
+                },
+                "tags": [
+                  "security",
+                  "ai-security",
+                  "ai-agent"
+                ]
+              }
+            },
+            {
+              "id": "AI-SUPPLY-001",
+              "name": "ModelProvenanceKnownAndDocumented",
+              "shortDescription": {
+                "text": "Model Provenance Known and Documented"
+              },
+              "fullDescription": {
+                "text": "No model provenance documentation found. You need a record of: which model, which version, who made it, and what it was trained on."
+              },
+              "helpUri": "https://github.com/audit-forge/mark-sentinel/blob/main/checks/AI-SUPPLY.md#ai-supply-001",
+              "defaultConfiguration": {
+                "level": "error"
+              },
+              "properties": {
+                "severity": "HIGH",
+                "category": "AI-SUPPLY",
+                "frameworks": {
+                  "OWASP LLM": "LLM03",
+                  "FedRAMP": "SA-12, CM-8",
+                  "NIST AI RMF": "GOVERN 2.2"
+                },
+                "tags": [
+                  "security",
+                  "ai-security",
+                  "ai-supply"
+                ]
+              }
+            },
+            {
+              "id": "AI-SUPPLY-002",
+              "name": "ModelSourceVerified(notTamperedOrPoisoned)",
+              "shortDescription": {
+                "text": "Model Source Verified (Not Tampered or Poisoned)"
+              },
+              "fullDescription": {
+                "text": "Model integrity verification (checksum/hash) found."
+              },
+              "helpUri": "https://github.com/audit-forge/mark-sentinel/blob/main/checks/AI-SUPPLY.md#ai-supply-002",
+              "defaultConfiguration": {
+                "level": "note"
+              },
+              "properties": {
+                "severity": "CRITICAL",
+                "category": "AI-SUPPLY",
+                "frameworks": {
+                  "OWASP LLM": "LLM03, LLM04",
+                  "FedRAMP": "SA-12, SI-7",
+                  "NIST AI RMF": "MAP 1.5"
+                },
+                "tags": [
+                  "security",
+                  "ai-security",
+                  "ai-supply"
+                ]
+              }
+            },
+            {
+              "id": "AI-SUPPLY-003",
+              "name": "DependenciesFromApprovedSourcesOnly",
+              "shortDescription": {
+                "text": "Dependencies from Approved Sources Only"
+              },
+              "fullDescription": {
+                "text": "No requirements.txt found. Cannot audit Python dependencies."
+              },
+              "helpUri": "https://github.com/audit-forge/mark-sentinel/blob/main/checks/AI-SUPPLY.md#ai-supply-003",
+              "defaultConfiguration": {
+                "level": "warning"
+              },
+              "properties": {
+                "severity": "HIGH",
+                "category": "AI-SUPPLY",
+                "frameworks": {
+                  "OWASP LLM": "LLM03",
+                  "FedRAMP": "SA-12, CM-7",
+                  "NIST AI RMF": "GOVERN 2.2"
+                },
+                "tags": [
+                  "security",
+                  "ai-security",
+                  "ai-supply"
+                ]
+              }
+            },
+            {
+              "id": "AI-SUPPLY-004",
+              "name": "NoShadowAiUnsanctionedModelInUse",
+              "shortDescription": {
+                "text": "No Shadow AI / Unsanctioned Model in Use"
+              },
+              "fullDescription": {
+                "text": "Cannot fully evaluate shadow AI from static config. This check requires network monitoring and employee surveys to fully assess."
+              },
+              "helpUri": "https://github.com/audit-forge/mark-sentinel/blob/main/checks/AI-SUPPLY.md#ai-supply-004",
+              "defaultConfiguration": {
+                "level": "warning"
+              },
+              "properties": {
+                "severity": "HIGH",
+                "category": "AI-SUPPLY",
+                "frameworks": {
+                  "OWASP LLM": "LLM03",
+                  "FedRAMP": "CM-7",
+                  "NIST AI RMF": "GOVERN 2.2"
+                },
+                "tags": [
+                  "security",
+                  "ai-security",
+                  "ai-supply"
+                ]
+              }
+            },
+            {
+              "id": "AI-SUPPLY-005",
+              "name": "ModelVersionPinned(notFloatingLatest)",
+              "shortDescription": {
+                "text": "Model Version Pinned (Not Floating Latest)"
+              },
+              "fullDescription": {
+                "text": "Model versions appear to be pinned to specific version identifiers."
+              },
+              "helpUri": "https://github.com/audit-forge/mark-sentinel/blob/main/checks/AI-SUPPLY.md#ai-supply-005",
+              "defaultConfiguration": {
+                "level": "note"
+              },
+              "properties": {
+                "severity": "MEDIUM",
+                "category": "AI-SUPPLY",
+                "frameworks": {
+                  "OWASP LLM": "LLM03",
+                  "FedRAMP": "CM-6",
+                  "NIST AI RMF": "GOVERN 2.2"
+                },
+                "tags": [
+                  "security",
+                  "ai-security",
+                  "ai-supply"
+                ]
+              }
+            },
+            {
+              "id": "AI-GOV-001",
+              "name": "AiUsagePolicyDocumented",
+              "shortDescription": {
+                "text": "AI Usage Policy Documented"
+              },
+              "fullDescription": {
+                "text": "No AI usage policy found. Without a policy, there is no basis for enforcement, no guidance for employees, and no compliance evidence."
+              },
+              "helpUri": "https://github.com/audit-forge/mark-sentinel/blob/main/checks/AI-GOV.md#ai-gov-001",
+              "defaultConfiguration": {
+                "level": "error"
+              },
+              "properties": {
+                "severity": "HIGH",
+                "category": "AI-GOV",
+                "frameworks": {
+                  "OWASP LLM": "LLM10",
+                  "FedRAMP": "PL-1",
+                  "NIST AI RMF": "GOVERN 1.1",
+                  "EU AI Act": "Article 9"
+                },
+                "tags": [
+                  "security",
+                  "ai-security",
+                  "ai-gov"
+                ]
+              }
+            },
+            {
+              "id": "AI-GOV-002",
+              "name": "DataRetentionPolicyCoversAiInteractions",
+              "shortDescription": {
+                "text": "Data Retention Policy Covers AI Interactions"
+              },
+              "fullDescription": {
+                "text": "No data retention policy covering AI interactions found. GDPR, HIPAA, and CCPA all require knowing where AI interaction data is stored and how long it is kept."
+              },
+              "helpUri": "https://github.com/audit-forge/mark-sentinel/blob/main/checks/AI-GOV.md#ai-gov-002",
+              "defaultConfiguration": {
+                "level": "error"
+              },
+              "properties": {
+                "severity": "HIGH",
+                "category": "AI-GOV",
+                "frameworks": {
+                  "OWASP LLM": "LLM02",
+                  "FedRAMP": "SI-12, AU-11",
+                  "NIST AI RMF": "GOVERN 1.1",
+                  "GDPR": "Article 5(1)(e)"
+                },
+                "tags": [
+                  "security",
+                  "ai-security",
+                  "ai-gov"
+                ]
+              }
+            },
+            {
+              "id": "AI-GOV-003",
+              "name": "AiIncidentResponsePlanExists",
+              "shortDescription": {
+                "text": "AI Incident Response Plan Exists"
+              },
+              "fullDescription": {
+                "text": "No AI incident response plan found. If your AI leaks data, gets injected, or misbehaves, you need a plan ready before that happens."
+              },
+              "helpUri": "https://github.com/audit-forge/mark-sentinel/blob/main/checks/AI-GOV.md#ai-gov-003",
+              "defaultConfiguration": {
+                "level": "error"
+              },
+              "properties": {
+                "severity": "HIGH",
+                "category": "AI-GOV",
+                "frameworks": {
+                  "OWASP LLM": "LLM10",
+                  "FedRAMP": "IR-1, IR-4",
+                  "NIST AI RMF": "MANAGE 4.1"
+                },
+                "tags": [
+                  "security",
+                  "ai-security",
+                  "ai-gov"
+                ]
+              }
+            },
+            {
+              "id": "AI-GOV-004",
+              "name": "HumanOversightMechanismsInPlace",
+              "shortDescription": {
+                "text": "Human Oversight Mechanisms in Place"
+              },
+              "fullDescription": {
+                "text": "No human oversight configuration or documentation found. This check requires process review \u2014 cannot fully verify via config scan. If your AI influences high-stakes decisions, human oversight mechanisms should be documented."
+              },
+              "helpUri": "https://github.com/audit-forge/mark-sentinel/blob/main/checks/AI-GOV.md#ai-gov-004",
+              "defaultConfiguration": {
+                "level": "warning"
+              },
+              "properties": {
+                "severity": "HIGH",
+                "category": "AI-GOV",
+                "frameworks": {
+                  "OWASP LLM": "LLM06",
+                  "FedRAMP": "PL-1",
+                  "NIST AI RMF": "GOVERN 6.1",
+                  "EU AI Act": "Article 14"
+                },
+                "tags": [
+                  "security",
+                  "ai-security",
+                  "ai-gov"
+                ]
+              }
+            },
+            {
+              "id": "AI-GOV-005",
+              "name": "AiSystemDocumentedInAssetInventory",
+              "shortDescription": {
+                "text": "AI System Documented in Asset Inventory"
+              },
+              "fullDescription": {
+                "text": "No AI asset inventory found. An AI system not in inventory cannot be managed, monitored, updated, or secured."
+              },
+              "helpUri": "https://github.com/audit-forge/mark-sentinel/blob/main/checks/AI-GOV.md#ai-gov-005",
+              "defaultConfiguration": {
+                "level": "error"
+              },
+              "properties": {
+                "severity": "MEDIUM",
+                "category": "AI-GOV",
+                "frameworks": {
+                  "OWASP LLM": "LLM10",
+                  "FedRAMP": "CM-8",
+                  "NIST AI RMF": "GOVERN 2.2",
+                  "EU AI Act": "Article 60"
+                },
+                "tags": [
+                  "security",
+                  "ai-security",
+                  "ai-gov"
+                ]
+              }
+            }
+          ]
+        }
+      },
+      "invocations": [
+        {
+          "executionSuccessful": true,
+          "commandLine": "audit.py --mode config --target /Users/neepai/hash/workspace/projects/ai-stig-audit/test/fixtures/deploy-hardened --profile FedRAMP Moderate --output sarif"
+        }
+      ],
+      "artifacts": [
+        {
+          "location": {
+            "uri": "/Users/neepai/hash/workspace/projects/ai-stig-audit/test/fixtures/deploy-hardened"
+          },
+          "description": {
+            "text": "Scanned directory"
+          }
+        }
+      ],
+      "results": [
+        {
+          "ruleId": "AI-DEPLOY-001",
+          "level": "note",
+          "message": {
+            "text": "No API keys detected in source files. .gitignore protects .env files.\n\nEvidence:\n  \u2022 .gitignore found with .env protection\n  \u2022 1 .env file(s) present (correct storage location)"
+          },
+          "locations": [
+            {
+              "logicalLocations": [
+                {
+                  "name": "/Users/neepai/hash/workspace/projects/ai-stig-audit/test/fixtures/deploy-hardened",
+                  "kind": "module",
+                  "fullyQualifiedName": "/Users/neepai/hash/workspace/projects/ai-stig-audit/test/fixtures/deploy-hardened"
+                }
+              ]
+            }
+          ],
+          "properties": {
+            "status": "PASS",
+            "severity": "CRITICAL",
+            "category": "AI-DEPLOY",
+            "evidence": [
+              ".gitignore found with .env protection",
+              "1 .env file(s) present (correct storage location)"
+            ],
+            "frameworks": {
+              "OWASP LLM": "LLM07",
+              "FedRAMP": "IA-5",
+              "NIST AI RMF": "MANAGE 2.2"
+            }
+          }
+        },
+        {
+          "ruleId": "AI-DEPLOY-002",
+          "level": "note",
+          "message": {
+            "text": "No hardcoded credentials detected in config files.\n\nEvidence:\n  \u2022 Environment variable references found (${}  style) \u2014 credentials correctly externalized\n  \u2022 1 .env file(s) present for secret storage"
+          },
+          "locations": [
+            {
+              "logicalLocations": [
+                {
+                  "name": "/Users/neepai/hash/workspace/projects/ai-stig-audit/test/fixtures/deploy-hardened",
+                  "kind": "module",
+                  "fullyQualifiedName": "/Users/neepai/hash/workspace/projects/ai-stig-audit/test/fixtures/deploy-hardened"
+                }
+              ]
+            }
+          ],
+          "properties": {
+            "status": "PASS",
+            "severity": "HIGH",
+            "category": "AI-DEPLOY",
+            "evidence": [
+              "Environment variable references found (${}  style) \u2014 credentials correctly externalized",
+              "1 .env file(s) present for secret storage"
+            ],
+            "frameworks": {
+              "OWASP LLM": "LLM07",
+              "FedRAMP": "IA-5, CM-6",
+              "NIST AI RMF": "MANAGE 2.2"
+            }
+          }
+        },
+        {
+          "ruleId": "AI-DEPLOY-003",
+          "level": "note",
+          "message": {
+            "text": "Logging configuration and retention settings found.\n\nEvidence:\n  \u2022 Logging patterns matched: 4\n  \u2022 Log retention configuration present"
+          },
+          "locations": [
+            {
+              "logicalLocations": [
+                {
+                  "name": "/Users/neepai/hash/workspace/projects/ai-stig-audit/test/fixtures/deploy-hardened",
+                  "kind": "module",
+                  "fullyQualifiedName": "/Users/neepai/hash/workspace/projects/ai-stig-audit/test/fixtures/deploy-hardened"
+                }
+              ]
+            }
+          ],
+          "properties": {
+            "status": "PASS",
+            "severity": "HIGH",
+            "category": "AI-DEPLOY",
+            "evidence": [
+              "Logging patterns matched: 4",
+              "Log retention configuration present"
+            ],
+            "frameworks": {
+              "OWASP LLM": "LLM10",
+              "FedRAMP": "AU-2, AU-11",
+              "NIST AI RMF": "MEASURE 2.5"
+            }
+          }
+        },
+        {
+          "ruleId": "AI-DEPLOY-004",
+          "level": "note",
+          "message": {
+            "text": "Authentication configuration found in deployment files.\n\nEvidence:\n  \u2022 Authentication configuration detected"
+          },
+          "locations": [
+            {
+              "logicalLocations": [
+                {
+                  "name": "/Users/neepai/hash/workspace/projects/ai-stig-audit/test/fixtures/deploy-hardened",
+                  "kind": "module",
+                  "fullyQualifiedName": "/Users/neepai/hash/workspace/projects/ai-stig-audit/test/fixtures/deploy-hardened"
+                }
+              ]
+            }
+          ],
+          "properties": {
+            "status": "PASS",
+            "severity": "CRITICAL",
+            "category": "AI-DEPLOY",
+            "evidence": [
+              "Authentication configuration detected"
+            ],
+            "frameworks": {
+              "OWASP LLM": "LLM07",
+              "FedRAMP": "AC-3",
+              "NIST AI RMF": "GOVERN 1.1"
+            }
+          }
+        },
+        {
+          "ruleId": "AI-DEPLOY-005",
+          "level": "note",
+          "message": {
+            "text": "TLS configuration found in deployment files.\n\nEvidence:\n  \u2022 TLS/SSL configuration detected"
+          },
+          "locations": [
+            {
+              "logicalLocations": [
+                {
+                  "name": "/Users/neepai/hash/workspace/projects/ai-stig-audit/test/fixtures/deploy-hardened",
+                  "kind": "module",
+                  "fullyQualifiedName": "/Users/neepai/hash/workspace/projects/ai-stig-audit/test/fixtures/deploy-hardened"
+                }
+              ]
+            }
+          ],
+          "properties": {
+            "status": "PASS",
+            "severity": "HIGH",
+            "category": "AI-DEPLOY",
+            "evidence": [
+              "TLS/SSL configuration detected"
+            ],
+            "frameworks": {
+              "OWASP LLM": "LLM08",
+              "FedRAMP": "SC-8",
+              "NIST AI RMF": "MANAGE 2.2"
+            }
+          }
+        },
+        {
+          "ruleId": "AI-DEPLOY-006",
+          "level": "note",
+          "message": {
+            "text": "Rate limiting configuration found in deployment files.\n\nEvidence:\n  \u2022 Rate limiting patterns detected in config"
+          },
+          "locations": [
+            {
+              "logicalLocations": [
+                {
+                  "name": "/Users/neepai/hash/workspace/projects/ai-stig-audit/test/fixtures/deploy-hardened",
+                  "kind": "module",
+                  "fullyQualifiedName": "/Users/neepai/hash/workspace/projects/ai-stig-audit/test/fixtures/deploy-hardened"
+                }
+              ]
+            }
+          ],
+          "properties": {
+            "status": "PASS",
+            "severity": "MEDIUM",
+            "category": "AI-DEPLOY",
+            "evidence": [
+              "Rate limiting patterns detected in config"
+            ],
+            "frameworks": {
+              "OWASP LLM": "LLM10",
+              "FedRAMP": "SC-5",
+              "NIST AI RMF": "MANAGE 2.2"
+            }
+          }
+        },
+        {
+          "ruleId": "AI-INP-001",
+          "level": "none",
+          "message": {
+            "text": "This check requires a live AI connection to send adversarial probes. Run with --mode api or --mode local to evaluate."
+          },
+          "locations": [
+            {
+              "logicalLocations": [
+                {
+                  "name": "/Users/neepai/hash/workspace/projects/ai-stig-audit/test/fixtures/deploy-hardened",
+                  "kind": "module",
+                  "fullyQualifiedName": "/Users/neepai/hash/workspace/projects/ai-stig-audit/test/fixtures/deploy-hardened"
+                }
+              ]
+            }
+          ],
+          "properties": {
+            "status": "SKIP",
+            "severity": "CRITICAL",
+            "category": "AI-INP",
+            "evidence": [],
+            "frameworks": {
+              "OWASP LLM": "LLM01",
+              "OWASP Agentic": "OAGNT-01",
+              "FedRAMP": "SI-10",
+              "NIST AI RMF": "MEASURE 2.6"
+            }
+          }
+        },
+        {
+          "ruleId": "AI-INP-002",
+          "level": "none",
+          "message": {
+            "text": "This check requires a live AI connection to send adversarial probes. Run with --mode api or --mode local to evaluate."
+          },
+          "locations": [
+            {
+              "logicalLocations": [
+                {
+                  "name": "/Users/neepai/hash/workspace/projects/ai-stig-audit/test/fixtures/deploy-hardened",
+                  "kind": "module",
+                  "fullyQualifiedName": "/Users/neepai/hash/workspace/projects/ai-stig-audit/test/fixtures/deploy-hardened"
+                }
+              ]
+            }
+          ],
+          "properties": {
+            "status": "SKIP",
+            "severity": "HIGH",
+            "category": "AI-INP",
+            "evidence": [],
+            "frameworks": {
+              "OWASP LLM": "LLM01",
+              "OWASP Agentic": "OAGNT-01",
+              "FedRAMP": "SI-10",
+              "NIST AI RMF": "MEASURE 2.6"
+            }
+          }
+        },
+        {
+          "ruleId": "AI-INP-003",
+          "level": "none",
+          "message": {
+            "text": "Indirect/RAG injection testing requires knowledge of the target retrieval pipeline. This check is deferred to Phase 3 \u2014 supply a RAG fixture or document corpus to enable it."
+          },
+          "locations": [
+            {
+              "logicalLocations": [
+                {
+                  "name": "/Users/neepai/hash/workspace/projects/ai-stig-audit/test/fixtures/deploy-hardened",
+                  "kind": "module",
+                  "fullyQualifiedName": "/Users/neepai/hash/workspace/projects/ai-stig-audit/test/fixtures/deploy-hardened"
+                }
+              ]
+            }
+          ],
+          "properties": {
+            "status": "SKIP",
+            "severity": "HIGH",
+            "category": "AI-INP",
+            "evidence": [],
+            "frameworks": {
+              "OWASP LLM": "LLM05",
+              "OWASP Agentic": "OAGNT-03",
+              "FedRAMP": "SI-10",
+              "NIST AI RMF": "MEASURE 2.6"
+            }
+          }
+        },
+        {
+          "ruleId": "AI-INP-004",
+          "level": "none",
+          "message": {
+            "text": "This check requires a live AI connection to send adversarial probes. Run with --mode api or --mode local to evaluate."
+          },
+          "locations": [
+            {
+              "logicalLocations": [
+                {
+                  "name": "/Users/neepai/hash/workspace/projects/ai-stig-audit/test/fixtures/deploy-hardened",
+                  "kind": "module",
+                  "fullyQualifiedName": "/Users/neepai/hash/workspace/projects/ai-stig-audit/test/fixtures/deploy-hardened"
+                }
+              ]
+            }
+          ],
+          "properties": {
+            "status": "SKIP",
+            "severity": "HIGH",
+            "category": "AI-INP",
+            "evidence": [],
+            "frameworks": {
+              "OWASP LLM": "LLM01",
+              "OWASP Agentic": "OAGNT-01",
+              "FedRAMP": "SI-10",
+              "NIST AI RMF": "MEASURE 2.6"
+            }
+          }
+        },
+        {
+          "ruleId": "AI-INP-005",
+          "level": "note",
+          "message": {
+            "text": "Input limit configuration found in deployment files.\n\nEvidence:\n  \u2022 max_tokens or input length limit configuration detected"
+          },
+          "locations": [
+            {
+              "logicalLocations": [
+                {
+                  "name": "/Users/neepai/hash/workspace/projects/ai-stig-audit/test/fixtures/deploy-hardened",
+                  "kind": "module",
+                  "fullyQualifiedName": "/Users/neepai/hash/workspace/projects/ai-stig-audit/test/fixtures/deploy-hardened"
+                }
+              ]
+            }
+          ],
+          "properties": {
+            "status": "PASS",
+            "severity": "MEDIUM",
+            "category": "AI-INP",
+            "evidence": [
+              "max_tokens or input length limit configuration detected"
+            ],
+            "frameworks": {
+              "OWASP LLM": "LLM10",
+              "FedRAMP": "SI-10",
+              "NIST AI RMF": "MANAGE 2.2"
+            }
+          }
+        },
+        {
+          "ruleId": "AI-OUT-001",
+          "level": "none",
+          "message": {
+            "text": "This check requires a live AI connection to send adversarial probes. Run with --mode api or --mode local to evaluate."
+          },
+          "locations": [
+            {
+              "logicalLocations": [
+                {
+                  "name": "/Users/neepai/hash/workspace/projects/ai-stig-audit/test/fixtures/deploy-hardened",
+                  "kind": "module",
+                  "fullyQualifiedName": "/Users/neepai/hash/workspace/projects/ai-stig-audit/test/fixtures/deploy-hardened"
+                }
+              ]
+            }
+          ],
+          "properties": {
+            "status": "SKIP",
+            "severity": "MEDIUM",
+            "category": "AI-OUT",
+            "evidence": [],
+            "frameworks": {
+              "OWASP LLM": "LLM02",
+              "FedRAMP": "AC-4",
+              "NIST AI RMF": "MEASURE 2.5"
+            }
+          }
+        },
+        {
+          "ruleId": "AI-OUT-002",
+          "level": "none",
+          "message": {
+            "text": "This check requires a live AI connection to send adversarial probes. Run with --mode api or --mode local to evaluate."
+          },
+          "locations": [
+            {
+              "logicalLocations": [
+                {
+                  "name": "/Users/neepai/hash/workspace/projects/ai-stig-audit/test/fixtures/deploy-hardened",
+                  "kind": "module",
+                  "fullyQualifiedName": "/Users/neepai/hash/workspace/projects/ai-stig-audit/test/fixtures/deploy-hardened"
+                }
+              ]
+            }
+          ],
+          "properties": {
+            "status": "SKIP",
+            "severity": "CRITICAL",
+            "category": "AI-OUT",
+            "evidence": [],
+            "frameworks": {
+              "OWASP LLM": "LLM02",
+              "FedRAMP": "AC-4",
+              "NIST AI RMF": "MEASURE 2.5"
+            }
+          }
+        },
+        {
+          "ruleId": "AI-OUT-003",
+          "level": "none",
+          "message": {
+            "text": "This check requires a live AI connection to send adversarial probes. Run with --mode api or --mode local to evaluate."
+          },
+          "locations": [
+            {
+              "logicalLocations": [
+                {
+                  "name": "/Users/neepai/hash/workspace/projects/ai-stig-audit/test/fixtures/deploy-hardened",
+                  "kind": "module",
+                  "fullyQualifiedName": "/Users/neepai/hash/workspace/projects/ai-stig-audit/test/fixtures/deploy-hardened"
+                }
+              ]
+            }
+          ],
+          "properties": {
+            "status": "SKIP",
+            "severity": "HIGH",
+            "category": "AI-OUT",
+            "evidence": [],
+            "frameworks": {
+              "OWASP LLM": "LLM02",
+              "FedRAMP": "AC-4",
+              "NIST AI RMF": "MEASURE 2.5"
+            }
+          }
+        },
+        {
+          "ruleId": "AI-OUT-004",
+          "level": "none",
+          "message": {
+            "text": "This check requires a live AI connection to send adversarial probes. Run with --mode api or --mode local to evaluate."
+          },
+          "locations": [
+            {
+              "logicalLocations": [
+                {
+                  "name": "/Users/neepai/hash/workspace/projects/ai-stig-audit/test/fixtures/deploy-hardened",
+                  "kind": "module",
+                  "fullyQualifiedName": "/Users/neepai/hash/workspace/projects/ai-stig-audit/test/fixtures/deploy-hardened"
+                }
+              ]
+            }
+          ],
+          "properties": {
+            "status": "SKIP",
+            "severity": "HIGH",
+            "category": "AI-OUT",
+            "evidence": [],
+            "frameworks": {
+              "OWASP LLM": "LLM02",
+              "FedRAMP": "AC-4",
+              "NIST AI RMF": "MEASURE 2.5"
+            }
+          }
+        },
+        {
+          "ruleId": "AI-OUT-005",
+          "level": "none",
+          "message": {
+            "text": "No Python source files found to analyze. Static analysis requires source code in the target directory."
+          },
+          "locations": [
+            {
+              "logicalLocations": [
+                {
+                  "name": "/Users/neepai/hash/workspace/projects/ai-stig-audit/test/fixtures/deploy-hardened",
+                  "kind": "module",
+                  "fullyQualifiedName": "/Users/neepai/hash/workspace/projects/ai-stig-audit/test/fixtures/deploy-hardened"
+                }
+              ]
+            }
+          ],
+          "properties": {
+            "status": "SKIP",
+            "severity": "CRITICAL",
+            "category": "AI-OUT",
+            "evidence": [],
+            "frameworks": {
+              "OWASP LLM": "LLM05",
+              "FedRAMP": "SI-10",
+              "NIST AI RMF": "MEASURE 2.5"
+            }
+          }
+        },
+        {
+          "ruleId": "AI-AGENT-001",
+          "level": "none",
+          "message": {
+            "text": "No agent configuration file found (agent_config.json, agent.json, tools.json). Point --target at a directory containing your agent configuration."
+          },
+          "locations": [
+            {
+              "logicalLocations": [
+                {
+                  "name": "/Users/neepai/hash/workspace/projects/ai-stig-audit/test/fixtures/deploy-hardened",
+                  "kind": "module",
+                  "fullyQualifiedName": "/Users/neepai/hash/workspace/projects/ai-stig-audit/test/fixtures/deploy-hardened"
+                }
+              ]
+            }
+          ],
+          "properties": {
+            "status": "SKIP",
+            "severity": "CRITICAL",
+            "category": "AI-AGENT",
+            "evidence": [],
+            "frameworks": {
+              "OWASP LLM": "LLM06",
+              "FedRAMP": "AC-6",
+              "NIST AI RMF": "GOVERN 6.1"
+            }
+          }
+        },
+        {
+          "ruleId": "AI-AGENT-002",
+          "level": "none",
+          "message": {
+            "text": "No agent configuration file found."
+          },
+          "locations": [
+            {
+              "logicalLocations": [
+                {
+                  "name": "/Users/neepai/hash/workspace/projects/ai-stig-audit/test/fixtures/deploy-hardened",
+                  "kind": "module",
+                  "fullyQualifiedName": "/Users/neepai/hash/workspace/projects/ai-stig-audit/test/fixtures/deploy-hardened"
+                }
+              ]
+            }
+          ],
+          "properties": {
+            "status": "SKIP",
+            "severity": "CRITICAL",
+            "category": "AI-AGENT",
+            "evidence": [],
+            "frameworks": {
+              "OWASP LLM": "LLM06",
+              "FedRAMP": "AC-3",
+              "NIST AI RMF": "GOVERN 6.1"
+            }
+          }
+        },
+        {
+          "ruleId": "AI-AGENT-003",
+          "level": "none",
+          "message": {
+            "text": "This check requires a live agent session to test memory poisoning via adversarial inputs. Run with --mode api or --mode local to evaluate."
+          },
+          "locations": [
+            {
+              "logicalLocations": [
+                {
+                  "name": "/Users/neepai/hash/workspace/projects/ai-stig-audit/test/fixtures/deploy-hardened",
+                  "kind": "module",
+                  "fullyQualifiedName": "/Users/neepai/hash/workspace/projects/ai-stig-audit/test/fixtures/deploy-hardened"
+                }
+              ]
+            }
+          ],
+          "properties": {
+            "status": "SKIP",
+            "severity": "HIGH",
+            "category": "AI-AGENT",
+            "evidence": [],
+            "frameworks": {
+              "OWASP LLM": "LLM01",
+              "FedRAMP": "SI-7",
+              "NIST AI RMF": "MANAGE 1.3"
+            }
+          }
+        },
+        {
+          "ruleId": "AI-AGENT-004",
+          "level": "none",
+          "message": {
+            "text": "No agent configuration found. N/A for single-agent deployments."
+          },
+          "locations": [
+            {
+              "logicalLocations": [
+                {
+                  "name": "/Users/neepai/hash/workspace/projects/ai-stig-audit/test/fixtures/deploy-hardened",
+                  "kind": "module",
+                  "fullyQualifiedName": "/Users/neepai/hash/workspace/projects/ai-stig-audit/test/fixtures/deploy-hardened"
+                }
+              ]
+            }
+          ],
+          "properties": {
+            "status": "SKIP",
+            "severity": "HIGH",
+            "category": "AI-AGENT",
+            "evidence": [],
+            "frameworks": {
+              "OWASP LLM": "LLM06",
+              "FedRAMP": "AC-3",
+              "NIST AI RMF": "GOVERN 6.1"
+            }
+          }
+        },
+        {
+          "ruleId": "AI-AGENT-005",
+          "level": "none",
+          "message": {
+            "text": "No agent configuration found."
+          },
+          "locations": [
+            {
+              "logicalLocations": [
+                {
+                  "name": "/Users/neepai/hash/workspace/projects/ai-stig-audit/test/fixtures/deploy-hardened",
+                  "kind": "module",
+                  "fullyQualifiedName": "/Users/neepai/hash/workspace/projects/ai-stig-audit/test/fixtures/deploy-hardened"
+                }
+              ]
+            }
+          ],
+          "properties": {
+            "status": "SKIP",
+            "severity": "HIGH",
+            "category": "AI-AGENT",
+            "evidence": [],
+            "frameworks": {
+              "OWASP LLM": "LLM06",
+              "FedRAMP": "AU-2",
+              "NIST AI RMF": "MEASURE 2.5"
+            }
+          }
+        },
+        {
+          "ruleId": "AI-AGENT-006",
+          "level": "none",
+          "message": {
+            "text": "No agent configuration found."
+          },
+          "locations": [
+            {
+              "logicalLocations": [
+                {
+                  "name": "/Users/neepai/hash/workspace/projects/ai-stig-audit/test/fixtures/deploy-hardened",
+                  "kind": "module",
+                  "fullyQualifiedName": "/Users/neepai/hash/workspace/projects/ai-stig-audit/test/fixtures/deploy-hardened"
+                }
+              ]
+            }
+          ],
+          "properties": {
+            "status": "SKIP",
+            "severity": "CRITICAL",
+            "category": "AI-AGENT",
+            "evidence": [],
+            "frameworks": {
+              "OWASP LLM": "LLM06",
+              "FedRAMP": "AC-4, SC-7",
+              "NIST AI RMF": "MANAGE 1.3"
+            }
+          }
+        },
+        {
+          "ruleId": "AI-SUPPLY-001",
+          "level": "error",
+          "message": {
+            "text": "No model provenance documentation found. You need a record of: which model, which version, who made it, and what it was trained on.\n\nEvidence:\n  \u2022 No model_config.json or AI inventory file found\n  \u2022 No provenance fields (model_id, provider, base_model) detected in config files\n\nRemediation:\n1. Create an AI asset inventory (see AI-GOV-005) for every model in use.\n2. For each model, record: provider, model ID, version, training data summary, limitations.\n3. For fine-tuned models: document the base model, fine-tuning dataset, and training date.\n4. Subscribe to provider security advisories for models in use."
+          },
+          "locations": [
+            {
+              "logicalLocations": [
+                {
+                  "name": "/Users/neepai/hash/workspace/projects/ai-stig-audit/test/fixtures/deploy-hardened",
+                  "kind": "module",
+                  "fullyQualifiedName": "/Users/neepai/hash/workspace/projects/ai-stig-audit/test/fixtures/deploy-hardened"
+                }
+              ]
+            }
+          ],
+          "properties": {
+            "status": "FAIL",
+            "severity": "HIGH",
+            "category": "AI-SUPPLY",
+            "evidence": [
+              "No model_config.json or AI inventory file found",
+              "No provenance fields (model_id, provider, base_model) detected in config files"
+            ],
+            "frameworks": {
+              "OWASP LLM": "LLM03",
+              "FedRAMP": "SA-12, CM-8",
+              "NIST AI RMF": "GOVERN 2.2"
+            }
+          }
+        },
+        {
+          "ruleId": "AI-SUPPLY-002",
+          "level": "note",
+          "message": {
+            "text": "Model integrity verification (checksum/hash) found.\n\nEvidence:\n  \u2022 Hash verification configuration detected"
+          },
+          "locations": [
+            {
+              "logicalLocations": [
+                {
+                  "name": "/Users/neepai/hash/workspace/projects/ai-stig-audit/test/fixtures/deploy-hardened",
+                  "kind": "module",
+                  "fullyQualifiedName": "/Users/neepai/hash/workspace/projects/ai-stig-audit/test/fixtures/deploy-hardened"
+                }
+              ]
+            }
+          ],
+          "properties": {
+            "status": "PASS",
+            "severity": "CRITICAL",
+            "category": "AI-SUPPLY",
+            "evidence": [
+              "Hash verification configuration detected"
+            ],
+            "frameworks": {
+              "OWASP LLM": "LLM03, LLM04",
+              "FedRAMP": "SA-12, SI-7",
+              "NIST AI RMF": "MAP 1.5"
+            }
+          }
+        },
+        {
+          "ruleId": "AI-SUPPLY-003",
+          "level": "warning",
+          "message": {
+            "text": "No requirements.txt found. Cannot audit Python dependencies.\n\nEvidence:\n  \u2022 No requirements.txt or requirements*.txt found in target directory\n\nRemediation:\nCreate a requirements.txt with pinned versions for all dependencies.\nFor Node.js: ensure package-lock.json is committed.\nRun 'pip audit' or 'npm audit' to check for known vulnerabilities."
+          },
+          "locations": [
+            {
+              "logicalLocations": [
+                {
+                  "name": "/Users/neepai/hash/workspace/projects/ai-stig-audit/test/fixtures/deploy-hardened",
+                  "kind": "module",
+                  "fullyQualifiedName": "/Users/neepai/hash/workspace/projects/ai-stig-audit/test/fixtures/deploy-hardened"
+                }
+              ]
+            }
+          ],
+          "properties": {
+            "status": "WARN",
+            "severity": "HIGH",
+            "category": "AI-SUPPLY",
+            "evidence": [
+              "No requirements.txt or requirements*.txt found in target directory"
+            ],
+            "frameworks": {
+              "OWASP LLM": "LLM03",
+              "FedRAMP": "SA-12, CM-7",
+              "NIST AI RMF": "GOVERN 2.2"
+            }
+          }
+        },
+        {
+          "ruleId": "AI-SUPPLY-004",
+          "level": "warning",
+          "message": {
+            "text": "Cannot fully evaluate shadow AI from static config. This check requires network monitoring and employee surveys to fully assess.\n\nEvidence:\n  \u2022 No obvious unsanctioned AI indicators in config files\n  \u2022 AI packages in requirements.txt: none detected\n  \u2022 Shadow AI discovery requires network log analysis (DNS queries to AI API endpoints)\n\nRemediation:\nRun a shadow AI discovery by querying DNS/network logs for connections to:\napi.openai.com, api.anthropic.com, generativelanguage.googleapis.com, api.cohere.com\nMatch against your approved AI service inventory."
+          },
+          "locations": [
+            {
+              "logicalLocations": [
+                {
+                  "name": "/Users/neepai/hash/workspace/projects/ai-stig-audit/test/fixtures/deploy-hardened",
+                  "kind": "module",
+                  "fullyQualifiedName": "/Users/neepai/hash/workspace/projects/ai-stig-audit/test/fixtures/deploy-hardened"
+                }
+              ]
+            }
+          ],
+          "properties": {
+            "status": "WARN",
+            "severity": "HIGH",
+            "category": "AI-SUPPLY",
+            "evidence": [
+              "No obvious unsanctioned AI indicators in config files",
+              "AI packages in requirements.txt: none detected",
+              "Shadow AI discovery requires network log analysis (DNS queries to AI API endpoints)"
+            ],
+            "frameworks": {
+              "OWASP LLM": "LLM03",
+              "FedRAMP": "CM-7",
+              "NIST AI RMF": "GOVERN 2.2"
+            }
+          }
+        },
+        {
+          "ruleId": "AI-SUPPLY-005",
+          "level": "note",
+          "message": {
+            "text": "Model versions appear to be pinned to specific version identifiers.\n\nEvidence:\n  \u2022 config.json \u2014 \"model\": \"gpt-4o-2024-11-20\""
+          },
+          "locations": [
+            {
+              "logicalLocations": [
+                {
+                  "name": "/Users/neepai/hash/workspace/projects/ai-stig-audit/test/fixtures/deploy-hardened",
+                  "kind": "module",
+                  "fullyQualifiedName": "/Users/neepai/hash/workspace/projects/ai-stig-audit/test/fixtures/deploy-hardened"
+                }
+              ]
+            }
+          ],
+          "properties": {
+            "status": "PASS",
+            "severity": "MEDIUM",
+            "category": "AI-SUPPLY",
+            "evidence": [
+              "config.json \u2014 \"model\": \"gpt-4o-2024-11-20\""
+            ],
+            "frameworks": {
+              "OWASP LLM": "LLM03",
+              "FedRAMP": "CM-6",
+              "NIST AI RMF": "GOVERN 2.2"
+            }
+          }
+        },
+        {
+          "ruleId": "AI-GOV-001",
+          "level": "error",
+          "message": {
+            "text": "No AI usage policy found. Without a policy, there is no basis for enforcement, no guidance for employees, and no compliance evidence.\n\nEvidence:\n  \u2022 No AI usage policy file found (looked for: ai_usage_policy.md, ai_policy.*, usage_policy.*)\n  \u2022 Policies should define: approved tools, prohibited uses, data classification, responsible party\n\nRemediation:\n1. Draft a minimal AI policy (even one page): approved tools, prohibited data types, responsible party.\n2. Have legal/compliance review for industry-specific requirements (HIPAA, PCI, GDPR).\n3. Communicate to all employees and collect acknowledgment.\n4. Publish in your internal wiki and set a 12-month review reminder.\n5. M.A.R.K. Sentinel provides a policy template in docs/SMB_GUIDE.md."
+          },
+          "locations": [
+            {
+              "logicalLocations": [
+                {
+                  "name": "/Users/neepai/hash/workspace/projects/ai-stig-audit/test/fixtures/deploy-hardened",
+                  "kind": "module",
+                  "fullyQualifiedName": "/Users/neepai/hash/workspace/projects/ai-stig-audit/test/fixtures/deploy-hardened"
+                }
+              ]
+            }
+          ],
+          "properties": {
+            "status": "FAIL",
+            "severity": "HIGH",
+            "category": "AI-GOV",
+            "evidence": [
+              "No AI usage policy file found (looked for: ai_usage_policy.md, ai_policy.*, usage_policy.*)",
+              "Policies should define: approved tools, prohibited uses, data classification, responsible party"
+            ],
+            "frameworks": {
+              "OWASP LLM": "LLM10",
+              "FedRAMP": "PL-1",
+              "NIST AI RMF": "GOVERN 1.1",
+              "EU AI Act": "Article 9"
+            }
+          }
+        },
+        {
+          "ruleId": "AI-GOV-002",
+          "level": "error",
+          "message": {
+            "text": "No data retention policy covering AI interactions found. GDPR, HIPAA, and CCPA all require knowing where AI interaction data is stored and how long it is kept.\n\nEvidence:\n  \u2022 No data retention policy found (looked for: data_retention.md, retention_policy.*, ai_retention.*)\n  \u2022 Policy should cover: AI logs, conversation history, embeddings, fine-tuning datasets\n\nRemediation:\n1. Audit where AI interaction data is stored: logs, vector store embeddings, provider-side storage.\n2. Add AI data categories to your retention policy with defined retention periods.\n3. Configure technical enforcement: log rotation, vector store TTLs.\n4. Check your AI provider's data retention settings \u2014 configure minimum retention.\n5. Document the deletion process for AI data in your data subject rights procedure."
+          },
+          "locations": [
+            {
+              "logicalLocations": [
+                {
+                  "name": "/Users/neepai/hash/workspace/projects/ai-stig-audit/test/fixtures/deploy-hardened",
+                  "kind": "module",
+                  "fullyQualifiedName": "/Users/neepai/hash/workspace/projects/ai-stig-audit/test/fixtures/deploy-hardened"
+                }
+              ]
+            }
+          ],
+          "properties": {
+            "status": "FAIL",
+            "severity": "HIGH",
+            "category": "AI-GOV",
+            "evidence": [
+              "No data retention policy found (looked for: data_retention.md, retention_policy.*, ai_retention.*)",
+              "Policy should cover: AI logs, conversation history, embeddings, fine-tuning datasets"
+            ],
+            "frameworks": {
+              "OWASP LLM": "LLM02",
+              "FedRAMP": "SI-12, AU-11",
+              "NIST AI RMF": "GOVERN 1.1",
+              "GDPR": "Article 5(1)(e)"
+            }
+          }
+        },
+        {
+          "ruleId": "AI-GOV-003",
+          "level": "error",
+          "message": {
+            "text": "No AI incident response plan found. If your AI leaks data, gets injected, or misbehaves, you need a plan ready before that happens.\n\nEvidence:\n  \u2022 No IR plan found (looked for: incident_response.md, ir_plan.*, ai_incident.*)\n  \u2022 An AI IR plan should cover: how to disable AI quickly, who to notify, how to preserve evidence\n\nRemediation:\nAnswer these 5 questions in a document:\n1. What counts as an AI incident? (data leak, injection attack, model misbehavior)\n2. Who do I call first? (internal team + AI vendor security contact)\n3. How do I disable AI quickly? (document the kill switch)\n4. How do I preserve evidence? (export logs before clearing)\n5. Who needs to be notified? (legal, affected users, regulators if required)"
+          },
+          "locations": [
+            {
+              "logicalLocations": [
+                {
+                  "name": "/Users/neepai/hash/workspace/projects/ai-stig-audit/test/fixtures/deploy-hardened",
+                  "kind": "module",
+                  "fullyQualifiedName": "/Users/neepai/hash/workspace/projects/ai-stig-audit/test/fixtures/deploy-hardened"
+                }
+              ]
+            }
+          ],
+          "properties": {
+            "status": "FAIL",
+            "severity": "HIGH",
+            "category": "AI-GOV",
+            "evidence": [
+              "No IR plan found (looked for: incident_response.md, ir_plan.*, ai_incident.*)",
+              "An AI IR plan should cover: how to disable AI quickly, who to notify, how to preserve evidence"
+            ],
+            "frameworks": {
+              "OWASP LLM": "LLM10",
+              "FedRAMP": "IR-1, IR-4",
+              "NIST AI RMF": "MANAGE 4.1"
+            }
+          }
+        },
+        {
+          "ruleId": "AI-GOV-004",
+          "level": "warning",
+          "message": {
+            "text": "No human oversight configuration or documentation found. This check requires process review \u2014 cannot fully verify via config scan. If your AI influences high-stakes decisions, human oversight mechanisms should be documented.\n\nEvidence:\n  \u2022 No HITL configuration in agent config\n  \u2022 No oversight documentation found\n  \u2022 Note: This check requires manual process review to fully evaluate\n\nRemediation:\n1. Identify which AI use cases constitute high-stakes decisions (hiring, credit, medical, legal).\n2. For each high-stakes use case: define who reviews, what information they see, how they override.\n3. Document the oversight mechanism for auditors.\n4. Track AI-human divergence rate: how often do humans override the AI? A 0% rate suggests rubber-stamping."
+          },
+          "locations": [
+            {
+              "logicalLocations": [
+                {
+                  "name": "/Users/neepai/hash/workspace/projects/ai-stig-audit/test/fixtures/deploy-hardened",
+                  "kind": "module",
+                  "fullyQualifiedName": "/Users/neepai/hash/workspace/projects/ai-stig-audit/test/fixtures/deploy-hardened"
+                }
+              ]
+            }
+          ],
+          "properties": {
+            "status": "WARN",
+            "severity": "HIGH",
+            "category": "AI-GOV",
+            "evidence": [
+              "No HITL configuration in agent config",
+              "No oversight documentation found",
+              "Note: This check requires manual process review to fully evaluate"
+            ],
+            "frameworks": {
+              "OWASP LLM": "LLM06",
+              "FedRAMP": "PL-1",
+              "NIST AI RMF": "GOVERN 6.1",
+              "EU AI Act": "Article 14"
+            }
+          }
+        },
+        {
+          "ruleId": "AI-GOV-005",
+          "level": "error",
+          "message": {
+            "text": "No AI asset inventory found. An AI system not in inventory cannot be managed, monitored, updated, or secured.\n\nEvidence:\n  \u2022 No inventory file found (looked for: ai_inventory.md, ai_asset_inventory.md, aibom.*)\n  \u2022 Inventory should include: system name, provider, model version, purpose, owner, data processed\n\nRemediation:\n1. Start with a simple spreadsheet or Markdown table: System, Provider, Model, Version, Owner, Data Processed.\n2. Include ALL AI: externally-hosted APIs, local models, and AI features in approved software (Copilot, Gemini).\n3. Build inventory maintenance into change management: no new AI deployment without an inventory entry.\n4. Review quarterly \u2014 remove decommissioned systems, add newly discovered shadow AI."
+          },
+          "locations": [
+            {
+              "logicalLocations": [
+                {
+                  "name": "/Users/neepai/hash/workspace/projects/ai-stig-audit/test/fixtures/deploy-hardened",
+                  "kind": "module",
+                  "fullyQualifiedName": "/Users/neepai/hash/workspace/projects/ai-stig-audit/test/fixtures/deploy-hardened"
+                }
+              ]
+            }
+          ],
+          "properties": {
+            "status": "FAIL",
+            "severity": "MEDIUM",
+            "category": "AI-GOV",
+            "evidence": [
+              "No inventory file found (looked for: ai_inventory.md, ai_asset_inventory.md, aibom.*)",
+              "Inventory should include: system name, provider, model version, purpose, owner, data processed"
+            ],
+            "frameworks": {
+              "OWASP LLM": "LLM10",
+              "FedRAMP": "CM-8",
+              "NIST AI RMF": "GOVERN 2.2",
+              "EU AI Act": "Article 60"
+            }
+          }
+        }
+      ],
+      "properties": {
+        "scanDate": "2026-04-29",
+        "target": "/Users/neepai/hash/workspace/projects/ai-stig-audit/test/fixtures/deploy-hardened",
+        "mode": "config",
+        "profile": "FedRAMP Moderate",
+        "summary": {
+          "pass": 9,
+          "fail": 5,
+          "warn": 3,
+          "skip": 15
+        }
+      }
+    }
+  ]
+}
