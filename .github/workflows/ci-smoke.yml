@@ -4,7 +4,7 @@ on:
   pull_request:
   push:
     branches:
-      - phase4/smb-packaging
+      - main
 
 jobs:
   smoke:
