@@ -1,0 +1,29 @@
+name: CI - smoke
+
+on:
+  pull_request:
+  push:
+    branches:
+      - phase4/smb-packaging
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+      - name: Make scripts executable
+        run: |
+          chmod +x ./scripts/install.sh
+          chmod +x ./scripts/generate_pdf.sh || true
+      - name: Run installer (smoke)
+        run: |
+          ./scripts/install.sh
+      - name: Run unit tests (smoke)
+        run: |
+          . .venv/bin/activate
+          pip install pytest
+          pytest -q test/test_gemini_hash_connectors.py -q
