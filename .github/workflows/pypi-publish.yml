@@ -1,0 +1,26 @@
+name: Build & Publish Python package
+
+on:
+  push:
+    branches:
+      - phase4/smb-packaging
+  workflow_dispatch:
+
+jobs:
+  build:
+    if: ${{ secrets.PYPI_API_TOKEN != '' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+      - name: Build sdist and wheel
+        run: |
+          python -m pip install --upgrade build
+          python -m build --sdist --wheel
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          password: ${{ secrets.PYPI_API_TOKEN }}
