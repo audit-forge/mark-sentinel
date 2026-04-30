@@ -7,7 +7,7 @@ on:
       - main
 
 jobs:
-  smoke:
+  smoke-linux:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -27,3 +27,25 @@ jobs:
           . .venv/bin/activate
           pip install pytest
           pytest -q test/test_gemini_hash_connectors.py -q
+
+  smoke-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+      - name: Run installer (PowerShell)
+        shell: pwsh
+        run: |
+          powershell -ExecutionPolicy Bypass -File scripts\install.ps1
+      - name: Run unit tests (smoke)
+        shell: pwsh
+        run: |
+          .\.venv\Scripts\python.exe -m pip install pytest --quiet
+          .\.venv\Scripts\pytest.exe -q test/test_gemini_hash_connectors.py -q
+      - name: Verify audit.py runs on Windows
+        shell: pwsh
+        run: |
+          .\.venv\Scripts\python.exe audit.py --mode config --profile smb --target test\fixtures\deploy-hardened --output plain --quiet
