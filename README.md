@@ -12,10 +12,32 @@ Quick links
 This section gets a non-technical user from zero to a readable security report in three commands.
 
 Requirements
-- Linux/macOS with Python 3.11+ installed
+- Windows 10/11, Linux, or macOS
+- Python 3.9+ installed (https://www.python.org/downloads/)
+  - Windows: check "Add Python to PATH" during installation
 - Optional: pandoc + wkhtmltopdf (for PDF report generation)
 
-Install and run (one-command install + quick scan)
+Install and run — Windows
+
+```powershell
+# clone (if needed)
+git clone https://github.com/audit-forge/mark-sentinel.git
+cd mark-sentinel
+
+# One-command installer (PowerShell — recommended)
+powershell -ExecutionPolicy Bypass -File scripts\install.ps1
+
+# OR: plain batch installer (no PowerShell required)
+scripts\install.bat
+
+# Run a sample config-mode scan
+.venv\Scripts\python.exe audit.py --mode config --profile smb --target test\fixtures\deploy-hardened --output plain
+
+# Scan your own project directory
+.venv\Scripts\python.exe audit.py --mode config --target C:\path\to\your\project --profile smb --output plain
+```
+
+Install and run — Linux / macOS
 
 ```bash
 # clone (if needed)
