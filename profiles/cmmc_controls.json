@@ -1,0 +1,39 @@
+{
+  "AI-DEPLOY-001": ["AC", "IA", "AU"],
+  "AI-DEPLOY-002": ["CM", "AC"],
+  "AI-DEPLOY-003": ["AU", "SI"],
+  "AI-DEPLOY-004": ["AC", "IA"],
+  "AI-DEPLOY-005": ["SC", "SI"],
+  "AI-DEPLOY-006": ["SC", "SI"],
+
+  "AI-INP-001": ["SI", "PL"],
+  "AI-INP-002": ["SI", "IA"],
+  "AI-INP-003": ["CM", "SI"],
+  "AI-INP-004": ["SI"],
+  "AI-INP-005": ["SI"],
+
+  "AI-OUT-001": ["MP", "SI"],
+  "AI-OUT-002": ["MP", "AU", "SI"],
+  "AI-OUT-003": ["SI"],
+  "AI-OUT-004": ["SI", "PL"],
+  "AI-OUT-005": ["SI", "CM"],
+
+  "AI-AGENT-001": ["AC", "CM"],
+  "AI-AGENT-002": ["AC", "IR"],
+  "AI-AGENT-003": ["SI", "CM"],
+  "AI-AGENT-004": ["AC", "SI"],
+  "AI-AGENT-005": ["AU", "SI"],
+  "AI-AGENT-006": ["SC", "SI", "AU"],
+
+  "AI-SUPPLY-001": ["CM", "PL"],
+  "AI-SUPPLY-002": ["CM", "SI"],
+  "AI-SUPPLY-003": ["CM", "SI"],
+  "AI-SUPPLY-004": ["AC", "AU"],
+  "AI-SUPPLY-005": ["CM"],
+
+  "AI-GOV-001": ["PL"],
+  "AI-GOV-002": ["PL", "MP"],
+  "AI-GOV-003": ["IR", "AU"],
+  "AI-GOV-004": ["PL", "AC"],
+  "AI-GOV-005": ["CM", "PL"]
+}
