@@ -182,7 +182,22 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         out_dir = _latest_out_dir()
         dash = (out_dir / 'dashboard.html') if out_dir else None
         if dash and dash.exists():
-            self._send(200, dash.read_bytes(), 'text/html; charset=utf-8')
+            try:
+                html = dash.read_text(encoding='utf-8')
+                # inject a small Fleet link near the top of the page so users can
+                # navigate from the main dashboard to the fleet view without
+                # changing the generated dashboard generator or templates.
+                idx = html.lower().find('<body')
+                if idx != -1:
+                    idx2 = html.find('>', idx)
+                    if idx2 != -1:
+                        inject = '\n<div style="position:fixed;right:18px;top:14px;z-index:999;"><a href="/fleet" style="background:#161b22;color:#58a6ff;padding:6px 10px;border-radius:6px;border:1px solid #21262d;text-decoration:none;font-size:13px">Fleet</a></div>\n'
+                        html = html[:idx2+1] + inject + html[idx2+1:]
+                self._send(200, html.encode('utf-8'), 'text/html; charset=utf-8')
+                return
+            except Exception:
+                # fall back to raw bytes if anything goes wrong reading/injecting
+                self._send(200, dash.read_bytes(), 'text/html; charset=utf-8')
         else:
             page = (
                 b'<html><head><style>'
