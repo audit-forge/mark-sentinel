@@ -672,10 +672,10 @@ body{{background:#0d1117;color:#c9d1d9;font-family:-apple-system,BlinkMacSystemF
   </div>
 
   <div class="stat-row">
-    <div class="scard"><div class="scard-n c-blue">{len(devices)}</div><div class="scard-l">Devices</div></div>
-    <div class="scard"><div class="scard-n c-red">{total_fail}</div><div class="scard-l">Total Fails</div></div>
-    <div class="scard"><div class="scard-n c-yellow">{total_warn}</div><div class="scard-l">Total Warns</div></div>
-    <div class="scard"><div class="scard-n c-green">{total_pass}</div><div class="scard-l">Total Passes</div></div>
+    <div class="scard"><div class="scard-n c-blue" id="sc-count">{len(devices)}</div><div class="scard-l">Devices</div></div>
+    <div class="scard"><div class="scard-n c-red" id="sc-fail">{total_fail}</div><div class="scard-l">Total Fails</div></div>
+    <div class="scard"><div class="scard-n c-yellow" id="sc-warn">{total_warn}</div><div class="scard-l">Total Warns</div></div>
+    <div class="scard"><div class="scard-n c-green" id="sc-pass">{total_pass}</div><div class="scard-l">Total Passes</div></div>
   </div>
 
   <div class="sec-hdr">Connected Devices</div>
@@ -686,7 +686,7 @@ body{{background:#0d1117;color:#c9d1d9;font-family:-apple-system,BlinkMacSystemF
       <th class="c-red">Fail</th><th class="c-yellow">Warn</th><th class="c-green">Pass</th>
       <th>Profile</th><th>Last seen</th><th>Risk</th><th></th>
     </tr></thead>
-    <tbody>{rows}</tbody>
+    <tbody id="device-tbody">{rows}</tbody>
   </table>
 
   <div class="sec-hdr" style="margin-top:32px">
@@ -705,14 +705,73 @@ body{{background:#0d1117;color:#c9d1d9;font-family:-apple-system,BlinkMacSystemF
 
 <script>
 let _countdown = 60;
-let _pauseReload = false;
 const _note = document.getElementById('refresh-note');
 setInterval(() => {{
-  if (_pauseReload) {{ _countdown = 60; _note.textContent = 'Auto-refresh paused'; return; }}
   _countdown--;
-  if (_countdown <= 0) location.reload();
-  _note.textContent = 'Auto-refreshes in ' + _countdown + 's';
+  if (_countdown <= 0) {{ _countdown = 60; refreshDevices(); }}
+  _note.textContent = 'Devices refresh in ' + _countdown + 's';
 }}, 1000);
+
+function _age(ts) {{
+  if (!ts) return 'never';
+  const s = Math.floor(Date.now()/1000) - ts;
+  if (s < 120) return s + 's ago';
+  if (s < 3600) return Math.floor(s/60) + 'm ago';
+  if (s < 86400) return Math.floor(s/3600) + 'h ago';
+  return Math.floor(s/86400) + 'd ago';
+}}
+
+function _riskCls(fail, warn) {{
+  return fail > 0 ? 'r-fail' : warn > 0 ? 'r-warn' : 'r-pass';
+}}
+
+async function refreshDevices() {{
+  try {{
+    const resp = await fetch('/api/devices');
+    if (!resp.ok) return;
+    const data = await resp.json();
+    const devs = data.devices || [];
+    const tFail = devs.reduce((s,d)=>s+(d.fail_count||0),0);
+    const tWarn = devs.reduce((s,d)=>s+(d.warn_count||0),0);
+    const tPass = devs.reduce((s,d)=>s+(d.pass_count||0),0);
+    document.getElementById('sc-count').textContent = devs.length;
+    document.getElementById('sc-fail').textContent  = tFail;
+    document.getElementById('sc-warn').textContent  = tWarn;
+    document.getElementById('sc-pass').textContent  = tPass;
+    const tbody = document.getElementById('device-tbody');
+    if (!devs.length) {{
+      tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:32px;color:#484f58">No agents have reported yet.</td></tr>';
+      return;
+    }}
+    tbody.innerHTML = devs.map(d => {{
+      const did  = d.device_id || '';
+      const fail = d.fail_count || 0;
+      const warn = d.warn_count || 0;
+      const pas  = d.pass_count || 0;
+      const rc   = _riskCls(fail, warn);
+      const age  = _age(d.last_seen);
+      return `<tr class="dev-row" onclick="selectDevice('${{esc(did)}}')" >
+        <td class="dev-host">${{esc(d.hostname||'unknown')}}</td>
+        <td>${{esc(d.platform||'')}}</td>
+        <td class="c-red">${{fail}}</td>
+        <td class="c-yellow">${{warn}}</td>
+        <td class="c-green">${{pas}}</td>
+        <td>${{esc(d.profile||'')}}</td>
+        <td>${{age}}</td>
+        <td><span class="risk-dot ${{rc}}"></span></td>
+        <td onclick="event.stopPropagation()" style="white-space:nowrap">
+          <button class="scan-btn" id="sb-${{esc(did)}}" onclick="scanDevice('${{esc(did)}}')" >Scan Now</button>
+          <a href="/fleet/device/${{esc(did)}}/dashboard" target="_blank"
+             style="margin-left:8px;background:#161b22;border:1px solid #30363d;color:#8b949e;
+                    border-radius:4px;padding:3px 10px;font-size:12px;text-decoration:none;
+                    display:inline-block"
+             onmouseover="this.style.borderColor='#58a6ff';this.style.color='#c9d1d9'"
+             onmouseout="this.style.borderColor='#30363d';this.style.color='#8b949e'">Full Report</a>
+        </td>
+      </tr>`;
+    }}).join('');
+  }} catch (_) {{ /* silently ignore refresh errors */ }}
+}}
 
 function esc(s) {{
   if (!s) return '';
@@ -731,10 +790,8 @@ async function runDiscovery() {{
     if (!resp.ok) throw new Error(data.error || 'HTTP ' + resp.status);
     const svcs = data.services || [];
     if (svcs.length === 0) {{
-      _pauseReload = false;
       panel.innerHTML = '<div class="empty" style="padding:12px">No AI services found on the local network.</div>';
     }} else {{
-      _pauseReload = true;
       const rows = svcs.map(s => {{
         const status = s.status ? 'HTTP ' + s.status : 'TCP open';
         return `<tr>
@@ -757,7 +814,7 @@ async function runDiscovery() {{
       </table>
       <div style="font-size:11px;color:#484f58;margin-top:10px;display:flex;align-items:center;gap:12px">
         <span>${{svcs.length}} service(s) found</span>
-        <button onclick="_pauseReload=false;this.closest('div').parentElement.innerHTML='<div class=\\'empty\\'style=\\'padding:12px\\'>Click Scan Network to probe the local subnet for AI services.</div>'" style="background:none;border:1px solid #30363d;color:#6e7681;border-radius:3px;padding:2px 8px;font-size:11px;cursor:pointer">Clear</button>
+        <button onclick="this.closest('div').parentElement.innerHTML='<div class=\\'empty\\'style=\\'padding:12px\\'>Click Scan Network to probe the local subnet for AI services.</div>'" style="background:none;border:1px solid #30363d;color:#6e7681;border-radius:3px;padding:2px 8px;font-size:11px;cursor:pointer">Clear</button>
       </div>`;
     }}
   }} catch (e) {{
