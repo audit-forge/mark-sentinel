@@ -29,5 +29,3 @@ mark-sentinel = "server:main"
 [tool.hatch.build.targets.wheel]
 include = ["**/*"]
 
-[tool.hatch.version]
-path = "mark_sentinel_version.txt"
