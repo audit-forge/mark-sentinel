@@ -174,9 +174,12 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             static[path]()
         # timeseries endpoint for fleet device charts
         elif path.startswith('/fleet/device/') and path.endswith('/timeseries.json'):
-            # path: /fleet/device/<id>/timeseries.json
             did = path[len('/fleet/device/'): -len('/timeseries.json')]
             self._api_device_timeseries(did)
+        # full single-device dashboard (all views: findings, remediation, heatmap, etc.)
+        elif path.startswith('/fleet/device/') and path.endswith('/dashboard'):
+            did = path[len('/fleet/device/'): -len('/dashboard')]
+            self._serve_device_dashboard(did)
         elif path.startswith('/api/devices/'):
             self._api_device_report(path[len('/api/devices/'):])
         elif path.startswith('/api/agent/commands/'):
@@ -300,6 +303,34 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         self.send_header('Content-Length', str(len(data)))
         self.end_headers()
         self.wfile.write(data)
+
+    def _serve_device_dashboard(self, device_id: str):
+        """GET /fleet/device/<id>/dashboard — full single-device dashboard with all views."""
+        if not device_id:
+            self._not_found()
+            return
+        try:
+            report = _get_store().get_latest_report(device_id)
+        except Exception as e:
+            self._send(500, f'Store error: {e}'.encode(), 'text/plain')
+            return
+        if report is None:
+            self._send(404, b'Device not found', 'text/plain')
+            return
+        try:
+            sys.path.insert(0, str(ROOT))
+            from output.dashboard import generate
+            import tempfile, os as _os
+            with tempfile.NamedTemporaryFile(suffix='.html', delete=False) as tf:
+                tmp_path = tf.name
+            generate([report], tmp_path,
+                     meta={'scan_date': report.get('scan_date', ''),
+                           'target':    report.get('target', device_id)})
+            html = Path(tmp_path).read_bytes()
+            _os.unlink(tmp_path)
+            self._send(200, html, 'text/html; charset=utf-8')
+        except Exception as e:
+            self._send(500, f'Dashboard generation failed: {e}'.encode(), 'text/plain')
 
     def _api_events(self):
         self.send_response(200)
@@ -545,7 +576,15 @@ def _build_fleet_html(devices: list[dict]) -> str:
           <td>{d.get('profile','')}</td>
           <td>{age}</td>
           <td><span class="risk-dot {rc}"></span></td>
-          <td onclick="event.stopPropagation()"><button class="scan-btn" id="sb-{did}" onclick="scanDevice('{did}')">Scan Now</button></td>
+          <td onclick="event.stopPropagation()" style="white-space:nowrap">
+            <button class="scan-btn" id="sb-{did}" onclick="scanDevice('{did}')">Scan Now</button>
+            <a href="/fleet/device/{did}/dashboard" target="_blank"
+               style="margin-left:8px;background:#161b22;border:1px solid #30363d;color:#8b949e;
+                      border-radius:4px;padding:3px 10px;font-size:12px;text-decoration:none;
+                      display:inline-block;white-space:nowrap"
+               onmouseover="this.style.borderColor='#58a6ff';this.style.color='#c9d1d9'"
+               onmouseout="this.style.borderColor='#30363d';this.style.color='#8b949e'">Full Report</a>
+          </td>
         </tr>"""
 
     if not rows:
@@ -793,6 +832,15 @@ function renderDeviceFindings(panel, report, deviceId) {{
         · Profile: ${{esc(report.profile || '')}}
         · Scan date: ${{esc(report.scan_date || '')}}
       </span>
+    </div>
+
+    <div style="margin-bottom:14px;display:flex;gap:10px;align-items:center">
+      <a href="/fleet/device/${{deviceId}}/dashboard" target="_blank"
+         style="background:#1f3358;border:1px solid #58a6ff;color:#58a6ff;border-radius:6px;
+                padding:6px 16px;font-size:13px;font-weight:600;text-decoration:none;white-space:nowrap">
+        ◈ Open Full Dashboard
+      </a>
+      <span style="font-size:11px;color:#484f58">Overview · Findings · Remediation · Heat Map · Control Coverage · What-If Simulator · Export PDF</span>
     </div>
 
     <div style="margin-bottom:14px">
