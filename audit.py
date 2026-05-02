@@ -19,6 +19,7 @@ if sys.version_info < (3, 11):
 import argparse
 import json
 import os
+import socket
 from pathlib import Path
 
 from connectors.config_connector import scan_directory
@@ -300,7 +301,19 @@ examples:
         action='store_true',
         help='Push PASS findings to DefectDojo in addition to FAIL/WARN (default: FAIL/WARN only)',
     )
+    parser.add_argument(
+        '--alerts',
+        default=None,
+        metavar='FILE',
+        help='Path to alerts_config.json — send email/webhook notifications for new critical findings',
+    )
     args = parser.parse_args()
+
+    # history subcommand — delegate to audit_history.py CLI
+    if len(sys.argv) > 1 and sys.argv[1] == 'history':
+        import subprocess as _sp
+        _sp.run([sys.executable, str(Path(__file__).parent / 'audit_history.py')] + sys.argv[2:])
+        return
 
     if not args.quiet:
         print(BANNER, file=sys.stderr)
@@ -523,6 +536,18 @@ examples:
         with open(args.out_file, 'w') as f:
             f.write(output_text)
         print(f"\n[Report written to {args.out_file}]")
+
+    if args.alerts:
+        try:
+            from alerts import load_alert_config, fire_alerts
+            alert_cfg = load_alert_config(Path(args.alerts))
+            if alert_cfg:
+                report_dict = json.loads(format_json(results, profile, str(target), args.mode))
+                fire_alerts(report_dict, socket.gethostname(), socket.gethostname(), alert_cfg)
+            else:
+                print(f"[WARN] Could not load alerts config: {args.alerts}", file=sys.stderr)
+        except Exception as _ae:
+            print(f"[WARN] Alerts failed: {_ae}", file=sys.stderr)
 
     has_fail = any(r.status == FAIL for r in results)
     sys.exit(1 if has_fail else 0)
