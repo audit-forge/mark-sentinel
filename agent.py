@@ -193,6 +193,27 @@ def report_to_server(report: dict, config: dict,
     return False
 
 
+# ── Command polling ────────────────────────────────────────────────────────────
+
+def poll_for_command(config: dict, device_id: str) -> str | None:
+    """Check the server for a pending on-demand command. Returns command string or None."""
+    server = config.get('server', '').rstrip('/')
+    if not server:
+        return None
+    token = config.get('token', '')
+    url = f'{server}/api/agent/commands/{device_id}'
+    headers: dict[str, str] = {'User-Agent': f'sentinel-agent/{VERSION}'}
+    if token:
+        headers['Authorization'] = f'Bearer {token}'
+    try:
+        req = _urlreq.Request(url, headers=headers)
+        with _urlreq.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read())
+            return data.get('command')
+    except Exception:
+        return None
+
+
 # ── Main scan cycle ────────────────────────────────────────────────────────────
 
 def run_cycle(config: dict) -> bool:
@@ -248,14 +269,31 @@ def main() -> None:
     interval = cfg.get('interval', 3600)
 
     if args.daemon:
-        log.info('Daemon mode — interval %ds', interval)
+        POLL_INTERVAL = 30  # seconds between command polls
+        device_id = _device_id()
+        log.info('Daemon mode — scan interval %ds, command poll every %ds', interval, POLL_INTERVAL)
+        last_scan = 0.0
         while True:
-            try:
-                run_cycle(cfg)
-            except Exception as e:
-                log.error('Unhandled error in scan cycle: %s', e)
-            log.info('Next scan in %ds', interval)
-            time.sleep(interval)
+            now = time.time()
+            # Run scheduled scan when interval has elapsed
+            if now - last_scan >= interval:
+                try:
+                    run_cycle(cfg)
+                except Exception as e:
+                    log.error('Unhandled error in scan cycle: %s', e)
+                last_scan = time.time()
+
+            # Poll for on-demand command
+            cmd = poll_for_command(cfg, device_id)
+            if cmd == 'scan_now':
+                log.info('On-demand scan triggered by server')
+                try:
+                    run_cycle(cfg)
+                except Exception as e:
+                    log.error('Unhandled error in on-demand scan: %s', e)
+                last_scan = time.time()
+
+            time.sleep(POLL_INTERVAL)
     else:
         ok = run_cycle(cfg)
         sys.exit(0 if ok else 1)
