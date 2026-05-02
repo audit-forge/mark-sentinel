@@ -1218,6 +1218,7 @@ def _build_html(data: dict) -> str:
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
 <title>M.A.R.K. Sentinel — Security Dashboard</title>
 <style>{_CSS}</style>
+    <style>@media print{#sidebar,.scan-btn,.enterprise-link,button{display:none!important}body,#app,#main,#content{height:auto!important;overflow:visible!important}}</style>
 </head>
 <body>
 <div id="app">
@@ -1244,9 +1245,12 @@ def _build_html(data: dict) -> str:
   <div id="main">
     <div id="header">
       <div class="header-title">AI Security Dashboard <span id="hdr-profile"></span></div>
-      <div class="header-meta">
-        <span>📅 <span id="hdr-date"></span></span>
-        <span><span id="hdr-time"></span></span>
+      <div style="display:flex;align-items:center;gap:12px">
+        <div class="header-meta">
+          <span>📅 <span id="hdr-date"></span></span>
+          <span><span id="hdr-time"></span></span>
+        </div>
+        <button class="pbtn" onclick="window.print()">Export PDF</button>
       </div>
     </div>
     <div id="content">

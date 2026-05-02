@@ -40,3 +40,20 @@ Thumbs.db
 # Scan output directories (generated, not source)
 output/demo_*/
 output/artifacts/
+
+# Dev/agent files to ignore
+CLAUDE.md
+.claude/
+AGENTS.md
+.cursorrules
+.windsurfrules
+.aider.conf.yml
+GEMINI.md
+.gemini/
+Modelfile
+.continue/
+DEVIN.md
+.amazonq/
+.tabnine_root
+.copilot/
+.github/copilot-instructions.md
