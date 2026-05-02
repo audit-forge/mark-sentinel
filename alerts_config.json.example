@@ -1,0 +1,9 @@
+{
+  "webhook_url": "https://hooks.example.com/sentinel",
+  "slack_webhook": "https://hooks.slack.com/services/YOUR/SLACK/WEBHOOK",
+  "email_to": "security@example.com",
+  "email_from": "sentinel@example.com",
+  "smtp_host": "smtp.example.com",
+  "smtp_port": 587,
+  "min_severity": "CRITICAL"
+}
