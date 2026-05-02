@@ -60,13 +60,22 @@ def _agent_token() -> str:
 
 
 def _latest_out_dir() -> Path | None:
-    # Prefer the newest demo_* directory that contains a generated dashboard.html.
-    dirs = sorted((ROOT / 'output').glob('demo_*'), reverse=True)
-    for d in dirs:
-        if (d / 'dashboard.html').exists():
-            return d
-    # fallback: no demo dir with dashboard found
-    return None
+    # Select the demo_* directory whose dashboard.html exists and has the largest size.
+    # This avoids returning a recently-created but incomplete dashboard file (small/truncated)
+    # and prefers a richer generated dashboard when multiple runs are present.
+    candidates = []
+    for d in (ROOT / 'output').glob('demo_*'):
+        p = d / 'dashboard.html'
+        if p.exists():
+            try:
+                candidates.append((p.stat().st_size, d))
+            except Exception:
+                candidates.append((0, d))
+    if not candidates:
+        return None
+    # pick the directory with the largest dashboard.html size
+    candidates.sort(reverse=True)
+    return candidates[0][1]
 
 
 def _rebuild_dashboard(out_dir: Path) -> bool:
