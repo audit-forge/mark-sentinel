@@ -191,7 +191,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                 if idx != -1:
                     idx2 = html.find('>', idx)
                     if idx2 != -1:
-                        inject = '\n<div style="position:fixed;left:50%;top:14px;transform:translateX(-50%);z-index:999;"><a href="/fleet" style="background:#161b22;color:#58a6ff;padding:6px 10px;border-radius:6px;border:1px solid #21262d;text-decoration:none;font-size:13px">Fleet</a></div>\n'
+                        inject = '\n<div style="position:fixed;left:50%;top:14px;transform:translateX(-50%);z-index:999;"><a href="/fleet" style="background:#161b22;color:#58a6ff;padding:6px 10px;border-radius:6px;border:1px solid #21262d;text-decoration:none;font-size:13px">Enterprise View</a></div>\n'
                         # replace the dashboard header's full path with a live clock so the header
                         # no longer shows the full filesystem path and scan date. This script
                         # runs client-side after the generated dashboard loads.
@@ -442,7 +442,7 @@ def _build_fleet_html(devices: list[dict]) -> str:
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
-<title>M.A.R.K. Sentinel — Fleet View</title>
+<title>M.A.R.K. Sentinel — Enterprise View</title>
 <style>
 *{{box-sizing:border-box;margin:0;padding:0}}
 body{{background:#0d1117;color:#c9d1d9;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:14px}}
@@ -504,7 +504,7 @@ body{{background:#0d1117;color:#c9d1d9;font-family:-apple-system,BlinkMacSystemF
   <div class="brand-bar">
     <span class="brand-mark">M.A.R.K.</span>
     <span class="brand-name">SENTINEL</span>
-    <span class="brand-sub">Fleet View</span>
+    <span class="brand-sub">Enterprise View</span>
     <a class="hlink" href="/">← Single-device dashboard</a>
   </div>
 
@@ -720,7 +720,7 @@ def main():
     print(f'\n  M.A.R.K. Sentinel  ·  Dashboard Server')
     print(f'  Project  : {ROOT}')
     print(f'  Dashboard: {url}')
-    print(f'  Fleet    : {url}/fleet')
+    print(f'  Enterprise View: {url}/fleet')
     print(f'  Devices  : {url}/api/devices')
     print(f'  Stop     : Ctrl+C\n')
     if not args.no_browser:
