@@ -1,0 +1,266 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# M.A.R.K. Sentinel Agent — Linux/macOS Installer
+# Usage: sudo bash install.sh [--server URL] [--token TOKEN] [--no-service]
+
+INSTALL_PREFIX="/opt/sentinel"
+CONFIG_DIR="/etc/sentinel"
+CONFIG_FILE="${CONFIG_DIR}/agent_config.json"
+SERVICE_NAME="sentinel-agent"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+OPT_SERVER=""
+OPT_TOKEN=""
+OPT_NO_SERVICE=0
+
+usage() {
+    echo "Usage: sudo bash install.sh [--server URL] [--token TOKEN] [--no-service]"
+    exit 1
+}
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --server)   OPT_SERVER="$2"; shift 2 ;;
+        --token)    OPT_TOKEN="$2";  shift 2 ;;
+        --no-service) OPT_NO_SERVICE=1; shift ;;
+        -h|--help)  usage ;;
+        *) echo "Unknown option: $1"; usage ;;
+    esac
+done
+
+if [[ "$(id -u)" -ne 0 ]]; then
+    echo "Error: this installer must be run as root (use sudo)." >&2
+    exit 1
+fi
+
+detect_os() {
+    case "$(uname -s)" in
+        Linux*)  echo "linux" ;;
+        Darwin*) echo "macos" ;;
+        *)       echo "unknown" ;;
+    esac
+}
+
+OS="$(detect_os)"
+if [[ "$OS" == "unknown" ]]; then
+    echo "Error: unsupported operating system '$(uname -s)'." >&2
+    exit 1
+fi
+
+# ── Python version check ─────────────────────────────────────────────────────
+
+find_python() {
+    for candidate in python3.13 python3.12 python3.11 python3; do
+        if command -v "$candidate" &>/dev/null; then
+            local ver
+            ver="$("$candidate" -c 'import sys; print("%d%d" % sys.version_info[:2])')"
+            if [[ "$ver" -ge 311 ]]; then
+                echo "$candidate"
+                return 0
+            fi
+        fi
+    done
+    return 1
+}
+
+echo "Checking Python 3.11+ ..."
+if ! PYTHON="$(find_python)"; then
+    echo "Error: Python 3.11 or later is required but was not found." >&2
+    echo "Install from https://www.python.org/downloads/ then re-run." >&2
+    exit 1
+fi
+PYTHON_VER="$("$PYTHON" -c 'import sys; print(sys.version.split()[0])')"
+echo "  Found: $PYTHON ($PYTHON_VER)"
+
+# ── Install pip dependencies ─────────────────────────────────────────────────
+
+echo "Installing Python dependencies ..."
+if [[ -f "${SCRIPT_DIR}/requirements.txt" ]]; then
+    "$PYTHON" -m pip install --quiet --upgrade pip
+    "$PYTHON" -m pip install --quiet -r "${SCRIPT_DIR}/requirements.txt"
+else
+    echo "  Warning: requirements.txt not found, skipping pip install."
+fi
+
+# ── Copy files to install prefix ─────────────────────────────────────────────
+
+echo "Installing files to ${INSTALL_PREFIX} ..."
+mkdir -p "${INSTALL_PREFIX}"
+
+for f in agent.py audit.py audit_safe.py storage.py server.py requirements.txt; do
+    if [[ -f "${SCRIPT_DIR}/${f}" ]]; then
+        install -m 644 "${SCRIPT_DIR}/${f}" "${INSTALL_PREFIX}/${f}"
+    fi
+done
+
+for d in checks connectors profiles; do
+    if [[ -d "${SCRIPT_DIR}/${d}" ]]; then
+        cp -r "${SCRIPT_DIR}/${d}" "${INSTALL_PREFIX}/${d}"
+    fi
+done
+
+chmod 755 "${INSTALL_PREFIX}/agent.py"
+
+# ── Create config ────────────────────────────────────────────────────────────
+
+echo "Configuring ${CONFIG_FILE} ..."
+mkdir -p "${CONFIG_DIR}"
+chmod 750 "${CONFIG_DIR}"
+
+if [[ ! -f "${CONFIG_FILE}" ]]; then
+    if [[ -f "${SCRIPT_DIR}/agent_config.json.example" ]]; then
+        cp "${SCRIPT_DIR}/agent_config.json.example" "${CONFIG_FILE}"
+    else
+        cat > "${CONFIG_FILE}" <<'EOCFG'
+{
+  "server":   "http://localhost:7331",
+  "token":    "replace-with-your-secret-token",
+  "target":   ".",
+  "profile":  "default",
+  "interval": 3600
+}
+EOCFG
+    fi
+fi
+
+if [[ -n "$OPT_SERVER" ]]; then
+    "$PYTHON" - "${CONFIG_FILE}" "${OPT_SERVER}" <<'EOPY'
+import sys, json
+path, server = sys.argv[1], sys.argv[2]
+cfg = json.loads(open(path).read())
+cfg["server"] = server
+open(path, "w").write(json.dumps(cfg, indent=2) + "\n")
+EOPY
+fi
+
+if [[ -n "$OPT_TOKEN" ]]; then
+    "$PYTHON" - "${CONFIG_FILE}" "${OPT_TOKEN}" <<'EOPY'
+import sys, json
+path, token = sys.argv[1], sys.argv[2]
+cfg = json.loads(open(path).read())
+cfg["token"] = token
+open(path, "w").write(json.dumps(cfg, indent=2) + "\n")
+EOPY
+fi
+
+chmod 640 "${CONFIG_FILE}"
+
+# ── Service installation ──────────────────────────────────────────────────────
+
+install_systemd() {
+    echo "Installing systemd service ..."
+
+    if ! id -u sentinel &>/dev/null; then
+        useradd --system --no-create-home --shell /sbin/nologin sentinel
+        echo "  Created system user: sentinel"
+    fi
+
+    chown -R sentinel:sentinel "${INSTALL_PREFIX}"
+    chown root:sentinel "${CONFIG_DIR}"
+    chown root:sentinel "${CONFIG_FILE}"
+
+    local unit_src="${SCRIPT_DIR}/deploy/sentinel-agent.service"
+    local unit_dst="/etc/systemd/system/${SERVICE_NAME}.service"
+
+    if [[ -f "$unit_src" ]]; then
+        install -m 644 "$unit_src" "$unit_dst"
+    else
+        cat > "$unit_dst" <<EOUNIT
+[Unit]
+Description=M.A.R.K. Sentinel Agent
+Documentation=https://github.com/hash-ai/sentinel
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=sentinel
+Group=sentinel
+ExecStart=${PYTHON} ${INSTALL_PREFIX}/agent.py --config ${CONFIG_FILE} --daemon
+Restart=on-failure
+RestartSec=30
+Environment=PYTHONUNBUFFERED=1
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=sentinel-agent
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=${INSTALL_PREFIX} /var/log
+
+[Install]
+WantedBy=multi-user.target
+EOUNIT
+    fi
+
+    systemctl daemon-reload
+    systemctl enable "${SERVICE_NAME}"
+    systemctl restart "${SERVICE_NAME}"
+    echo "  Service enabled and started: ${SERVICE_NAME}"
+    systemctl status "${SERVICE_NAME}" --no-pager -l || true
+}
+
+install_launchd() {
+    echo "Installing launchd daemon ..."
+
+    local plist_src="${SCRIPT_DIR}/deploy/io.hash.sentinel-agent.plist"
+    local plist_dst="/Library/LaunchDaemons/io.hash.sentinel-agent.plist"
+
+    if [[ -f "$plist_src" ]]; then
+        install -m 644 "$plist_src" "$plist_dst"
+    else
+        cat > "$plist_dst" <<EOPLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>              <string>io.hash.sentinel-agent</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>${PYTHON}</string>
+    <string>${INSTALL_PREFIX}/agent.py</string>
+    <string>--daemon</string>
+    <string>--config</string>
+    <string>${CONFIG_FILE}</string>
+  </array>
+  <key>RunAtLoad</key>          <true/>
+  <key>KeepAlive</key>          <true/>
+  <key>StandardOutPath</key>    <string>/var/log/sentinel-agent.log</string>
+  <key>StandardErrorPath</key>  <string>/var/log/sentinel-agent.log</string>
+</dict>
+</plist>
+EOPLIST
+    fi
+
+    chmod 644 "$plist_dst"
+
+    if launchctl list | grep -q "io.hash.sentinel-agent" 2>/dev/null; then
+        launchctl unload "$plist_dst" 2>/dev/null || true
+    fi
+    launchctl load -w "$plist_dst"
+    echo "  Launch daemon loaded: io.hash.sentinel-agent"
+}
+
+if [[ "$OPT_NO_SERVICE" -eq 0 ]]; then
+    if [[ "$OS" == "linux" ]]; then
+        if command -v systemctl &>/dev/null; then
+            install_systemd
+        else
+            echo "Warning: systemd not found; skipping service installation."
+        fi
+    elif [[ "$OS" == "macos" ]]; then
+        install_launchd
+    fi
+else
+    echo "Skipping service installation (--no-service)."
+    echo "To start manually: sudo ${PYTHON} ${INSTALL_PREFIX}/agent.py --config ${CONFIG_FILE} --daemon"
+fi
+
+echo ""
+echo "M.A.R.K. Sentinel Agent installed successfully."
+echo "  Install dir : ${INSTALL_PREFIX}"
+echo "  Config      : ${CONFIG_FILE}"
+echo ""
+echo "Edit ${CONFIG_FILE} to set your server URL and token, then restart the service."
