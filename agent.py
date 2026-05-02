@@ -238,6 +238,128 @@ def run_cycle(config: dict) -> bool:
 
 # ── Entry point ────────────────────────────────────────────────────────────────
 
+_LAUNCHD_LABEL = 'com.mark.sentinel.agent'
+_SYSTEMD_UNIT   = 'sentinel-agent'
+
+
+def _install_service(args: argparse.Namespace, cfg: dict) -> None:
+    """Install the agent as an auto-starting background service."""
+    import platform as _platform
+    system = _platform.system()
+
+    # Build the daemon command from current invocation args
+    python  = sys.executable
+    script  = str(Path(__file__).resolve())
+    cmd     = [python, script, '--daemon']
+    if cfg.get('server'):  cmd += ['--server',  cfg['server']]
+    if cfg.get('token'):   cmd += ['--token',   cfg['token']]
+    if cfg.get('target'):  cmd += ['--target',  cfg['target']]
+    if cfg.get('profile'): cmd += ['--profile', cfg['profile']]
+    if cfg.get('interval'):cmd += ['--interval',str(cfg['interval'])]
+
+    if system == 'Darwin':
+        _install_launchd(cmd)
+    elif system == 'Linux':
+        _install_systemd(cmd)
+    else:
+        log.error('Service install not supported on %s — run with --daemon manually.', system)
+        sys.exit(1)
+
+
+def _install_launchd(cmd: list[str]) -> None:
+    """Create and load a launchd user agent plist."""
+    import plistlib as _plist
+    plist_dir  = Path.home() / 'Library' / 'LaunchAgents'
+    plist_path = plist_dir / f'{_LAUNCHD_LABEL}.plist'
+    log_dir    = Path.home() / 'Library' / 'Logs' / 'sentinel'
+    plist_dir.mkdir(parents=True, exist_ok=True)
+    log_dir.mkdir(parents=True, exist_ok=True)
+
+    plist = {
+        'Label':             _LAUNCHD_LABEL,
+        'ProgramArguments':  cmd,
+        'RunAtLoad':         True,
+        'KeepAlive':         True,
+        'StandardOutPath':   str(log_dir / 'agent.log'),
+        'StandardErrorPath': str(log_dir / 'agent.log'),
+        'EnvironmentVariables': {'PATH': '/usr/local/bin:/usr/bin:/bin'},
+    }
+    with open(plist_path, 'wb') as f:
+        _plist.dump(plist, f)
+
+    # Unload first in case an old version is running, then load
+    subprocess.run(['launchctl', 'unload', str(plist_path)],
+                   capture_output=True)
+    result = subprocess.run(['launchctl', 'load', str(plist_path)],
+                            capture_output=True, text=True)
+    if result.returncode != 0:
+        log.error('launchctl load failed: %s', result.stderr.strip())
+        sys.exit(1)
+
+    log.info('Service installed and started.')
+    log.info('  Plist : %s', plist_path)
+    log.info('  Logs  : %s', log_dir / 'agent.log')
+    log.info('  Stop  : launchctl unload %s', plist_path)
+    log.info('  Status: launchctl list %s', _LAUNCHD_LABEL)
+
+
+def _install_systemd(cmd: list[str]) -> None:
+    """Create and enable a systemd user unit."""
+    unit_dir  = Path.home() / '.config' / 'systemd' / 'user'
+    unit_path = unit_dir / f'{_SYSTEMD_UNIT}.service'
+    unit_dir.mkdir(parents=True, exist_ok=True)
+
+    exec_start = ' '.join(cmd)
+    unit_text = f"""[Unit]
+Description=M.A.R.K. Sentinel Agent
+After=network.target
+
+[Service]
+ExecStart={exec_start}
+Restart=on-failure
+RestartSec=30
+
+[Install]
+WantedBy=default.target
+"""
+    unit_path.write_text(unit_text)
+    subprocess.run(['systemctl', '--user', 'daemon-reload'], check=True)
+    subprocess.run(['systemctl', '--user', 'enable', '--now', _SYSTEMD_UNIT], check=True)
+
+    log.info('Service installed and started.')
+    log.info('  Unit  : %s', unit_path)
+    log.info('  Status: systemctl --user status %s', _SYSTEMD_UNIT)
+    log.info('  Logs  : journalctl --user -u %s -f', _SYSTEMD_UNIT)
+    log.info('  Stop  : systemctl --user disable --now %s', _SYSTEMD_UNIT)
+
+
+def _uninstall_service() -> None:
+    """Stop and remove the installed service."""
+    import platform as _platform
+    system = _platform.system()
+
+    if system == 'Darwin':
+        plist_path = Path.home() / 'Library' / 'LaunchAgents' / f'{_LAUNCHD_LABEL}.plist'
+        if plist_path.exists():
+            subprocess.run(['launchctl', 'unload', str(plist_path)], capture_output=True)
+            plist_path.unlink()
+            log.info('Service removed: %s', plist_path)
+        else:
+            log.info('No service found at %s', plist_path)
+
+    elif system == 'Linux':
+        unit_path = Path.home() / '.config' / 'systemd' / 'user' / f'{_SYSTEMD_UNIT}.service'
+        subprocess.run(['systemctl', '--user', 'disable', '--now', _SYSTEMD_UNIT],
+                       capture_output=True)
+        if unit_path.exists():
+            unit_path.unlink()
+        subprocess.run(['systemctl', '--user', 'daemon-reload'], capture_output=True)
+        log.info('Service removed.')
+    else:
+        log.error('Service uninstall not supported on %s', system)
+        sys.exit(1)
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(
         description='M.A.R.K. Sentinel Agent',
@@ -255,6 +377,10 @@ def main() -> None:
                     help='Seconds between daemon scans (default: 3600)')
     ap.add_argument('--once',      action='store_true',
                     help='Run one scan and exit (default without --daemon)')
+    ap.add_argument('--install-service',   action='store_true',
+                    help='Install as a background launchd service (macOS) or systemd unit (Linux)')
+    ap.add_argument('--uninstall-service', action='store_true',
+                    help='Remove the installed background service')
     args = ap.parse_args()
 
     cfg = load_config(args.config)
@@ -265,6 +391,13 @@ def main() -> None:
     if args.profile:    cfg['profile']  = args.profile
     if args.scan_only:  cfg.pop('server', None)
     if args.interval:   cfg['interval'] = args.interval
+
+    if args.install_service:
+        _install_service(args, cfg)
+        return
+    if args.uninstall_service:
+        _uninstall_service()
+        return
 
     interval = cfg.get('interval', 3600)
 
