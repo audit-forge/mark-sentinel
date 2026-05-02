@@ -16,9 +16,11 @@ if sys.version_info < (3, 11):
         "Install: https://python.org/downloads/"
     )
 import http.server
+import io
 import json
 import os
 import subprocess
+import tarfile
 import threading
 import time
 import webbrowser
@@ -165,6 +167,8 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             '/api/discover':   self._api_discover,
             '/fleet':          self._serve_fleet,
             '/health':         self._api_health,
+            '/agent.py':       self._serve_agent_script,
+            '/bundle.tar.gz':  self._serve_bundle,
         }
         if path in static:
             static[path]()
@@ -256,6 +260,46 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             'time': datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
             'dashboard': dash,
         })
+
+    def _serve_agent_script(self):
+        """GET /agent.py — serve the fleet agent script for easy remote installation."""
+        agent_file = ROOT / 'agent.py'
+        if not agent_file.exists():
+            self._not_found()
+            return
+        self._send(200, agent_file.read_bytes(), 'text/x-python; charset=utf-8')
+
+    def _serve_bundle(self):
+        """GET /bundle.tar.gz — serve a minimal Sentinel bundle for remote agents.
+        Includes everything needed to run agent.py + audit.py on a remote machine.
+        Excludes: output/, benchmarks/, docs/, test/, .git, __pycache__, *.db, *.log.
+        """
+        _SKIP_DIRS  = {'output', 'benchmarks', 'docs', 'test', '.git', '__pycache__',
+                       '.sentinel_db', 'node_modules'}
+        _SKIP_EXTS  = {'.db', '.log', '.pyc', '.egg-info'}
+        _SKIP_FILES = {'agent_token.txt'}
+
+        buf = io.BytesIO()
+        with tarfile.open(fileobj=buf, mode='w:gz') as tar:
+            for path in sorted(ROOT.rglob('*')):
+                if not path.is_file():
+                    continue
+                rel = path.relative_to(ROOT)
+                parts = rel.parts
+                if any(p in _SKIP_DIRS for p in parts):
+                    continue
+                if path.suffix in _SKIP_EXTS:
+                    continue
+                if path.name in _SKIP_FILES:
+                    continue
+                tar.add(path, arcname=str(Path('sentinel') / rel))
+        data = buf.getvalue()
+        self.send_response(200)
+        self.send_header('Content-Type', 'application/gzip')
+        self.send_header('Content-Disposition', 'attachment; filename="sentinel.tar.gz"')
+        self.send_header('Content-Length', str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
 
     def _api_events(self):
         self.send_response(200)
@@ -859,16 +903,18 @@ def main():
     import argparse
     ap = argparse.ArgumentParser(description='M.A.R.K. Sentinel Dashboard Server')
     ap.add_argument('--port', type=int, default=PORT, help=f'Port to listen on (default: {PORT})')
+    ap.add_argument('--host', default='0.0.0.0', help='Bind address (default: 0.0.0.0 — all interfaces)')
     ap.add_argument('--no-browser', action='store_true', help="Don't auto-open browser")
     args = ap.parse_args()
 
-    server = http.server.ThreadingHTTPServer(('127.0.0.1', args.port), _Handler)
+    server = http.server.ThreadingHTTPServer((args.host, args.port), _Handler)
     url = f'http://localhost:{args.port}'
     print(f'\n  M.A.R.K. Sentinel  ·  Dashboard Server')
     print(f'  Project  : {ROOT}')
     print(f'  Dashboard: {url}')
     print(f'  Enterprise View: {url}/fleet')
     print(f'  Devices  : {url}/api/devices')
+    print(f'  Network  : http://0.0.0.0:{args.port} (accessible from LAN)')
     print(f'  Stop     : Ctrl+C\n')
     if not args.no_browser:
         threading.Timer(0.6, lambda: webbrowser.open(url)).start()
