@@ -200,7 +200,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                         # Inject a centered Enterprise View link (fixed) and also inject
                         # a more robust head-level CSS+JS block that hides the generated
                         # full-path element and places a persistent clock into the header.
-                        inject = '\n<div style="position:fixed;left:50%;top:14px;transform:translateX(-50%);z-index:999;"><a href="/fleet" style="background:#161b22;color:#58a6ff;padding:6px 10px;border-radius:6px;border:1px solid #21262d;text-decoration:none;font-size:13px">Enterprise View</a></div>\n'
+                        inject = f'\n<div style="position:fixed;left:50%;top:14px;transform:translateX(-50%);z-index:999;"><a href="http://localhost:{PORT}/fleet" style="background:#161b22;color:#58a6ff;padding:6px 10px;border-radius:6px;border:1px solid #21262d;text-decoration:none;font-size:13px">Enterprise View</a></div>\n'
                         # Prefer injecting into <head> for CSS so it applies even if scripts
                         # later rewrite the header. We'll look for </head> and insert before it.
                         head_inject = (
