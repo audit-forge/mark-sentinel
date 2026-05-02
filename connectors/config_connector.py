@@ -120,9 +120,15 @@ def scan_directory(target_dir: str, mode: str = "config") -> ScanContext:
 
             ext = filepath.suffix.lower()
             name_lower = filename.lower()
-            _special = {'.gitignore', '.dockerignore', '.gitattributes', '.editorconfig'}
+            _special = {
+                '.gitignore', '.dockerignore', '.gitattributes', '.editorconfig',
+                # AI agent instruction files (extensionless or non-standard extensions)
+                'modelfile', '.cursorrules', '.cursorignore', '.windsurfrules',
+                '.aiderignore', '.tabnine_root', '.aiprompt', '.continuerc.json',
+                'claude.md', 'agents.md', 'agent.md', 'gemini.md',
+            }
             if ext not in TEXT_EXTS and not name_lower.startswith('.env') and 'dockerfile' not in name_lower:
-                if filename not in _special:
+                if name_lower not in _special:
                     continue
 
             try:
