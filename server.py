@@ -202,7 +202,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                                   "      const t = document.getElementById(\"hdr-target\");\n"
                                   "      const d = document.getElementById(\"hdr-date\");\n"
                                   "      if(t && t.textContent && t.textContent.includes(\"/\")) t.textContent = \"\";\n"
-                                  "      if(d){ const now = new Date(); d.textContent = now.toLocaleString(); }\n"
+                                  "      if(d){ const now = new Date(); try{ d.textContent = new Intl.DateTimeFormat(undefined, {dateStyle:'medium', timeStyle:'short', timeZoneName:'short'}).format(now); }catch(e){ d.textContent = now.toLocaleString(); } }\n"
                                   "    }catch(e){}\n"
                                   "  }\n"
                                   "  apply();\n"
