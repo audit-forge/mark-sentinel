@@ -156,6 +156,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             '/api/events':     self._api_events,
             '/api/devices':    self._api_devices,
             '/fleet':          self._serve_fleet,
+            '/health':         self._api_health,
         }
         if path in static:
             static[path]()
@@ -239,6 +240,28 @@ class _Handler(http.server.BaseHTTPRequestHandler):
     def _api_status(self):
         with _lock:
             self._json({'status': _status, 'lines': len(_log)})
+
+    def _api_health(self):
+        """Basic health endpoint for monitoring. Returns 200 + JSON when the dashboard server is reachable.
+        Includes server time and which dashboard (demo_*) folder is being served, if any.
+        """
+        try:
+            out_dir = _latest_out_dir()
+            if out_dir and (out_dir / 'dashboard.html').exists():
+                dash = {
+                    'name': out_dir.name,
+                    'dashboard': str(out_dir / 'dashboard.html'),
+                }
+            else:
+                dash = None
+        except Exception:
+            dash = None
+        self._json({
+            'status': 'ok',
+            'server': 'sentinel-dashboard',
+            'time': datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
+            'dashboard': dash,
+        })
 
     def _api_events(self):
         self.send_response(200)
