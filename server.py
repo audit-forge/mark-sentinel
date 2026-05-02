@@ -164,6 +164,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             '/api/status':     self._api_status,
             '/api/events':     self._api_events,
             '/api/devices':    self._api_devices,
+            '/api/discover':   self._api_discover,
             '/fleet':          self._serve_fleet,
             '/health':         self._api_health,
         }
@@ -374,6 +375,15 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             return
         cmd_id = store.enqueue_command(device_id, 'scan_now')
         self._json({'status': 'queued', 'device_id': device_id, 'command_id': cmd_id})
+
+    def _api_discover(self):
+        """GET /api/discover — scan local subnet for AI services (runs in thread)."""
+        try:
+            from discovery import discover
+            services = discover()
+            self._json({'services': services, 'count': len(services)})
+        except Exception as e:
+            self._json({'error': str(e), 'services': []}, 500)
 
     def _api_devices(self):
         try:
@@ -595,6 +605,14 @@ body{{background:#0d1117;color:#c9d1d9;font-family:-apple-system,BlinkMacSystemF
     <tbody>{rows}</tbody>
   </table>
 
+  <div class="sec-hdr" style="margin-top:32px">
+    AI Service Discovery
+    <button id="discover-btn" class="scan-btn" style="margin-left:12px" onclick="runDiscovery()">Scan Network</button>
+  </div>
+  <div id="discover-panel" style="background:#161b22;border:1px solid #21262d;border-radius:8px;padding:18px;min-height:60px;margin-bottom:28px">
+    <div class="empty" style="padding:12px">Click Scan Network to probe the local subnet for AI services.</div>
+  </div>
+
   <div class="sec-hdr">Device Findings</div>
   <div id="detail-panel">
     <div class="empty">← Click a device row to view its findings</div>
@@ -613,6 +631,50 @@ setInterval(() => {{
 function esc(s) {{
   if (!s) return '';
   return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}}
+
+async function runDiscovery() {{
+  const btn = document.getElementById('discover-btn');
+  const panel = document.getElementById('discover-panel');
+  btn.disabled = true;
+  btn.textContent = 'Scanning…';
+  panel.innerHTML = '<div class="empty" style="padding:12px">Probing local subnet — this may take 10–30 seconds…</div>';
+  try {{
+    const resp = await fetch('/api/discover');
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.error || 'HTTP ' + resp.status);
+    const svcs = data.services || [];
+    if (svcs.length === 0) {{
+      panel.innerHTML = '<div class="empty" style="padding:12px">No AI services found on the local network.</div>';
+    }} else {{
+      const rows = svcs.map(s => {{
+        const status = s.status ? 'HTTP ' + s.status : 'TCP open';
+        return `<tr>
+          <td style="font-weight:600;color:#e6edf3">${{esc(s.service)}}</td>
+          <td><a href="${{esc(s.url)}}" target="_blank" style="color:#58a6ff;text-decoration:none">${{esc(s.url)}}</a></td>
+          <td style="color:#6e7681;font-family:monospace;font-size:12px">${{esc(s.host)}}</td>
+          <td style="color:#6e7681">${{esc(String(s.port))}}</td>
+          <td style="color:#3fb950;font-size:12px">${{esc(status)}}</td>
+        </tr>`;
+      }}).join('');
+      panel.innerHTML = `<table style="width:100%;border-collapse:collapse">
+        <thead><tr style="font-size:11px;color:#6e7681;text-transform:uppercase;letter-spacing:.5px">
+          <th style="text-align:left;padding:6px 10px;border-bottom:1px solid #30363d">Service</th>
+          <th style="text-align:left;padding:6px 10px;border-bottom:1px solid #30363d">URL</th>
+          <th style="text-align:left;padding:6px 10px;border-bottom:1px solid #30363d">Host</th>
+          <th style="text-align:left;padding:6px 10px;border-bottom:1px solid #30363d">Port</th>
+          <th style="text-align:left;padding:6px 10px;border-bottom:1px solid #30363d">Status</th>
+        </tr></thead>
+        <tbody>${{rows}}</tbody>
+      </table>
+      <div style="font-size:11px;color:#484f58;margin-top:10px">${{svcs.length}} service(s) found</div>`;
+    }}
+  }} catch (e) {{
+    panel.innerHTML = '<div class="empty" style="padding:12px;color:#f85149">Discovery failed: ' + esc(String(e)) + '</div>';
+  }} finally {{
+    btn.disabled = false;
+    btn.textContent = 'Scan Network';
+  }}
 }}
 
 async function scanDevice(id) {{
