@@ -71,7 +71,7 @@ metadata:
   namespace: sentinel
   labels:
     app.kubernetes.io/name: sentinel-agent
-    app.kubernetes.io/version: "latest"
+    app.kubernetes.io/version: "1.0.0"
     app.kubernetes.io/component: agent
     app.kubernetes.io/part-of: mark-sentinel
 spec:
@@ -86,7 +86,7 @@ spec:
     metadata:
       labels:
         app.kubernetes.io/name: sentinel-agent
-        app.kubernetes.io/version: "latest"
+        app.kubernetes.io/version: "1.0.0"
       annotations:
         prometheus.io/scrape: "false"
     spec:
@@ -104,7 +104,7 @@ spec:
 
       containers:
         - name: sentinel-agent
-          image: ghcr.io/hash-ai/sentinel-agent:latest
+          image: ghcr.io/hash-ai/sentinel-agent:1.0.0
           imagePullPolicy: Always
 
           command:

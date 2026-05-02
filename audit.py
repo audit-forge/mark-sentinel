@@ -214,8 +214,8 @@ examples:
     )
     parser.add_argument(
         '--model',
-        default='gpt-4o',
-        help='Model name to probe (default: gpt-4o)',
+        default='gpt-4o-2024-11-20',
+        help='Model name to probe (default: gpt-4o-2024-11-20)',
     )
     # Local/Ollama args
     parser.add_argument(

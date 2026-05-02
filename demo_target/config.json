@@ -4,7 +4,7 @@
   "ai_provider": "openai",
   "api_url": "http://api.acmecorp.internal/v1",
   "openai_api_key": "sk-proj-T3sLa8NqKm2pVx7bYc4wJ9dR6fG0hE1uZ5iO",
-  "model": "gpt-4o",
+  "model": "gpt-4o-2024-11-20",
   "openclaw_gateway": {
     "host": "http://127.0.0.1:8400",
     "password": "7c3f9a1e82b4d056078ef2c91a4b3d87"
