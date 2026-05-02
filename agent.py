@@ -50,6 +50,38 @@ from urllib import request as _urlreq
 ROOT = Path(__file__).parent
 DEFAULT_CONFIG = ROOT / 'agent_config.json'
 VERSION = '1.0.0'
+_PROCESS_NAME = 'sentinel-agent'
+
+
+def _set_process_name() -> None:
+    """Rename the process so it shows as 'sentinel-agent' in Activity Monitor,
+    ps, top, Task Manager, etc. — not as 'python3' or 'python.exe'."""
+    import ctypes
+    import ctypes.util
+
+    sys.argv[0] = _PROCESS_NAME  # affects ps on some systems
+
+    system = __import__('platform').system()
+
+    if system == 'Darwin':
+        try:
+            libc = ctypes.CDLL(ctypes.util.find_library('c'), use_errno=True)
+            libc.setproctitle(b'sentinel-agent')
+        except Exception:
+            pass
+
+    elif system == 'Linux':
+        try:
+            ctypes.CDLL('libc.so.6', use_errno=True).prctl(
+                15, b'sentinel-agent', 0, 0, 0)  # PR_SET_NAME = 15
+        except Exception:
+            pass
+
+    elif system == 'Windows':
+        try:
+            ctypes.windll.kernel32.SetConsoleTitleW('sentinel-agent')
+        except Exception:
+            pass
 
 logging.basicConfig(
     format='%(asctime)s [%(levelname)s] %(message)s',
@@ -361,6 +393,7 @@ def _uninstall_service() -> None:
 
 
 def main() -> None:
+    _set_process_name()
     ap = argparse.ArgumentParser(
         description='M.A.R.K. Sentinel Agent',
         formatter_class=argparse.RawDescriptionHelpFormatter,
