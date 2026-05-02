@@ -277,7 +277,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         Includes everything needed to run agent.py + audit.py on a remote machine.
         Excludes: output/, benchmarks/, docs/, test/, .git, __pycache__, *.db, *.log.
         """
-        _SKIP_DIRS  = {'output', 'benchmarks', 'docs', 'test', '.git', '__pycache__',
+        _SKIP_DIRS  = {'benchmarks', 'docs', 'test', '.git', '__pycache__',
                        '.sentinel_db', 'node_modules'}
         _SKIP_EXTS  = {'.db', '.log', '.pyc', '.egg-info'}
         _SKIP_FILES = {'agent_token.txt'}
@@ -294,6 +294,9 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                 if path.suffix in _SKIP_EXTS:
                     continue
                 if path.name in _SKIP_FILES:
+                    continue
+                # From output/ only ship the Python modules, not scan result dirs
+                if parts[0] == 'output' and (len(parts) > 2 or path.suffix != '.py'):
                     continue
                 tar.add(path, arcname=str(Path('sentinel') / rel))
         data = buf.getvalue()
