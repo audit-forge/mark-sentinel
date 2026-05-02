@@ -192,6 +192,10 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                     idx2 = html.find('>', idx)
                     if idx2 != -1:
                         inject = '\n<div style="position:fixed;left:50%;top:14px;transform:translateX(-50%);z-index:999;"><a href="/fleet" style="background:#161b22;color:#58a6ff;padding:6px 10px;border-radius:6px;border:1px solid #21262d;text-decoration:none;font-size:13px">Fleet</a></div>\n'
+                        # replace the dashboard header's full path with a live clock so the header
+                        # no longer shows the full filesystem path and scan date. This script
+                        # runs client-side after the generated dashboard loads.
+                        inject += '\n<script>document.addEventListener("DOMContentLoaded", function(){\n  try{\n    const t = document.getElementById("hdr-target");\n    const d = document.getElementById("hdr-date");\n    if(t) t.textContent = "";\n    function updateClock(){\n      const now = new Date();\n      if(d) d.textContent = now.toLocaleString();\n    }\n    updateClock();\n    setInterval(updateClock, 30000);\n  }catch(e){/* ignore */}\n});</script>\n'
                         html = html[:idx2+1] + inject + html[idx2+1:]
                 self._send(200, html.encode('utf-8'), 'text/html; charset=utf-8')
                 return
