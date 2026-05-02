@@ -196,9 +196,22 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                         # no longer shows the full filesystem path. We override the generated
                         # script's values repeatedly for a short duration to ensure our change
                         # persists even if the dashboard's init() runs after this injection.
-                        inject += '\n<script>(function(){\n  function apply(){\n    try{\n      const t = document.getElementById("hdr-target");\n      const d = document.getElementById("hdr-date");\n      if(t && t.textContent && t.textContent.includes("/")) t.textContent = "";\n      if(d){ const now = new Date(); d.textContent = now.toLocaleString(); }\n    }catch(e){}\n  }\n  // initial attempt
-  apply();\n  // observe header area for changes and re-apply when dashboard scripts update it
-  try{\n    const parent = document.querySelector('.header-meta') || document.body;\n    const mo = new MutationObserver(()=>apply());\n    mo.observe(parent, {childList:true, subtree:true, characterData:true});\n  }catch(e){}\n})();</script>\n'
+                        inject += ("\n<script>(function(){\n"
+                                  "  function apply(){\n"
+                                  "    try{\n"
+                                  "      const t = document.getElementById(\"hdr-target\");\n"
+                                  "      const d = document.getElementById(\"hdr-date\");\n"
+                                  "      if(t && t.textContent && t.textContent.includes(\"/\")) t.textContent = \"\";\n"
+                                  "      if(d){ const now = new Date(); d.textContent = now.toLocaleString(); }\n"
+                                  "    }catch(e){}\n"
+                                  "  }\n"
+                                  "  apply();\n"
+                                  "  try{\n"
+                                  "    const parent = document.querySelector('.header-meta') || document.body;\n"
+                                  "    const mo = new MutationObserver(()=>apply());\n"
+                                  "    mo.observe(parent, {childList:true, subtree:true, characterData:true});\n"
+                                  "  }catch(e){}\n"
+                                  "})();</script>\n")
                         html = html[:idx2+1] + inject + html[idx2+1:]
                 self._send(200, html.encode('utf-8'), 'text/html; charset=utf-8')
                 return
