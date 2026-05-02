@@ -9,10 +9,16 @@ Usage:
   python audit.py --mode api --endpoint https://api.openai.com/v1 --api-key $OPENAI_API_KEY --model gpt-4o
   python audit.py --mode local --ollama-host http://localhost:11434 --model llama3 --output plain,sarif
 """
+import sys
+if sys.version_info < (3, 11):
+    sys.exit(
+        "M.A.R.K. Sentinel requires Python 3.11 or later.\n"
+        f"Running: Python {sys.version.split()[0]}\n"
+        "Install: https://python.org/downloads/"
+    )
 import argparse
 import json
 import os
-import sys
 from pathlib import Path
 
 from connectors.config_connector import scan_directory
@@ -35,21 +41,37 @@ BANNER = """
 ╚══════════════════════════════════════════════════╝"""
 
 
+_SEV_ORDER = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW', 'INFO']
+
+
 def load_profile(name: str) -> dict:
     profile_path = Path(__file__).parent / 'profiles' / f'{name}.json'
     if not profile_path.exists():
-        available = [p.stem for p in (Path(__file__).parent / 'profiles').glob('*.json')]
+        available = sorted(p.stem for p in (Path(__file__).parent / 'profiles').glob('*.json')
+                           if not p.stem.endswith('_controls'))
         print(f"[ERROR] Profile '{name}' not found. Available: {', '.join(available)}", file=sys.stderr)
         sys.exit(1)
     with open(profile_path) as f:
-        return json.load(f)
+        profile = json.load(f)
+    emphasis = profile.get('framework_emphasis')
+    if emphasis:
+        controls_path = Path(__file__).parent / 'profiles' / f'{emphasis}_controls.json'
+        if controls_path.exists():
+            with open(controls_path) as f:
+                profile['_controls'] = json.load(f)
+    return profile
 
 
 def filter_results(results: list, profile: dict) -> list:
-    if profile.get('checks') == 'all':
-        return results
-    allowed = set(profile['checks'])
-    return [r for r in results if r.check_id in allowed]
+    if profile.get('checks') != 'all':
+        allowed = set(profile['checks'])
+        results = [r for r in results if r.check_id in allowed]
+    threshold = profile.get('severity_threshold', 'LOW')
+    if threshold in _SEV_ORDER:
+        cutoff = _SEV_ORDER.index(threshold)
+        results = [r for r in results
+                   if r.severity not in _SEV_ORDER or _SEV_ORDER.index(r.severity) <= cutoff]
+    return results
 
 
 def build_scan_context(args):
@@ -86,12 +108,37 @@ def build_scan_context(args):
     if mode == "gemini":
         from connectors.gemini_connector import connect as gemini_connect
         import os as _os
-        api_key = args.gemini_api_key or _os.environ.get("GEMINI_API_KEY", "")
+        api_key = args.gemini_api_key or _os.environ.get("GEMINI_API_KEY", "") or _os.environ.get("GOOGLE_API_KEY", "")
         if not api_key:
-            print("[ERROR] --gemini-api-key or GEMINI_API_KEY env var required for --mode gemini", file=sys.stderr)
+            print("[ERROR] --gemini-api-key or GEMINI_API_KEY/GOOGLE_API_KEY env var required for --mode gemini", file=sys.stderr)
             sys.exit(1)
         model = args.model if args.model != "gpt-4o" else "gemini-1.5-flash"
         return gemini_connect(api_key=api_key, model=model, target_dir=str(target))
+
+    if mode == "vertex":
+        from connectors.vertex_connector import connect as vertex_connect
+        import os as _os
+        key_file = args.vertex_key_file or _os.environ.get("VERTEX_SA_KEY_FILE", "")
+        project = args.vertex_project or _os.environ.get("VERTEX_PROJECT", "")
+        if not key_file:
+            print("[ERROR] --vertex-key-file or VERTEX_SA_KEY_FILE env var required for --mode vertex", file=sys.stderr)
+            sys.exit(1)
+        if not project:
+            print("[ERROR] --vertex-project or VERTEX_PROJECT env var required for --mode vertex", file=sys.stderr)
+            sys.exit(1)
+        model = args.model if args.model != "gpt-4o" else "gemini-1.5-flash"
+        region = args.vertex_region
+        return vertex_connect(key_file=key_file, project=project, model=model, region=region, target_dir=str(target))
+
+    if mode == "anthropic":
+        from connectors.claude_connector import connect as claude_connect
+        import os as _os
+        api_key = args.anthropic_api_key or _os.environ.get("ANTHROPIC_API_KEY", "")
+        if not api_key:
+            print("[ERROR] --anthropic-api-key or ANTHROPIC_API_KEY env var required for --mode anthropic", file=sys.stderr)
+            sys.exit(1)
+        model = args.model if args.model != "gpt-4o" else "claude-opus-4-7"
+        return claude_connect(api_key=api_key, model=model, target_dir=str(target))
 
     if mode == "hash":
         from connectors.hash_connector import connect as hash_connect
@@ -114,12 +161,14 @@ examples:
   python audit.py --mode config --profile smb --output plain
   python audit.py --mode config --target ./my-app --profile default --output json,plain
   python audit.py --mode api --endpoint https://api.openai.com/v1 --api-key sk-... --model gpt-4o
-  python audit.py --mode local --ollama-host http://localhost:11434 --model llama3 --output plain,sarif
+  python audit.py --mode gemini --gemini-api-key AIza... --model gemini-1.5-flash
+  python audit.py --mode anthropic --anthropic-api-key sk-ant-... --model claude-opus-4-7
+  python audit.py --mode local --ollama-host http://localhost:11434 --model qwen2.5:7b --output plain,sarif
         """,
     )
     parser.add_argument(
         '--mode',
-        choices=['config', 'api', 'local', 'gemini', 'hash', 'docker', 'kubectl'],
+        choices=['config', 'api', 'local', 'gemini', 'vertex', 'anthropic', 'hash', 'docker', 'kubectl'],
         default='config',
         help='Scan mode (default: config)',
     )
@@ -182,6 +231,32 @@ examples:
         metavar='KEY',
         help='Google AI API key (for --mode gemini; or set GEMINI_API_KEY env var)',
     )
+    # Vertex AI args
+    parser.add_argument(
+        '--vertex-key-file',
+        default=None,
+        metavar='FILE',
+        help='Path to GCP service account JSON key (for --mode vertex; or set VERTEX_SA_KEY_FILE env var)',
+    )
+    parser.add_argument(
+        '--vertex-project',
+        default=None,
+        metavar='PROJECT_ID',
+        help='GCP project ID (for --mode vertex; or set VERTEX_PROJECT env var)',
+    )
+    parser.add_argument(
+        '--vertex-region',
+        default='us-central1',
+        metavar='REGION',
+        help='Vertex AI region (for --mode vertex, default: us-central1)',
+    )
+    # Anthropic/Claude args
+    parser.add_argument(
+        '--anthropic-api-key',
+        default=None,
+        metavar='KEY',
+        help='Anthropic API key (for --mode anthropic; or set ANTHROPIC_API_KEY env var)',
+    )
     # Hash/openclaw args
     parser.add_argument(
         '--hash-host',
@@ -228,7 +303,7 @@ examples:
     args = parser.parse_args()
 
     if not args.quiet:
-        print(BANNER)
+        print(BANNER, file=sys.stderr)
 
     if args.mode in ('docker', 'kubectl'):
         print(f"\n[INFO] '{args.mode}' mode will be available in Phase 3. Running config mode scan.\n")
@@ -246,27 +321,33 @@ examples:
         elif args.mode == "gemini":
             model_label = args.model if args.model != "gpt-4o" else "gemini-1.5-flash"
             mode_label = f"gemini ({model_label})"
+        elif args.mode == "vertex":
+            model_label = args.model if args.model != "gpt-4o" else "gemini-1.5-flash"
+            mode_label = f"vertex ({model_label} / {args.vertex_region})"
+        elif args.mode == "anthropic":
+            model_label = args.model if args.model != "gpt-4o" else "claude-opus-4-7"
+            mode_label = f"anthropic ({model_label})"
         elif args.mode == "hash":
             mode_label = f"hash ({args.hash_host})"
-        print(f"\nTarget:  {target}")
-        print(f"Profile: {profile['name']}  |  Mode: {mode_label}")
-        print(f"{'─' * 52}")
-        if args.mode in ("api", "local", "gemini", "hash"):
-            print("Connecting and running probes...", end='', flush=True)
+        print(f"\nTarget:  {target}", file=sys.stderr)
+        print(f"Profile: {profile['name']}  |  Mode: {mode_label}", file=sys.stderr)
+        print(f"{'─' * 52}", file=sys.stderr)
+        if args.mode in ("api", "local", "gemini", "vertex", "anthropic", "hash"):
+            print("Connecting and running probes...", end='', flush=True, file=sys.stderr)
         else:
-            print("Scanning...", end='', flush=True)
+            print("Scanning...", end='', flush=True, file=sys.stderr)
 
     ctx = build_scan_context(args)
 
     if not args.quiet:
-        if args.mode in ("api", "local", "gemini", "hash"):
+        if args.mode in ("api", "local", "gemini", "vertex", "anthropic", "hash"):
             probe_count = len(ctx.probe_results)
             if ctx.live_error:
-                print(f" connection error: {ctx.live_error}")
+                print(f" connection error: {ctx.live_error}", file=sys.stderr)
             else:
-                print(f" {probe_count} probes run. Config scan: {ctx.total_files_scanned} files.\n")
+                print(f" {probe_count} probes run. Config scan: {ctx.total_files_scanned} files.\n", file=sys.stderr)
         else:
-            print(f" {ctx.total_files_scanned} files scanned.\n")
+            print(f" {ctx.total_files_scanned} files scanned.\n", file=sys.stderr)
 
     # Run all check modules
     results = []
@@ -285,7 +366,8 @@ examples:
 
     output_text = None
     if 'plain' in output_formats:
-        output_text = format_report(results, profile, str(target))
+        _model = args.model if args.mode not in ('config', 'hash') else ''
+        output_text = format_report(results, profile, str(target), mode=args.mode, model=_model)
         print(output_text)
 
     if 'json' in output_formats:
@@ -298,7 +380,7 @@ examples:
                 out_path += '.json'
             with open(out_path, 'w') as f:
                 f.write(json_text)
-            print(f"\n[JSON report written to {out_path}]")
+            print(f"\n[JSON report written to {out_path}]", file=sys.stderr)
 
     if 'sarif' in output_formats:
         sarif_text = format_sarif(results, profile, str(target), args.mode)
@@ -310,7 +392,7 @@ examples:
                 out_path += '.sarif'
             with open(out_path, 'w') as f:
                 f.write(sarif_text)
-            print(f"\n[SARIF report written to {out_path}]")
+            print(f"\n[SARIF report written to {out_path}]", file=sys.stderr)
 
     # Compliance output (Phase 3)
     if 'compliance' in output_formats:
@@ -425,6 +507,17 @@ examples:
                 print(f"  Engagement: {summary['engagement_url']}")
             except Exception as exc:
                 print(f" failed: {exc}", file=sys.stderr)
+
+    if 'dashboard' in output_formats:
+        from output.dashboard import generate
+        _model = getattr(args, 'model', '') or ''
+        _label = args.mode
+        json_data = json.loads(format_json(results, profile, str(target), args.mode))
+        json_data['_provider_label'] = _label
+        json_data['_model'] = _model
+        dash_file = (args.out_file.rsplit('.', 1)[0] + '_dashboard.html') if args.out_file else str(target.name) + '_dashboard.html'
+        dash_path = generate([json_data], dash_file)
+        print(f"\n[Dashboard written to {dash_path}]", file=sys.stderr)
 
     if args.out_file and 'json' not in output_formats and 'sarif' not in output_formats and output_text:
         with open(args.out_file, 'w') as f:

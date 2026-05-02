@@ -10,10 +10,10 @@ minimal parser that will not support advanced YAML features. The intention is
 for unit tests / fixture-driven validation using the provided docker-compose
 fixtures in test/fixtures.
 """
-from typing import Dict, Any, Optional
+from typing import Any
 
 
-def _load_yaml(path: str) -> Optional[Dict[str, Any]]:
+def _load_yaml(path: str) -> dict[str, Any] | None:
     try:
         import yaml
     except Exception:
@@ -46,7 +46,7 @@ def _load_yaml(path: str) -> Optional[Dict[str, Any]]:
     return data
 
 
-def parse_docker_compose(compose_path: str) -> Dict[str, Any]:
+def parse_docker_compose(compose_path: str) -> dict[str, Any]:
     """Return the parsed docker-compose content (services dict)
 
     This intentionally returns a simplified representation suitable for the
@@ -69,7 +69,7 @@ def parse_docker_compose(compose_path: str) -> Dict[str, Any]:
     return parsed
 
 
-def scan_container_by_compose(compose_path: str, service_name: str) -> Dict[str, Any]:
+def scan_container_by_compose(compose_path: str, service_name: str) -> dict[str, Any]:
     """Lightweight scan that inspects the compose service and returns findings.
     Returns a dict with service, findings (list), and metadata.
     """

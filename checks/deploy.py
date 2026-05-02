@@ -25,6 +25,7 @@ _PLACEHOLDER_FRAGMENTS = (
     'xxx', '...', 'your-', 'your_', 'replace', 'placeholder', 'example',
     'changeme', 'insert', 'todo', 'sk-test', 'add_your', 'put_your',
     'enter_your', 'sk-xxxx', 'sk-proj-xxxx',
+    'fixture', 'fake', 'sample', 'dummy', 'test-key', 'testkey', 'demo-',
 )
 
 _CRED_RE = [

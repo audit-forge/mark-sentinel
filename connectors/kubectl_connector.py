@@ -11,10 +11,10 @@ Functions:
 
 No external kubernetes client is required; this works from YAML manifests.
 """
-from typing import List, Dict, Any, Optional
+from typing import Any
 
 
-def _load_yaml_multi(path: str) -> List[Dict[str, Any]]:
+def _load_yaml_multi(path: str) -> list[dict[str, Any]]:
     try:
         import yaml
     except Exception:
@@ -45,12 +45,12 @@ def _load_yaml_multi(path: str) -> List[Dict[str, Any]]:
     return docs
 
 
-def parse_k8s_manifest(manifest_path: str) -> List[Dict[str, Any]]:
+def parse_k8s_manifest(manifest_path: str) -> list[dict[str, Any]]:
     """Return a list of parsed k8s resources from a manifest file."""
     return _load_yaml_multi(manifest_path)
 
 
-def scan_manifest_for_ai_components(manifest_path: str) -> Dict[str, Any]:
+def scan_manifest_for_ai_components(manifest_path: str) -> dict[str, Any]:
     """Look for common AI service patterns (Deployments, Pods with images that look like 'ai' or 'model')
 
     Returns a dict: {resources: [...], findings: [...]}

@@ -32,3 +32,11 @@ Thumbs.db
 .vscode/
 .idea/
 *.swp
+
+# Sentinel runtime
+.sentinel.log
+.sentinel.pid
+
+# Scan output directories (generated, not source)
+output/demo_*/
+output/artifacts/
