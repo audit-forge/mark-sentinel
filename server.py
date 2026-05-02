@@ -60,8 +60,13 @@ def _agent_token() -> str:
 
 
 def _latest_out_dir() -> Path | None:
+    # Prefer the newest demo_* directory that contains a generated dashboard.html.
     dirs = sorted((ROOT / 'output').glob('demo_*'), reverse=True)
-    return dirs[0] if dirs else None
+    for d in dirs:
+        if (d / 'dashboard.html').exists():
+            return d
+    # fallback: no demo dir with dashboard found
+    return None
 
 
 def _rebuild_dashboard(out_dir: Path) -> bool:
