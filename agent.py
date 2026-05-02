@@ -433,31 +433,40 @@ def main() -> None:
         return
 
     interval = cfg.get('interval', 3600)
+    RETRY_INTERVAL = 300  # retry failed deliveries every 5 minutes
 
     if args.daemon:
         POLL_INTERVAL = 30  # seconds between command polls
         device_id = _device_id()
         log.info('Daemon mode — scan interval %ds, command poll every %ds', interval, POLL_INTERVAL)
         last_scan = 0.0
+        last_success = 0.0
         while True:
             now = time.time()
-            # Run scheduled scan when interval has elapsed
-            if now - last_scan >= interval:
+            # Run full scan when interval has elapsed OR retry a failed delivery every 5 min
+            due = (now - last_scan >= interval) or (last_success < last_scan and now - last_scan >= RETRY_INTERVAL)
+            if due:
                 try:
-                    run_cycle(cfg)
+                    ok = run_cycle(cfg)
                 except Exception as e:
                     log.error('Unhandled error in scan cycle: %s', e)
+                    ok = False
                 last_scan = time.time()
+                if ok:
+                    last_success = last_scan
 
             # Poll for on-demand command
             cmd = poll_for_command(cfg, device_id)
             if cmd == 'scan_now':
                 log.info('On-demand scan triggered by server')
                 try:
-                    run_cycle(cfg)
+                    ok = run_cycle(cfg)
                 except Exception as e:
                     log.error('Unhandled error in on-demand scan: %s', e)
+                    ok = False
                 last_scan = time.time()
+                if ok:
+                    last_success = last_scan
 
             time.sleep(POLL_INTERVAL)
     else:
