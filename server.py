@@ -705,8 +705,10 @@ body{{background:#0d1117;color:#c9d1d9;font-family:-apple-system,BlinkMacSystemF
 
 <script>
 let _countdown = 60;
+let _pauseReload = false;
 const _note = document.getElementById('refresh-note');
 setInterval(() => {{
+  if (_pauseReload) {{ _countdown = 60; _note.textContent = 'Auto-refresh paused'; return; }}
   _countdown--;
   if (_countdown <= 0) location.reload();
   _note.textContent = 'Auto-refreshes in ' + _countdown + 's';
@@ -729,8 +731,10 @@ async function runDiscovery() {{
     if (!resp.ok) throw new Error(data.error || 'HTTP ' + resp.status);
     const svcs = data.services || [];
     if (svcs.length === 0) {{
+      _pauseReload = false;
       panel.innerHTML = '<div class="empty" style="padding:12px">No AI services found on the local network.</div>';
     }} else {{
+      _pauseReload = true;
       const rows = svcs.map(s => {{
         const status = s.status ? 'HTTP ' + s.status : 'TCP open';
         return `<tr>
@@ -751,7 +755,10 @@ async function runDiscovery() {{
         </tr></thead>
         <tbody>${{rows}}</tbody>
       </table>
-      <div style="font-size:11px;color:#484f58;margin-top:10px">${{svcs.length}} service(s) found</div>`;
+      <div style="font-size:11px;color:#484f58;margin-top:10px;display:flex;align-items:center;gap:12px">
+        <span>${{svcs.length}} service(s) found</span>
+        <button onclick="_pauseReload=false;this.closest('div').parentElement.innerHTML='<div class=\\'empty\\'style=\\'padding:12px\\'>Click Scan Network to probe the local subnet for AI services.</div>'" style="background:none;border:1px solid #30363d;color:#6e7681;border-radius:3px;padding:2px 8px;font-size:11px;cursor:pointer">Clear</button>
+      </div>`;
     }}
   }} catch (e) {{
     panel.innerHTML = '<div class="empty" style="padding:12px;color:#f85149">Discovery failed: ' + esc(String(e)) + '</div>';
