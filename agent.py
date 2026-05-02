@@ -125,20 +125,19 @@ def run_scan(target: str, profile: str) -> dict | None:
         log.error('Failed to launch scan: %s', e)
         return None
 
-    if proc.returncode != 0:
-        log.error('Scan exited %d\n%s', proc.returncode,
-                  (proc.stderr or proc.stdout or '')[-600:])
-        return None
-
+    # audit.py exits 1 when findings exist (standard scanner behavior).
+    # Only treat it as a fatal error if there's no JSON on stdout.
     stdout = proc.stdout.strip()
     if not stdout:
-        log.error('Scan produced no JSON output')
+        log.error('Scan produced no output (exit %d): %s',
+                  proc.returncode, (proc.stderr or '')[-400:])
         return None
 
     try:
         return json.loads(stdout)
     except json.JSONDecodeError as e:
-        log.error('Could not parse scan JSON: %s\nOutput: %s', e, stdout[:300])
+        log.error('Could not parse scan JSON (exit %d): %s\nOutput: %s',
+                  proc.returncode, e, stdout[:300])
         return None
 
 
