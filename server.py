@@ -699,7 +699,7 @@ body{{background:#0d1117;color:#c9d1d9;font-family:-apple-system,BlinkMacSystemF
 
   <div class="sec-hdr">Device Findings</div>
   <div id="detail-panel">
-    <div class="empty">← Click a device row to view its findings</div>
+    <div class="empty">← Click a device row to view its dashboard</div>
   </div>
 </div>
 
@@ -788,169 +788,44 @@ async function scanDevice(id) {{
 
 async function selectDevice(id) {{
   const panel = document.getElementById('detail-panel');
-  panel.innerHTML = '<div class="empty">Loading…</div>';
-  try {{
-    const resp = await fetch('/api/devices/' + id);
-    if (!resp.ok) throw new Error('HTTP ' + resp.status);
-    const data = await resp.json();
-    renderDeviceFindings(panel, data, id);
-  }} catch (e) {{
-    panel.innerHTML = '<div class="empty">Failed to load: ' + esc(String(e)) + '</div>';
-  }}
-}}
-
-function togF(i) {{
-  document.getElementById('df' + i).classList.toggle('open');
-}}
-
-function renderDeviceFindings(panel, report, deviceId) {{
-  const hostname = report._hostname || deviceId;
-  const s = report.summary || {{}};
-  const findings = (report.findings || []).sort((a, b) => {{
-    const so = {{FAIL:0,WARN:1,PASS:2,SKIP:3}};
-    const ss = {{CRITICAL:0,HIGH:1,MEDIUM:2,LOW:3}};
-    const sd = (so[a.status]??3) - (so[b.status]??3);
-    return sd !== 0 ? sd : (ss[a.severity]??3) - (ss[b.severity]??3);
-  }});
-
-  const rows = findings.map((f, i) => {{
-    const sl = (f.severity || '').toLowerCase();
-    const stl = (f.status || '').toLowerCase();
-    const remHtml = (f.remediation || '').split('\\n').filter(Boolean)
-      .map(s => '<div>' + esc(s) + '</div>').join('');
-    return `<div class="finding" id="df${{i}}">
-      <div class="fhdr" onclick="togF(${{i}})">
-        <div class="find-ind ${{sl}}"></div>
-        <span class="sev-badge ${{sl}}">${{esc(f.severity)}}</span>
-        <span class="stat-badge ${{stl}}">${{esc(f.status)}}</span>
-        <span class="find-id">${{esc(f.check_id)}}</span>
-        <span class="find-title">${{esc(f.title)}}</span>
-        <span class="find-chev">▶</span>
-      </div>
-      <div class="fbody">
-        ${{esc(f.details)}}
-        ${{remHtml ? '<div style="margin-top:10px;font-size:12px"><strong>How to fix:</strong><br>' + remHtml + '</div>' : ''}}
-      </div>
-    </div>`;
-  }}).join('');
-
+  panel.style.padding = '0';
+  panel.style.minHeight = 'unset';
   panel.innerHTML = `
-    <div class="detail-hdr">
-      <span class="detail-host">${{esc(hostname)}}</span>
-      <span class="detail-meta">
-        ${{s.fail || 0}} fail · ${{s.warn || 0}} warn · ${{s.pass || 0}} pass
-        · Profile: ${{esc(report.profile || '')}}
-        · Scan date: ${{esc(report.scan_date || '')}}
-      </span>
+    <div style="display:flex;align-items:center;justify-content:space-between;
+                padding:10px 16px;background:#161b22;border-radius:8px 8px 0 0;
+                border-bottom:1px solid #30363d">
+      <span id="dash-title" style="font-size:13px;font-weight:600;color:#e6edf3">Loading dashboard…</span>
+      <div style="display:flex;gap:8px;align-items:center">
+        <a id="dash-ext" href="/fleet/device/${{id}}/dashboard" target="_blank"
+           style="font-size:11px;color:#58a6ff;text-decoration:none">open in new tab ↗</a>
+        <button onclick="closeDevice()"
+                style="background:none;border:1px solid #30363d;color:#6e7681;
+                       border-radius:4px;padding:2px 9px;font-size:12px;cursor:pointer">✕</button>
+      </div>
     </div>
-
-    <div style="margin-bottom:14px;display:flex;gap:10px;align-items:center">
-      <a href="/fleet/device/${{deviceId}}/dashboard" target="_blank"
-         style="background:#1f3358;border:1px solid #58a6ff;color:#58a6ff;border-radius:6px;
-                padding:6px 16px;font-size:13px;font-weight:600;text-decoration:none;white-space:nowrap">
-        ◈ Open Full Dashboard
-      </a>
-      <span style="font-size:11px;color:#484f58">Overview · Findings · Remediation · Heat Map · Control Coverage · What-If Simulator · Export PDF</span>
-    </div>
-
-    <div style="margin-bottom:14px">
-      <canvas id="ts-chart" width="800" height="160" style="width:100%;height:160px;background:#0d1117;border:1px solid #21262d;border-radius:6px"></canvas>
-    </div>
-
-    ${{rows || '<div class="empty">No findings for this device.</div>'}}`;
-
-  // After populating, load timeseries data and draw chart
-  loadTimeseries(deviceId);
-}}
-
-async function loadTimeseries(deviceId) {{
+    <iframe src="/fleet/device/${{id}}/dashboard"
+            style="width:100%;height:calc(100vh - 260px);min-height:600px;
+                   border:none;display:block;border-radius:0 0 8px 8px"
+            onload="this.contentDocument && (document.getElementById('dash-title').textContent = this.contentDocument.title || 'Dashboard')">
+    </iframe>`;
   try {{
-    const resp = await fetch('/fleet/device/' + deviceId + '/timeseries.json');
-    if (!resp.ok) throw new Error('HTTP ' + resp.status);
-    const json = await resp.json();
-    drawTimeseries(json.points || []);
-  }} catch (e) {{
-    // silently ignore chart errors and leave the canvas empty
-    console.warn('timeseries load failed', e);
-  }}
+    const r = await fetch('/api/devices/' + id);
+    if (r.ok) {{
+      const d = await r.json();
+      const el = document.getElementById('dash-title');
+      if (el) {{
+        const s = d.summary || {{}};
+        el.textContent = (d._hostname || id) + ' — ' + (s.fail||0) + ' fail · ' + (s.warn||0) + ' warn · ' + (s.pass||0) + ' pass';
+      }}
+    }}
+  }} catch (_) {{}}
 }}
 
-function drawTimeseries(points) {{
-  const c = document.getElementById('ts-chart');
-  if (!c) return;
-  const ctx = c.getContext('2d');
-  // clear
-  ctx.clearRect(0,0,c.width,c.height);
-  if (!points || points.length === 0) {{
-    // draw placeholder
-    ctx.fillStyle = '#484f58';
-    ctx.font = '12px sans-serif';
-    ctx.fillText('No historical data', 12, 24);
-    return;
-  }}
-  // prepare series arrays
-  const ts = points.map(p => p.t * 1000); // ms
-  const fail = points.map(p => p.fail);
-  const warn = points.map(p => p.warn);
-  const pass = points.map(p => p.pass);
-
-  const pad = 8;
-  const w = c.width - pad*2;
-  const h = c.height - pad*2;
-  const minT = Math.min(...ts);
-  const maxT = Math.max(...ts);
-  const maxY = Math.max(...fail.concat(warn).concat(pass).concat([1]));
-
-  function xFor(t) {{
-    if (maxT === minT) return pad + w/2;
-    return pad + ((t - minT) / (maxT - minT)) * w;
-  }}
-  function yFor(v) {{
-    if (maxY === 0) return pad + h;
-    return pad + (1 - (v / maxY)) * h;
-  }}
-
-  // grid
-  ctx.strokeStyle = '#171a1f';
-  ctx.lineWidth = 1;
-  ctx.beginPath();
-  for (let i=0;i<=4;i++) {{
-    const yy = pad + (i/4)*h;
-    ctx.moveTo(pad, yy); ctx.lineTo(pad + w, yy);
-  }}
-  ctx.stroke();
-
-  // draw lines for pass (green), warn (yellow), fail (red)
-  const series = [
-    {{arr: pass, color:'#3fb950'}},
-    {{arr: warn, color:'#d29922'}},
-    {{arr: fail, color:'#f85149'}},
-  ];
-
-  series.forEach(sv => {{
-    ctx.beginPath();
-    ctx.strokeStyle = sv.color;
-    ctx.lineWidth = 2;
-    sv.arr.forEach((v,i) => {{
-      const x = xFor(ts[i]);
-      const y = yFor(v);
-      if (i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
-    }});
-    ctx.stroke();
-    // draw points
-    ctx.fillStyle = sv.color;
-    sv.arr.forEach((v,i) => {{
-      const x = xFor(ts[i]);
-      const y = yFor(v);
-      ctx.beginPath(); ctx.arc(x,y,2,0,Math.PI*2); ctx.fill();
-    }});
-  }});
-
-  // X axis labels (first and last)
-  ctx.fillStyle = '#6e7681'; ctx.font = '11px sans-serif';
-  const fmt = (t) => new Date(t).toLocaleString();
-  ctx.fillText(fmt(minT), pad+2, c.height - 6);
-  ctx.fillText(fmt(maxT), c.width - ctx.measureText(fmt(maxT)).width - 6, c.height - 6);
+function closeDevice() {{
+  const panel = document.getElementById('detail-panel');
+  panel.style.padding = '';
+  panel.style.minHeight = '';
+  panel.innerHTML = '<div class="empty">← Click a device row to view its dashboard</div>';
 }}
 </script>
 </body>
