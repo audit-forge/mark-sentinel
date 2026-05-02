@@ -199,71 +199,21 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         if dash and dash.exists():
             try:
                 html = dash.read_text(encoding='utf-8')
-                # inject a small Fleet link near the top of the page so users can
-                # navigate from the main dashboard to the fleet view without
-                # changing the generated dashboard generator or templates.
                 idx = html.lower().find('<body')
                 if idx != -1:
                     idx2 = html.find('>', idx)
                     if idx2 != -1:
-                        # Inject a centered Enterprise View link (fixed) and also inject
-                        # a more robust head-level CSS+JS block that hides the generated
-                        # full-path element and places a persistent clock into the header.
-                        inject = f'\n<div style="position:fixed;left:50%;top:14px;transform:translateX(-50%);z-index:999;"><a href="http://localhost:{PORT}/fleet" style="background:#161b22;color:#58a6ff;padding:6px 10px;border-radius:6px;border:1px solid #21262d;text-decoration:none;font-size:13px">Enterprise View</a></div>\n'
-                        # Prefer injecting into <head> for CSS so it applies even if scripts
-                        # later rewrite the header. We'll look for </head> and insert before it.
-                        head_inject = (
-                            "\n<style>\n"
-                            "  #hdr-target{display:none !important;}\n"
-                            "  #injected-clock{color:#6e7681;font-size:11px;margin-left:8px}\n"
-                            "</style>\n"
-                            "<script>\n"
-                            "(function(){\n"
-                            "  function ensureClock(){\n"
-                            "    try{\n"
-                            "      // create the clock element if missing\n"
-                            "      let c = document.getElementById('injected-clock');\n"
-                            "      if(!c){\n"
-                            "        c = document.createElement('span'); c.id = 'injected-clock';\n"
-                            "        const host = document.querySelector('.header-meta') || document.querySelector('#header') || document.body;\n"
-                            "        if(host) host.appendChild(c);\n"
-                            "      }\n"
-                            "      // update time display\n"
-                            "      const now = new Date();\n"
-                            "      try{ c.textContent = new Intl.DateTimeFormat(undefined, {dateStyle:'medium', timeStyle:'short', timeZoneName:'short'}).format(now); }catch(e){ c.textContent = now.toLocaleString(); }\n"
-                            "    }catch(e){}\n"
-                            "  }\n"
-                            "  // apply immediately and keep updated\n"
-                            "  ensureClock();\n"
-                            "  setInterval(ensureClock, 30000);\n"
-                            "  // observe header area so if dashboard scripts replace it we re-add/hide quickly\n"
-                            "  try{ const parent = document.querySelector('.header-meta') || document.querySelector('#header') || document.body;\n"
-                            "    const mo = new MutationObserver(ensureClock); mo.observe(parent, {childList:true, subtree:true, characterData:true}); }catch(e){}\n"
-                            "})();\n"
-                            "</script>\n"
+                        link = (
+                            f'\n<div style="position:fixed;left:50%;top:14px;'
+                            f'transform:translateX(-50%);z-index:999;">'
+                            f'<a href="/fleet" style="background:#161b22;color:#58a6ff;'
+                            f'padding:6px 10px;border-radius:6px;border:1px solid #21262d;'
+                            f'text-decoration:none;font-size:13px">Enterprise View</a></div>\n'
                         )
-                        # Insert head_inject before </head> if possible, otherwise after body tag
-                        head_end = html.lower().find('</head>')
-                        if head_end != -1:
-                            html = html[:head_end] + head_inject + html[head_end:]
-                        else:
-                            # fallback: insert after opening <body> tag
-                            html = html[:idx2+1] + head_inject + inject + html[idx2+1:]
-                        # always include the floating Enterprise View link as before
-                        if head_end != -1:
-                            # insert the floating link after the opening <body> tag
-                            bidx = html.lower().find('<body')
-                            if bidx != -1:
-                                bidx2 = html.find('>', bidx)
-                                if bidx2 != -1:
-                                    html = html[:bidx2+1] + inject + html[bidx2+1:]
-                        else:
-                            # already added inject above in fallback
-                            pass
+                        html = html[:idx2+1] + link + html[idx2+1:]
                 self._send(200, html.encode('utf-8'), 'text/html; charset=utf-8')
                 return
             except Exception:
-                # fall back to raw bytes if anything goes wrong reading/injecting
                 self._send(200, dash.read_bytes(), 'text/html; charset=utf-8')
         else:
             page = (
