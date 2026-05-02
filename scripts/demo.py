@@ -79,6 +79,7 @@ from checks.output_safety import run_all as out_checks
 from checks.agentic import run_all as agent_checks
 from checks.supply_chain import run_all as supply_checks
 from checks.governance import run_all as gov_checks
+from checks.runtime import run_all as runtime_checks
 from output.plain_english import format_report
 from output.json_report import format_json
 from output.sarif import format_sarif
@@ -142,6 +143,7 @@ def _run_checks(ctx) -> list:
     results.extend(agent_checks(ctx))
     results.extend(supply_checks(ctx))
     results.extend(gov_checks(ctx))
+    results.extend(runtime_checks(ctx))
     return results
 
 

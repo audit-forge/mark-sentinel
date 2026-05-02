@@ -36,5 +36,11 @@
   "AI-GOV-002": ["PL", "MP"],
   "AI-GOV-003": ["IR", "AU"],
   "AI-GOV-004": ["PL", "AC"],
-  "AI-GOV-005": ["CM", "PL"]
+  "AI-GOV-005": ["CM", "PL"],
+
+  "AI-RUNTIME-001": ["AU", "SI"],
+  "AI-RUNTIME-002": ["SI", "IR"],
+  "AI-RUNTIME-003": ["AC", "IR"],
+  "AI-RUNTIME-004": ["SC", "SI"],
+  "AI-RUNTIME-005": ["AU", "SI"]
 }
