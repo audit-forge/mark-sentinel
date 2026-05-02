@@ -1218,7 +1218,7 @@ def _build_html(data: dict) -> str:
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
 <title>M.A.R.K. Sentinel — Security Dashboard</title>
 <style>{_CSS}</style>
-    <style>@media print{#sidebar,.scan-btn,.enterprise-link,button{display:none!important}body,#app,#main,#content{height:auto!important;overflow:visible!important}}</style>
+    <style>@media print{{#sidebar,.scan-btn,.enterprise-link,button{{display:none!important}}body,#app,#main,#content{{height:auto!important;overflow:visible!important}}}}</style>
 </head>
 <body>
 <div id="app">
