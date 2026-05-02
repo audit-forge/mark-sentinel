@@ -193,9 +193,10 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                     if idx2 != -1:
                         inject = '\n<div style="position:fixed;left:50%;top:14px;transform:translateX(-50%);z-index:999;"><a href="/fleet" style="background:#161b22;color:#58a6ff;padding:6px 10px;border-radius:6px;border:1px solid #21262d;text-decoration:none;font-size:13px">Enterprise View</a></div>\n'
                         # replace the dashboard header's full path with a live clock so the header
-                        # no longer shows the full filesystem path and scan date. This script
-                        # runs client-side after the generated dashboard loads.
-                        inject += '\n<script>document.addEventListener("DOMContentLoaded", function(){\n  try{\n    const t = document.getElementById("hdr-target");\n    if(t) t.textContent = "";\n  }catch(e){}\n});</script>\n'
+                        # no longer shows the full filesystem path. We override the generated
+                        # script's values repeatedly for a short duration to ensure our change
+                        # persists even if the dashboard's init() runs after this injection.
+                        inject += '\n<script>(function(){\n  function apply(){\n    try{\n      const t = document.getElementById("hdr-target");\n      const d = document.getElementById("hdr-date");\n      if(t && t.textContent && t.textContent.includes("/")) t.textContent = "";\n      if(d){ const now = new Date(); d.textContent = now.toLocaleString(); }\n    }catch(e){}\n  }\n  apply();\n  let cnt = 0; const iid = setInterval(function(){ apply(); if(++cnt>20) clearInterval(iid); }, 300);\n})();</script>\n'
                         html = html[:idx2+1] + inject + html[idx2+1:]
                 self._send(200, html.encode('utf-8'), 'text/html; charset=utf-8')
                 return
