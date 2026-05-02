@@ -1,0 +1,16 @@
+# Ignore agent/dev files
+CLAUDE.md
+.claude/
+AGENTS.md
+.cursorrules
+.windsurfrules
+.aider.conf.yml
+GEMINI.md
+.gemini/
+Modelfile
+.continue/
+DEVIN.md
+.amazonq/
+.tabnine_root
+.copilot/
+.github/copilot-instructions.md

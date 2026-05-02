@@ -112,7 +112,7 @@ def build_scan_context(args):
         if not api_key:
             print("[ERROR] --gemini-api-key or GEMINI_API_KEY/GOOGLE_API_KEY env var required for --mode gemini", file=sys.stderr)
             sys.exit(1)
-        model = args.model if args.model != "gpt-4o" else "gemini-1.5-flash"
+        model = args.model if args.model != "gpt-4o-2024-11-20" else "gemini-1.5-flash"
         return gemini_connect(api_key=api_key, model=model, target_dir=str(target))
 
     if mode == "vertex":
@@ -126,7 +126,7 @@ def build_scan_context(args):
         if not project:
             print("[ERROR] --vertex-project or VERTEX_PROJECT env var required for --mode vertex", file=sys.stderr)
             sys.exit(1)
-        model = args.model if args.model != "gpt-4o" else "gemini-1.5-flash"
+        model = args.model if args.model != "gpt-4o-2024-11-20" else "gemini-1.5-flash"
         region = args.vertex_region
         return vertex_connect(key_file=key_file, project=project, model=model, region=region, target_dir=str(target))
 
@@ -137,7 +137,7 @@ def build_scan_context(args):
         if not api_key:
             print("[ERROR] --anthropic-api-key or ANTHROPIC_API_KEY env var required for --mode anthropic", file=sys.stderr)
             sys.exit(1)
-        model = args.model if args.model != "gpt-4o" else "claude-opus-4-7"
+        model = args.model if args.model != "gpt-4o-2024-11-20" else "claude-opus-4-7"
         return claude_connect(api_key=api_key, model=model, target_dir=str(target))
 
     if mode == "hash":
@@ -319,13 +319,13 @@ examples:
         elif args.mode == "local":
             mode_label = f"local ({args.ollama_host})"
         elif args.mode == "gemini":
-            model_label = args.model if args.model != "gpt-4o" else "gemini-1.5-flash"
+            model_label = args.model if args.model != "gpt-4o-2024-11-20" else "gemini-1.5-flash"
             mode_label = f"gemini ({model_label})"
         elif args.mode == "vertex":
-            model_label = args.model if args.model != "gpt-4o" else "gemini-1.5-flash"
+            model_label = args.model if args.model != "gpt-4o-2024-11-20" else "gemini-1.5-flash"
             mode_label = f"vertex ({model_label} / {args.vertex_region})"
         elif args.mode == "anthropic":
-            model_label = args.model if args.model != "gpt-4o" else "claude-opus-4-7"
+            model_label = args.model if args.model != "gpt-4o-2024-11-20" else "claude-opus-4-7"
             mode_label = f"anthropic ({model_label})"
         elif args.mode == "hash":
             mode_label = f"hash ({args.hash_host})"
