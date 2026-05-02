@@ -3,7 +3,7 @@
 
 **Created:** 2026-04-27
 **Owner:** Keith Ferguson
-**Status:** ACTIVE — Phase 3 ready (Phases 0, 1, 2 complete)
+**Status:** ACTIVE — Phase 5 in progress (Phases 0–4 complete)
 
 ---
 
@@ -284,20 +284,68 @@ Delivery:
 - [x] Integration tests → `test/test_live_probes.py` (22 tests, 22 passing — safe + vulnerable mock server)
 - Done boundary: **MET** — `python audit.py --mode api --endpoint <url> --model <model>` produces SARIF; live checks transition from SKIP to PASS/FAIL; 43 total tests passing
 
-### Phase 3 — Compliance Output & Docker/K8s (2 weeks)
-- [ ] Build compliance report formatter (framework-mapped findings doc)
-- [ ] Implement `docker_connector.py`
-- [ ] Implement `kubectl_connector.py` (unit tested, live validation deferred)
-- [ ] FedRAMP and CMMC profile definitions
-- [ ] `docs/PILOT_TESTER_HANDOFF.md` and `docs/V1_RELEASE_BOUNDARY.md`
-- Done boundary: v1.0 pilot-ready with all modes and output formats
+### Phase 3 — Compliance Output & Docker/K8s ✅ COMPLETE — 2026-04-30
+- [x] Build compliance report formatter → `output/compliance.py`
+- [x] Implement `docker_connector.py`
+- [x] Implement `kubectl_connector.py`
+- [x] FedRAMP and CMMC profile definitions → `profiles/fedramp.json`, `profiles/cmmc.json`
+- [x] `docs/PILOT_TESTER_HANDOFF.md` and `docs/V1_RELEASE_BOUNDARY.md`
+- [x] Kyverno ClusterPolicy output → `output/kyverno.py`
+- [x] OPA Rego policy output → `output/rego.py`
+- [x] Gemini + Vertex AI connectors → `connectors/gemini_connector.py`, `connectors/vertex_connector.py`
+- [x] DefectDojo integration → `connectors/defectdojo_connector.py`
+- [x] Presidio PII connector → `connectors/presidio_connector.py`
+- Done boundary: **MET** — v1.0 pilot-ready with all modes, output formats, and extended provider coverage
 
-### Phase 4 — SMB Polish & Packaging (1 week)
-- [ ] `docs/SMB_GUIDE.md` — plain English setup guide for non-technical users
-- [ ] One-command install (pip or curl-to-bash)
-- [ ] Sample SMB report (PDF-ready)
-- [ ] README targeting both audiences
-- Done boundary: a non-technical person can install and run a basic scan in under 10 minutes
+### Phase 4 — SMB Polish & Packaging ✅ COMPLETE — 2026-05-01
+- [x] `docs/SMB_GUIDE.md` — plain English setup guide for non-technical users
+- [x] `docs/SMB_QUICKSTART.md` — quick-start for non-technical users
+- [x] One-command install → `scripts/install.sh`, `scripts/install.ps1`, `scripts/install.bat`
+- [x] Sample SMB report (PDF-ready) → `scripts/generate_pdf.sh`
+- [x] README targeting both audiences
+- [x] CI smoke test workflow → `.github/workflows/ci-smoke.yml`
+- [x] Docker build workflow → `.github/workflows/docker-build.yml`
+- [x] PyPI publish workflow → `.github/workflows/pypi-publish.yml`
+- [x] `pyproject.toml` packaging
+- [x] `Dockerfile`
+- Done boundary: **MET** — non-technical install in under 10 minutes; CI/CD scaffolded; PyPI + Docker publish gated on secrets
+
+### Phase 5 — Web Dashboard / UI (In Progress)
+- [ ] Self-hosted web interface served from `audit.py --serve` (or standalone `dashboard.py`)
+- [ ] Executive summary view — overall risk score, CRITICAL/HIGH/WARN/PASS counts
+- [ ] Per-category breakdown cards (AI-DEPLOY, AI-INP, AI-OUT, AI-AGENT, AI-SUPPLY, AI-GOV)
+- [ ] Finding detail panel — description, evidence, remediation steps
+- [ ] Multi-provider comparison table (visual, color-coded, like demo output but interactive)
+- [ ] Framework mapping view — filter findings by NIST/FedRAMP/CMMC/OWASP
+- [ ] Remediation priority queue — ranked action list
+- [ ] Wiz-inspired design: dark sidebar, color-coded risk cards, clean data tables
+- [ ] Loads from existing JSON output — no re-scan needed to view
+- [ ] Export to PDF from UI
+- Done boundary: a non-technical user can open a browser, see their scan results, and click through to understand and fix every finding
+
+### Phase 6 — Multi-Provider Comparison + Scheduled Scans
+- [ ] `--compare` mode — run same audit against multiple providers side-by-side, produce comparison report
+- [ ] Scheduled scan support — cron-style recurring audits, results stored with timestamps
+- [ ] Trend view — show how posture changes between scans over time
+- [ ] Alert/notification on new findings (email, webhook)
+- [ ] `audit history` CLI subcommand
+- Done boundary: enterprises can track AI security posture over time, not just point-in-time
+
+### Phase 7 — AI Runtime Monitoring + Behavioral Audit
+- [ ] `monitoring/interceptor.py` — async logging middleware; intercepts every inference call passing through hash-ai gateway (port 8400); logs: timestamp, model, task_type, tool_calls[], tokens_in, tokens_out, duration_ms
+- [ ] `monitoring/activity_log.py` — SQLite-backed structured activity log; configurable retention (7/30/90 days); queryable via CLI and dashboard
+- [ ] `monitoring/anomaly.py` — baseline builder + threshold-based anomaly detection; flags token spikes, off-hours agentic activity, unexpected tool calls, unusual model escalations
+- [ ] `checks/runtime.py` — 5 new STIG-style controls:
+  - AI-RUNTIME-001: Inference activity logging enabled (CRITICAL if absent)
+  - AI-RUNTIME-002: Anomaly detection configured
+  - AI-RUNTIME-003: Human oversight checkpoint for autonomous agent tasks
+  - AI-RUNTIME-004: Token budget limits enforced
+  - AI-RUNTIME-005: Prompt audit trail retained
+- [ ] `checks/AI-RUNTIME.md` — benchmark spec doc for new category
+- [ ] Dashboard integration — live activity feed, anomaly alerts panel
+- [ ] Framework mappings: NIST AI RMF GOVERN 6.1, MANAGE 4.1; OWASP Agentic OAGNT-05/06
+- **Prerequisite:** Phase 4 of Hash-AI Pro (Sentinel integration into Hash runtime) must ship first
+- Done boundary: Sentinel detects and reports on runtime AI behavior, not just static config — prompt injection attempts, agentic overreach, and token anomalies all surface as findings
 
 ---
 
@@ -325,9 +373,11 @@ v1.0 is complete when:
 
 ## Current Status
 
-**Status:** ACTIVE — Phase 3 ready.
-**Phase 0 completed:** 2026-04-28 — all 32 checks documented, benchmark written, framework mappings verified, fixture specs defined.
-**Phase 1 completed:** 2026-04-28 — config mode engine, all 6 check modules, plain/JSON/SARIF output, fixture validation tests (21 passing).
-**Phase 2 completed:** 2026-04-28 — api_connector (11 probes), ollama_connector, live INP/OUT checks, integration tests (22 passing). Total: 43 tests passing.
-**Next step:** Phase 3 — compliance report formatter, docker_connector, kubectl_connector, FedRAMP/CMMC profiles, docs.
-**Restart point:** This file. Read top to bottom. Start at Phase 3.
+**Status:** ACTIVE — Phase 5 in progress.
+**Phase 0 completed:** 2026-04-28 — benchmark written, 32 checks documented, framework mappings, fixture specs.
+**Phase 1 completed:** 2026-04-28 — core engine, 6 check modules, plain/JSON/SARIF output, 21 fixture tests passing.
+**Phase 2 completed:** 2026-04-28 — api_connector (11 probes), ollama_connector, live INP/OUT checks, 43 tests passing.
+**Phase 3 completed:** 2026-04-30 — compliance/kyverno/rego output, docker/kubectl/gemini/vertex/presidio/defectdojo connectors, FedRAMP+CMMC profiles, pilot docs.
+**Phase 4 completed:** 2026-05-01 — SMB guide, one-command install (sh/ps1/bat), PDF report, CI/CD workflows, pyproject.toml, Dockerfile.
+**Next step:** Phase 5 — Web Dashboard / UI (Wiz-inspired design).
+**Restart point:** This file. Read top to bottom. Start at Phase 5.
