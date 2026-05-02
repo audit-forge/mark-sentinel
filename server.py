@@ -806,7 +806,7 @@ function renderDeviceFindings(panel, report, deviceId) {{
   const rows = findings.map((f, i) => {{
     const sl = (f.severity || '').toLowerCase();
     const stl = (f.status || '').toLowerCase();
-    const remHtml = (f.remediation || '').split('\n').filter(Boolean)
+    const remHtml = (f.remediation || '').split('\\n').filter(Boolean)
       .map(s => '<div>' + esc(s) + '</div>').join('');
     return `<div class="finding" id="df${{i}}">
       <div class="fhdr" onclick="togF(${{i}})">
