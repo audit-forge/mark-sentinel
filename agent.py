@@ -1,0 +1,266 @@
+#!/usr/bin/env python3
+"""
+M.A.R.K. Sentinel Agent — distributed device scanner
+
+Runs local AI security checks on a schedule and reports results to a
+central Sentinel server. Designed to be installed as a system service
+(systemd, launchd, Windows Service, Intune) on every device you want
+to audit.
+
+Usage:
+  python3 agent.py --server http://10.0.1.50:7331 --token <tok>
+  python3 agent.py --daemon --interval 3600
+  python3 agent.py --config /etc/sentinel/agent_config.json --once
+  python3 agent.py --scan-only          # local scan, no reporting
+
+Config file (agent_config.json):
+  {
+    "server":   "http://10.0.1.50:7331",
+    "token":    "your-secret-token",
+    "target":   ".",
+    "profile":  "default",
+    "interval": 3600
+  }
+
+Environment overrides:
+  SENTINEL_SERVER       — server URL
+  SENTINEL_AGENT_TOKEN  — auth token
+"""
+import sys
+if sys.version_info < (3, 11):
+    sys.exit(
+        "M.A.R.K. Sentinel requires Python 3.11 or later.\n"
+        f"Running: Python {sys.version.split()[0]}\n"
+        "Install: https://python.org/downloads/"
+    )
+
+import argparse
+import hashlib
+import json
+import logging
+import os
+import platform
+import socket
+import subprocess
+import time
+from pathlib import Path
+from urllib import error as _urlerr
+from urllib import request as _urlreq
+
+ROOT = Path(__file__).parent
+DEFAULT_CONFIG = ROOT / 'agent_config.json'
+VERSION = '1.0.0'
+
+logging.basicConfig(
+    format='%(asctime)s [%(levelname)s] %(message)s',
+    datefmt='%H:%M:%S',
+    level=logging.INFO,
+)
+log = logging.getLogger('sentinel-agent')
+
+
+# ── Device identity ────────────────────────────────────────────────────────────
+
+def _device_id() -> str:
+    """Stable 16-char hex ID derived from hostname + MAC address."""
+    hostname = socket.gethostname()
+    try:
+        import uuid
+        # node = 48-bit MAC integer
+        node = uuid.getnode()
+        mac = ':'.join(f'{(node >> i) & 0xff:02x}' for i in range(0, 48, 8))
+    except Exception:
+        mac = 'unknown'
+    return hashlib.sha256(f'{hostname}:{mac}'.encode()).hexdigest()[:16]
+
+
+# ── Config loading ─────────────────────────────────────────────────────────────
+
+def load_config(path: Path | None = None) -> dict:
+    path = path or DEFAULT_CONFIG
+    cfg: dict = {}
+    if path.exists():
+        try:
+            cfg = json.loads(path.read_text())
+        except Exception as e:
+            log.warning('Could not parse config %s: %s', path, e)
+    if os.environ.get('SENTINEL_SERVER'):
+        cfg['server'] = os.environ['SENTINEL_SERVER']
+    if os.environ.get('SENTINEL_AGENT_TOKEN'):
+        cfg['token'] = os.environ['SENTINEL_AGENT_TOKEN']
+    return cfg
+
+
+# ── Local scan ─────────────────────────────────────────────────────────────────
+
+def run_scan(target: str, profile: str) -> dict | None:
+    """
+    Run a config-mode Sentinel scan and return the parsed JSON report.
+    Captures stdout (JSON) separately from stderr (progress output).
+    """
+    audit_script = ROOT / 'audit.py'
+    if not audit_script.exists():
+        log.error('audit.py not found at %s', audit_script)
+        return None
+
+    cmd = [
+        sys.executable, str(audit_script),
+        '--mode', 'config',
+        '--target', target,
+        '--profile', profile,
+        '--output', 'json',
+        '--quiet',
+    ]
+    log.info('Scan: %s', ' '.join(cmd))
+
+    try:
+        proc = subprocess.run(
+            cmd, capture_output=True, text=True,
+            timeout=300, cwd=str(ROOT),
+        )
+    except subprocess.TimeoutExpired:
+        log.error('Scan timed out after 300 s')
+        return None
+    except Exception as e:
+        log.error('Failed to launch scan: %s', e)
+        return None
+
+    if proc.returncode != 0:
+        log.error('Scan exited %d\n%s', proc.returncode,
+                  (proc.stderr or proc.stdout or '')[-600:])
+        return None
+
+    stdout = proc.stdout.strip()
+    if not stdout:
+        log.error('Scan produced no JSON output')
+        return None
+
+    try:
+        return json.loads(stdout)
+    except json.JSONDecodeError as e:
+        log.error('Could not parse scan JSON: %s\nOutput: %s', e, stdout[:300])
+        return None
+
+
+# ── Reporting ──────────────────────────────────────────────────────────────────
+
+def report_to_server(report: dict, config: dict,
+                     device_id: str, hostname: str) -> bool:
+    """POST the scan report to the central Sentinel server."""
+    server = config.get('server', '').rstrip('/')
+    if not server:
+        log.warning('No server configured — scan-only mode')
+        return True
+
+    token = config.get('token', '')
+    payload = json.dumps({
+        'device_id':     device_id,
+        'hostname':      hostname,
+        'platform':      platform.system(),
+        'agent_version': VERSION,
+        'report':        report,
+    }).encode()
+
+    headers: dict[str, str] = {
+        'Content-Type':   'application/json',
+        'Content-Length': str(len(payload)),
+        'User-Agent':     f'sentinel-agent/{VERSION}',
+    }
+    if token:
+        headers['Authorization'] = f'Bearer {token}'
+
+    url = f'{server}/api/agent/report'
+    for attempt in range(1, 4):
+        try:
+            req = _urlreq.Request(url, data=payload, headers=headers, method='POST')
+            with _urlreq.urlopen(req, timeout=30) as resp:
+                if 200 <= resp.status < 300:
+                    log.info('Report accepted (HTTP %s)', resp.status)
+                    return True
+                log.warning('Server returned HTTP %s (attempt %d/3)', resp.status, attempt)
+        except _urlerr.HTTPError as e:
+            log.warning('HTTP %s from server (attempt %d/3)', e.code, attempt)
+        except _urlerr.URLError as e:
+            log.warning('Connection error (attempt %d/3): %s', attempt, e.reason)
+        except Exception as e:
+            log.warning('Unexpected error (attempt %d/3): %s', attempt, e)
+
+        if attempt < 3:
+            wait = 2 ** attempt
+            log.info('Retry in %ds…', wait)
+            time.sleep(wait)
+
+    log.error('Failed to deliver report after 3 attempts')
+    return False
+
+
+# ── Main scan cycle ────────────────────────────────────────────────────────────
+
+def run_cycle(config: dict) -> bool:
+    target    = config.get('target', '.')
+    profile   = config.get('profile', 'default')
+    device_id = _device_id()
+    hostname  = socket.gethostname()
+
+    log.info('Device: %s  Hostname: %s  Target: %s  Profile: %s',
+             device_id, hostname, target, profile)
+
+    report = run_scan(target, profile)
+    if report is None:
+        return False
+
+    summary = report.get('summary', {})
+    log.info('Scan complete — FAIL:%d WARN:%d PASS:%d',
+             summary.get('fail', 0), summary.get('warn', 0), summary.get('pass', 0))
+
+    return report_to_server(report, config, device_id, hostname)
+
+
+# ── Entry point ────────────────────────────────────────────────────────────────
+
+def main() -> None:
+    ap = argparse.ArgumentParser(
+        description='M.A.R.K. Sentinel Agent',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=__doc__,
+    )
+    ap.add_argument('--config',    type=Path, help='Config file (default: agent_config.json)')
+    ap.add_argument('--server',    help='Central server URL (e.g. http://10.0.1.50:7331)')
+    ap.add_argument('--token',     help='Agent auth token (overrides SENTINEL_AGENT_TOKEN env)')
+    ap.add_argument('--target',    default=None, help='Scan target directory (default: .)')
+    ap.add_argument('--profile',   default=None, help='Audit profile (default: default)')
+    ap.add_argument('--scan-only', action='store_true', help='Run scan but do not report to server')
+    ap.add_argument('--daemon',    action='store_true', help='Run on a repeating schedule')
+    ap.add_argument('--interval',  type=int, default=None,
+                    help='Seconds between daemon scans (default: 3600)')
+    ap.add_argument('--once',      action='store_true',
+                    help='Run one scan and exit (default without --daemon)')
+    args = ap.parse_args()
+
+    cfg = load_config(args.config)
+
+    if args.server:     cfg['server']   = args.server
+    if args.token:      cfg['token']    = args.token
+    if args.target:     cfg['target']   = args.target
+    if args.profile:    cfg['profile']  = args.profile
+    if args.scan_only:  cfg.pop('server', None)
+    if args.interval:   cfg['interval'] = args.interval
+
+    interval = cfg.get('interval', 3600)
+
+    if args.daemon:
+        log.info('Daemon mode — interval %ds', interval)
+        while True:
+            try:
+                run_cycle(cfg)
+            except Exception as e:
+                log.error('Unhandled error in scan cycle: %s', e)
+            log.info('Next scan in %ds', interval)
+            time.sleep(interval)
+    else:
+        ok = run_cycle(cfg)
+        sys.exit(0 if ok else 1)
+
+
+if __name__ == '__main__':
+    main()
