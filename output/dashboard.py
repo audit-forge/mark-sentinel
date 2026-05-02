@@ -604,12 +604,14 @@ function renderReports(){
         <button class="rep-btn" onclick="openReport('analyst')">Generate Report →</button>
       </div>
     </div>
-    <div class="rep-note">Each report opens in a new tab — use Ctrl+P / Cmd+P to save as PDF</div>`;
+    <div class="rep-note">Each report opens in a new tab with an Export PDF button in the top-right corner</div>`;
 }
 
 function openReport(type){
   const p=DATA.providers[curProv];
-  const html=type==='exec'?buildExecReport(p):type==='ciso'?buildCISOReport(p):buildAnalystReport(p);
+  let html=type==='exec'?buildExecReport(p):type==='ciso'?buildCISOReport(p):buildAnalystReport(p);
+  const btn='<button class="rpt-print-btn" onclick="window.print()">Export PDF</button>';
+  html=html.replace('<body>','<body>'+btn);
   const w=window.open('','_blank');
   w.document.write(html);
   w.document.close();
@@ -682,7 +684,9 @@ li{margin-bottom:6px;color:#374151}
 .section-intro{color:#6b7280;font-size:13px;margin-bottom:12px}
 .rpt-footer{margin-top:48px;padding-top:14px;border-top:1px solid #e5e7eb;font-size:11px;color:#9ca3af;display:flex;justify-content:space-between}
 code{background:#f3f4f6;padding:1px 5px;border-radius:3px;font-size:12px}
-@media print{.page{padding:24px}body{font-size:12px}.frow{page-break-inside:avoid}}
+@media print{{.page{{padding:24px}}body{{font-size:12px}}.frow{{page-break-inside:avoid}}.rpt-print-btn{{display:none!important}}}}
+.rpt-print-btn{{position:fixed;top:18px;right:22px;background:#1a1a2e;color:#fff;border:none;border-radius:6px;padding:9px 18px;font-size:13px;font-weight:600;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.18);z-index:9999;transition:background .15s}}
+.rpt-print-btn:hover{{background:#2d2d5e}}
 </style>`;}
 
 function _riskBannerClass(riskCls){
