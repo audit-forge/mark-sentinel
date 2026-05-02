@@ -154,6 +154,11 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         }
         if path in static:
             static[path]()
+        # timeseries endpoint for fleet device charts
+        elif path.startswith('/fleet/device/') and path.endswith('/timeseries.json'):
+            # path: /fleet/device/<id>/timeseries.json
+            did = path[len('/fleet/device/'): -len('/timeseries.json')]
+            self._api_device_timeseries(did)
         elif path.startswith('/api/devices/'):
             self._api_device_report(path[len('/api/devices/'):])
         else:
@@ -311,6 +316,34 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self._json({'error': 'device not found'}, 404)
             return
         self._json(report)
+
+    def _api_device_timeseries(self, device_id: str):
+        """Return time-series of fail/warn/pass counts for a device.
+        JSON format: { points: [ {t: <epoch>, fail: <int>, warn: <int>, pass: <int>} ] }
+        """
+        if not device_id:
+            self._not_found()
+            return
+        try:
+            store = _get_store()
+            # Use a direct DB connection to read historical reports for this device.
+            with store._conn() as conn:
+                rows = conn.execute(
+                    "SELECT received_at, fail_count, warn_count, pass_count FROM reports "
+                    "WHERE device_id = ? ORDER BY received_at ASC",
+                    (device_id,)
+                ).fetchall()
+            points = []
+            for r in rows:
+                points.append({
+                    't': int(r['received_at']),
+                    'fail': int(r['fail_count']),
+                    'warn': int(r['warn_count']),
+                    'pass': int(r['pass_count']),
+                })
+            self._json({'points': points})
+        except Exception as e:
+            self._json({'error': str(e)}, 500)
 
     def _serve_fleet(self):
         try:
@@ -524,7 +557,7 @@ function renderDeviceFindings(panel, report, deviceId) {{
   const rows = findings.map((f, i) => {{
     const sl = (f.severity || '').toLowerCase();
     const stl = (f.status || '').toLowerCase();
-    const remHtml = (f.remediation || '').split('\\n').filter(Boolean)
+    const remHtml = (f.remediation || '').split('\n').filter(Boolean)
       .map(s => '<div>' + esc(s) + '</div>').join('');
     return `<div class="finding" id="df${{i}}">
       <div class="fhdr" onclick="togF(${{i}})">
@@ -551,7 +584,105 @@ function renderDeviceFindings(panel, report, deviceId) {{
         · Scan date: ${{esc(report.scan_date || '')}}
       </span>
     </div>
+
+    <div style="margin-bottom:14px">
+      <canvas id="ts-chart" width="800" height="160" style="width:100%;height:160px;background:#0d1117;border:1px solid #21262d;border-radius:6px"></canvas>
+    </div>
+
     ${{rows || '<div class="empty">No findings for this device.</div>'}}`;
+
+  // After populating, load timeseries data and draw chart
+  loadTimeseries(deviceId);
+}}
+
+async function loadTimeseries(deviceId) {{
+  try {{
+    const resp = await fetch('/fleet/device/' + deviceId + '/timeseries.json');
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    const json = await resp.json();
+    drawTimeseries(json.points || []);
+  }} catch (e) {{
+    // silently ignore chart errors and leave the canvas empty
+    console.warn('timeseries load failed', e);
+  }}
+}}
+
+function drawTimeseries(points) {{
+  const c = document.getElementById('ts-chart');
+  if (!c) return;
+  const ctx = c.getContext('2d');
+  // clear
+  ctx.clearRect(0,0,c.width,c.height);
+  if (!points || points.length === 0) {{
+    // draw placeholder
+    ctx.fillStyle = '#484f58';
+    ctx.font = '12px sans-serif';
+    ctx.fillText('No historical data', 12, 24);
+    return;
+  }}
+  // prepare series arrays
+  const ts = points.map(p => p.t * 1000); // ms
+  const fail = points.map(p => p.fail);
+  const warn = points.map(p => p.warn);
+  const pass = points.map(p => p.pass);
+
+  const pad = 8;
+  const w = c.width - pad*2;
+  const h = c.height - pad*2;
+  const minT = Math.min(...ts);
+  const maxT = Math.max(...ts);
+  const maxY = Math.max(...fail.concat(warn).concat(pass).concat([1]));
+
+  function xFor(t) {{
+    if (maxT === minT) return pad + w/2;
+    return pad + ((t - minT) / (maxT - minT)) * w;
+  }}
+  function yFor(v) {{
+    if (maxY === 0) return pad + h;
+    return pad + (1 - (v / maxY)) * h;
+  }}
+
+  // grid
+  ctx.strokeStyle = '#171a1f';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  for (let i=0;i<=4;i++) {{
+    const yy = pad + (i/4)*h;
+    ctx.moveTo(pad, yy); ctx.lineTo(pad + w, yy);
+  }}
+  ctx.stroke();
+
+  // draw lines for pass (green), warn (yellow), fail (red)
+  const series = [
+    {{arr: pass, color:'#3fb950'}},
+    {{arr: warn, color:'#d29922'}},
+    {{arr: fail, color:'#f85149'}},
+  ];
+
+  series.forEach(sv => {{
+    ctx.beginPath();
+    ctx.strokeStyle = sv.color;
+    ctx.lineWidth = 2;
+    sv.arr.forEach((v,i) => {{
+      const x = xFor(ts[i]);
+      const y = yFor(v);
+      if (i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
+    }});
+    ctx.stroke();
+    // draw points
+    ctx.fillStyle = sv.color;
+    sv.arr.forEach((v,i) => {{
+      const x = xFor(ts[i]);
+      const y = yFor(v);
+      ctx.beginPath(); ctx.arc(x,y,2,0,Math.PI*2); ctx.fill();
+    }});
+  }});
+
+  // X axis labels (first and last)
+  ctx.fillStyle = '#6e7681'; ctx.font = '11px sans-serif';
+  const fmt = (t) => new Date(t).toLocaleString();
+  ctx.fillText(fmt(minT), pad+2, c.height - 6);
+  ctx.fillText(fmt(maxT), c.width - ctx.measureText(fmt(maxT)).width - 6, c.height - 6);
 }}
 </script>
 </body>
