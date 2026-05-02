@@ -268,8 +268,9 @@ function esc(s){if(!s)return'';return String(s).replace(/&/g,'&amp;').replace(/<
 
 function init(){
   const m=DATA.meta||{};
-  document.getElementById('hdr-target').textContent=m.target||'';
   document.getElementById('hdr-date').textContent=m.scan_date||'';
+  function _tick(){document.getElementById('hdr-time').textContent=new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});}
+  _tick(); setInterval(_tick,30000);
   const _fwLabels={fedramp:'NIST 800-53',cmmc:'CMMC Level 2'};
   const _fwLabel=_fwLabels[m.profile_framework]||'';
   document.getElementById('hdr-profile').textContent=(m.profile||'')+(_fwLabel?' · '+_fwLabel:'');
@@ -1244,8 +1245,8 @@ def _build_html(data: dict) -> str:
     <div id="header">
       <div class="header-title">AI Security Dashboard <span id="hdr-profile"></span></div>
       <div class="header-meta">
-        <span>🎯 <span id="hdr-target"></span></span>
         <span>📅 <span id="hdr-date"></span></span>
+        <span><span id="hdr-time"></span></span>
       </div>
     </div>
     <div id="content">
