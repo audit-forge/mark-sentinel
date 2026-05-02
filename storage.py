@@ -60,6 +60,18 @@ class AgentStore:
 
                 CREATE INDEX IF NOT EXISTS idx_reports_device_time
                     ON reports(device_id, received_at DESC);
+
+                CREATE TABLE IF NOT EXISTS commands (
+                    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                    device_id   TEXT NOT NULL,
+                    command     TEXT NOT NULL DEFAULT 'scan_now',
+                    created_at  INTEGER NOT NULL,
+                    claimed_at  INTEGER,
+                    FOREIGN KEY (device_id) REFERENCES devices(device_id)
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_commands_device
+                    ON commands(device_id, claimed_at);
             """)
 
     def upsert_report(self, device_id: str, hostname: str, report: dict,
@@ -159,3 +171,39 @@ class AgentStore:
     def device_count(self) -> int:
         with self._conn() as conn:
             return conn.execute("SELECT COUNT(*) FROM devices").fetchone()[0]
+
+    def enqueue_command(self, device_id: str, command: str = 'scan_now') -> int:
+        """Queue a command for a device. Returns the new command id."""
+        now = int(time.time())
+        with self._lock, self._conn() as conn:
+            cur = conn.execute(
+                "INSERT INTO commands (device_id, command, created_at) VALUES (?, ?, ?)",
+                (device_id, command, now),
+            )
+            return cur.lastrowid
+
+    def claim_command(self, device_id: str) -> str | None:
+        """Return and mark-claimed the oldest pending command for a device, or None."""
+        now = int(time.time())
+        with self._lock, self._conn() as conn:
+            row = conn.execute(
+                """SELECT id, command FROM commands
+                   WHERE device_id = ? AND claimed_at IS NULL
+                   ORDER BY created_at ASC LIMIT 1""",
+                (device_id,),
+            ).fetchone()
+            if not row:
+                return None
+            conn.execute(
+                "UPDATE commands SET claimed_at = ? WHERE id = ?",
+                (now, row['id']),
+            )
+            return row['command']
+
+    def pending_command_count(self, device_id: str) -> int:
+        """Return how many unclaimed commands are queued for a device."""
+        with self._conn() as conn:
+            return conn.execute(
+                "SELECT COUNT(*) FROM commands WHERE device_id = ? AND claimed_at IS NULL",
+                (device_id,),
+            ).fetchone()[0]

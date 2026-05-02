@@ -176,6 +176,8 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self._api_device_timeseries(did)
         elif path.startswith('/api/devices/'):
             self._api_device_report(path[len('/api/devices/'):])
+        elif path.startswith('/api/agent/commands/'):
+            self._api_agent_commands(path[len('/api/agent/commands/'):])
         else:
             self._not_found()
 
@@ -185,6 +187,8 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self._api_scan()
         elif path == '/api/agent/report':
             self._api_agent_report()
+        elif path.startswith('/api/fleet/scan/'):
+            self._api_fleet_scan(path[len('/api/fleet/scan/'):])
         else:
             self._not_found()
 
@@ -345,6 +349,32 @@ class _Handler(http.server.BaseHTTPRequestHandler):
 
         self._json({'status': 'accepted', 'device_id': device_id})
 
+    def _api_agent_commands(self, device_id: str):
+        """GET /api/agent/commands/<device_id> — agent polls for pending commands."""
+        if not device_id:
+            self._json({'command': None})
+            return
+        expected = _agent_token()
+        if expected:
+            auth = self.headers.get('Authorization', '')
+            if auth != f'Bearer {expected}':
+                self._send(401, b'Unauthorized', 'text/plain')
+                return
+        command = _get_store().claim_command(device_id)
+        self._json({'command': command})
+
+    def _api_fleet_scan(self, device_id: str):
+        """POST /api/fleet/scan/<device_id> — enqueue an on-demand scan for a device."""
+        if not device_id:
+            self._json({'error': 'missing device_id'}, 400)
+            return
+        store = _get_store()
+        if store.get_device(device_id) is None:
+            self._json({'error': 'device not found'}, 404)
+            return
+        cmd_id = store.enqueue_command(device_id, 'scan_now')
+        self._json({'status': 'queued', 'device_id': device_id, 'command_id': cmd_id})
+
     def _api_devices(self):
         try:
             devices = _get_store().list_devices()
@@ -463,6 +493,7 @@ def _build_fleet_html(devices: list[dict]) -> str:
           <td>{d.get('profile','')}</td>
           <td>{age}</td>
           <td><span class="risk-dot {rc}"></span></td>
+          <td onclick="event.stopPropagation()"><button class="scan-btn" id="sb-{did}" onclick="scanDevice('{did}')">Scan Now</button></td>
         </tr>"""
 
     if not rows:
@@ -502,6 +533,9 @@ body{{background:#0d1117;color:#c9d1d9;font-family:-apple-system,BlinkMacSystemF
 .dev-host{{font-weight:600;color:#e6edf3}}
 .risk-dot{{display:inline-block;width:10px;height:10px;border-radius:50%}}
 .risk-dot.r-fail{{background:#f85149}}.risk-dot.r-warn{{background:#d29922}}.risk-dot.r-pass{{background:#3fb950}}
+.scan-btn{{background:#161b22;border:1px solid #30363d;color:#58a6ff;border-radius:4px;padding:3px 10px;font-size:12px;cursor:pointer;white-space:nowrap}}
+.scan-btn:hover{{background:#1c2128;border-color:#58a6ff}}
+.scan-btn:disabled{{color:#484f58;border-color:#21262d;cursor:default}}
 #detail-panel{{background:#161b22;border:1px solid #21262d;border-radius:8px;padding:22px;min-height:200px}}
 .detail-hdr{{display:flex;align-items:center;gap:12px;margin-bottom:18px}}
 .detail-host{{font-size:18px;font-weight:700;color:#e6edf3}}
@@ -556,7 +590,7 @@ body{{background:#0d1117;color:#c9d1d9;font-family:-apple-system,BlinkMacSystemF
     <thead><tr>
       <th>Hostname</th><th>Platform</th>
       <th class="c-red">Fail</th><th class="c-yellow">Warn</th><th class="c-green">Pass</th>
-      <th>Profile</th><th>Last seen</th><th>Risk</th>
+      <th>Profile</th><th>Last seen</th><th>Risk</th><th></th>
     </tr></thead>
     <tbody>{rows}</tbody>
   </table>
@@ -579,6 +613,24 @@ setInterval(() => {{
 function esc(s) {{
   if (!s) return '';
   return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}}
+
+async function scanDevice(id) {{
+  const btn = document.getElementById('sb-' + id);
+  if (btn) {{ btn.disabled = true; btn.textContent = 'Queued…'; }}
+  try {{
+    const resp = await fetch('/api/fleet/scan/' + id, {{method: 'POST'}});
+    const data = await resp.json();
+    if (resp.ok) {{
+      if (btn) btn.textContent = 'Queued ✓';
+      setTimeout(() => {{ if (btn) {{ btn.disabled = false; btn.textContent = 'Scan Now'; }} }}, 5000);
+    }} else {{
+      if (btn) {{ btn.disabled = false; btn.textContent = 'Error'; }}
+      alert(data.error || 'Failed to queue scan');
+    }}
+  }} catch (e) {{
+    if (btn) {{ btn.disabled = false; btn.textContent = 'Scan Now'; }}
+  }}
 }}
 
 async function selectDevice(id) {{
