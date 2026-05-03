@@ -221,7 +221,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                             '<a href="/fleet" style="background:#161b22;color:#58a6ff;'
                             'padding:6px 10px;border-radius:6px;border:1px solid #21262d;'
                             'text-decoration:none;font-size:13px">Command Center</a> '
-                            '<a href="/academy" style="background:#161b22;color:#58a6ff;'
+                            '<a href="/academy" target="_blank" style="background:#161b22;color:#58a6ff;'
                             'padding:6px 10px;border-radius:6px;border:1px solid #21262d;'
                             'text-decoration:none;font-size:13px;margin-left:8px">Academy</a></div>\n'
                         )
@@ -451,6 +451,14 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             print(f'[server] agent store error: {e}', file=__import__('sys').stderr)
             self._send(500, b'Storage error', 'text/plain')
             return
+
+        try:
+            from alerts import load_alert_config, fire_alerts
+            alert_cfg = load_alert_config(ROOT / 'alerts_config.json')
+            if alert_cfg:
+                fire_alerts(report, device_id, hostname, alert_cfg)
+        except Exception as _ae:
+            print(f'[server] alerts error: {_ae}', file=sys.stderr)
 
         self._json({'status': 'accepted', 'device_id': device_id})
 
@@ -705,7 +713,7 @@ body{{background:#0d1117;color:#c9d1d9;font-family:-apple-system,BlinkMacSystemF
     <span class="brand-mark">M.A.R.K.</span>
     <span class="brand-name">SENTINEL</span>
     <span class="brand-sub">Command Center</span>
-    <a class="hlink" href="/academy" style="margin-right:16px">Academy</a>
+    <a class="hlink" href="/academy" target="_blank" style="margin-right:16px">Academy</a>
     <a class="hlink" href="/">← Single-device dashboard</a>
   </div>
 
@@ -887,22 +895,34 @@ async function selectDevice(id) {{
   panel.style.minHeight = 'unset';
   panel.innerHTML = `
     <div style="display:flex;align-items:center;justify-content:space-between;
-                padding:10px 16px;background:#161b22;border-radius:8px 8px 0 0;
+                padding:0 16px 0 0;background:#161b22;border-radius:8px 8px 0 0;
                 border-bottom:1px solid #30363d">
-      <span id="dash-title" style="font-size:13px;font-weight:600;color:#e6edf3">Loading dashboard…</span>
+      <div style="display:flex;align-items:center;gap:0">
+        <button id="tab-btn-dash" onclick="showDashTab('${{id}}')"
+          style="background:none;border:none;border-bottom:2px solid #58a6ff;color:#e6edf3;
+                 font-size:13px;font-weight:600;padding:10px 16px 8px;cursor:pointer">Dashboard</button>
+        <button id="tab-btn-trend" onclick="showTrendTab('${{id}}')"
+          style="background:none;border:none;border-bottom:2px solid transparent;color:#6e7681;
+                 font-size:13px;font-weight:400;padding:10px 16px 8px;cursor:pointer">Trend</button>
+      </div>
       <div style="display:flex;gap:8px;align-items:center">
-        <a id="dash-ext" href="/fleet/device/${id}/dashboard" target="_blank"
+        <span id="dash-title" style="font-size:12px;color:#8b949e"></span>
+        <a id="dash-ext" href="/fleet/device/${{id}}/dashboard" target="_blank"
            style="font-size:11px;color:#58a6ff;text-decoration:none">open in new tab ↗</a>
         <button onclick="closeDevice()"
                 style="background:none;border:1px solid #30363d;color:#6e7681;
                        border-radius:4px;padding:2px 9px;font-size:12px;cursor:pointer">✕</button>
       </div>
     </div>
-    <iframe src="/fleet/device/${id}/dashboard"
-            style="width:100%;height:calc(100vh - 260px);min-height:600px;
-                   border:none;display:block;border-radius:0 0 8px 8px"
-            onload="this.contentDocument && (document.getElementById('dash-title').textContent = this.contentDocument.title || 'Dashboard')">
-    </iframe>`;
+    <div id="device-dash-pane">
+      <iframe src="/fleet/device/${{id}}/dashboard"
+              style="width:100%;height:calc(100vh - 280px);min-height:580px;
+                     border:none;display:block;border-radius:0 0 8px 8px">
+      </iframe>
+    </div>
+    <div id="device-trend-pane" style="display:none;padding:20px 16px;min-height:300px">
+      <div id="trend-chart" style="color:#8b949e;font-size:13px">Loading trend data…</div>
+    </div>`;
   try {{
     const r = await fetch('/api/devices/' + id);
     if (r.ok) {{
@@ -914,6 +934,85 @@ async function selectDevice(id) {{
       }}
     }}
   }} catch (_) {{}}
+}}
+
+function showDashTab(id) {{
+  const dp = document.getElementById('device-dash-pane');
+  const tp = document.getElementById('device-trend-pane');
+  if (dp) dp.style.display = '';
+  if (tp) tp.style.display = 'none';
+  const b1 = document.getElementById('tab-btn-dash'), b2 = document.getElementById('tab-btn-trend');
+  if (b1) {{ b1.style.borderBottomColor = '#58a6ff'; b1.style.color = '#e6edf3'; b1.style.fontWeight = '600'; }}
+  if (b2) {{ b2.style.borderBottomColor = 'transparent'; b2.style.color = '#6e7681'; b2.style.fontWeight = '400'; }}
+}}
+
+async function showTrendTab(id) {{
+  const dp = document.getElementById('device-dash-pane');
+  const tp = document.getElementById('device-trend-pane');
+  if (dp) dp.style.display = 'none';
+  if (tp) tp.style.display = '';
+  const b1 = document.getElementById('tab-btn-dash'), b2 = document.getElementById('tab-btn-trend');
+  if (b1) {{ b1.style.borderBottomColor = 'transparent'; b1.style.color = '#6e7681'; b1.style.fontWeight = '400'; }}
+  if (b2) {{ b2.style.borderBottomColor = '#58a6ff'; b2.style.color = '#e6edf3'; b2.style.fontWeight = '600'; }}
+  const chart = document.getElementById('trend-chart');
+  if (!chart) return;
+  chart.textContent = 'Loading…';
+  try {{
+    const r = await fetch('/fleet/device/' + id + '/timeseries.json');
+    const data = await r.json();
+    chart.innerHTML = renderTrendChart(data.points || []);
+  }} catch (e) {{
+    chart.innerHTML = '<div style="color:#f85149;padding:20px">Failed to load trend data: ' + e + '</div>';
+  }}
+}}
+
+function renderTrendChart(points) {{
+  if (!points.length) {{
+    return '<div style="padding:48px;text-align:center;color:#484f58">No historical data yet.<br>'
+      + '<small style="color:#363d47">The trend view populates after the device completes multiple scans.</small></div>';
+  }}
+  const W = 680, H = 220, padL = 50, padR = 20, padT = 22, padB = 44;
+  const cW = W - padL - padR, cH = H - padT - padB;
+  const n = points.length;
+  const maxVal = Math.max(1, ...points.map(function(p) {{ return Math.max(p.fail||0, p.warn||0, p.pass||0); }}));
+  function xp(i) {{ return padL + (n === 1 ? cW/2 : i/(n-1)*cW); }}
+  function yp(v) {{ return padT + (1 - v/maxVal)*cH; }}
+  function mkline(ser, col) {{
+    const pts = points.map(function(p,i) {{ return xp(i)+','+yp(p[ser]||0); }}).join(' ');
+    return '<polyline points="'+pts+'" fill="none" stroke="'+col+'" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>';
+  }}
+  function mkdots(ser, col) {{
+    return points.map(function(p,i) {{
+      return '<circle cx="'+xp(i)+'" cy="'+yp(p[ser]||0)+'" r="3.5" fill="'+col+'" stroke="#0d1117" stroke-width="1"/>';
+    }}).join('');
+  }}
+  let grid = '';
+  for (let k = 0; k <= 4; k++) {{
+    const yy = padT + (k/4)*cH;
+    const v = Math.round(maxVal*(1 - k/4));
+    grid += '<line x1="'+padL+'" y1="'+yy+'" x2="'+(padL+cW)+'" y2="'+yy+'" stroke="#21262d" stroke-width="1"/>'
+          + '<text x="'+(padL-6)+'" y="'+(yy+4)+'" text-anchor="end" font-size="10" fill="#6e7681">'+v+'</text>';
+  }}
+  let xlabels = '';
+  const step = Math.max(1, Math.floor((n-1)/5));
+  for (let i = 0; i < n; i++) {{
+    if (i % step !== 0 && i !== n-1) continue;
+    const d = new Date(points[i].t * 1000);
+    const lbl = String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+    xlabels += '<text x="'+xp(i)+'" y="'+(padT+cH+16)+'" text-anchor="middle" font-size="10" fill="#6e7681">'+lbl+'</text>';
+  }}
+  return '<div style="overflow-x:auto">'
+    + '<svg viewBox="0 0 '+W+' '+H+'" style="width:100%;max-width:'+W+'px;display:block" xmlns="http://www.w3.org/2000/svg">'
+    + grid
+    + '<line x1="'+padL+'" y1="'+padT+'" x2="'+padL+'" y2="'+(padT+cH)+'" stroke="#30363d" stroke-width="1"/>'
+    + '<line x1="'+padL+'" y1="'+(padT+cH)+'" x2="'+(padL+cW)+'" y2="'+(padT+cH)+'" stroke="#30363d" stroke-width="1"/>'
+    + mkline('fail','#f85149') + mkline('warn','#d29922') + mkline('pass','#3fb950')
+    + mkdots('fail','#f85149') + mkdots('warn','#d29922') + mkdots('pass','#3fb950')
+    + xlabels
+    + '<circle cx="'+(padL+10)+'" cy="12" r="4" fill="#f85149"/><text x="'+(padL+18)+'" y="16" font-size="11" fill="#8b949e">FAIL</text>'
+    + '<circle cx="'+(padL+58)+'" cy="12" r="4" fill="#d29922"/><text x="'+(padL+66)+'" y="16" font-size="11" fill="#8b949e">WARN</text>'
+    + '<circle cx="'+(padL+106)+'" cy="12" r="4" fill="#3fb950"/><text x="'+(padL+114)+'" y="16" font-size="11" fill="#8b949e">PASS</text>'
+    + '</svg></div>';
 }}
 
 function closeDevice() {{

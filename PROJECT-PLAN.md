@@ -323,12 +323,12 @@ Delivery:
 - [x] Export to PDF from UI
 - Done boundary: a non-technical user can open a browser, see their scan results, and click through to understand and fix every finding
 
-### Phase 6 — Multi-Provider Comparison + Scheduled Scans
+### Phase 6 — Multi-Provider Comparison + Scheduled Scans ✅ COMPLETE
 - [x] `--compare` mode — run same audit against multiple providers side-by-side, produce comparison report
 - [x] Scheduled scan support — cron-style recurring audits, results stored with timestamps (done — agent.py --daemon)
-- [ ] Trend view — show how posture changes between scans over time
-- [ ] Alert/notification on new findings (email, webhook)
-- [ ] `audit history` CLI subcommand
+- [x] Trend view — Dashboard/Trend tab in Command Center; SVG line chart (fail/warn/pass over time) fed by `/fleet/device/<id>/timeseries.json`
+- [x] Alert/notification on new findings — `alerts.py` (email + Slack + webhook); wired into `_api_agent_report` on every report ingestion; configured via `alerts_config.json`
+- [x] `audit history` CLI subcommand — `audit_history.py` (list-devices, device, trends, summary); delegated from `audit.py history ...`
 - [x] Distributed agent fleet (agent.py, storage.py, fleet dashboard, full deployment tooling)
 - Done boundary: enterprises can track AI security posture over time, not just point-in-time
 
@@ -374,12 +374,13 @@ v1.0 is complete when:
 
 ## Current Status
 
-**Status:** ACTIVE — Phase 5 complete — Phase 6 in progress.
+**Status:** ACTIVE — Phase 6 complete — Phase 7 next.
 **Phase 0 completed:** 2026-04-28 — benchmark written, 32 checks documented, framework mappings, fixture specs.
 **Phase 1 completed:** 2026-04-28 — core engine, 6 check modules, plain/JSON/SARIF output, 21 fixture tests passing.
 **Phase 2 completed:** 2026-04-28 — api_connector (11 probes), ollama_connector, live INP/OUT checks, 43 tests passing.
 **Phase 3 completed:** 2026-04-30 — compliance/kyverno/rego output, docker/kubectl/gemini/vertex/presidio/defectdojo connectors, FedRAMP+CMMC profiles, pilot docs.
 **Phase 4 completed:** 2026-05-01 — SMB guide, one-command install (sh/ps1/bat), PDF report, CI/CD workflows, pyproject.toml, Dockerfile.
 **Phase 5 completed:** 2026-05-01 — Wiz-inspired web dashboard, executive summary, per-category cards, finding detail, comparison table, framework view, remediation queue, PDF export.
-**Next step:** Phase 6 — trend view, alerts/webhooks, audit history CLI
-**Restart point:** This file. Read top to bottom. Start at Phase 6.
+**Phase 6 completed:** 2026-05-03 — trend view (SVG chart, Dashboard/Trend tabs in Command Center), alerts wired into report ingestion (email/Slack/webhook), audit history CLI (list-devices/device/trends/summary).
+**Next step:** Phase 7 — AI Runtime Monitoring + Behavioral Audit
+**Restart point:** This file. Read top to bottom. Start at Phase 7.

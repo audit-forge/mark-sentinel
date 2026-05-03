@@ -18,6 +18,7 @@ SECTIONS = [
     ("macos", "macOS"),
     ("windows", "Windows"),
     ("linux", "Linux"),
+    ("docker", "Docker"),
     ("first-scan", "First Scan"),
     ("severity", "Severity Levels"),
     ("status", "Finding Status"),
@@ -254,6 +255,74 @@ def build(root: pathlib.Path) -> bytes:
              "sudo systemctl restart sentinel-agent\n"
              "sudo journalctl -u sentinel-agent -f    # live logs</code></pre>")
 
+    docker = (
+        "<p>Use Docker to run the Sentinel agent (or server) in an isolated container — "
+        "no Python install required on the host.</p>"
+        "<h4>Prerequisites</h4>"
+        "<ul>"
+        "<li>Docker Engine 20.10+ (or Docker Desktop)</li>"
+        "<li>The Sentinel source repo cloned on the build machine</li>"
+        "</ul>"
+        "<h4>Create Dockerfile.agent</h4>"
+        "<p>Create this file in the project root (next to the existing <code>Dockerfile</code>):</p>"
+        "<pre><code>FROM python:3.12-slim\n\n"
+        "WORKDIR /app\n"
+        "ENV PYTHONUNBUFFERED=1\n\n"
+        "RUN groupadd -r sentinel &amp;&amp; useradd -r -g sentinel -m sentinel\n\n"
+        "COPY requirements.txt ./\n"
+        "RUN pip install --no-cache-dir -r requirements.txt\n\n"
+        "COPY . .\n"
+        "RUN chown -R sentinel:sentinel /app\n\n"
+        "USER sentinel\n\n"
+        "CMD [\"python\", \"agent.py\", \"--daemon\"]</code></pre>"
+        "<h4>Build and run the agent</h4>"
+        "<pre><code># Build\n"
+        "docker build -f Dockerfile.agent -t sentinel-agent .\n\n"
+        "# Run — pass server URL and token via environment variables\n"
+        "docker run -d \\\n"
+        "  --name sentinel-agent \\\n"
+        "  --hostname my-container-name \\\n"
+        "  --restart unless-stopped \\\n"
+        "  -e SENTINEL_SERVER=http://SERVER_IP:7331 \\\n"
+        "  -e SENTINEL_AGENT_TOKEN=your-token-here \\\n"
+        "  sentinel-agent\n\n"
+        "# View logs\n"
+        "docker logs -f sentinel-agent\n\n"
+        "# Stop\n"
+        "docker stop sentinel-agent</code></pre>"
+        "<p><b>Note:</b> The container hostname becomes the device name in the Command Center. "
+        "Set <code>--hostname</code> to something meaningful. "
+        "The agent scans the container filesystem; mount host paths with <code>-v</code> if you need host scanning.</p>"
+        "<h4>Docker Compose (server + agent on the same host)</h4>"
+        "<pre><code>services:\n"
+        "  server:\n"
+        "    build: .\n"
+        "    ports:\n"
+        "      - \"7331:7331\"\n"
+        "    volumes:\n"
+        "      - sentinel-data:/app/output\n\n"
+        "  agent:\n"
+        "    build:\n"
+        "      context: .\n"
+        "      dockerfile: Dockerfile.agent\n"
+        "    environment:\n"
+        "      SENTINEL_SERVER: http://server:7331\n"
+        "      SENTINEL_AGENT_TOKEN: ${SENTINEL_AGENT_TOKEN}\n"
+        "    depends_on:\n"
+        "      - server\n\n"
+        "volumes:\n"
+        "  sentinel-data:</code></pre>"
+        "<pre><code># Start both\n"
+        "SENTINEL_AGENT_TOKEN=your-token docker compose up -d\n\n"
+        "# Dashboard: http://localhost:7331\n"
+        "# Command Center: http://localhost:7331/command</code></pre>"
+        "<h4>Environment variables</h4>"
+        "<ul>"
+        "<li><b>SENTINEL_SERVER</b> — URL of the Sentinel server (required)</li>"
+        "<li><b>SENTINEL_AGENT_TOKEN</b> — auth token (must match server's <code>agent_token.txt</code>)</li>"
+        "</ul>"
+    )
+
     first_scan = ("<ol>"
                   "<li>Open http://localhost:7331 in your browser</li>"
                   "<li>Click \"Run Scan\" — demo scan runs in ~10 seconds</li>"
@@ -460,6 +529,7 @@ def build(root: pathlib.Path) -> bytes:
         section_html('macos', 'macOS', macos),
         section_html('windows', 'Windows', windows),
         section_html('linux', 'Linux', linux),
+        section_html('docker', 'Docker', docker),
         section_html('first-scan', 'First Scan', first_scan),
         section_html('severity', 'Severity Levels', severity),
         section_html('status', 'Finding Status', status),
