@@ -169,6 +169,8 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             '/health':         self._api_health,
             '/agent.py':       self._serve_agent_script,
             '/bundle.tar.gz':  self._serve_bundle,
+            '/academy':        self._serve_academy,
+            '/command':        self._serve_fleet,
         }
         if path in static:
             static[path]()
@@ -215,10 +217,13 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                     if idx2 != -1:
                         link = (
                             f'\n<div style="position:fixed;left:50%;top:14px;'
-                            f'transform:translateX(-50%);z-index:999;">'
+                            f'transform:translateX(-50%);z-index:999;'>
                             f'<a href="/fleet" style="background:#161b22;color:#58a6ff;'
                             f'padding:6px 10px;border-radius:6px;border:1px solid #21262d;'
-                            f'text-decoration:none;font-size:13px">Enterprise View</a></div>\n'
+                            f'text-decoration:none;font-size:13px">Command Center</a> '
+                            f'<a href="/academy" style="background:#161b22;color:#58a6ff;'
+                            f'padding:6px 10px;border-radius:6px;border:1px solid #21262d;'
+                            f'text-decoration:none;font-size:13px;margin-left:8px">Academy</a></div>\n'
                         )
                         html = html[:idx2+1] + link + html[idx2+1:]
                 self._send(200, html.encode('utf-8'), 'text/html; charset=utf-8')
@@ -522,6 +527,15 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             devices = []
         self._send(200, _build_fleet_html(devices).encode(), 'text/html; charset=utf-8')
 
+    def _serve_academy(self):
+        try:
+            sys.path.insert(0, str(ROOT))
+            from academy import build
+            html = build(ROOT)
+            self._send(200, html, 'text/html; charset=utf-8')
+        except Exception as e:
+            self._send(500, f'Academy build failed: {e}'.encode(), 'text/plain')
+
     # ── helpers ───────────────────────────────────────────────────────────────
 
     def _not_found(self):
@@ -602,7 +616,7 @@ def _build_fleet_html(devices: list[dict]) -> str:
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
-<title>M.A.R.K. Sentinel — Enterprise View</title>
+<title>M.A.R.K. Sentinel — Command Center</title>
 <style>
 *{{box-sizing:border-box;margin:0;padding:0}}
 body{{background:#0d1117;color:#c9d1d9;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:14px}}
@@ -667,7 +681,8 @@ body{{background:#0d1117;color:#c9d1d9;font-family:-apple-system,BlinkMacSystemF
   <div class="brand-bar">
     <span class="brand-mark">M.A.R.K.</span>
     <span class="brand-name">SENTINEL</span>
-    <span class="brand-sub">Enterprise View</span>
+    <span class="brand-sub">Command Center</span>
+    <a class="hlink" href="/academy" style="margin-right:16px">Academy</a>
     <a class="hlink" href="/">← Single-device dashboard</a>
   </div>
 
@@ -853,14 +868,14 @@ async function selectDevice(id) {{
                 border-bottom:1px solid #30363d">
       <span id="dash-title" style="font-size:13px;font-weight:600;color:#e6edf3">Loading dashboard…</span>
       <div style="display:flex;gap:8px;align-items:center">
-        <a id="dash-ext" href="/fleet/device/${{id}}/dashboard" target="_blank"
+        <a id="dash-ext" href="/fleet/device/${id}/dashboard" target="_blank"
            style="font-size:11px;color:#58a6ff;text-decoration:none">open in new tab ↗</a>
         <button onclick="closeDevice()"
                 style="background:none;border:1px solid #30363d;color:#6e7681;
                        border-radius:4px;padding:2px 9px;font-size:12px;cursor:pointer">✕</button>
       </div>
     </div>
-    <iframe src="/fleet/device/${{id}}/dashboard"
+    <iframe src="/fleet/device/${id}/dashboard"
             style="width:100%;height:calc(100vh - 260px);min-height:600px;
                    border:none;display:block;border-radius:0 0 8px 8px"
             onload="this.contentDocument && (document.getElementById('dash-title').textContent = this.contentDocument.title || 'Dashboard')">
@@ -902,7 +917,7 @@ def main():
     print(f'\n  M.A.R.K. Sentinel  ·  Dashboard Server')
     print(f'  Project  : {ROOT}')
     print(f'  Dashboard: {url}')
-    print(f'  Enterprise View: {url}/fleet')
+    print(f'  Command Center: {url}/command (also available at {url}/fleet)')
     print(f'  Devices  : {url}/api/devices')
     print(f'  Network  : http://0.0.0.0:{args.port} (accessible from LAN)')
     print(f'  Stop     : Ctrl+C\n')
