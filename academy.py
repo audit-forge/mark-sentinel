@@ -343,7 +343,7 @@ def build(root: pathlib.Path) -> bytes:
                 title = _escape(itm['title'])
                 sev = itm.get('severity','')
                 parts.append(f'<div class="check-card" data-check="{cid}">')
-                parts.append(f'<div class="check-hdr" onclick="toggleCard(this)">')
+                parts.append('<div class="check-hdr" onclick="toggleCard(this)">')
                 parts.append(f'<div class="check-id">{cid}</div>')
                 parts.append(f'<div class="check-title">{title}</div>')
                 parts.append(badge_for(sev))
@@ -361,7 +361,7 @@ def build(root: pathlib.Path) -> bytes:
                     lines = [ln.strip('-* ').strip() for ln in md_text.splitlines() if ln.strip()]
                     if not lines:
                         return '<div class="muted">No criteria provided.</div>'
-                    return '<ul>' + ''.join(f'<li>{_escape(l)}</li>' for l in lines) + '</ul>'
+                    return '<ul>' + ''.join(f'<li>{_escape(line)}</li>' for line in lines) + '</ul>'
                 parts.append('<div class="pf-grid">')
                 parts.append('<div><strong>PASS Criteria</strong>' + _make_list(itm.get('pass','')) + '</div>')
                 parts.append('<div><strong>FAIL Criteria</strong>' + _make_list(itm.get('fail','')) + '</div>')

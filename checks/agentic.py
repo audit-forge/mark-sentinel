@@ -350,8 +350,6 @@ def check_agent_006(ctx: ScanContext) -> CheckResult:
     text = _agent_config_text(ctx)
     has_http_tool = bool(re.search(r'(?i)"(?:http|web|url|fetch|request)"\s*:', text))
     has_allowlist = any(r.search(text) for r in _DOMAIN_ALLOWLIST_RE)
-    has_broad_http = any(r.search(text) for r in _BROAD_HTTP_RE)
-
     if has_http_tool and not has_allowlist:
         return CheckResult(
             check_id="AI-AGENT-006",

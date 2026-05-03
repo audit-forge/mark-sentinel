@@ -283,11 +283,16 @@ def _install_service(args: argparse.Namespace, cfg: dict) -> None:
     python  = sys.executable
     script  = str(Path(__file__).resolve())
     cmd     = [python, script, '--daemon']
-    if cfg.get('server'):  cmd += ['--server',  cfg['server']]
-    if cfg.get('token'):   cmd += ['--token',   cfg['token']]
-    if cfg.get('target'):  cmd += ['--target',  cfg['target']]
-    if cfg.get('profile'): cmd += ['--profile', cfg['profile']]
-    if cfg.get('interval'):cmd += ['--interval',str(cfg['interval'])]
+    if cfg.get('server'):
+        cmd += ['--server', cfg['server']]
+    if cfg.get('token'):
+        cmd += ['--token', cfg['token']]
+    if cfg.get('target'):
+        cmd += ['--target', cfg['target']]
+    if cfg.get('profile'):
+        cmd += ['--profile', cfg['profile']]
+    if cfg.get('interval'):
+        cmd += ['--interval', str(cfg['interval'])]
 
     if system == 'Darwin':
         _install_launchd(cmd)
@@ -418,12 +423,18 @@ def main() -> None:
 
     cfg = load_config(args.config)
 
-    if args.server:     cfg['server']   = args.server
-    if args.token:      cfg['token']    = args.token
-    if args.target:     cfg['target']   = args.target
-    if args.profile:    cfg['profile']  = args.profile
-    if args.scan_only:  cfg.pop('server', None)
-    if args.interval:   cfg['interval'] = args.interval
+    if args.server:
+        cfg['server'] = args.server
+    if args.token:
+        cfg['token'] = args.token
+    if args.target:
+        cfg['target'] = args.target
+    if args.profile:
+        cfg['profile'] = args.profile
+    if args.scan_only:
+        cfg.pop('server', None)
+    if args.interval:
+        cfg['interval'] = args.interval
 
     if args.install_service:
         _install_service(args, cfg)
