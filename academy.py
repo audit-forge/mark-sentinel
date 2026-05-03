@@ -139,12 +139,20 @@ def build(root: pathlib.Path) -> bytes:
     prereqs = ("<ul>"
                "<li>Python 3.11 or later (required on every machine)</li>"
                "<li>Git (required on the server machine for initial install)</li>"
+               "<li>GitHub access — SSH key or Personal Access Token (PAT). "
+               "GitHub does not accept passwords for git operations. "
+               "To create a PAT: GitHub → Settings → Developer settings → "
+               "Personal access tokens → Generate new token (classic) → select <b>repo</b> scope.</li>"
                "<li>Network access between agents and the server machine</li>"
                "<li>Admin/root privileges for service installation</li>"
                "</ul>")
 
     macos = ("<h4>Server setup (run once)</h4>"
-             "<pre><code>sudo git clone https://github.com/audit-forge/mark-sentinel.git /opt/sentinel\n"
+             "<p>Use SSH (recommended) or a Personal Access Token — GitHub does not accept passwords:</p>"
+             "<pre><code># Option A — SSH\n"
+             "sudo git clone git@github.com:audit-forge/mark-sentinel.git /opt/sentinel\n\n"
+             "# Option B — Personal Access Token\n"
+             "sudo git clone https://YOUR_TOKEN@github.com/audit-forge/mark-sentinel.git /opt/sentinel\n\n"
              "pip3 install -r /opt/sentinel/requirements.txt</code></pre>"
              "<h4>Start the server</h4>"
              "<pre><code>python3 /opt/sentinel/server.py\n"
@@ -162,7 +170,11 @@ def build(root: pathlib.Path) -> bytes:
              "# Logs: /var/log/sentinel-agent.log</code></pre>")
 
     windows = ("<h4>Server setup (run once — PowerShell as Administrator)</h4>"
-               "<pre><code>git clone https://github.com/audit-forge/mark-sentinel.git C:\\Sentinel\n"
+               "<p>Use SSH (recommended) or a Personal Access Token — GitHub does not accept passwords:</p>"
+               "<pre><code># Option A — SSH\n"
+               "git clone git@github.com:audit-forge/mark-sentinel.git C:\\Sentinel\n\n"
+               "# Option B — Personal Access Token\n"
+               "git clone https://YOUR_TOKEN@github.com/audit-forge/mark-sentinel.git C:\\Sentinel\n\n"
                "pip install -r C:\\Sentinel\\requirements.txt</code></pre>"
                "<h4>Start the server</h4>"
                "<pre><code>python C:\\Sentinel\\server.py --no-browser\n"
@@ -182,7 +194,11 @@ def build(root: pathlib.Path) -> bytes:
                "<p>For best results install NSSM first (https://nssm.cc). The installer falls back to sc.exe if NSSM is not found.</p>")
 
     linux = ("<h4>Server setup (run once)</h4>"
-             "<pre><code>sudo git clone https://github.com/audit-forge/mark-sentinel.git /opt/sentinel\n"
+             "<p>Use SSH (recommended) or a Personal Access Token — GitHub does not accept passwords:</p>"
+             "<pre><code># Option A — SSH\n"
+             "sudo git clone git@github.com:audit-forge/mark-sentinel.git /opt/sentinel\n\n"
+             "# Option B — Personal Access Token\n"
+             "sudo git clone https://YOUR_TOKEN@github.com/audit-forge/mark-sentinel.git /opt/sentinel\n\n"
              "pip3 install -r /opt/sentinel/requirements.txt</code></pre>"
              "<h4>Start the server</h4>"
              "<pre><code>python3 /opt/sentinel/server.py --no-browser\n"
