@@ -320,10 +320,31 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         try:
             report = _get_store().get_latest_report(device_id)
         except Exception as e:
+            print(f'[server] get_latest_report error for {device_id}: {e}', file=sys.stderr)
             self._send(500, f'Store error: {e}'.encode(), 'text/plain')
             return
         if report is None:
-            self._send(404, b'Device not found', 'text/plain')
+            try:
+                device = _get_store().get_device(device_id)
+            except Exception:
+                device = None
+            if device is None:
+                self._send(404, b'Device not found', 'text/plain')
+            else:
+                hostname = device.get('hostname', device_id)
+                html = (
+                    b'<!doctype html><html><head>'
+                    b'<meta charset="utf-8">'
+                    b'<style>body{font-family:system-ui;background:#0d1117;color:#8b949e;'
+                    b'display:flex;align-items:center;justify-content:center;height:100vh;margin:0}'
+                    b'div{text-align:center}.title{font-size:18px;color:#e6edf3;margin-bottom:8px}'
+                    b'.sub{font-size:13px}</style></head><body><div>'
+                    b'<div class="title">No scan report yet for ' + hostname.encode() + b'</div>'
+                    b'<div class="sub">The agent has registered but has not completed a scan.<br>'
+                    b'Reports arrive automatically after each scan cycle.</div>'
+                    b'</div></body></html>'
+                )
+                self._send(200, html, 'text/html; charset=utf-8')
             return
         try:
             sys.path.insert(0, str(ROOT))
@@ -339,6 +360,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             _os.unlink(tmp_path)
             self._send(200, html, 'text/html; charset=utf-8')
         except Exception as e:
+            print(f'[server] dashboard generation error for {device_id}: {e}', file=sys.stderr)
             self._send(500, f'Dashboard generation failed: {e}'.encode(), 'text/plain')
 
     def _api_events(self):
