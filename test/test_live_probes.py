@@ -20,12 +20,11 @@ AUDIT = str(ROOT / "audit.py")
 HARDENED = str(ROOT / "test/fixtures/deploy-hardened")
 
 sys.path.insert(0, str(ROOT))
-from connectors.api_connector import (
-    Probe, ProbeResult, _evaluate, _CANARY_OVERRIDE, _CANARY_INJECT,
+from connectors.api_connector import (  # noqa: E402
+    Probe, _evaluate, _CANARY_OVERRIDE, _CANARY_INJECT,
     _CANARY_JAILBREAK, _CANARY_SYSPROMPT, _CANARY_PII_NAME, _CANARY_PII_EMAIL,
     PROBES, run_probes,
 )
-from connectors.config_connector import ScanContext
 
 
 # ---------------------------------------------------------------------------

@@ -216,14 +216,14 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                     idx2 = html.find('>', idx)
                     if idx2 != -1:
                         link = (
-                            f'\n<div style="position:fixed;left:50%;top:14px;'
-                            f'transform:translateX(-50%);z-index:999;'>
-                            f'<a href="/fleet" style="background:#161b22;color:#58a6ff;'
-                            f'padding:6px 10px;border-radius:6px;border:1px solid #21262d;'
-                            f'text-decoration:none;font-size:13px">Command Center</a> '
-                            f'<a href="/academy" style="background:#161b22;color:#58a6ff;'
-                            f'padding:6px 10px;border-radius:6px;border:1px solid #21262d;'
-                            f'text-decoration:none;font-size:13px;margin-left:8px">Academy</a></div>\n'
+                            '\n<div style="position:fixed;left:50%;top:14px;'
+                            'transform:translateX(-50%);z-index:999;'>
+                            '<a href="/fleet" style="background:#161b22;color:#58a6ff;'
+                            'padding:6px 10px;border-radius:6px;border:1px solid #21262d;'
+                            'text-decoration:none;font-size:13px">Command Center</a> '
+                            '<a href="/academy" style="background:#161b22;color:#58a6ff;'
+                            'padding:6px 10px;border-radius:6px;border:1px solid #21262d;'
+                            'text-decoration:none;font-size:13px;margin-left:8px">Academy</a></div>\n'
                         )
                         html = html[:idx2+1] + link + html[idx2+1:]
                 self._send(200, html.encode('utf-8'), 'text/html; charset=utf-8')
@@ -328,7 +328,8 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         try:
             sys.path.insert(0, str(ROOT))
             from output.dashboard import generate
-            import tempfile, os as _os
+            import tempfile
+            import os as _os
             with tempfile.NamedTemporaryFile(suffix='.html', delete=False) as tf:
                 tmp_path = tf.name
             generate([report], tmp_path,
@@ -914,13 +915,13 @@ def main():
 
     server = http.server.ThreadingHTTPServer((args.host, args.port), _Handler)
     url = f'http://localhost:{args.port}'
-    print(f'\n  M.A.R.K. Sentinel  ·  Dashboard Server')
+    print('\n  M.A.R.K. Sentinel  ·  Dashboard Server')
     print(f'  Project  : {ROOT}')
     print(f'  Dashboard: {url}')
     print(f'  Command Center: {url}/command (also available at {url}/fleet)')
     print(f'  Devices  : {url}/api/devices')
     print(f'  Network  : http://0.0.0.0:{args.port} (accessible from LAN)')
-    print(f'  Stop     : Ctrl+C\n')
+    print('  Stop     : Ctrl+C\n')
     if not args.no_browser:
         threading.Timer(0.6, lambda: webbrowser.open(url)).start()
     try:

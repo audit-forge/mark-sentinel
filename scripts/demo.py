@@ -72,17 +72,17 @@ def _load_hash_env():
 
 _load_hash_env()
 
-from checks import FAIL, WARN, PASS, SKIP
-from checks.deploy import run_all as deploy_checks
-from checks.input_safety import run_all as inp_checks
-from checks.output_safety import run_all as out_checks
-from checks.agentic import run_all as agent_checks
-from checks.supply_chain import run_all as supply_checks
-from checks.governance import run_all as gov_checks
-from checks.runtime import run_all as runtime_checks
-from output.plain_english import format_report
-from output.json_report import format_json
-from output.sarif import format_sarif
+from checks import FAIL, WARN, PASS, SKIP  # noqa: E402
+from checks.deploy import run_all as deploy_checks  # noqa: E402
+from checks.input_safety import run_all as inp_checks  # noqa: E402
+from checks.output_safety import run_all as out_checks  # noqa: E402
+from checks.agentic import run_all as agent_checks  # noqa: E402
+from checks.supply_chain import run_all as supply_checks  # noqa: E402
+from checks.governance import run_all as gov_checks  # noqa: E402
+from checks.runtime import run_all as runtime_checks  # noqa: E402
+from output.plain_english import format_report  # noqa: E402
+from output.json_report import format_json  # noqa: E402
+from output.sarif import format_sarif  # noqa: E402
 
 
 # ── service detection ──────────────────────────────────────────────────────
@@ -212,7 +212,7 @@ def _print_comparison(rows: list):
     live_rows   = [r for r in rows if r['mode'] != 'config']
 
     if config_rows:
-        print(f"\n  ── Infrastructure & Config Checks (same for all providers) ──")
+        print("\n  ── Infrastructure & Config Checks (same for all providers) ──")
         print(f"  {'Provider':<28}  {'FAIL':>5}  {'WARN':>5}  {'PASS':>5}")
         print("  " + "─" * (W - 2))
         for row in config_rows:
@@ -225,7 +225,7 @@ def _print_comparison(rows: list):
         print("  They're identical because every provider runs against the same codebase.")
 
     if live_rows:
-        print(f"\n  ── Live Adversarial Probe Results (per-provider behavior) ──")
+        print("\n  ── Live Adversarial Probe Results (per-provider behavior) ──")
         print(f"  {'Provider':<30}  {'Cfg FAIL':>8}  {'Cfg WARN':>8}  {'Probe PASS':>10}  {'Probe FAIL':>10}")
         print("  " + "─" * (W - 2))
         for row in live_rows:
@@ -271,26 +271,26 @@ def _audit(p: dict, target: str, profile: dict, out_dir: Path) -> dict | None:
 
         elif mode == 'openai':
             from connectors.api_connector import connect
-            print(f"  Probing  : ", end='', flush=True)
+            print("  Probing  : ", end='', flush=True)
             ctx = connect(endpoint='https://api.openai.com/v1',
                           api_key=p['api_key'], model=model, target_dir=target)
             print(_probe_line(ctx))
 
         elif mode == 'anthropic':
             from connectors.claude_connector import connect
-            print(f"  Probing  : ", end='', flush=True)
+            print("  Probing  : ", end='', flush=True)
             ctx = connect(api_key=p['api_key'], model=model, target_dir=target)
             print(_probe_line(ctx))
 
         elif mode == 'local':
             from connectors.ollama_connector import connect
-            print(f"  Probing  : ", end='', flush=True)
+            print("  Probing  : ", end='', flush=True)
             ctx = connect(host=p['host'], model=model, target_dir=target)
             print(_probe_line(ctx))
 
         elif mode == 'hash':
             from connectors.hash_connector import connect
-            print(f"  Probing  : ", end='', flush=True)
+            print("  Probing  : ", end='', flush=True)
             ctx = connect(host=p['host'], token=p.get('token', ''), target_dir=target)
             print(_probe_line(ctx))
 
@@ -366,26 +366,26 @@ def main():
     print(f"\nTarget  : {target}")
     print(f"Profile : {profile['name']}")
     print(f"Output  : {out_dir}")
-    print(f"\nDetecting providers...")
+    print("\nDetecting providers...")
 
     providers = []
 
     providers.append({'label': 'Config scan', 'mode': 'config'})
-    print(f"  ✓  Config scan")
+    print("  ✓  Config scan")
 
     if openai_key:
         providers.append({'label': f'ChatGPT  ({args.openai_model})', 'mode': 'openai',
                           'api_key': openai_key, 'model': args.openai_model})
         print(f"  ✓  ChatGPT — key found  [{args.openai_model}]")
     else:
-        print(f"  ✗  ChatGPT — OPENAI_API_KEY not set")
+        print("  ✗  ChatGPT — OPENAI_API_KEY not set")
 
     if anthropic_key:
         providers.append({'label': f'Claude   ({args.claude_model})', 'mode': 'anthropic',
                           'api_key': anthropic_key, 'model': args.claude_model})
         print(f"  ✓  Claude — key found  [{args.claude_model}]")
     else:
-        print(f"  ✗  Claude — ANTHROPIC_API_KEY not set")
+        print("  ✗  Claude — ANTHROPIC_API_KEY not set")
 
     ollama_up = _is_ollama_up(ollama_host)
     if ollama_up:
@@ -408,7 +408,7 @@ def main():
                           'host': hash_host, 'token': hash_token})
         print(f"  ✓  hash-ai — running  [{hash_host}]")
     else:
-        print(f"  ✗  hash-ai — not running  (run: hash-ai start)")
+        print("  ✗  hash-ai — not running  (run: hash-ai start)")
 
     print(f"\nRunning {len(providers)} audit(s)...")
 
@@ -421,15 +421,15 @@ def main():
     if rows:
         _print_comparison(rows)
         print(f"\nFull reports saved to: {out_dir}/")
-        print(f"  <provider>.txt        — plain English narrative")
-        print(f"  <provider>.json       — structured findings")
-        print(f"  <provider>.sarif      — SARIF for CI/CD import")
+        print("  <provider>.txt        — plain English narrative")
+        print("  <provider>.json       — structured findings")
+        print("  <provider>.sarif      — SARIF for CI/CD import")
         try:
             from output.dashboard import generate
             all_reports = [json.loads(f.read_text()) for f in sorted(out_dir.glob("*.json"))]
             if all_reports:
                 dash_path = generate(all_reports, out_dir / 'dashboard.html')
-                print(f"  dashboard.html        — interactive multi-provider dashboard")
+                print("  dashboard.html        — interactive multi-provider dashboard")
                 print(f"\nOpen dashboard:  open {dash_path}")
         except Exception as _dash_err:
             print(f"  [dashboard generation skipped: {_dash_err}]")

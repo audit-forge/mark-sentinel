@@ -4,7 +4,7 @@ Checks: AI-SUPPLY-001 through AI-SUPPLY-006
 All checks are evaluable in config mode.
 """
 import re
-from . import CheckResult, PASS, FAIL, WARN, SKIP
+from . import CheckResult, PASS, FAIL, WARN
 from connectors.config_connector import ScanContext
 
 CATEGORY = "AI-SUPPLY"
@@ -256,8 +256,8 @@ def check_supply_003(ctx: ScanContext) -> CheckResult:
             frameworks={"OWASP LLM": "LLM03", "FedRAMP": "SA-12, CM-7", "NIST AI RMF": "GOVERN 2.2"},
         )
 
-    lines = [l.strip() for l in ctx.requirements_txt.splitlines()
-             if l.strip() and not l.strip().startswith('#')]
+    lines = [ln.strip() for ln in ctx.requirements_txt.splitlines()
+             if ln.strip() and not ln.strip().startswith('#')]
 
     pinned = []
     unpinned = []
@@ -416,7 +416,6 @@ def check_supply_004(ctx: ScanContext) -> CheckResult:
 
 def check_supply_005(ctx: ScanContext) -> CheckResult:
     """AI-SUPPLY-005: Model Version Pinned (Not Floating Latest)"""
-    all_text = '\n'.join(ctx.files.values())
     floating_hits = []
     pinned_hits = []
 
