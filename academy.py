@@ -478,6 +478,6 @@ def build(root: pathlib.Path) -> bytes:
         '</script>',
         '</body>',
         '</html>'
-    ]
+    ])
 
     return '\n'.join(html_parts).encode('utf-8')
