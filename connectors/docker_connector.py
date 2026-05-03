@@ -105,7 +105,8 @@ def scan_container_by_compose(compose_path: str, service_name: str) -> dict[str,
 
 
 if __name__ == "__main__":
-    import argparse, json
+    import argparse
+    import json
     parser = argparse.ArgumentParser()
     parser.add_argument("compose", help="path to docker-compose.yml")
     parser.add_argument("service", help="service name")

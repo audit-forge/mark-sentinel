@@ -3,7 +3,6 @@ M.A.R.K. Sentinel — API Connector
 Connects to any OpenAI-compatible endpoint for live adversarial probe checks.
 """
 import json
-import time
 import urllib.request
 import urllib.error
 from dataclasses import dataclass, field

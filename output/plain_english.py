@@ -3,7 +3,7 @@ M.A.R.K. Sentinel — Plain English output formatter
 Produces human-readable terminal output with SMB-friendly language option.
 """
 from datetime import date
-from checks import CheckResult, PASS, FAIL, WARN, SKIP, STATUS_RANK, SEVERITY_RANK
+from checks import CheckResult, PASS, FAIL, WARN, SKIP
 
 _STATUS_ICON = {PASS: "✅", FAIL: "🔴", WARN: "⚠️ ", SKIP: "⏭ "}
 _STATUS_LABEL = {PASS: "PASS", FAIL: "FAIL", WARN: "WARN", SKIP: "SKIP"}
@@ -193,7 +193,7 @@ def format_report(results: list, profile: dict, target: str, mode: str = 'config
         step += 1
     if skipped and not is_live:
         next_lines.append(f"  {step}. Run in live mode to evaluate {len(skipped)} agentic checks:")
-        next_lines.append(f"       python audit.py --mode api --endpoint https://api.openai.com/v1 --profile default")
+        next_lines.append("       python audit.py --mode api --endpoint https://api.openai.com/v1 --profile default")
         step += 1
 
     if next_lines:

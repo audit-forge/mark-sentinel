@@ -33,7 +33,7 @@ def generate_compliance_report(findings: list[dict], profile_name: str | None = 
     fails = sum(1 for f in findings if f.get("result") == "FAIL")
 
     header = [
-        f"# M.A.R.K. Sentinel — Compliance Report",
+        "# M.A.R.K. Sentinel — Compliance Report",
         f"Generated: {now}",
     ]
     if profile_name:
@@ -93,7 +93,8 @@ def write_compliance_report(path: str, findings: list[dict], profile_name: str |
 
 # Minimal CLI for manual invocation during handoffs (keeps dependencies low)
 if __name__ == "__main__":
-    import json, sys
+    import json
+    import sys
     if len(sys.argv) < 3:
         print("Usage: compliance.py <findings.json> <out.md> [profile]")
         sys.exit(2)

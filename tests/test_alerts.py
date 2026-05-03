@@ -2,7 +2,7 @@ import json
 import sys
 import unittest
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from alerts import AlertConfig, fire_alerts, load_alert_config, should_alert
@@ -31,7 +31,8 @@ class TestLoadAlertConfig(unittest.TestCase):
         self.assertIsNone(load_alert_config(Path('/nonexistent/path.json')))
 
     def test_loads_valid_config(self, tmp_path=None):
-        import tempfile, os
+        import tempfile
+        import os
         data = {'webhook_url': 'https://example.com', 'min_severity': 'HIGH'}
         with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
             json.dump(data, f)

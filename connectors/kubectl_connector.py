@@ -76,7 +76,8 @@ def scan_manifest_for_ai_components(manifest_path: str) -> dict[str, Any]:
 
 
 if __name__ == "__main__":
-    import argparse, json
+    import argparse
+    import json
     parser = argparse.ArgumentParser()
     parser.add_argument("manifest")
     parser.add_argument("--out")
