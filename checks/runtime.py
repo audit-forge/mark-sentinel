@@ -5,10 +5,8 @@ Checks: AI-RUNTIME-001 through AI-RUNTIME-005
 Evaluates whether the AI deployment has runtime monitoring wired in.
 Inspects config files and the live Hash runtime API when available.
 """
-import json
 import re
-from pathlib import Path
-from . import CheckResult, PASS, FAIL, WARN, SKIP
+from . import CheckResult, PASS, FAIL, WARN
 from connectors.config_connector import ScanContext
 
 CATEGORY = "AI-RUNTIME"

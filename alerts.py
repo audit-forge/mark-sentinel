@@ -4,7 +4,7 @@ import logging
 import os
 import smtplib
 import urllib.request
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from email.message import EmailMessage
 from pathlib import Path
 

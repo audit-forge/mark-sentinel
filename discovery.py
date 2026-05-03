@@ -4,7 +4,6 @@ Pure stdlib implementation (asyncio only, no external deps).
 """
 import asyncio
 import ipaddress
-import json
 import logging
 import socket
 from urllib import request as _urlreq

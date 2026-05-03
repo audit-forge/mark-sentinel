@@ -29,7 +29,7 @@ from checks.output_safety import run_all as out_checks
 from checks.agentic import run_all as agent_checks
 from checks.supply_chain import run_all as supply_checks
 from checks.governance import run_all as gov_checks
-from checks import FAIL, SKIP
+from checks import FAIL
 from output.plain_english import format_report
 from output.json_report import format_json
 from output.sarif import format_sarif
@@ -510,7 +510,7 @@ examples:
                     engagement_name=args.defectdojo_engagement or None,
                     push_passing=args.defectdojo_push_all,
                 )
-                print(f" done.")
+                print(" done.")
                 print(f"  Pushed:  {summary['pushed']} findings")
                 print(f"  Skipped: {summary['skipped']} (PASS/SKIP not pushed)")
                 if summary['errors']:

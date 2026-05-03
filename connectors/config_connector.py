@@ -3,7 +3,6 @@ M.A.R.K. Sentinel — Config Connector
 Scans a directory for AI deployment files and returns a structured ScanContext.
 """
 import os
-import re
 import json
 from pathlib import Path
 from dataclasses import dataclass, field
