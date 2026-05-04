@@ -73,15 +73,25 @@ fi
 PYTHON_VER="$("$PYTHON" -c 'import sys; print(sys.version.split()[0])')"
 echo "  Found: $PYTHON ($PYTHON_VER)"
 
+# ── Virtualenv setup (avoids PEP 668 on Ubuntu 23.04+ / Debian 12+) ──────────
+
+VENV_DIR="${INSTALL_PREFIX}/venv"
+echo "Creating virtualenv at ${VENV_DIR} ..."
+mkdir -p "${INSTALL_PREFIX}"
+"$PYTHON" -m venv "${VENV_DIR}"
+VENV_PYTHON="${VENV_DIR}/bin/python"
+
 # ── Install pip dependencies ─────────────────────────────────────────────────
 
 echo "Installing Python dependencies ..."
 if [[ -f "${SCRIPT_DIR}/requirements.txt" ]]; then
-    "$PYTHON" -m pip install --quiet --upgrade pip
-    "$PYTHON" -m pip install --quiet -r "${SCRIPT_DIR}/requirements.txt"
+    "${VENV_PYTHON}" -m pip install --quiet --upgrade pip
+    "${VENV_PYTHON}" -m pip install --quiet -r "${SCRIPT_DIR}/requirements.txt"
 else
     echo "  Warning: requirements.txt not found, skipping pip install."
 fi
+
+PYTHON="${VENV_PYTHON}"
 
 # ── Copy files to install prefix ─────────────────────────────────────────────
 
