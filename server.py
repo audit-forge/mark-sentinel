@@ -390,10 +390,6 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             pass
 
     def _api_scan(self):
-        origin = self.headers.get('Origin', '')
-        if origin and not origin.startswith('http://localhost') and not origin.startswith('http://127.0.0.1'):
-            self._send(403, b'Forbidden', 'text/plain')
-            return
         with _lock:
             if _status == 'running':
                 self._json({'error': 'scan already running'}, 409)
