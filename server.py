@@ -15,6 +15,10 @@ if sys.version_info < (3, 11):
         f"Running: Python {sys.version.split()[0]}\n"
         "Install: https://python.org/downloads/"
     )
+if hasattr(sys.stdout, 'reconfigure'):
+    sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+if hasattr(sys.stderr, 'reconfigure'):
+    sys.stderr.reconfigure(encoding='utf-8', errors='replace')
 import http.server
 import io
 import json
@@ -130,7 +134,7 @@ def _run_scan(mode: str, target: str, profile: str, providers: list[str]):
         emit('')
         proc = subprocess.Popen(
             cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-            text=True, cwd=str(ROOT),
+            text=True, encoding='utf-8', cwd=str(ROOT),
         )
         for line in proc.stdout:
             emit(line.rstrip())

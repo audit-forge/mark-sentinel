@@ -16,6 +16,10 @@ if sys.version_info < (3, 11):
         f"Running: Python {sys.version.split()[0]}\n"
         "Install: https://python.org/downloads/"
     )
+if hasattr(sys.stdout, 'reconfigure'):
+    sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+if hasattr(sys.stderr, 'reconfigure'):
+    sys.stderr.reconfigure(encoding='utf-8', errors='replace')
 import argparse
 import json
 import os
@@ -30,6 +34,7 @@ from checks.agentic import run_all as agent_checks
 from checks.supply_chain import run_all as supply_checks
 from checks.governance import run_all as gov_checks
 from checks.ai_tools import run_all as tool_checks
+from checks.runtime import run_all as runtime_checks
 from checks import FAIL
 from output.plain_english import format_report
 from output.json_report import format_json
@@ -372,6 +377,7 @@ examples:
     results.extend(supply_checks(ctx))
     results.extend(gov_checks(ctx))
     results.extend(tool_checks(ctx))
+    results.extend(runtime_checks(ctx))
 
     # Apply profile filter
     results = filter_results(results, profile)
