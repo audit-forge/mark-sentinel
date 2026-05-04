@@ -399,7 +399,7 @@ examples:
             out_path = args.out_file
             if not out_path.endswith('.json'):
                 out_path += '.json'
-            with open(out_path, 'w') as f:
+            with open(out_path, 'w', encoding='utf-8') as f:
                 f.write(json_text)
             print(f"\n[JSON report written to {out_path}]", file=sys.stderr)
 
@@ -411,7 +411,7 @@ examples:
         if out_path:
             if not out_path.endswith('.sarif') and not out_path.endswith('.json'):
                 out_path += '.sarif'
-            with open(out_path, 'w') as f:
+            with open(out_path, 'w', encoding='utf-8') as f:
                 f.write(sarif_text)
             print(f"\n[SARIF report written to {out_path}]", file=sys.stderr)
 
@@ -476,7 +476,7 @@ examples:
         out_path = args.out_file
         if out_path:
             rego_path = out_path if out_path.endswith('.rego') else out_path + '.rego'
-            with open(rego_path, 'w') as f:
+            with open(rego_path, 'w', encoding='utf-8') as f:
                 f.write(rego_text)
             print(f"\n[Rego policy written to {rego_path}]")
         else:
@@ -488,7 +488,7 @@ examples:
         out_path = args.out_file
         if out_path:
             kyverno_path = out_path if out_path.endswith('.yaml') else out_path + '_kyverno.yaml'
-            with open(kyverno_path, 'w') as f:
+            with open(kyverno_path, 'w', encoding='utf-8') as f:
                 f.write(kyverno_text)
             print(f"\n[Kyverno policies written to {kyverno_path}]")
         else:
@@ -541,7 +541,7 @@ examples:
         print(f"\n[Dashboard written to {dash_path}]", file=sys.stderr)
 
     if args.out_file and 'json' not in output_formats and 'sarif' not in output_formats and output_text:
-        with open(args.out_file, 'w') as f:
+        with open(args.out_file, 'w', encoding='utf-8') as f:
             f.write(output_text)
         print(f"\n[Report written to {args.out_file}]")
 
