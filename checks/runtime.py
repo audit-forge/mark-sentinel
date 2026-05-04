@@ -50,7 +50,7 @@ def check_runtime_001(ctx: ScanContext) -> CheckResult:
             check_id="AI-RUNTIME-001",
             status=PASS,
             title="Inference activity logging enabled",
-            detail="monitoring.enabled = true and activity log database configured.",
+            details="monitoring.enabled = true and activity log database configured.",
             remediation="",
         )
 
@@ -60,7 +60,7 @@ def check_runtime_001(ctx: ScanContext) -> CheckResult:
             status=WARN,
             severity="MEDIUM",
             title="Inference activity logging enabled but no log path configured",
-            detail="monitoring.enabled = true but no db_path found — logs may not persist.",
+            details="monitoring.enabled = true but no db_path found — logs may not persist.",
             remediation=(
                 'Add "db_path" under "monitoring" in hash.json:\n'
                 '  "monitoring": {"enabled": true, "db_path": "workspace/memory/.activity.db"}'
@@ -72,7 +72,7 @@ def check_runtime_001(ctx: ScanContext) -> CheckResult:
         status=FAIL,
         severity="CRITICAL",
         title="Inference activity logging not enabled",
-        detail="No monitoring configuration found. Every inference call is untracked.",
+        details="No monitoring configuration found. Every inference call is untracked.",
         remediation=(
             'Add to hash.json (or equivalent config):\n'
             '  "monitoring": {\n'
@@ -94,7 +94,7 @@ def check_runtime_002(ctx: ScanContext) -> CheckResult:
             check_id="AI-RUNTIME-002",
             status=PASS,
             title="Anomaly detection configured",
-            detail="anomaly_detection.enabled = true found in config.",
+            details="anomaly_detection.enabled = true found in config.",
             remediation="",
         )
 
@@ -105,7 +105,7 @@ def check_runtime_002(ctx: ScanContext) -> CheckResult:
             status=WARN,
             severity="MEDIUM",
             title="Activity logging enabled but anomaly detection not configured",
-            detail="monitoring.enabled = true but no anomaly_detection block found.",
+            details="monitoring.enabled = true but no anomaly_detection block found.",
             remediation=(
                 'Add anomaly detection to hash.json:\n'
                 '  "monitoring": {\n'
@@ -120,7 +120,7 @@ def check_runtime_002(ctx: ScanContext) -> CheckResult:
         status=FAIL,
         severity="HIGH",
         title="Anomaly detection not configured",
-        detail="No anomaly detection found. Token spikes, off-hours agentic activity, "
+        details="No anomaly detection found. Token spikes, off-hours agentic activity, "
                "and unexpected tool calls go undetected.",
         remediation=(
             'Add to hash.json:\n'
@@ -142,7 +142,7 @@ def check_runtime_003(ctx: ScanContext) -> CheckResult:
             check_id="AI-RUNTIME-003",
             status=PASS,
             title="Human oversight / HITL configured for autonomous tasks",
-            detail="Human-in-the-loop or approval requirement found in config.",
+            details="Human-in-the-loop or approval requirement found in config.",
             remediation="",
         )
 
@@ -154,7 +154,7 @@ def check_runtime_003(ctx: ScanContext) -> CheckResult:
             status=FAIL,
             severity="HIGH",
             title="Autonomous agents configured without human oversight checkpoint",
-            detail="An agents block is present but no human-in-the-loop or approval "
+            details="An agents block is present but no human-in-the-loop or approval "
                    "gate was found. Autonomous tasks can run and act without human review.",
             remediation=(
                 'Add to your agent config:\n'
@@ -171,7 +171,7 @@ def check_runtime_003(ctx: ScanContext) -> CheckResult:
         status=WARN,
         severity="MEDIUM",
         title="No human oversight policy found",
-        detail="No human-in-the-loop configuration detected. If autonomous agents are "
+        details="No human-in-the-loop configuration detected. If autonomous agents are "
                "used, add explicit approval gates for high-impact actions.",
         remediation=(
             'Add to hash.json:\n'
@@ -190,7 +190,7 @@ def check_runtime_004(ctx: ScanContext) -> CheckResult:
             check_id="AI-RUNTIME-004",
             status=PASS,
             title="Token budget limits configured",
-            detail=f"Found {len(matches)} token limit/budget setting(s) in config.",
+            details=f"Found {len(matches)} token limit/budget setting(s) in config.",
             remediation="",
         )
 
@@ -199,7 +199,7 @@ def check_runtime_004(ctx: ScanContext) -> CheckResult:
         status=FAIL,
         severity="HIGH",
         title="No token budget limits configured",
-        detail="No max_tokens, token_budget, or token_limit found. A runaway loop or "
+        details="No max_tokens, token_budget, or token_limit found. A runaway loop or "
                "adversarial prompt could exhaust the entire API quota.",
         remediation=(
             'Add token limits per provider/model in config:\n'
@@ -224,7 +224,7 @@ def check_runtime_005(ctx: ScanContext) -> CheckResult:
             check_id="AI-RUNTIME-005",
             status=PASS,
             title="Prompt audit trail configured",
-            detail="Explicit prompt logging or audit trail setting found.",
+            details="Explicit prompt logging or audit trail setting found.",
             remediation="",
         )
 
@@ -237,7 +237,7 @@ def check_runtime_005(ctx: ScanContext) -> CheckResult:
                 check_id="AI-RUNTIME-005",
                 status=PASS,
                 title="Prompt audit trail retained via activity log",
-                detail=f"Activity logging enabled with {days}-day retention stores prompt hashes.",
+                details=f"Activity logging enabled with {days}-day retention stores prompt hashes.",
                 remediation="",
             )
         return CheckResult(
@@ -245,7 +245,7 @@ def check_runtime_005(ctx: ScanContext) -> CheckResult:
             status=WARN,
             severity="MEDIUM",
             title="Retention period too short for audit trail",
-            detail=f"retention_days = {days} is below the recommended 30-day minimum.",
+            details=f"retention_days = {days} is below the recommended 30-day minimum.",
             remediation='Set "retention_days": 30 (or higher) under "monitoring" in config.',
         )
 
@@ -255,7 +255,7 @@ def check_runtime_005(ctx: ScanContext) -> CheckResult:
             status=WARN,
             severity="MEDIUM",
             title="Activity logging on but no explicit retention policy",
-            detail="No retention_days configured — log growth is unbounded and audit "
+            details="No retention_days configured — log growth is unbounded and audit "
                    "trail duration is undefined.",
             remediation='Add "retention_days": 30 under "monitoring" in hash.json.',
         )
@@ -265,7 +265,7 @@ def check_runtime_005(ctx: ScanContext) -> CheckResult:
         status=FAIL,
         severity="HIGH",
         title="No prompt audit trail",
-        detail="No prompt logging, audit trail, or activity retention policy found. "
+        details="No prompt logging, audit trail, or activity retention policy found. "
                "Forensic investigation after a security incident is not possible.",
         remediation=(
             'Enable monitoring with retention in hash.json:\n'
