@@ -201,6 +201,10 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self._api_agent_report()
         elif path.startswith('/api/fleet/scan/'):
             self._api_fleet_scan(path[len('/api/fleet/scan/'):])
+        elif path == '/api/fleet/update/all':
+            self._api_fleet_update_all()
+        elif path.startswith('/api/fleet/update/'):
+            self._api_fleet_update(path[len('/api/fleet/update/'):])
         else:
             self._not_found()
 
@@ -488,6 +492,30 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         cmd_id = store.enqueue_command(device_id, 'scan_now')
         self._json({'status': 'queued', 'device_id': device_id, 'command_id': cmd_id})
 
+    def _api_fleet_update(self, device_id: str):
+        """POST /api/fleet/update/<device_id> — push update_self command to one device."""
+        if not device_id:
+            self._json({'error': 'missing device_id'}, 400)
+            return
+        store = _get_store()
+        if store.get_device(device_id) is None:
+            self._json({'error': 'device not found'}, 404)
+            return
+        cmd_id = store.enqueue_command(device_id, 'update_self')
+        self._json({'status': 'queued', 'device_id': device_id, 'command_id': cmd_id})
+
+    def _api_fleet_update_all(self):
+        """POST /api/fleet/update/all — push update_self command to every known device."""
+        store = _get_store()
+        devices = store.list_devices()
+        queued = []
+        for d in devices:
+            did = d.get('device_id', '')
+            if did:
+                store.enqueue_command(did, 'update_self')
+                queued.append(did)
+        self._json({'status': 'queued', 'count': len(queued), 'devices': queued})
+
     def _api_discover(self):
         """GET /api/discover — scan local subnet for AI services (runs in thread)."""
         try:
@@ -626,6 +654,8 @@ def _build_fleet_html(devices: list[dict]) -> str:
           <td><span class="risk-dot {rc}"></span></td>
           <td onclick="event.stopPropagation()" style="white-space:nowrap">
             <button class="scan-btn" id="sb-{did}" onclick="scanDevice('{did}')">Scan Now</button>
+            <button class="scan-btn" id="ub-{did}" onclick="updateDevice('{did}')"
+                    style="margin-left:4px;color:#e3b341;border-color:#30363d">Update</button>
             <a href="/fleet/device/{did}/dashboard" target="_blank"
                style="margin-left:8px;background:#161b22;border:1px solid #30363d;color:#8b949e;
                       border-radius:4px;padding:3px 10px;font-size:12px;text-decoration:none;
@@ -724,7 +754,11 @@ body{{background:#0d1117;color:#c9d1d9;font-family:-apple-system,BlinkMacSystemF
     <div class="scard"><div class="scard-n c-green" id="sc-pass">{total_pass}</div><div class="scard-l">Total Passes</div></div>
   </div>
 
-  <div class="sec-hdr">Connected Devices</div>
+  <div class="sec-hdr" style="display:flex;align-items:center;justify-content:space-between">
+    <span>Connected Devices</span>
+    <button class="scan-btn" onclick="updateAllDevices()"
+            style="color:#e3b341;border-color:#30363d;font-size:12px">Update All Agents</button>
+  </div>
   <div class="refresh-note" id="refresh-note">Auto-refreshes every 60s</div>
   <table class="dev-table">
     <thead><tr>
@@ -807,6 +841,8 @@ async function refreshDevices() {{
         <td><span class="risk-dot ${{rc}}"></span></td>
         <td onclick="event.stopPropagation()" style="white-space:nowrap">
           <button class="scan-btn" id="sb-${{esc(did)}}" onclick="scanDevice('${{esc(did)}}')" >Scan Now</button>
+          <button class="scan-btn" id="ub-${{esc(did)}}" onclick="updateDevice('${{esc(did)}}')"
+                  style="margin-left:4px;color:#e3b341;border-color:#30363d">Update</button>
           <a href="/fleet/device/${{esc(did)}}/dashboard" target="_blank"
              style="margin-left:8px;background:#161b22;border:1px solid #30363d;color:#8b949e;
                     border-radius:4px;padding:3px 10px;font-size:12px;text-decoration:none;
@@ -886,6 +922,45 @@ async function scanDevice(id) {{
     }}
   }} catch (e) {{
     if (btn) {{ btn.disabled = false; btn.textContent = 'Scan Now'; }}
+  }}
+}}
+
+async function updateDevice(id) {{
+  const btn = document.getElementById('ub-' + id);
+  if (btn) {{ btn.disabled = true; btn.textContent = 'Queued…'; }}
+  try {{
+    const resp = await fetch('/api/fleet/update/' + id, {{method: 'POST'}});
+    const data = await resp.json();
+    if (resp.ok) {{
+      if (btn) btn.textContent = 'Queued ✓';
+      setTimeout(() => {{ if (btn) {{ btn.disabled = false; btn.textContent = 'Update'; }} }}, 8000);
+    }} else {{
+      if (btn) {{ btn.disabled = false; btn.textContent = 'Error'; }}
+      alert(data.error || 'Failed to queue update');
+    }}
+  }} catch (e) {{
+    if (btn) {{ btn.disabled = false; btn.textContent = 'Update'; }}
+  }}
+}}
+
+async function updateAllDevices() {{
+  const btn = event.currentTarget;
+  btn.disabled = true;
+  btn.textContent = 'Queuing…';
+  try {{
+    const resp = await fetch('/api/fleet/update/all', {{method: 'POST'}});
+    const data = await resp.json();
+    if (resp.ok) {{
+      btn.textContent = `Queued (${{data.count}})`;
+      setTimeout(() => {{ btn.disabled = false; btn.textContent = 'Update All Agents'; }}, 8000);
+    }} else {{
+      btn.disabled = false;
+      btn.textContent = 'Update All Agents';
+      alert(data.error || 'Failed to queue updates');
+    }}
+  }} catch (e) {{
+    btn.disabled = false;
+    btn.textContent = 'Update All Agents';
   }}
 }}
 
