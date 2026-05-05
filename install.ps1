@@ -241,9 +241,21 @@ Set-Location '$InstallDir'
     Write-Host "  To start manually: & '$PythonExe' '$InstallDir\agent.py' --config '$ConfigFile' --daemon" -ForegroundColor DarkGray
 }
 
+# ── Desktop shortcut → opens fleet dashboard in browser ──────────────────────
+$ShortcutPath = [Environment]::GetFolderPath('Desktop') + '\Sentinel Dashboard.url'
+$DashUrl = if ($Server) { $Server.TrimEnd('/') + '/fleet' } else { 'http://localhost:7331/fleet' }
+try {
+    Set-Content -Path $ShortcutPath -Value "[InternetShortcut]`r`nURL=$DashUrl`r`nIconIndex=0`r`n" -Encoding ASCII
+    Write-OK "Desktop shortcut created: $ShortcutPath"
+} catch {
+    Write-Warn "Could not create desktop shortcut: $_"
+}
+
 Write-Host ""
 Write-Host "M.A.R.K. Sentinel Agent installed successfully." -ForegroundColor Green
 Write-Host "  Install dir : $InstallDir"
 Write-Host "  Config      : $ConfigFile"
+Write-Host "  Shortcut    : $ShortcutPath"
 Write-Host ""
 Write-Host "Edit $ConfigFile to set your server URL and token, then restart the service."
+Write-Host "Or open the fleet dashboard and use Settings to update the config without a terminal."
