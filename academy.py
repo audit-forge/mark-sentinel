@@ -25,6 +25,7 @@ SECTIONS = [
     ("status", "Finding Status"),
     ("tabs", "Dashboard Tabs"),
     ("command", "Command Center"),
+    ("settings", "Settings"),
     ("alerts", "Alerts & Notifications"),
     ("catalog", "Check Catalog"),
     ("troubleshoot", "Troubleshooting"),
@@ -382,6 +383,79 @@ def build(root: pathlib.Path) -> bytes:
                       "python3 audit.py --mode config --profile financial --output plain\n"
                       "</code></pre>")
 
+    settings = (
+        "<p>The <b>Settings</b> panel lives at the bottom of the Command Center. "
+        "It exists for one reason: <b>once Sentinel is installed, you should never need to open a terminal again.</b> "
+        "Everything that needs a human decision after install is exposed here.</p>"
+
+        "<h3>What is it for?</h3>"
+        "<p>After you install Sentinel on a device, two things may change over time depending on your situation:</p>"
+        "<ol>"
+        "<li><b>Which compliance rules to run</b> — called the Compliance Profile</li>"
+        "<li><b>How often to run them</b> — called the Scan Interval</li>"
+        "</ol>"
+        "<p>Settings lets you change both without touching a config file or opening a terminal. "
+        "Everything else — server address, authentication token, what folder to scan — is set once during install "
+        "and never needs to change.</p>"
+
+        "<h3>Compliance Profile</h3>"
+        "<p>The profile tells Sentinel <i>which rulebook to audit against</i>. "
+        "Different industries have different requirements. You pick the one that matches your situation.</p>"
+        "<table class=\"sev-table\">"
+        "<tr><th>Default</th><td>General-purpose AI security checks. Good starting point for any organization.</td></tr>"
+        "<tr><th>Financial Services</th><td>Full check suite mapped to NIST AI RMF 1.0, SR 11-7, and SR 26-2. "
+        "Required for banks and financial institutions. Use this for PNC and similar clients.</td></tr>"
+        "<tr><th>FedRAMP / NIST 800-53</th><td>Controls required for U.S. federal cloud deployments.</td></tr>"
+        "<tr><th>CMMC</th><td>Defense supply chain compliance (DoD contractors).</td></tr>"
+        "<tr><th>SMB</th><td>Simplified language and lightweight checks for small businesses with no compliance team.</td></tr>"
+        "</table>"
+
+        "<h3>When would you change the profile?</h3>"
+        "<ul>"
+        "<li>A new client has different regulatory requirements than your current setting — "
+        "switch to their profile before the next scan so the report speaks their language.</li>"
+        "<li>You onboard a bank — switch from Default to Financial Services so the report "
+        "references SR 26-2 and NIST AI RMF instead of generic controls.</li>"
+        "<li>A customer gets acquired by a government contractor — switch to CMMC.</li>"
+        "<li>You want to run a quick lightweight check on a small business — switch to SMB "
+        "so the report doesn't overwhelm them with regulatory language they don't need.</li>"
+        "</ul>"
+
+        "<h3>Scan Interval</h3>"
+        "<p>This controls how frequently Sentinel automatically re-scans the device and sends updated results "
+        "to the Command Center. The value is in seconds.</p>"
+        "<table class=\"sev-table\">"
+        "<tr><th>3600</th><td>Every hour — use during active remediation or when a client is fixing issues and wants to see progress quickly.</td></tr>"
+        "<tr><th>86400</th><td>Once a day — good default for ongoing monitoring once things are in order.</td></tr>"
+        "<tr><th>604800</th><td>Once a week — low-overhead background monitoring for stable environments.</td></tr>"
+        "</table>"
+
+        "<h3>When would you change the interval?</h3>"
+        "<ul>"
+        "<li>A client is actively fixing findings — drop to 3600 (hourly) so you can both watch the score improve in real time.</li>"
+        "<li>An audit is coming up in two weeks — increase frequency to daily so you have a dense trend line to show auditors.</li>"
+        "<li>Everything is clean and stable — set to weekly to reduce noise.</li>"
+        "</ul>"
+
+        "<h3>Desktop Shortcut</h3>"
+        "<p>The <b>Desktop Shortcut</b> button (top right of the Settings section) downloads a file you can "
+        "save to your desktop. Double-clicking it opens the Command Center in your browser instantly — "
+        "no terminal, no remembering the URL. On Windows it creates a <code>.url</code> file; "
+        "on Mac it creates a <code>.webloc</code> file. Both work by double-click.</p>"
+        "<p>On Windows, the installer (<code>install.ps1</code>) creates this shortcut automatically on the desktop "
+        "during setup, so most users will already have it without needing to download it manually.</p>"
+
+        "<h3>What Settings does NOT do</h3>"
+        "<p>Settings does not control:</p>"
+        "<ul>"
+        "<li>Which server the agent reports to — set at install time, does not change</li>"
+        "<li>Which folder is scanned — set at install time, Sentinel figures this out automatically</li>"
+        "<li>Authentication tokens — managed by the installer, not the UI</li>"
+        "</ul>"
+        "<p>Those are one-time install decisions. If they ever need to change, that is done by re-running "
+        "the installer or using the Update Agent button from the Command Center.</p>"
+    )
+
     alerts = ("<p>Create a file called <code>alerts.json</code> in the Sentinel directory:</p>"
               "<pre><code>{\n  \"webhook_url\": \"https://hooks.slack.com/services/YOUR/WEBHOOK/URL\",\n  \"min_severity\": \"HIGH\",\n  \"email_to\": \"security@yourcompany.com\",\n  \"email_from\": \"sentinel@yourcompany.com\",\n  \"smtp_host\": \"smtp.yourcompany.com\"\n}</code></pre>"
               "<p>Fields:</p>"
@@ -668,6 +742,7 @@ def build(root: pathlib.Path) -> bytes:
         section_html('status', 'Finding Status', status),
         section_html('tabs', 'Dashboard Tabs', tabs),
         section_html('command', 'Command Center', command_center),
+        section_html('settings', 'Settings', settings),
         section_html('alerts', 'Alerts & Notifications', alerts),
         '<section id="catalog" class="doc-section">',
         '<h2>Check Catalog</h2>',
