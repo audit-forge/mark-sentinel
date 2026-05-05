@@ -318,13 +318,14 @@ function isDisagreement(id){const statuses=DATA.providers.map(p=>{const f=p.find
 function toggleDisagreements(){showDisagreementsOnly=!showDisagreementsOnly;renderCompare();}
 
 function riskInfo(s){
-  const ratio=s.total_evaluated>0?s.fail/s.total_evaluated:0;
-  const score=Math.round(ratio*100);
-  if(s.has_critical_fail)return{cls:'c-red',label:'Critical Risk',score:Math.max(score,65)};
-  if(s.fail>5)return{cls:'c-orange',label:'High Risk',score:Math.max(score,40)};
-  if(s.fail>0)return{cls:'c-yellow',label:'Medium Risk',score:Math.max(score,20)};
-  if(s.warn>0)return{cls:'c-yellow',label:'Low Risk',score:15};
-  return{cls:'c-green',label:'Minimal Risk',score:5};
+  const n=s.total_evaluated||0;
+  const crit=s.critical_count||0;
+  const weighted=n>0?Math.min(100,Math.round(((s.fail||0)+crit)/n*100)):0;
+  if(s.has_critical_fail)return{cls:'c-red',label:'Critical Risk',score:weighted};
+  if(s.fail>5)return{cls:'c-orange',label:'High Risk',score:weighted};
+  if(s.fail>0)return{cls:'c-yellow',label:'Medium Risk',score:weighted};
+  if(s.warn>0)return{cls:'c-yellow',label:'Low Risk',score:n>0?Math.max(1,Math.round((s.warn||0)/n*50)):5};
+  return{cls:'c-green',label:'Minimal Risk',score:0};
 }
 
 function renderOverview(){

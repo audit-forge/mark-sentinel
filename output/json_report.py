@@ -11,13 +11,15 @@ def format_json(results: list, profile: dict, target: str, mode: str) -> str:
     active = [r for r in results if r.status != "SKIP"]
     skipped = [r for r in results if r.status == "SKIP"]
 
+    critical_fails = [r for r in active if r.status == "FAIL" and r.severity == "CRITICAL"]
     summary = {
         "total_evaluated": len(active),
         "pass": sum(1 for r in active if r.status == "PASS"),
         "warn": sum(1 for r in active if r.status == "WARN"),
         "fail": sum(1 for r in active if r.status == "FAIL"),
         "skip": len(skipped),
-        "has_critical_fail": any(r.status == "FAIL" and r.severity == "CRITICAL" for r in results),
+        "has_critical_fail": len(critical_fails) > 0,
+        "critical_count": len(critical_fails),
     }
 
     report = {
