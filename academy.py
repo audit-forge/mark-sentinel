@@ -20,6 +20,7 @@ SECTIONS = [
     ("linux", "Linux"),
     ("docker", "Docker"),
     ("first-scan", "First Scan"),
+    ("profiles", "Profiles"),
     ("severity", "Severity Levels"),
     ("status", "Finding Status"),
     ("tabs", "Dashboard Tabs"),
@@ -135,7 +136,8 @@ def build(root: pathlib.Path) -> bytes:
 
     # Static content blocks
     overview = ("<p>Sentinel is an AI security audit platform. Scans AI deployments for STIG/NIST/OWASP compliance. "
-                "Two components: server (dashboard) and agent (installed on each device).</p>")
+                "Two components: server (dashboard) and agent (installed on each device).</p>"
+                "<p>Sentinel now supports NIST AI RMF 1.0 and SR 26-2 (April 2026 model risk guidance) for financial sector deployments.</p>")
 
     prereqs = ("<ul>"
                "<li>Python 3.11 or later (required on every machine)</li>"
@@ -331,6 +333,14 @@ def build(root: pathlib.Path) -> bytes:
                   "<li>For fleet: open the Command Center from the top nav link</li>"
                   "</ol>")
 
+    profiles = ("<p>Sentinel ships with several built-in profiles to tailor checks for different environments.</p>"
+                "<ul>"
+                "<li><b>SMB Basic</b> — lightweight checks suitable for small/medium businesses.</li>"
+                "<li><b>FedRAMP Moderate</b> — controls mapped to NIST 800-53 for cloud deployments.</li>"
+                "<li><b>CMMC Level 2</b> — controlled environment mapping for DoD supply chain.</li>"
+                "<li><b>Financial Services</b> — runs all checks mapped to NIST AI RMF 1.0, SR 11-7, and SR 26-2. Designed for banks and financial institutions.</li>"
+                "</ul>")
+
     severity = ("<table class=\"sev-table\">"
                 "<tr><th>CRITICAL</th><td>system is actively exposed; fix immediately</td></tr>"
                 "<tr><th>HIGH</th><td>significant risk; fix within 24 hours</td></tr>"
@@ -360,7 +370,17 @@ def build(root: pathlib.Path) -> bytes:
                       "<li>\"Full Report\" opens the device dashboard in a new tab</li>"
                       "<li>Network Discovery scans the local subnet for AI services</li>"
                       "<li>Device list auto-refreshes every 60 seconds without a page reload</li>"
-                      "</ul>")
+                      "</ul>"
+                      "<h4>Command examples</h4>"
+                      "<pre><code># Generate a PDF report for compliance handoff\n"
+                      "python3 audit.py --mode config --profile financial --output pdf --out-file pnc_audit\n\n"
+                      "# Scan a large enterprise repository (increase file limit)\n"
+                      "python3 audit.py --mode config --profile financial --max-files 5000 --output plain\n\n"
+                      "# Compare two previous scans (before/after remediation)\n"
+                      "python3 audit.py --compare before.json after.json\n\n"
+                      "# Run financial profile (NIST AI RMF + SR 26-2)\n"
+                      "python3 audit.py --mode config --profile financial --output plain\n"
+                      "</code></pre>")
 
     alerts = ("<p>Create a file called <code>alerts.json</code> in the Sentinel directory:</p>"
               "<pre><code>{\n  \"webhook_url\": \"https://hooks.slack.com/services/YOUR/WEBHOOK/URL\",\n  \"min_severity\": \"HIGH\",\n  \"email_to\": \"security@yourcompany.com\",\n  \"email_from\": \"sentinel@yourcompany.com\",\n  \"smtp_host\": \"smtp.yourcompany.com\"\n}</code></pre>"
@@ -643,6 +663,7 @@ def build(root: pathlib.Path) -> bytes:
         section_html('linux', 'Linux', linux),
         section_html('docker', 'Docker', docker),
         section_html('first-scan', 'First Scan', first_scan),
+        section_html('profiles', 'Profiles', profiles),
         section_html('severity', 'Severity Levels', severity),
         section_html('status', 'Finding Status', status),
         section_html('tabs', 'Dashboard Tabs', tabs),
