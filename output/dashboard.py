@@ -908,7 +908,7 @@ function renderScan(){
       <div class="form-row">
         <span class="form-label">Mode</span>
         <div class="radio-group">
-          <label class="radio-opt"><input type="radio" name="smode" value="demo" ${scanMode==='demo'?'checked':''} onchange="scanMode='demo';renderScan()"> All Providers (Demo)</label>
+          <label class="radio-opt"><input type="radio" name="smode" value="demo" ${scanMode==='demo'?'checked':''} onchange="scanMode='demo';renderScan()"> All Providers</label>
           <label class="radio-opt"><input type="radio" name="smode" value="single" ${scanMode==='single'?'checked':''} onchange="scanMode='single';renderScan()"> Single Provider</label>
         </div>
       </div>
@@ -921,6 +921,7 @@ function renderScan(){
         <span class="form-label">Profile</span>
         <select id="scan-profile" class="form-select">
           <option value="default">Default</option>
+          <option value="financial">Financial Services (NIST AI RMF / SR 26-2)</option>
           <option value="fedramp">FedRAMP / NIST 800-53</option>
           <option value="cmmc">CMMC</option>
           <option value="smb">SMB</option>
