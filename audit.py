@@ -193,7 +193,7 @@ examples:
     parser.add_argument(
         '--output',
         default='plain',
-        help='Output format(s), comma-separated: plain, json, sarif, compliance, rego, kyverno, defectdojo (default: plain)',
+        help='Output format(s), comma-separated: plain, json, sarif, pdf, compliance, rego, kyverno, defectdojo (default: plain)',
     )
     parser.add_argument(
         '--out-file',
@@ -320,6 +320,12 @@ examples:
         metavar='FILE',
         help='Path to alerts_config.json — send email/webhook notifications for new critical findings',
     )
+    parser.add_argument(
+        '--compare',
+        nargs=2,
+        metavar=('BEFORE', 'AFTER'),
+        help='Compare two JSON scan reports and show before/after delta',
+    )
     args = parser.parse_args()
 
     # history subcommand — delegate to audit_history.py CLI
@@ -327,6 +333,21 @@ examples:
         import subprocess as _sp
         _sp.run([sys.executable, str(Path(__file__).parent / 'audit_history.py')] + sys.argv[2:])
         return
+
+    # --compare: short-circuit the CLI to compare two existing JSON reports
+    if getattr(args, 'compare', None):
+        try:
+            from output.comparison import compare_reports
+            import json as _json
+            before_path, after_path = args.compare
+            before = _json.load(open(before_path))
+            after = _json.load(open(after_path))
+            out = compare_reports(before, after)
+            print(out)
+            return
+        except Exception as _e:
+            print(f"[ERROR] Comparison failed: {_e}", file=sys.stderr)
+            sys.exit(1)
 
     if not args.quiet:
         print(BANNER, file=sys.stderr)
@@ -421,6 +442,22 @@ examples:
             with open(out_path, 'w', encoding='utf-8') as f:
                 f.write(sarif_text)
             print(f"\n[SARIF report written to {out_path}]", file=sys.stderr)
+
+    if 'pdf' in output_formats:
+        _model = args.model if args.mode not in ('config', 'hash') else ''
+        try:
+            from output.pdf_report import format_pdf
+            pdf_bytes = format_pdf(results, profile, str(target), mode=args.mode, model=_model)
+            out_path = args.out_file
+            if out_path:
+                out_path = out_path if out_path.endswith('.pdf') else out_path + '.pdf'
+            else:
+                out_path = 'sentinel_report.pdf'
+            with open(out_path, 'wb') as f:
+                f.write(pdf_bytes)
+            print(f"\n[PDF report written to {out_path}]", file=sys.stderr)
+        except Exception as _e:
+            print(f"[ERROR] Failed to generate PDF: {_e}", file=sys.stderr)
 
     # Compliance output (Phase 3)
     if 'compliance' in output_formats:

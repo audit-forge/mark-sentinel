@@ -1,0 +1,9 @@
+openai
+langchain
+anthropic
+azure-ai-services
+tiktoken
+langchain-openai
+langchain-community
+llama-index
+chromadb
