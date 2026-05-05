@@ -526,6 +526,21 @@ def main() -> None:
             elif cmd == 'update_self':
                 log.info('Remote update triggered by server')
                 self_update(cfg)
+            elif cmd and cmd.startswith('set_config:'):
+                try:
+                    updates = json.loads(cmd[len('set_config:'):])
+                    config_path = DEFAULT_CONFIG
+                    existing = json.loads(config_path.read_text(encoding='utf-8')) if config_path.exists() else {}
+                    existing.update({k: v for k, v in updates.items() if k in ('profile', 'interval')})
+                    config_path.write_text(json.dumps(existing, indent=2), encoding='utf-8')
+                    if 'profile' in updates:
+                        cfg['profile'] = updates['profile']
+                    if 'interval' in updates:
+                        cfg['interval'] = int(updates['interval'])
+                        interval = cfg['interval']
+                    log.info('Config updated by server: %s', updates)
+                except Exception as e:
+                    log.error('set_config failed: %s', e)
 
             time.sleep(POLL_INTERVAL)
     else:
