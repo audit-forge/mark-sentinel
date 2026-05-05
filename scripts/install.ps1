@@ -3,7 +3,7 @@
     M.A.R.K. Sentinel -- Windows installer (PowerShell)
 .DESCRIPTION
     Creates a Python virtual environment and installs runtime dependencies.
-    Requires Python 3.9+ (python.exe must be in PATH).
+    Requires Python 3.11+ (python.exe must be in PATH).
     Run from the repository root:  .\scripts\install.ps1
 #>
 Set-StrictMode -Version Latest
@@ -20,7 +20,7 @@ foreach ($cmd in @("python", "python3", "py")) {
     try {
         $raw = & $cmd --version 2>&1
         $ver = "$raw"
-        if ($ver -match "Python 3\.([9]|1[0-9])") {
+        if ($ver -match "Python 3\.(1[1-9])") {
             $PythonExe = $cmd
             Write-Host "  Python found : $ver  ($cmd)" -ForegroundColor Green
             break
@@ -30,7 +30,7 @@ foreach ($cmd in @("python", "python3", "py")) {
 
 if (-not $PythonExe) {
     Write-Host ""
-    Write-Host "  ERROR: Python 3.9+ not found in PATH." -ForegroundColor Red
+    Write-Host "  ERROR: Python 3.11+ not found in PATH." -ForegroundColor Red
     Write-Host "  Download from: https://www.python.org/downloads/" -ForegroundColor Yellow
     Write-Host "  Make sure to check 'Add Python to PATH' during installation." -ForegroundColor Yellow
     exit 1

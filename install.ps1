@@ -100,7 +100,7 @@ if (-not (Test-Path $InstallDir)) {
     New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null
 }
 
-$FilesToCopy = @("agent.py", "audit.py", "audit_safe.py", "storage.py", "server.py", "requirements.txt")
+$FilesToCopy = @("agent.py", "audit.py", "storage.py", "server.py", "requirements.txt")
 foreach ($f in $FilesToCopy) {
     $src = Join-Path $ScriptDir $f
     if (Test-Path $src) {
@@ -188,7 +188,7 @@ if (-not $NoService) {
         & nssm set $ServiceName AppRestartDelay 30000
         & nssm set $ServiceName AppStdout "$env:ProgramData\Sentinel\sentinel-agent.log"
         & nssm set $ServiceName AppStderr "$env:ProgramData\Sentinel\sentinel-agent.log"
-        & nssm set $ServiceName AppEnvironmentExtra "SENTINEL_SERVER=" "SENTINEL_AGENT_TOKEN="
+        & nssm set $ServiceName AppEnvironmentExtra "PYTHONUTF8=1" "SENTINEL_SERVER=" "SENTINEL_AGENT_TOKEN="
         & nssm start $ServiceName
         Write-OK "Service registered and started via NSSM"
 
@@ -200,6 +200,7 @@ if (-not $NoService) {
 # Auto-generated service wrapper for M.A.R.K. Sentinel Agent
 Set-Location '$InstallDir'
 `$env:PYTHONUNBUFFERED = '1'
+`$env:PYTHONUTF8 = '1'
 & '$PythonExe' '$InstallDir\agent.py' --daemon --config '$ConfigFile' 2>&1 |
     Tee-Object -FilePath '$ConfigDir\sentinel-agent.log' -Append
 "@ | Set-Content -Path $WrapperScript -Encoding UTF8

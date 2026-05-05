@@ -2,7 +2,7 @@
 
 This document explains how a pilot tester can run M.A.R.K. Sentinel (ai-stig-audit)
 locally to validate the v1.0 feature set. It assumes the project is checked out
-and Python 3.9+ is available.
+and Python 3.11+ is available.
 
 Quick checklist
 - Install dependencies: pip install -r requirements.txt

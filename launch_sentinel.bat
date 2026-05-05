@@ -19,6 +19,7 @@ if not errorlevel 1 (
 )
 
 :: Start server hidden in background
+SET PYTHONUTF8=1
 start "" /b python server.py --no-browser > .sentinel.log 2>&1
 
 :: Wait for server to respond (up to 6 seconds)
