@@ -854,15 +854,9 @@ body{{background:#0d1117;color:#c9d1d9;font-family:-apple-system,BlinkMacSystemF
     </a>
   </div>
   <div style="background:#161b22;border:1px solid #21262d;border-radius:8px;padding:20px;margin-bottom:28px">
-    <div id="cfg-saved" style="display:none;color:#3fb950;font-size:12px;margin-bottom:10px">&#10003; Saved</div>
+    <div id="cfg-saved" style="display:none;color:#3fb950;font-size:12px;margin-bottom:10px">&#10003; Saved — takes effect on next scan</div>
     <div style="display:grid;grid-template-columns:160px 1fr;gap:10px 16px;align-items:center;max-width:640px">
-      <label style="font-size:13px;color:#8b949e">Server URL</label>
-      <input id="cfg-server" class="form-input" type="text" placeholder="http://10.0.1.50:7331">
-      <label style="font-size:13px;color:#8b949e">Agent Token</label>
-      <input id="cfg-token" class="form-input" type="password" placeholder="leave blank if none">
-      <label style="font-size:13px;color:#8b949e">Scan Target</label>
-      <input id="cfg-target" class="form-input" type="text" placeholder=".">
-      <label style="font-size:13px;color:#8b949e">Profile</label>
+      <label style="font-size:13px;color:#8b949e">Compliance Profile</label>
       <select id="cfg-profile" class="form-select">
         <option value="default">Default</option>
         <option value="financial">Financial Services (NIST AI RMF / SR 26-2)</option>
@@ -870,11 +864,14 @@ body{{background:#0d1117;color:#c9d1d9;font-family:-apple-system,BlinkMacSystemF
         <option value="cmmc">CMMC</option>
         <option value="smb">SMB</option>
       </select>
-      <label style="font-size:13px;color:#8b949e">Scan Interval (s)</label>
-      <input id="cfg-interval" class="form-input" type="number" min="60" placeholder="3600">
+      <label style="font-size:13px;color:#8b949e">Scan Interval</label>
+      <div style="display:flex;align-items:center;gap:8px">
+        <input id="cfg-interval" class="form-input" type="number" min="60" placeholder="3600" style="width:120px">
+        <span style="font-size:12px;color:#484f58">seconds &nbsp;(3600 = hourly, 86400 = daily)</span>
+      </div>
     </div>
     <div style="margin-top:16px">
-      <button class="scan-btn" onclick="saveConfig()" style="color:#3fb950;border-color:#30363d">Save Config</button>
+      <button class="scan-btn" onclick="saveConfig()" style="color:#3fb950;border-color:#30363d">Save</button>
     </div>
   </div>
 </div>
@@ -1198,31 +1195,25 @@ async function loadConfig() {{
     const r = await fetch('/api/config');
     if (!r.ok) return;
     const c = await r.json();
-    const set = (id, val) => {{ const el = document.getElementById(id); if (el && val !== undefined) el.value = val; }};
-    set('cfg-server',   c.server   || '');
-    set('cfg-token',    c.token    || '');
-    set('cfg-target',   c.target   || '');
-    set('cfg-interval', c.interval || '');
     const prof = document.getElementById('cfg-profile');
     if (prof && c.profile) prof.value = c.profile;
+    const intvl = document.getElementById('cfg-interval');
+    if (intvl && c.interval) intvl.value = c.interval;
   }} catch (_) {{}}
 }}
 
 async function saveConfig() {{
-  const get = id => document.getElementById(id)?.value?.trim() || '';
   const body = {{}};
-  const server = get('cfg-server');   if (server)   body.server   = server;
-  const token  = get('cfg-token');    if (token)    body.token    = token;
-  const target = get('cfg-target');   if (target)   body.target   = target;
-  const prof   = document.getElementById('cfg-profile')?.value; if (prof) body.profile = prof;
-  const intvl  = get('cfg-interval'); if (intvl)    body.interval = parseInt(intvl, 10);
+  const prof  = document.getElementById('cfg-profile')?.value;
+  const intvl = document.getElementById('cfg-interval')?.value?.trim();
+  if (prof)  body.profile  = prof;
+  if (intvl) body.interval = parseInt(intvl, 10);
   try {{
-    const r = await fetch('/api/config', {{
+    await fetch('/api/config', {{
       method: 'POST',
       headers: {{'Content-Type': 'application/json'}},
       body: JSON.stringify(body),
     }});
-    const d = await r.json();
     const el = document.getElementById('cfg-saved');
     if (el) {{ el.style.display = 'block'; setTimeout(() => el.style.display = 'none', 3000); }}
   }} catch (e) {{ alert('Save failed: ' + e); }}
