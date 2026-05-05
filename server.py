@@ -658,9 +658,25 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             existing = json.loads(config_path.read_text(encoding='utf-8')) if config_path.exists() else {}
             existing.update(clean)
             config_path.write_text(json.dumps(existing, indent=2), encoding='utf-8')
-            self._json({'status': 'saved'})
         except Exception as e:
             self._json({'error': str(e)}, 500)
+            return
+
+        # Push profile/interval changes to all connected remote agents
+        pushed = 0
+        if 'profile' in clean or 'interval' in clean:
+            try:
+                store = _get_store()
+                cmd_payload = json.dumps({k: clean[k] for k in ('profile', 'interval') if k in clean})
+                for d in store.list_devices():
+                    did = d.get('device_id', '')
+                    if did:
+                        store.enqueue_command(did, f'set_config:{cmd_payload}')
+                        pushed += 1
+            except Exception:
+                pass
+
+        self._json({'status': 'saved', 'pushed_to_agents': pushed})
 
     def _serve_shortcut(self):
         url = f'http://localhost:{_serve_port}/fleet'
@@ -1320,13 +1336,21 @@ async function saveConfig() {{
   if (prof)  body.profile  = prof;
   if (intvl) body.interval = parseInt(intvl, 10);
   try {{
-    await fetch('/api/config', {{
+    const r = await fetch('/api/config', {{
       method: 'POST',
       headers: {{'Content-Type': 'application/json'}},
       body: JSON.stringify(body),
     }});
+    const d = await r.json();
     const el = document.getElementById('cfg-saved');
-    if (el) {{ el.style.display = 'block'; setTimeout(() => el.style.display = 'none', 3000); }}
+    if (el) {{
+      const n = d.pushed_to_agents || 0;
+      el.textContent = n > 0
+        ? `✓ Saved — pushed to ${{n}} connected agent${{n !== 1 ? 's' : ''}}`
+        : '✓ Saved — takes effect on next scan';
+      el.style.display = 'block';
+      setTimeout(() => el.style.display = 'none', 4000);
+    }}
   }} catch (e) {{ alert('Save failed: ' + e); }}
 }}
 
