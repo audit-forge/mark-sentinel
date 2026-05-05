@@ -16,5 +16,6 @@ echo   Open: http://localhost:7331
 echo   Press Ctrl+C to stop
 echo.
 
+SET PYTHONUTF8=1
 python server.py
 pause

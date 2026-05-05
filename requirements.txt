@@ -3,4 +3,4 @@
 # pyyaml is optional but recommended for docker-compose.yml parsing.
 pyyaml==6.0.2
 # google-auth is required only for --mode vertex (Vertex AI Gemini).
-google-auth>=2.0.0
+google-auth==2.40.0
