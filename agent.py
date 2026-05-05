@@ -40,12 +40,14 @@ if hasattr(sys.stderr, 'reconfigure'):
 
 import argparse
 import hashlib
+import io
 import json
 import logging
 import os
 import platform
 import socket
 import subprocess
+import tarfile
 import time
 from pathlib import Path
 from urllib import error as _urlerr
@@ -248,6 +250,45 @@ def poll_for_command(config: dict, device_id: str) -> str | None:
             return data.get('command')
     except Exception:
         return None
+
+
+# ── Self-update ────────────────────────────────────────────────────────────────
+
+def self_update(config: dict) -> bool:
+    """Download bundle.tar.gz from the server and overwrite local files, then restart."""
+    server = config.get('server', '').rstrip('/')
+    if not server:
+        log.error('self_update: no server configured')
+        return False
+    token = config.get('token', '')
+    url = f'{server}/bundle.tar.gz'
+    headers: dict[str, str] = {'User-Agent': f'sentinel-agent/{VERSION}'}
+    if token:
+        headers['Authorization'] = f'Bearer {token}'
+    try:
+        log.info('self_update: downloading bundle from %s', url)
+        req = _urlreq.Request(url, headers=headers)
+        with _urlreq.urlopen(req, timeout=60) as resp:
+            data = resp.read()
+        with tarfile.open(fileobj=io.BytesIO(data), mode='r:gz') as tar:
+            for member in tar.getmembers():
+                # strip leading 'sentinel/' prefix from archive paths
+                parts = Path(member.name).parts
+                if parts and parts[0] == 'sentinel':
+                    rel = Path(*parts[1:]) if len(parts) > 1 else None
+                else:
+                    rel = Path(member.name)
+                if rel is None or not member.isfile():
+                    continue
+                dest = ROOT / rel
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                with tar.extractfile(member) as src, open(dest, 'wb') as dst:
+                    dst.write(src.read())
+        log.info('self_update: bundle extracted — restarting')
+        os.execv(sys.executable, [sys.executable] + sys.argv)
+    except Exception as e:
+        log.error('self_update failed: %s', e)
+        return False
 
 
 # ── Main scan cycle ────────────────────────────────────────────────────────────
@@ -482,6 +523,9 @@ def main() -> None:
                 last_scan = time.time()
                 if ok:
                     last_success = last_scan
+            elif cmd == 'update_self':
+                log.info('Remote update triggered by server')
+                self_update(cfg)
 
             time.sleep(POLL_INTERVAL)
     else:
