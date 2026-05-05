@@ -156,7 +156,7 @@ def build_scan_context(args):
         )
 
     # config mode
-    return scan_directory(str(target), mode="config")
+    return scan_directory(str(target), mode="config", max_files=getattr(args, 'max_files', None))
 
 
 def main():
@@ -205,6 +205,13 @@ examples:
         '--quiet',
         action='store_true',
         help='Suppress banner and progress output',
+    )
+    parser.add_argument(
+        '--max-files',
+        type=int,
+        default=None,
+        metavar='N',
+        help='Max files to scan (default: 2000, or SENTINEL_MAX_FILES env var)',
     )
     # API mode args
     parser.add_argument(
