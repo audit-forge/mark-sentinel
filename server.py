@@ -204,6 +204,12 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self._api_agent_report()
         elif path == '/api/config':
             self._api_set_config()
+        elif path == '/api/system/update':
+            self._api_system_update()
+        elif path == '/api/system/restart-agent':
+            self._api_system_restart_agent()
+        elif path == '/api/system/restart-server':
+            self._api_system_restart_server()
         elif path.startswith('/api/fleet/scan/'):
             self._api_fleet_scan(path[len('/api/fleet/scan/'):])
         elif path == '/api/fleet/update/all':
@@ -584,6 +590,47 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         except Exception as e:
             self._json({'error': str(e)}, 500)
 
+    def _api_system_update(self):
+        """POST /api/system/update — run git pull in ROOT, return output."""
+        try:
+            result = subprocess.run(
+                ['git', 'pull'],
+                cwd=str(ROOT),
+                capture_output=True,
+                text=True,
+                timeout=60,
+            )
+            output = (result.stdout + result.stderr).strip()
+            self._json({'status': 'ok' if result.returncode == 0 else 'error', 'output': output})
+        except Exception as e:
+            self._json({'status': 'error', 'output': str(e)}, 500)
+
+    def _api_system_restart_agent(self):
+        """POST /api/system/restart-agent — restart the agent service."""
+        def _do_restart():
+            time.sleep(0.3)
+            try:
+                if sys.platform == 'win32':
+                    subprocess.run(['net', 'stop', 'SentinelAgent'], capture_output=True)
+                    subprocess.run(['net', 'start', 'SentinelAgent'], capture_output=True)
+                elif sys.platform == 'darwin':
+                    subprocess.run(['launchctl', 'stop', 'com.mark.sentinel.agent'], capture_output=True)
+                    subprocess.run(['launchctl', 'start', 'com.mark.sentinel.agent'], capture_output=True)
+                else:
+                    subprocess.run(['systemctl', 'restart', 'sentinel-agent'], capture_output=True)
+            except Exception as e:
+                print(f'[server] restart-agent error: {e}', file=sys.stderr)
+        threading.Thread(target=_do_restart, daemon=True).start()
+        self._json({'status': 'restarting'})
+
+    def _api_system_restart_server(self):
+        """POST /api/system/restart-server — restart this server process via os.execv."""
+        def _do_restart():
+            time.sleep(0.5)
+            os.execv(sys.executable, [sys.executable] + sys.argv)
+        threading.Thread(target=_do_restart, daemon=True).start()
+        self._json({'status': 'restarting'})
+
     def _api_get_config(self):
         config_path = ROOT / 'agent_config.json'
         if not config_path.exists():
@@ -853,7 +900,8 @@ body{{background:#0d1117;color:#c9d1d9;font-family:-apple-system,BlinkMacSystemF
       &#8659; Desktop Shortcut
     </a>
   </div>
-  <div style="background:#161b22;border:1px solid #21262d;border-radius:8px;padding:20px;margin-bottom:28px">
+  <div style="background:#161b22;border:1px solid #21262d;border-radius:8px;padding:20px;margin-bottom:16px">
+    <div style="font-size:12px;color:#8b949e;font-weight:600;text-transform:uppercase;letter-spacing:.06em;margin-bottom:14px">Configuration</div>
     <div id="cfg-saved" style="display:none;color:#3fb950;font-size:12px;margin-bottom:10px">&#10003; Saved — takes effect on next scan</div>
     <div style="display:grid;grid-template-columns:160px 1fr;gap:10px 16px;align-items:center;max-width:640px">
       <label style="font-size:13px;color:#8b949e">Compliance Profile</label>
@@ -867,12 +915,27 @@ body{{background:#0d1117;color:#c9d1d9;font-family:-apple-system,BlinkMacSystemF
       <label style="font-size:13px;color:#8b949e">Scan Interval</label>
       <div style="display:flex;align-items:center;gap:8px">
         <input id="cfg-interval" class="form-input" type="number" min="60" placeholder="3600" style="width:120px">
-        <span style="font-size:12px;color:#484f58">seconds &nbsp;(3600 = hourly, 86400 = daily)</span>
+        <span style="font-size:12px;color:#484f58">seconds &nbsp;(3600 = hourly · 86400 = daily)</span>
       </div>
     </div>
     <div style="margin-top:16px">
       <button class="scan-btn" onclick="saveConfig()" style="color:#3fb950;border-color:#30363d">Save</button>
     </div>
+  </div>
+
+  <div style="background:#161b22;border:1px solid #21262d;border-radius:8px;padding:20px;margin-bottom:28px">
+    <div style="font-size:12px;color:#8b949e;font-weight:600;text-transform:uppercase;letter-spacing:.06em;margin-bottom:14px">System</div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px">
+      <button class="scan-btn" id="btn-pull" onclick="pullUpdates()"
+              style="color:#e3b341;border-color:#30363d">&#8659; Pull Latest Updates</button>
+      <button class="scan-btn" id="btn-restart-agent" onclick="restartAgent()"
+              style="color:#58a6ff;border-color:#30363d">&#8635; Restart Agent</button>
+      <button class="scan-btn" id="btn-restart-server" onclick="restartServer()"
+              style="color:#58a6ff;border-color:#30363d">&#8635; Restart Dashboard</button>
+    </div>
+    <div id="sys-log" style="display:none;background:#0d1117;border:1px solid #30363d;border-radius:6px;
+         padding:12px;font-family:monospace;font-size:12px;color:#8b949e;white-space:pre-wrap;
+         max-height:200px;overflow-y:auto;line-height:1.6"></div>
   </div>
 </div>
 
@@ -1188,6 +1251,54 @@ function closeDevice() {{
   panel.style.padding = '';
   panel.style.minHeight = '';
   panel.innerHTML = '<div class="empty">← Click a device row to view its dashboard</div>';
+}}
+
+function _sysLog(msg, color) {{
+  const el = document.getElementById('sys-log');
+  if (!el) return;
+  el.style.display = 'block';
+  el.style.color = color || '#8b949e';
+  el.textContent = msg;
+}}
+
+async function pullUpdates() {{
+  const btn = document.getElementById('btn-pull');
+  btn.disabled = true; btn.textContent = 'Pulling…';
+  _sysLog('Running git pull…', '#8b949e');
+  try {{
+    const r = await fetch('/api/system/update', {{method:'POST'}});
+    const d = await r.json();
+    _sysLog(d.output || '(no output)', d.status === 'ok' ? '#3fb950' : '#f85149');
+    btn.textContent = d.status === 'ok' ? '&#8659; Up to date' : '&#8659; Pull failed';
+    setTimeout(() => {{ btn.disabled = false; btn.innerHTML = '&#8659; Pull Latest Updates'; }}, 5000);
+  }} catch(e) {{
+    _sysLog('Error: ' + e, '#f85149');
+    btn.disabled = false; btn.innerHTML = '&#8659; Pull Latest Updates';
+  }}
+}}
+
+async function restartAgent() {{
+  const btn = document.getElementById('btn-restart-agent');
+  btn.disabled = true; btn.textContent = 'Restarting…';
+  _sysLog('Restarting agent service…', '#8b949e');
+  try {{
+    await fetch('/api/system/restart-agent', {{method:'POST'}});
+    _sysLog('Agent restart queued. It will check back in within 30 seconds.', '#3fb950');
+    setTimeout(() => {{ btn.disabled = false; btn.innerHTML = '&#8635; Restart Agent'; }}, 5000);
+  }} catch(e) {{
+    _sysLog('Error: ' + e, '#f85149');
+    btn.disabled = false; btn.innerHTML = '&#8635; Restart Agent';
+  }}
+}}
+
+async function restartServer() {{
+  const btn = document.getElementById('btn-restart-server');
+  btn.disabled = true; btn.textContent = 'Restarting…';
+  _sysLog('Dashboard is restarting — page will reload in 5 seconds…', '#e3b341');
+  try {{
+    await fetch('/api/system/restart-server', {{method:'POST'}});
+  }} catch(_) {{}}
+  setTimeout(() => location.reload(), 5000);
 }}
 
 async function loadConfig() {{
