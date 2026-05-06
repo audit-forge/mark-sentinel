@@ -1,5 +1,3 @@
-import pytest
-
 from connectors.config_connector import ScanContext
 from checks.runtime import (
     check_runtime_001,
