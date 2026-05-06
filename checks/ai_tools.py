@@ -278,7 +278,7 @@ def check_tool_004(ctx: ScanContext) -> CheckResult:
     for home in _home_dirs():
         for fname in ['.aider.conf.yml', '.aider.model.settings.yml', '.aider.model.metadata.json']:
             p = home / fname
-            if p.exists():
+            if _path_exists(p):
                 config_files.append(str(p))
                 keys = _file_contains_key(p)
                 if keys:
@@ -397,7 +397,7 @@ def check_tool_006(ctx: ScanContext) -> CheckResult:
     config_found = False
     for home in _home_dirs():
         for rel in ['.cursor', '.config/Cursor']:
-            if (home / rel).exists():
+            if _path_exists(home / rel):
                 config_found = True
 
     if not cursor_found and not config_found:
@@ -438,7 +438,7 @@ def check_tool_007(ctx: ScanContext) -> CheckResult:
     leaked = []
     system_level = []
     for p in candidates:
-        if not p.exists():
+        if not _path_exists(p):
             continue
         keys = _file_contains_key(p)
         if keys:
