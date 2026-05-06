@@ -73,7 +73,11 @@ def generate_compliance_report(findings: list[dict], profile_name: str | None = 
                 if f.get("remediation"):
                     sections.append(f"  - Remediation: {f['remediation']}")
                 if f.get("frameworks"):
-                    mappings = ", ".join([f"{m.get('framework')}/{m.get('control')}" for m in f.get("frameworks")])
+                    fw = f.get("frameworks")
+                    if isinstance(fw, dict):
+                        mappings = ", ".join(f"{k}/{v}" for k, v in fw.items())
+                    else:
+                        mappings = ", ".join(f"{m.get('framework')}/{m.get('control')}" for m in fw)
                     sections.append(f"  - Framework mappings: {mappings}")
                 if f.get("evidence"):
                     sections.append(f"  - Evidence: {f['evidence']}")

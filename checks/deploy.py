@@ -152,7 +152,8 @@ def check_deploy_001(ctx: ScanContext) -> CheckResult:
             if path.endswith('.py') or path.endswith('.md'):
                 continue  # skip source/doc files — pattern strings match themselves
             m = regex.search(line)
-            if m and not _is_placeholder(m.group(0)):
+            val = m.group(1) if m and m.lastindex else (m.group(0) if m else None)
+            if m and not _is_placeholder(val):
                 key_hits.append((path, lineno, desc, line))
 
     gi_issues = []

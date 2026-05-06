@@ -11,6 +11,7 @@ import re
 import shutil
 import stat
 import subprocess
+import sys
 from pathlib import Path
 from . import CheckResult, PASS, FAIL, WARN, SKIP
 from connectors.config_connector import ScanContext
@@ -390,7 +391,7 @@ def check_tool_006(ctx: ScanContext) -> CheckResult:
     cursor_found = bool(shutil.which('cursor'))
     if not cursor_found:
         cursor_found = Path('/Applications/Cursor.app').exists()
-    if not cursor_found:
+    if not cursor_found and sys.platform == 'win32':
         win_path = Path(os.path.expandvars('%LOCALAPPDATA%')) / 'Programs' / 'Cursor' / 'Cursor.exe'
         cursor_found = win_path.exists()
 

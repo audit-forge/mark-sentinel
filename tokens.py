@@ -21,7 +21,10 @@ DEFAULT_STORE = Path('output/agent_tokens.json')
 
 def _load(store: Path) -> dict:
     if store.exists():
-        return json.loads(store.read_text())
+        try:
+            return json.loads(store.read_text())
+        except (json.JSONDecodeError, OSError):
+            return {'tokens': []}
     return {'tokens': []}
 
 
@@ -68,14 +71,18 @@ def cmd_revoke(args: argparse.Namespace) -> None:
     store = Path(args.store)
     data = _load(store)
     prefix = args.token_prefix
-    before = len(data['tokens'])
-    data['tokens'] = [t for t in data['tokens'] if not t.get('token', '').startswith(prefix)]
-    removed = before - len(data['tokens'])
-    if removed == 0:
+    matches = [t for t in data['tokens'] if t.get('token', '').startswith(prefix)]
+    if not matches:
         print(f'No token matching prefix "{prefix}" found.')
         return
+    if len(matches) > 1:
+        print(f'Prefix "{prefix}" matches {len(matches)} tokens. Use a longer prefix to be specific.')
+        for t in matches:
+            print(f'  {t.get("label", "")}: {t.get("token", "")[:12]}...')
+        return
+    data['tokens'] = [t for t in data['tokens'] if not t.get('token', '').startswith(prefix)]
     _save(store, data)
-    print(f'Revoked {removed} token(s).')
+    print(f'Revoked {len(matches)} token(s).')
 
 
 def cmd_verify(args: argparse.Namespace) -> None:

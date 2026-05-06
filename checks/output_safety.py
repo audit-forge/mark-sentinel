@@ -26,7 +26,7 @@ _DANGEROUS_RE = [
     (re.compile(r'os\.system\s*\('), 'os.system() call (shell injection risk)'),
     (re.compile(r'\beval\s*\('), 'eval() call (code injection risk)'),
     (re.compile(r'\bexec\s*\('), 'exec() call (code injection risk)'),
-    (re.compile(r'cursor\.execute\s*\(\s*f["\']|cursor\.execute\s*\(\s*".*%s.*"'), 'SQL string formatting (injection risk)'),
+    (re.compile(r'cursor\.execute\s*\(\s*f["\']|cursor\.execute\s*\(\s*["\'].*\+'), 'SQL string formatting (injection risk)'),
     (re.compile(r'render_template_string\s*\('), 'Flask render_template_string (SSTI risk)'),
     (re.compile(r'innerHTML\s*='), 'innerHTML assignment (XSS risk)'),
     (re.compile(r'document\.write\s*\('), 'document.write (XSS risk)'),

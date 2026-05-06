@@ -313,6 +313,18 @@ def check_gov_004(ctx: ScanContext) -> CheckResult:
             frameworks={"OWASP LLM": "LLM06", "FedRAMP": "PL-1", "NIST AI RMF": "GOVERN 6.1", "EU AI Act": "Article 14"},
         )
 
+    if has_hitl_config and has_oversight_doc:
+        return CheckResult(
+            check_id="AI-GOV-004",
+            title="Human Oversight Mechanisms in Place",
+            status=PASS,
+            severity="HIGH",
+            category=CATEGORY,
+            details="Human-in-the-loop configuration and oversight documentation both found.",
+            evidence=ev,
+            frameworks={"OWASP LLM": "LLM06", "FedRAMP": "PL-1", "NIST AI RMF": "GOVERN 6.1"},
+        )
+
     return CheckResult(
         check_id="AI-GOV-004",
         title="Human Oversight Mechanisms in Place",
