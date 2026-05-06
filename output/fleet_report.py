@@ -216,7 +216,7 @@ def generate_fleet_pdf(devices: list, tier: str = 'ciso') -> bytes:
     _section_header(pdf, 'Per-Device Breakdown')
     for d in devices:
         report = d.get('_report') or {}
-        results = report.get('results', [])
+        results = report.get('findings', report.get('results', []))
         if not results:
             continue
         fail  = d.get('fail_count', 0) or 0
@@ -265,7 +265,7 @@ def _collect_all_findings(devices: list) -> list:
     out = []
     for d in devices:
         report = d.get('_report') or {}
-        for r in report.get('results', []):
+        for r in report.get('findings', report.get('results', [])):
             f = dict(r)
             f['hostname'] = d.get('hostname', d.get('device_id', '?'))
             out.append(f)

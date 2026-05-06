@@ -218,7 +218,8 @@ tr:hover td{{background:#161b22}}
     # Critical/High findings across fleet
     all_findings = []
     for d in devices:
-        for r in (d.get('_report') or {}).get('results', []):
+        rep = d.get('_report') or {}
+        for r in rep.get('findings', rep.get('results', [])):
             r2 = dict(r); r2['_hostname'] = d.get('hostname', '?')
             all_findings.append(r2)
     crit_high = [f for f in all_findings if f.get('status') == 'FAIL' and f.get('severity') in ('CRITICAL', 'HIGH')]
@@ -254,7 +255,7 @@ tr:hover td{{background:#161b22}}
     parts.append('<h2>Per-Device Breakdown</h2>')
     for d in devices:
         report = d.get('_report') or {}
-        results = report.get('results', [])
+        results = report.get('findings', report.get('results', []))
         f = d.get('fail_count', 0) or 0
         w = d.get('warn_count', 0) or 0
         p = d.get('pass_count', 0) or 0
@@ -878,7 +879,7 @@ button:hover{{background:#2ea043}}
                 payload = [{'device_id': d['device_id'], 'hostname': d['hostname'],
                             'platform': d.get('platform', ''), 'fail_count': d.get('fail_count', 0),
                             'warn_count': d.get('warn_count', 0), 'pass_count': d.get('pass_count', 0),
-                            'last_seen': d.get('last_seen'), 'results': d['_report'].get('results', [])}
+                            'last_seen': d.get('last_seen'), 'results': d['_report'].get('findings', d['_report'].get('results', []))}
                            for d in devices]
                 self._json({'tier': tier, 'devices': payload})
                 return
