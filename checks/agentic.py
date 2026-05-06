@@ -239,7 +239,7 @@ def check_agent_004(ctx: ScanContext) -> CheckResult:
     text = _agent_config_text(ctx)
     is_multi_agent = bool(re.search(r'(?i)"agents?"\s*:\s*\[', text) or
                           re.search(r'(?i)"sub[_-]?agents?"\s*:', text) or
-                          re.search(r'(?i)"orchestrat', text))
+                          re.search(r'(?i)"orchestrat(?:or|ion|ed)"\s*[:{]', text))
 
     if not is_multi_agent:
         return CheckResult(

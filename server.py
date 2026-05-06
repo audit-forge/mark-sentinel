@@ -358,7 +358,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                     b'display:flex;align-items:center;justify-content:center;height:100vh;margin:0}'
                     b'div{text-align:center}.title{font-size:18px;color:#e6edf3;margin-bottom:8px}'
                     b'.sub{font-size:13px}</style></head><body><div>'
-                    b'<div class="title">No scan report yet for ' + hostname.encode() + b'</div>'
+                    b'<div class="title">No scan report yet for ' + __import__('html').escape(hostname).encode() + b'</div>'
                     b'<div class="sub">The agent has registered but has not completed a scan.<br>'
                     b'Reports arrive automatically after each scan cycle.</div>'
                     b'</div></body></html>'
@@ -409,10 +409,12 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             pass
 
     def _api_scan(self):
+        global _status
         with _lock:
             if _status == 'running':
                 self._json({'error': 'scan already running'}, 409)
                 return
+            _status = 'running'
         length = int(self.headers.get('Content-Length', 0))
         body = json.loads(self.rfile.read(length)) if length else {}
         threading.Thread(
@@ -440,6 +442,9 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         length = int(self.headers.get('Content-Length', 0))
         if not length:
             self._send(400, b'Empty body', 'text/plain')
+            return
+        if length > 1_048_576:
+            self._send(413, b'Payload too large', 'text/plain')
             return
         try:
             body = json.loads(self.rfile.read(length))
@@ -471,7 +476,11 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             from alerts import load_alert_config, fire_alerts
             alert_cfg = load_alert_config(ROOT / 'alerts_config.json')
             if alert_cfg:
-                fire_alerts(report, device_id, hostname, alert_cfg)
+                threading.Thread(
+                    target=fire_alerts,
+                    args=(report, device_id, hostname, alert_cfg),
+                    daemon=True,
+                ).start()
         except Exception as _ae:
             print(f'[server] alerts error: {_ae}', file=sys.stderr)
 
@@ -572,7 +581,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         try:
             store = _get_store()
             # Use a direct DB connection to read historical reports for this device.
-            with store._conn() as conn:
+            with store._lock, store._conn() as conn:
                 rows = conn.execute(
                     "SELECT received_at, fail_count, warn_count, pass_count FROM reports "
                     "WHERE device_id = ? ORDER BY received_at ASC",

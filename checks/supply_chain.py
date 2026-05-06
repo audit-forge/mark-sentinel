@@ -330,7 +330,7 @@ def check_supply_003(ctx: ScanContext) -> CheckResult:
             category=CATEGORY,
             details=f"All {total} packages in requirements.txt are version-pinned.",
             evidence=[f"{total} pinned packages found",
-                      f"AI packages detected: {', '.join(p for p in pinned if p in _AI_PACKAGES)[:5] or 'none'}"],
+                      f"AI packages detected: {', '.join(list(p for p in pinned if p in _AI_PACKAGES)[:5]) or 'none'}"],
             frameworks={"OWASP LLM": "LLM03", "FedRAMP": "SA-12", "NIST AI RMF": "GOVERN 2.2"},
         )
 

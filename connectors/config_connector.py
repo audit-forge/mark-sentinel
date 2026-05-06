@@ -100,6 +100,8 @@ def scan_directory(target_dir: str, mode: str = "config", max_files: int | None 
     count = 0
 
     for dirpath, dirnames, filenames in os.walk(root):
+        if count >= limit:
+            break
         dirnames[:] = sorted(d for d in dirnames if d not in SKIP_DIRS)
         rel_dir = Path(dirpath).relative_to(root)
 

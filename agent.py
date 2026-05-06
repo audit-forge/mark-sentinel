@@ -280,6 +280,9 @@ def self_update(config: dict) -> bool:
                     rel = Path(member.name)
                 if rel is None or not member.isfile():
                     continue
+                if rel.is_absolute() or any(p == '..' for p in rel.parts):
+                    log.warning('self_update: skipping unsafe path %s', member.name)
+                    continue
                 dest = ROOT / rel
                 dest.parent.mkdir(parents=True, exist_ok=True)
                 with tar.extractfile(member) as src, open(dest, 'wb') as dst:
@@ -536,7 +539,10 @@ def main() -> None:
                     if 'profile' in updates:
                         cfg['profile'] = updates['profile']
                     if 'interval' in updates:
-                        cfg['interval'] = int(updates['interval'])
+                        new_interval = int(updates['interval'])
+                        if new_interval < 60:
+                            raise ValueError(f'interval must be >= 60, got {new_interval}')
+                        cfg['interval'] = new_interval
                         interval = cfg['interval']
                     log.info('Config updated by server: %s', updates)
                 except Exception as e:

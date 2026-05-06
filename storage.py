@@ -110,7 +110,7 @@ class AgentStore:
 
     def list_devices(self) -> list[dict]:
         """Return all devices with their latest scan summary."""
-        with self._conn() as conn:
+        with self._lock, self._conn() as conn:
             rows = conn.execute("""
                 SELECT
                     d.device_id, d.hostname, d.platform, d.agent_version,
