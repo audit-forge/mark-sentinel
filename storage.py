@@ -12,6 +12,7 @@ import json
 import sqlite3
 import threading
 import time
+import os
 from pathlib import Path
 
 
@@ -74,6 +75,9 @@ class AgentStore:
                     ON commands(device_id, claimed_at);
             """)
 
+        # Prune old reports per retention policy (env var or default 90 days)
+        self.prune_old_reports(int(os.environ.get('SENTINEL_RETAIN_DAYS', '90')))
+
     def upsert_report(self, device_id: str, hostname: str, report: dict,
                       platform: str = '', agent_version: str = '') -> None:
         """Store a new report for a device, upserting device metadata."""
@@ -128,6 +132,15 @@ class AgentStore:
                 ORDER BY d.last_seen DESC
             """).fetchall()
         return [dict(r) for r in rows]
+
+    def prune_old_reports(self, retention_days: int = 90) -> int:
+        """Delete reports older than retention_days. Returns count deleted."""
+        cutoff = int(time.time()) - (retention_days * 86400)
+        with self._lock, self._conn() as conn:
+            cur = conn.execute("DELETE FROM reports WHERE received_at < ?", (cutoff,))
+            pruned = cur.rowcount
+            conn.execute("DELETE FROM devices WHERE device_id NOT IN (SELECT DISTINCT device_id FROM reports)")
+        return pruned
 
     def get_latest_report(self, device_id: str) -> dict | None:
         """Return the most recent full report JSON for a device."""

@@ -79,7 +79,7 @@ def _npm_global(package: str) -> bool:
     try:
         r = subprocess.run(
             ['npm', 'list', '-g', '--depth=0', package],
-            capture_output=True, text=True, timeout=10
+            capture_output=True, text=True, timeout=30
         )
         return package in r.stdout
     except Exception:
