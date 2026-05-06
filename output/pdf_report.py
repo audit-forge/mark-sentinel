@@ -143,19 +143,18 @@ def format_pdf(results: List, profile: dict, target: str, mode: str = 'config', 
     pdf.cell(25, 7, _safe_text('Severity'), border=1, ln=1)
 
     for r in results:
-        pdf.cell(30, 6, _safe_text(str(getattr(r, 'check_id', ''))), border=1)
-        # title may be long - use multi_cell trick
         x = pdf.get_x()
         y = pdf.get_y()
+        pdf.cell(30, 6, _safe_text(str(getattr(r, 'check_id', ''))), border=1)
         pdf.multi_cell(80, 6, _safe_text(str(getattr(r, 'title', ''))), border=1)
-        # move to right of title cell
-        pdf.set_xy(x + 80, y)
-        pdf.cell(25, 6, _safe_text(str(getattr(r, 'status', ''))), border=1)
-        pdf.cell(25, 6, _safe_text(str(getattr(r, 'severity', ''))), border=1, ln=1)
+        row_bottom = pdf.get_y()
+        row_h = row_bottom - y
+        pdf.set_xy(x + 110, y)
+        pdf.cell(25, row_h, _safe_text(str(getattr(r, 'status', ''))), border=1)
+        pdf.cell(25, row_h, _safe_text(str(getattr(r, 'severity', ''))), border=1)
+        pdf.set_xy(x, row_bottom)
 
-    # Finalize and return bytes
-    out = pdf.output(dest='S')
-    # fpdf2 may return str or bytes depending on version; ensure bytes
+    out = pdf.output()
     if isinstance(out, str):
         out = out.encode('latin-1')
     return out

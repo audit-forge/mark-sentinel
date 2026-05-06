@@ -5,18 +5,15 @@ services:
     image: pnc-ai-assistant:latest
     ports:
       - "8080:8080"
-    environment:
-      - OPENAI_API_KEY=sk-fake-prod-key-abcdef1234567890abcdef1234567890
-      - ANTHROPIC_API_KEY=sk-ant-fake-prod-key-xyz789abcdef1234567890
-      - DATABASE_URL=postgresql://admin:PncProd2026!@db:5432/ai_db
+    env_file:
+      - .env
     # No TLS configured
     # No restart policy
     # No resource limits
 
   db:
     image: postgres:15
-    environment:
-      - POSTGRES_PASSWORD=PncProd2026!
-      - POSTGRES_USER=admin
+    env_file:
+      - .env
     ports:
       - "5432:5432"
