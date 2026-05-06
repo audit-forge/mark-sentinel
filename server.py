@@ -269,6 +269,8 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self._serve_device_dashboard(did)
         elif path.startswith('/api/devices/'):
             self._api_device_report(path[len('/api/devices/'):])
+        elif path == '/api/fleet/report' or path.startswith('/api/fleet/report?'):
+            self._api_fleet_report()
         else:
             self._not_found()
 
@@ -698,6 +700,47 @@ button:hover{{background:#2ea043}}
                 queued.append(did)
         self._json({'status': 'queued', 'count': len(queued), 'devices': queued})
 
+    def _api_fleet_report(self):
+        """GET /api/fleet/report?tier=executive|ciso|technical&fmt=pdf|json"""
+        from urllib.parse import parse_qs, urlparse as _up
+        qs = parse_qs(_up(self.path).query)
+        tier = (qs.get('tier', ['ciso'])[0]).lower()
+        fmt  = (qs.get('fmt',  ['pdf'])[0]).lower()
+        if tier not in ('executive', 'ciso', 'technical'):
+            tier = 'ciso'
+        try:
+            store = _get_store()
+            devices = store.list_devices()
+            for d in devices:
+                d['_report'] = store.get_latest_report(d['device_id']) or {}
+            if fmt == 'json':
+                payload = []
+                for d in devices:
+                    payload.append({
+                        'device_id': d['device_id'],
+                        'hostname':  d['hostname'],
+                        'platform':  d.get('platform', ''),
+                        'fail_count': d.get('fail_count', 0),
+                        'warn_count': d.get('warn_count', 0),
+                        'pass_count': d.get('pass_count', 0),
+                        'last_seen':  d.get('last_seen'),
+                        'results':   d['_report'].get('results', []),
+                    })
+                self._json({'tier': tier, 'devices': payload})
+                return
+            from output.fleet_report import generate_fleet_pdf
+            pdf_bytes = generate_fleet_pdf(devices, tier=tier)
+            fname = f'sentinel_fleet_{tier}.pdf'
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/pdf')
+            self.send_header('Content-Disposition', f'attachment; filename="{fname}"')
+            self.send_header('Content-Length', str(len(pdf_bytes)))
+            self.end_headers()
+            self.wfile.write(pdf_bytes)
+        except Exception as e:
+            log.error('fleet report error: %s', e)
+            self._json({'error': str(e)}, 500)
+
     def _api_discover(self):
         """GET /api/discover — scan local subnet for AI services (runs in thread)."""
         try:
@@ -1058,10 +1101,18 @@ body{{background:#0d1117;color:#c9d1d9;font-family:-apple-system,BlinkMacSystemF
     <div class="scard"><div class="scard-n c-green" id="sc-pass">{total_pass}</div><div class="scard-l">Total Passes</div></div>
   </div>
 
-  <div class="sec-hdr" style="display:flex;align-items:center;justify-content:space-between">
+  <div class="sec-hdr" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
     <span>Connected Devices</span>
-    <button class="scan-btn" onclick="updateAllDevices()"
-            style="color:#e3b341;border-color:#30363d;font-size:12px">Update All Agents</button>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <a href="/api/fleet/report?tier=executive&fmt=pdf" class="scan-btn"
+         style="text-decoration:none;color:#3fb950;border-color:#30363d;font-size:12px">&#8659; Executive Report</a>
+      <a href="/api/fleet/report?tier=ciso&fmt=pdf" class="scan-btn"
+         style="text-decoration:none;color:#58a6ff;border-color:#30363d;font-size:12px">&#8659; CISO Report</a>
+      <a href="/api/fleet/report?tier=technical&fmt=pdf" class="scan-btn"
+         style="text-decoration:none;color:#8b949e;border-color:#30363d;font-size:12px">&#8659; Technical Report</a>
+      <button class="scan-btn" onclick="updateAllDevices()"
+              style="color:#e3b341;border-color:#30363d;font-size:12px">Update All Agents</button>
+    </div>
   </div>
   <div class="refresh-note" id="refresh-note">Auto-refreshes every 60s</div>
   <table class="dev-table">
