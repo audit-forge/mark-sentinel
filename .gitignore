@@ -36,6 +36,7 @@ Thumbs.db
 # Sentinel runtime
 .sentinel.log
 .sentinel.pid
+.sentinel-server.log
 agent_token.txt
 agent_config.json
 *.db

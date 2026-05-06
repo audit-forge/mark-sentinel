@@ -22,6 +22,7 @@ if hasattr(sys.stderr, 'reconfigure'):
 import http.server
 import io
 import json
+import logging
 import os
 import subprocess
 import tarfile
@@ -35,6 +36,8 @@ from urllib.parse import urlparse
 PORT = 7331
 ROOT = Path(__file__).parent
 _serve_port = PORT   # updated at startup so handlers can reference it
+
+log = logging.getLogger('sentinel.server')
 
 # ── scan state ────────────────────────────────────────────────────────────────
 _lock   = threading.Lock()
@@ -107,7 +110,7 @@ def _rebuild_dashboard(out_dir: Path) -> bool:
             generate(reports, out_dir / 'dashboard.html')
             return True
     except Exception as e:
-        print(f'[server] dashboard rebuild error: {e}', file=sys.stderr)
+        log.error('dashboard rebuild error: %s', e)
     return False
 
 
@@ -339,7 +342,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         try:
             report = _get_store().get_latest_report(device_id)
         except Exception as e:
-            print(f'[server] get_latest_report error for {device_id}: {e}', file=sys.stderr)
+            log.error('get_latest_report error for %s: %s', device_id, e)
             self._send(500, f'Store error: {e}'.encode(), 'text/plain')
             return
         if report is None:
@@ -379,7 +382,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             _os.unlink(tmp_path)
             self._send(200, html, 'text/html; charset=utf-8')
         except Exception as e:
-            print(f'[server] dashboard generation error for {device_id}: {e}', file=sys.stderr)
+            log.error('dashboard generation error for %s: %s', device_id, e)
             self._send(500, f'Dashboard generation failed: {e}'.encode(), 'text/plain')
 
     def _api_events(self):
@@ -468,7 +471,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                 agent_version=body.get('agent_version', ''),
             )
         except Exception as e:
-            print(f'[server] agent store error: {e}', file=__import__('sys').stderr)
+            log.error('agent store error: %s', e)
             self._send(500, b'Storage error', 'text/plain')
             return
 
@@ -482,7 +485,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                     daemon=True,
                 ).start()
         except Exception as _ae:
-            print(f'[server] alerts error: {_ae}', file=sys.stderr)
+            log.error('alerts error: %s', _ae)
 
         self._json({'status': 'accepted', 'device_id': device_id})
 
@@ -628,7 +631,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                 else:
                     subprocess.run(['systemctl', 'restart', 'sentinel-agent'], capture_output=True)
             except Exception as e:
-                print(f'[server] restart-agent error: {e}', file=sys.stderr)
+                log.error('restart-agent error: %s', e)
         threading.Thread(target=_do_restart, daemon=True).start()
         self._json({'status': 'restarting'})
 
@@ -1379,6 +1382,17 @@ def main():
 
     global _serve_port
     _serve_port = args.port
+
+    log_file = ROOT / '.sentinel-server.log'
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s %(levelname)s %(name)s %(message)s',
+        handlers=[
+            logging.FileHandler(log_file, encoding='utf-8'),
+            logging.StreamHandler(sys.stderr),
+        ],
+    )
+
     server = http.server.ThreadingHTTPServer((args.host, args.port), _Handler)
     url = f'http://localhost:{args.port}'
     print('\n  M.A.R.K. Sentinel  ·  Dashboard Server')
