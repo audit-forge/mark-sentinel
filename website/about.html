@@ -7,47 +7,105 @@
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
+
   <header class="site-header">
-    <div class="container">
-      <h1 class="logo">M.A.R.K.</h1>
+    <div class="nav-inner">
+      <div class="logo">M.A.R<span class="dot">.</span>K.</div>
       <nav>
         <a href="index.html">Home</a>
-        <a href="about.html">About</a>
+        <a href="sentinel.html">Sentinel</a>
+        <a href="about.html" class="active">About</a>
         <a href="contact.html">Contact</a>
+        <a href="https://github.com/audit-forge" class="nav-cta">GitHub</a>
       </nav>
     </div>
   </header>
 
-  <main class="container">
-    <h2>About M.A.R.K.</h2>
-    <p>M.A.R.K. stands for Machine Assisted Real-Time Knowledge. This project helps teams capture operational findings, surface recommendations, and keep knowledge accessible and actionable.</p>
+  <main>
+    <div class="container">
 
-    <h3>Current status (mockup)</h3>
-    <ul>
-      <li>Prototype agents for lightweight reporting</li>
-      <li>Local storage and simple web UI</li>
-      <li>Security and audit controls in development</li>
-    </ul>
+      <section class="hero" style="text-align:left; padding-bottom:40px">
+        <div class="eyebrow">Machine Assisted Real-time Knowledge</div>
+        <h1>Built to close the gap between <em>AI and security.</em></h1>
+        <p class="hero-sub" style="margin-left:0">M.A.R.K. is a two-product platform — a security audit suite for infrastructure and AI systems, and a self-hosted AI agent runtime that audits itself.</p>
+      </section>
 
-    <h3>Goals</h3>
-    <p>Make operational knowledge searchable, machine-augmented, and tightly integrated with security and compliance workflows.</p>
+      <section class="section">
+        <p class="section-eyebrow">Sentinel</p>
+        <h2 class="section-title">Security audits should be automatic, not manual.</h2>
+        <p class="section-sub">Most teams learn about misconfigurations from penetration tests or — worse — incidents. Sentinel runs the same checks continuously, mapped to the compliance frameworks your team is already using.</p>
+        <div class="card-grid">
+          <div class="card">
+            <h3>Infrastructure coverage</h3>
+            <p>Redis, PostgreSQL, Elasticsearch, Kafka, and MongoDB. Each tool runs fully offline, requires no agent, and works against Docker containers, Kubernetes pods, or direct connections.</p>
+          </div>
+          <div class="card">
+            <h3>AI security</h3>
+            <p>mark-sentinel extends the same approach to AI runtimes — model I/O controls, agent behavior constraints, supply chain checks, and runtime anomaly detection via STIG-style controls.</p>
+          </div>
+          <div class="card">
+            <h3>Compliance-ready output</h3>
+            <p>Every finding carries CIS, NIST, FedRAMP, DISA STIG, CMMC, and MITRE ATT&amp;CK identifiers. SARIF 2.1.0, evidence bundles, and Wiz/SCC JSON come out of every audit run.</p>
+          </div>
+        </div>
+      </section>
 
-    <h3>Sentinel — what it is</h3>
-    <p>Sentinel is a lightweight agent-server system that collects scan reports and operational findings from deployed hosts, stores them for audit and analysis, and surfaces actionable recommendations. Key points:</p>
-    <ul>
-      <li>Small-footprint agents report JSON scan results to a central server.</li>
-      <li>Reports are stored in a searchable backend and can be exported in machine-readable formats (SARIF, JSON) for CI/CD and security platforms.</li>
-      <li>Designed for auditability and integration with compliance workflows (CIS/DISA/NIST mappings available).</li>
-      <li>Supports command queueing for remote-triggered scans and has flexible storage adapters (SQLite for local/dev, PostgreSQL for production).</li>
-    </ul>
+      <section class="section">
+        <p class="section-eyebrow">Hash</p>
+        <h2 class="section-title">An AI that understands its own security posture.</h2>
+        <p class="section-sub">Hash is a self-hosted personal AI agent runtime. It connects to any model provider, reasons with a multi-pass critique pipeline, builds a persistent knowledge graph from your workspace, and runs Sentinel against itself at startup.</p>
+        <div class="card-grid">
+          <div class="card">
+            <div class="card-icon">🧠</div>
+            <h3>Reasoning that goes deeper</h3>
+            <p>A three-pass pipeline — draft, critique, synthesize — activates automatically on complex tasks. Uses a mid-tier critic and a frontier model for final synthesis.</p>
+          </div>
+          <div class="card">
+            <div class="card-icon">🔌</div>
+            <h3>Connects to everything</h3>
+            <p>MCP (Model Context Protocol) integration gives Hash access to any MCP-compatible server. Tools auto-discovered and available to all agents and the interactive REPL.</p>
+          </div>
+          <div class="card">
+            <div class="card-icon">🧬</div>
+            <h3>Memory that persists</h3>
+            <p>Semantic search via ChromaDB, full-text index, and a live knowledge graph extracted from your workspace. Everything is local — nothing leaves your machine.</p>
+          </div>
+          <div class="card">
+            <div class="card-icon">🤖</div>
+            <h3>Agents that plan and execute</h3>
+            <p>Give Hash a goal. It decomposes it into a subtask graph, executes each step with checkpoints, and exposes the full lifecycle through a REST API.</p>
+          </div>
+          <div class="card">
+            <div class="card-icon">🛡️</div>
+            <h3>Self-auditing runtime</h3>
+            <p>Sentinel checks run at startup. A behavioral anomaly detector builds a baseline and flags unusual activity patterns in real time.</p>
+          </div>
+          <div class="card">
+            <div class="card-icon">📦</div>
+            <h3>Production-ready packaging</h3>
+            <p>Multi-arch Docker image, Compose stack with Ollama, GHCR CI workflow, and a <code>pip install .</code> CLI entry point. Deploy locally or in a container in minutes.</p>
+          </div>
+        </div>
+        <p style="margin-top:24px; color:var(--muted); font-size:14px">Hash is currently in private development ahead of a public release. Details will be announced once IP filing is complete.</p>
+      </section>
 
-    <p class="powered">Powered by HASH#</p>
+      <div class="cta-banner">
+        <h2>Start with Sentinel — it's open source.</h2>
+        <p>Five public tools. No account. No telemetry. Runs fully offline.</p>
+        <div class="btn-row">
+          <a class="btn-primary" href="https://github.com/audit-forge">View on GitHub</a>
+          <a class="btn-ghost" href="sentinel.html">Sentinel overview</a>
+        </div>
+      </div>
+
+    </div>
   </main>
 
   <footer class="site-footer">
     <div class="container">
-      <p>© 2026 M.A.R.K. AI Systems</p>
+      <p>© 2026 M.A.R.K. AI Systems &nbsp;·&nbsp; <a href="https://github.com/audit-forge">audit-forge</a> &nbsp;·&nbsp; <a href="sentinel.html">Sentinel</a> &nbsp;·&nbsp; <a href="contact.html">Contact</a></p>
     </div>
   </footer>
+
 </body>
 </html>

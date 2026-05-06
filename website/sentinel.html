@@ -1,0 +1,252 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Sentinel — M.A.R.K.</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+  <header class="site-header">
+    <div class="nav-inner">
+      <div class="logo">M.A.R<span class="dot">.</span>K.</div>
+      <nav>
+        <a href="index.html">Home</a>
+        <a href="sentinel.html" class="active">Sentinel</a>
+        <a href="about.html">About</a>
+        <a href="contact.html">Contact</a>
+        <a href="https://github.com/audit-forge" class="nav-cta">GitHub</a>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <div class="container">
+
+      <!-- Hero -->
+      <section class="hero">
+        <div class="eyebrow">M.A.R.K. Sentinel — Open Source</div>
+        <h1>Security audits for<br><em>data infrastructure.</em></h1>
+        <p class="hero-sub">Automated CIS/STIG/NIST checks for Redis, PostgreSQL, Elasticsearch, Kafka, and MongoDB. No agent. No account. Runs anywhere Docker runs.</p>
+        <div class="btn-row">
+          <a class="btn-primary" href="https://github.com/audit-forge">Get started on GitHub</a>
+          <a class="btn-ghost" href="contact.html">Talk to us</a>
+        </div>
+      </section>
+
+      <!-- How it works -->
+      <section class="section">
+        <p class="section-eyebrow">How it works</p>
+        <h2 class="section-title">Three steps to a compliance-ready report.</h2>
+
+        <div class="card-grid">
+          <div class="card">
+            <div class="card-icon">1</div>
+            <h3>Point it at your infrastructure</h3>
+            <p>Run against a Docker container, a Kubernetes pod, or a direct connection. No agent installation, no network changes required.</p>
+          </div>
+          <div class="card">
+            <div class="card-icon">2</div>
+            <h3>Checks run automatically</h3>
+            <p>Hundreds of security checks execute against your configuration, runtime state, and container settings — each mapped to a named control in CIS, NIST, or DISA STIG.</p>
+          </div>
+          <div class="card">
+            <div class="card-icon">3</div>
+            <h3>Get findings your tools already understand</h3>
+            <p>SARIF 2.1.0 for GitHub Code Scanning. Evidence bundles for auditors. Wiz and SCC JSON for cloud posture platforms. CSV for spreadsheet review.</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- Output demo -->
+      <section class="section">
+        <p class="section-eyebrow">Output</p>
+        <h2 class="section-title">Structured findings, not log noise.</h2>
+        <p class="section-sub">Every finding includes the control ID, what was found, what was expected, a remediation step, and the evidence that produced it.</p>
+
+        <div class="split">
+          <div class="visual">
+            <div class="code-block"><span class="c"># Redis — direct connection audit</span>
+python3 audit.py \
+  --mode direct \
+  --host 10.0.0.5 \
+  --port 6379 \
+  --sarif out.sarif \
+  --bundle evidence.zip \
+  --csv findings.csv
+
+<span class="k">[FAIL]</span> <span class="s">RD-AUTH-001</span> CRITICAL
+  Default user must not have nopass
+  Actual:   user default on nopass ~* +@all
+  Expected: password-protected default user
+  Fix:      Set requirepass or configure ACL
+
+<span class="k">[FAIL]</span> <span class="s">RD-CFG-002</span> HIGH
+  Protected mode must be enabled
+  Actual:   protected-mode no
+  Expected: protected-mode yes
+
+<span class="k">[WARN]</span> <span class="s">RD-CFG-008</span> MEDIUM
+  Syslog integration recommended</div>
+          </div>
+          <div class="text">
+            <div class="card-grid" style="grid-template-columns:1fr">
+              <div class="card">
+                <h3>SARIF 2.1.0</h3>
+                <p>Upload directly to GitHub Code Scanning. Rules deduplicated per check ID, tagged with NIST controls and FedRAMP mappings.</p>
+              </div>
+              <div class="card">
+                <h3>Evidence bundle</h3>
+                <p>ZIP archive with results JSON, SARIF, runtime snapshot, and per-check evidence files. Drop it in your GRC tool or hand it to an auditor.</p>
+              </div>
+              <div class="card">
+                <h3>Wiz &amp; Google SCC</h3>
+                <p>Push findings directly to your cloud security posture management platform via Wiz Issues API or GCP SCC Findings API v1.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Tool table -->
+      <section class="section">
+        <p class="section-eyebrow">Tools</p>
+        <h2 class="section-title">What's covered.</h2>
+
+        <div class="tool-grid">
+          <div class="tool-card">
+            <div class="tool-header">
+              <span class="tool-name">redis-stig-audit</span>
+              <span class="tag tag-green">v1.0</span>
+            </div>
+            <p class="tool-desc">CIS Redis Benchmark checks for protected mode, TLS, ACL configuration, persistence, and container hardening. Docker, Kubernetes, and direct modes.</p>
+            <div class="tag-row">
+              <span class="tag tag-blue">37 tests</span>
+              <span class="tag tag-blue">CIS Redis</span>
+              <span class="tag tag-blue">FedRAMP</span>
+              <span class="tag tag-blue">CMMC</span>
+            </div>
+          </div>
+
+          <div class="tool-card">
+            <div class="tool-header">
+              <span class="tool-name">elastic-stig-audit</span>
+              <span class="tag tag-green">v1.0</span>
+            </div>
+            <p class="tool-desc">Elasticsearch security benchmark — xpack security, TLS transport and REST, authentication, authorization, audit logging, and container runtime checks. Includes CVE/KEV vulnerability scanning.</p>
+            <div class="tag-row">
+              <span class="tag tag-blue">95 tests</span>
+              <span class="tag tag-blue">CIS ES</span>
+              <span class="tag tag-blue">CVE/KEV</span>
+            </div>
+          </div>
+
+          <div class="tool-card">
+            <div class="tool-header">
+              <span class="tool-name">pg-stig-audit</span>
+              <span class="tag tag-green">v1.0</span>
+            </div>
+            <p class="tool-desc">PostgreSQL CIS Benchmark v1.1 and DISA STIG. Checks pg_hba.conf, SSL, logging, privilege separation, and extension controls. FedRAMP High and CMMC Level 2 mapped.</p>
+            <div class="tag-row">
+              <span class="tag tag-blue">CIS PG16</span>
+              <span class="tag tag-blue">DISA STIG</span>
+              <span class="tag tag-blue">FedRAMP High</span>
+            </div>
+          </div>
+
+          <div class="tool-card">
+            <div class="tool-header">
+              <span class="tool-name">kafka-stig-audit</span>
+              <span class="tag tag-green">v1.0</span>
+            </div>
+            <p class="tool-desc">Kafka container security audit. SASL authentication, TLS inter-broker encryption, topic authorization, network exposure, and Zookeeper hardening.</p>
+            <div class="tag-row">
+              <span class="tag tag-blue">67 tests</span>
+              <span class="tag tag-blue">CIS Kafka</span>
+              <span class="tag tag-blue">NIST 800-53</span>
+            </div>
+          </div>
+
+          <div class="tool-card">
+            <div class="tool-header">
+              <span class="tool-name">mongo-stig-audit</span>
+              <span class="tag tag-green">v1.0</span>
+            </div>
+            <p class="tool-desc">MongoDB CIS/STIG-style audit covering authentication, role-based access, encryption at rest, TLS, audit logging, and container runtime security.</p>
+            <div class="tag-row">
+              <span class="tag tag-blue">67 tests</span>
+              <span class="tag tag-blue">CIS MongoDB</span>
+              <span class="tag tag-blue">MITRE ATT&amp;CK</span>
+            </div>
+          </div>
+
+          <div class="tool-card">
+            <div class="tool-header">
+              <span class="tool-name">mark-sentinel (AI)</span>
+              <span class="tag tag-yellow">Coming soon</span>
+            </div>
+            <p class="tool-desc">Security audit for AI runtimes. Custom STIG-style controls for model I/O safety, agent behavior, supply chain integrity, runtime monitoring, and governance.</p>
+            <div class="tag-row">
+              <span class="tag tag-blue">AI-STIG</span>
+              <span class="tag tag-blue">Kyverno</span>
+              <span class="tag tag-blue">Rego / OPA</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Frameworks -->
+      <section class="section">
+        <p class="section-eyebrow">Framework coverage</p>
+        <h2 class="section-title">Every finding is already mapped.</h2>
+        <p class="section-sub">No manual cross-referencing. Each check carries its control IDs so you can filter, sort, and report by framework without additional work.</p>
+        <div class="card-grid">
+          <div class="card">
+            <h3>CIS Benchmarks</h3>
+            <p>Redis, Elasticsearch, PostgreSQL 16, Kafka, MongoDB. Section and control IDs on every finding.</p>
+          </div>
+          <div class="card">
+            <h3>NIST 800-53 &amp; 800-171</h3>
+            <p>Rev 5 control IDs for every check. Suitable for FedRAMP package preparation and FISMA reporting.</p>
+          </div>
+          <div class="card">
+            <h3>FedRAMP &amp; DISA STIG</h3>
+            <p>FedRAMP Moderate and High mappings. DISA STIG IDs for PostgreSQL. Pre-formatted for eMASS import.</p>
+          </div>
+          <div class="card">
+            <h3>CMMC Level 2</h3>
+            <p>Practice IDs and domain labels mapped to findings. Supports DoD contractor compliance documentation.</p>
+          </div>
+          <div class="card">
+            <h3>MITRE ATT&amp;CK &amp; D3FEND</h3>
+            <p>Technique IDs on relevant findings. Connects configuration gaps to known adversary techniques.</p>
+          </div>
+          <div class="card">
+            <h3>CVE / KEV</h3>
+            <p>Elasticsearch audit includes live CVE/KEV scanning against the NVD and CISA Known Exploited Vulnerabilities catalog.</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- CTA -->
+      <div class="cta-banner">
+        <h2>No account. No telemetry. Just results.</h2>
+        <p>All five tools are open source and run fully offline. Clone and go.</p>
+        <div class="btn-row">
+          <a class="btn-primary" href="https://github.com/audit-forge">audit-forge on GitHub</a>
+          <a class="btn-ghost" href="contact.html">Get in touch</a>
+        </div>
+      </div>
+
+    </div>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container">
+      <p>© 2026 M.A.R.K. AI Systems &nbsp;·&nbsp; <a href="https://github.com/audit-forge">audit-forge</a> &nbsp;·&nbsp; <a href="index.html">Home</a> &nbsp;·&nbsp; <a href="contact.html">Contact</a></p>
+    </div>
+  </footer>
+
+</body>
+</html>
