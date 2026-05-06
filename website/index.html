@@ -3,48 +3,243 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>M.A.R.K. — Machine Assisted Real-Time Knowledge</title>
+  <title>M.A.R.K. — Security Audits for AI and Data Infrastructure</title>
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
+
   <header class="site-header">
-    <div class="container">
-      <h1 class="logo">M.A.R.K.</h1>
+    <div class="nav-inner">
+      <div class="logo">M.A.R<span class="dot">.</span>K.</div>
       <nav>
-        <a href="index.html">Home</a>
+        <a href="index.html" class="active">Home</a>
+        <a href="sentinel.html">Sentinel</a>
         <a href="about.html">About</a>
         <a href="contact.html">Contact</a>
+        <a href="https://github.com/audit-forge" class="nav-cta">GitHub</a>
       </nav>
     </div>
   </header>
 
-  <main class="container hero">
-    <h2>Machine Assisted Real-Time Knowledge</h2>
-    <p class="tagline">M.A.R.K. helps teams capture, surface, and act on operational knowledge in real time. This is a mockup landing page — feature copy and visuals are placeholders for now.</p>
+  <main>
 
-    <section class="features">
-      <article>
-        <h3>Real-time insights</h3>
-        <p>Collect telemetry and human feedback to generate timely, actionable knowledge for ops and engineering.</p>
-      </article>
-      <article>
-        <h3>Audit-ready</h3>
-        <p>Designed to be auditable and easy to integrate with existing security controls and toolchains.</p>
-      </article>
-      <article>
-        <h3>Lightweight</h3>
-        <p>Small-footprint agents and simple storage backends make deployment painless.</p>
-      </article>
-    </section>
+    <!-- Hero -->
+    <div class="container">
+      <section class="hero">
+        <div class="eyebrow">Open Source · CIS · NIST · FedRAMP · DISA STIG</div>
+        <h1>Find misconfigurations<br><em>before auditors do.</em></h1>
+        <p class="hero-sub">M.A.R.K. Sentinel runs automated security checks against your data infrastructure and AI systems — mapped to the frameworks your compliance team actually uses.</p>
+        <div class="btn-row">
+          <a class="btn-primary" href="sentinel.html">View Sentinel</a>
+          <a class="btn-ghost" href="https://github.com/audit-forge">Browse on GitHub</a>
+        </div>
+      </section>
+    </div>
 
-    <p class="cta"><a class="btn" href="about.html">Learn more</a></p>
+    <!-- Platform strip -->
+    <div class="platform-strip">
+      <div class="container">
+        <p class="strip-label">Audits your infrastructure</p>
+        <div class="platform-list">
+          <span class="platform-pill">Redis</span>
+          <span class="platform-pill">PostgreSQL</span>
+          <span class="platform-pill">Elasticsearch</span>
+          <span class="platform-pill">Kafka</span>
+          <span class="platform-pill">MongoDB</span>
+          <span class="platform-pill">Docker</span>
+          <span class="platform-pill">Kubernetes</span>
+          <span class="platform-pill">AI Runtimes</span>
+        </div>
+        <p class="strip-label" style="margin-top:20px">Mapped to</p>
+        <div class="platform-list">
+          <span class="platform-pill">CIS Benchmarks</span>
+          <span class="platform-pill">NIST 800-53</span>
+          <span class="platform-pill">NIST 800-171</span>
+          <span class="platform-pill">FedRAMP</span>
+          <span class="platform-pill">DISA STIG</span>
+          <span class="platform-pill">CMMC Level 2</span>
+          <span class="platform-pill">MITRE ATT&amp;CK</span>
+          <span class="platform-pill">MITRE D3FEND</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="container">
+
+      <!-- Stats -->
+      <div class="stat-row">
+        <div class="stat"><div class="num">300+</div><div class="lbl">Security checks</div></div>
+        <div class="stat"><div class="num">5</div><div class="lbl">Public audit tools</div></div>
+        <div class="stat"><div class="num">8</div><div class="lbl">Compliance frameworks</div></div>
+        <div class="stat"><div class="num">SARIF</div><div class="lbl">2.1.0 output</div></div>
+      </div>
+
+      <!-- Sentinel section -->
+      <section class="section">
+        <p class="section-eyebrow">Sentinel</p>
+        <h2 class="section-title">One command. Complete audit.</h2>
+        <p class="section-sub">Point Sentinel at a container, pod, or host and get a structured findings report — ready for GitHub Code Scanning, Wiz, Google SCC, or your CI pipeline.</p>
+
+        <div class="split">
+          <div class="text">
+            <div class="card-grid" style="grid-template-columns:1fr">
+              <div class="card">
+                <h3>Works where you work</h3>
+                <p>Docker containers, Kubernetes pods, or direct connections. No agent to install, no infrastructure to change.</p>
+              </div>
+              <div class="card">
+                <h3>Output your tools already accept</h3>
+                <p>SARIF 2.1.0 for GitHub Advanced Security. Evidence bundles for auditors. Wiz and Google SCC JSON for cloud posture platforms.</p>
+              </div>
+              <div class="card">
+                <h3>Compliance out of the box</h3>
+                <p>Every finding is tagged with CIS IDs, NIST 800-53 controls, FedRAMP mappings, and MITRE ATT&amp;CK techniques — no manual cross-referencing.</p>
+              </div>
+            </div>
+          </div>
+          <div class="visual">
+            <div class="code-block"><span class="c"># Run a Redis audit against a Docker container</span>
+python3 audit.py \
+  --mode docker \
+  --container my-redis \
+  --sarif results.sarif \
+  --bundle evidence.zip
+
+<span class="c"># Results</span>
+<span class="k">[PASS]</span> <span class="s">RD-CFG-001</span>  Protected mode enabled
+<span class="k">[PASS]</span> <span class="s">RD-CFG-002</span>  TLS replication active
+<span class="k">[FAIL]</span> <span class="s">RD-AUTH-001</span> Default user has nopass
+<span class="k">[WARN]</span> <span class="s">RD-CONT-004</span> Root filesystem not read-only
+
+Risk: <span class="s">HIGH RISK</span> — 1 critical finding</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Tool coverage -->
+      <section class="section">
+        <p class="section-eyebrow">Coverage</p>
+        <h2 class="section-title">Five tools. All public.</h2>
+        <p class="section-sub">Every tool is open source under the <a href="https://github.com/audit-forge">audit-forge</a> GitHub org. No account required, no telemetry, fully offline.</p>
+
+        <div class="tool-grid">
+          <div class="tool-card">
+            <div class="tool-header">
+              <span class="tool-name">redis-stig-audit</span>
+              <span class="tag tag-green">Public</span>
+            </div>
+            <p class="tool-desc">CIS Redis Benchmark + STIG controls. Auth, TLS, ACL, persistence, and container hardening.</p>
+            <div class="tag-row">
+              <span class="tag tag-blue">37 tests</span>
+              <span class="tag tag-blue">CIS Redis</span>
+              <span class="tag tag-blue">Docker · K8s · Direct</span>
+            </div>
+          </div>
+          <div class="tool-card">
+            <div class="tool-header">
+              <span class="tool-name">elastic-stig-audit</span>
+              <span class="tag tag-green">Public</span>
+            </div>
+            <p class="tool-desc">Elasticsearch security checks. Auth, TLS, cluster hardening, logging, and CVE/KEV scanning.</p>
+            <div class="tag-row">
+              <span class="tag tag-blue">95 tests</span>
+              <span class="tag tag-blue">CIS ES</span>
+              <span class="tag tag-blue">CVE scan</span>
+            </div>
+          </div>
+          <div class="tool-card">
+            <div class="tool-header">
+              <span class="tool-name">pg-stig-audit</span>
+              <span class="tag tag-green">Public</span>
+            </div>
+            <p class="tool-desc">PostgreSQL CIS Benchmark v1.1 and DISA STIG. Config, auth, logging, and privilege controls.</p>
+            <div class="tag-row">
+              <span class="tag tag-blue">CIS PG16</span>
+              <span class="tag tag-blue">DISA STIG</span>
+              <span class="tag tag-blue">FedRAMP High</span>
+            </div>
+          </div>
+          <div class="tool-card">
+            <div class="tool-header">
+              <span class="tool-name">kafka-stig-audit</span>
+              <span class="tag tag-green">Public</span>
+            </div>
+            <p class="tool-desc">Kafka container security. SASL/TLS auth, network controls, logging, and Zookeeper hardening.</p>
+            <div class="tag-row">
+              <span class="tag tag-blue">67 tests</span>
+              <span class="tag tag-blue">CIS Kafka</span>
+              <span class="tag tag-blue">NIST 800-53</span>
+            </div>
+          </div>
+          <div class="tool-card">
+            <div class="tool-header">
+              <span class="tool-name">mongo-stig-audit</span>
+              <span class="tag tag-green">Public</span>
+            </div>
+            <p class="tool-desc">MongoDB CIS/STIG-style audit. Auth, encryption at rest and in transit, container runtime checks.</p>
+            <div class="tag-row">
+              <span class="tag tag-blue">67 tests</span>
+              <span class="tag tag-blue">CIS MongoDB</span>
+              <span class="tag tag-blue">MITRE ATT&amp;CK</span>
+            </div>
+          </div>
+          <div class="tool-card">
+            <div class="tool-header">
+              <span class="tool-name">mark-sentinel (AI)</span>
+              <span class="tag tag-yellow">Coming soon</span>
+            </div>
+            <p class="tool-desc">Security audit for AI runtimes. Custom STIG control set covering model I/O, agent behavior, supply chain, and governance.</p>
+            <div class="tag-row">
+              <span class="tag tag-blue">AI-STIG</span>
+              <span class="tag tag-blue">Kyverno</span>
+              <span class="tag tag-blue">Rego / OPA</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Hash teaser -->
+      <section class="section">
+        <p class="section-eyebrow">Also from M.A.R.K.</p>
+        <h2 class="section-title">Hash — a personal AI that audits itself.</h2>
+        <p class="section-sub">Hash is a self-hosted AI agent runtime with built-in reasoning, memory, and Sentinel integration. It runs the same security checks against itself at startup. Private release ahead.</p>
+        <div class="card-grid">
+          <div class="card">
+            <div class="card-icon">🧠</div>
+            <h3>Deep reasoning</h3>
+            <p>Multi-pass critique and synthesis pipeline. Automatically engages on complex research, coding, and security tasks.</p>
+          </div>
+          <div class="card">
+            <div class="card-icon">🧬</div>
+            <h3>Persistent memory</h3>
+            <p>Semantic search, full-text index, and a live knowledge graph that updates as you work — no cloud sync required.</p>
+          </div>
+          <div class="card">
+            <div class="card-icon">🛡️</div>
+            <h3>Self-auditing</h3>
+            <p>Sentinel runs against the Hash runtime at startup. Behavioral anomaly detection flags unusual activity in real time.</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- CTA -->
+      <div class="cta-banner">
+        <h2>Start auditing your infrastructure today.</h2>
+        <p>All five tools are open source, require no account, and run fully offline.</p>
+        <div class="btn-row">
+          <a class="btn-primary" href="https://github.com/audit-forge">View on GitHub</a>
+          <a class="btn-ghost" href="sentinel.html">Learn about Sentinel</a>
+        </div>
+      </div>
+
+    </div>
   </main>
 
   <footer class="site-footer">
     <div class="container">
-      <p>© 2026 M.A.R.K. AI Systems</p>
-      <p class="powered">Powered by HASH#</p>
+      <p>© 2026 M.A.R.K. AI Systems &nbsp;·&nbsp; <a href="https://github.com/audit-forge">audit-forge</a> &nbsp;·&nbsp; <a href="sentinel.html">Sentinel</a> &nbsp;·&nbsp; <a href="contact.html">Contact</a></p>
     </div>
   </footer>
+
 </body>
 </html>

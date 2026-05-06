@@ -9,24 +9,49 @@
 <body>
   <header class="site-header">
     <div class="container">
-      <h1 class="logo">M.A.R.K.</h1>
+      <h1 class="logo">M.A.R.<span>K</span>.</h1>
       <nav>
         <a href="index.html">Home</a>
         <a href="about.html">About</a>
-        <a href="contact.html">Contact</a>
+        <a href="sentinel.html">Sentinel</a>
+        <a href="contact.html" class="active">Contact</a>
       </nav>
     </div>
   </header>
 
   <main class="container">
-    <h2>Contact</h2>
-    <p>For inquiries about M.A.R.K. Sentinel, please open an issue on <a href="https://github.com/audit-forge/mark-sentinel">GitHub</a> or reach out via the project's official channels.</p>
+
+    <section style="padding-top:48px;max-width:640px">
+      <p class="section-label">Get in touch</p>
+      <h2 class="section-title">Contact M.A.R.K. AI Systems</h2>
+      <p class="section-sub">For questions, bug reports, or partnership inquiries, reach out through the appropriate channel below.</p>
+
+      <div class="card-grid" style="grid-template-columns:1fr">
+        <div class="card">
+          <h3>Sentinel — bug reports &amp; issues</h3>
+          <p>Open an issue on the relevant GitHub repo under <a href="https://github.com/audit-forge">audit-forge</a>. Include your tool version, mode (docker/kubectl/direct), and the full error output.</p>
+        </div>
+        <div class="card">
+          <h3>Sentinel — AI / mark-sentinel</h3>
+          <p>The AI Sentinel repo is currently private. For access or partnership inquiries, open an issue on <a href="https://github.com/audit-forge/redis-stig-audit">any public audit-forge repo</a> with the subject line "mark-sentinel inquiry".</p>
+        </div>
+        <div class="card">
+          <h3>Hash runtime</h3>
+          <p>Hash is currently in private development ahead of a public release. Details will be announced on GitHub once the IP filing is complete.</p>
+        </div>
+      </div>
+
+      <div style="margin-top:32px">
+        <a class="btn" href="https://github.com/audit-forge">Visit audit-forge on GitHub</a>
+      </div>
+    </section>
+
   </main>
 
   <footer class="site-footer">
     <div class="container">
-      <p>© 2026 M.A.R.K. AI Systems</p>
-      <p class="powered">Powered by HASH#</p>
+      <p>© 2026 M.A.R.K. AI Systems &nbsp;·&nbsp; <a href="https://github.com/audit-forge">audit-forge</a> on GitHub</p>
+      <p style="margin-top:4px">Powered by HASH#</p>
     </div>
   </footer>
 </body>
