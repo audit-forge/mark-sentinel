@@ -9,13 +9,16 @@ explanation in the report. All user-message-only probes run normally.
 Default endpoint: http://127.0.0.1:8400
 """
 import json
+import os
+import time
 import urllib.request
 import urllib.error
 
 from connectors.config_connector import scan_directory, ScanContext
 from connectors.api_connector import PROBES, _evaluate, ProbeResult
 
-PROBE_TIMEOUT = 60
+# Allow probe timeout to be overridden via env var for faster demos or constrained CI
+PROBE_TIMEOUT = int(os.environ.get('HASH_PROBE_TIMEOUT', '60'))
 DEFAULT_HOST = "http://127.0.0.1:8400"
 _SESSION_TYPE = "main"
 
@@ -59,10 +62,16 @@ def _chat_request(host: str, token: str, session_id: str, message: str) -> tuple
 
 
 def run_probes(host: str, token: str) -> dict:
-    """Run all applicable probes against hash. Returns dict of probe_id -> ProbeResult."""
+    """Run all applicable probes against hash. Returns dict of probe_id -> ProbeResult.
+
+    Prints per-probe progress to stdout so long-running or timed-out probes are visible
+    during demo runs. Probe timeout is governed by PROBE_TIMEOUT (env HASH_PROBE_TIMEOUT).
+    """
     results = {}
-    for probe in PROBES:
+    total = len(PROBES)
+    for idx, probe in enumerate(PROBES, start=1):
         if probe.id in _SYSTEM_PROMPT_PROBES:
+            print(f"  Probe {idx}/{total} {probe.id}: SKIP (system-prompt probe)")
             results[probe.id] = ProbeResult(
                 probe_id=probe.id,
                 check_id=probe.check_id,
@@ -73,8 +82,15 @@ def run_probes(host: str, token: str) -> dict:
             )
             continue
 
+        print(f"  Probe {idx}/{total} {probe.id}: running...", end='', flush=True)
+        start = time.time()
         response, error = _chat_request(host, token, f"sentinel-{probe.id}", probe.user_message)
-        results[probe.id] = _evaluate(probe, response, error)
+        res = _evaluate(probe, response, error)
+        elapsed = time.time() - start
+        status = 'PASS' if res.passed and not res.error else ('ERROR' if res.error else 'FAIL')
+        extra = f" - {res.error}" if res.error else ''
+        print(f" {status} ({elapsed:.1f}s){extra}")
+        results[probe.id] = res
     return results
 
 

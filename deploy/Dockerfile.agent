@@ -1,0 +1,33 @@
+FROM python:3.13-slim
+
+LABEL org.opencontainers.image.title="M.A.R.K. Sentinel Agent" \
+      org.opencontainers.image.description="Distributed AI security audit agent" \
+      org.opencontainers.image.vendor="Hash AI" \
+      org.opencontainers.image.source="https://github.com/hash-ai/sentinel"
+
+ENV SENTINEL_SERVER="" \
+    SENTINEL_AGENT_TOKEN="" \
+    PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1
+
+WORKDIR /app
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir --upgrade pip \
+ && pip install --no-cache-dir -r requirements.txt
+
+COPY agent.py audit.py audit_safe.py storage.py server.py ./
+COPY checks/    checks/
+COPY connectors/ connectors/
+COPY profiles/  profiles/
+
+RUN addgroup --system sentinel \
+ && adduser  --system --no-create-home --ingroup sentinel sentinel \
+ && chown -R sentinel:sentinel /app
+
+USER sentinel
+
+HEALTHCHECK --interval=60s --timeout=10s --start-period=15s --retries=3 \
+    CMD python agent.py --once --target /app 2>&1 | grep -q "scan" || exit 1
+
+CMD ["python", "agent.py", "--daemon", "--target", "/app"]

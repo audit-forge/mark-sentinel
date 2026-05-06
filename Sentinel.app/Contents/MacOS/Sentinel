@@ -1,0 +1,58 @@
+#!/bin/bash
+# M.A.R.K. Sentinel launcher — starts server silently, opens browser
+PROJ="$(cd "$(dirname "$0")/../../.." && pwd)"
+
+# macOS app bundles don't inherit the user's shell PATH, so probe explicitly
+_find_python() {
+    local candidates=(
+        /opt/homebrew/bin/python3.14
+        /opt/homebrew/bin/python3.13
+        /opt/homebrew/bin/python3.12
+        /opt/homebrew/bin/python3.11
+        /usr/local/bin/python3.14
+        /usr/local/bin/python3.13
+        /usr/local/bin/python3.12
+        /usr/local/bin/python3.11
+        "$HOME/.pyenv/shims/python3"
+        /usr/bin/python3
+        python3
+    )
+    for cmd in "${candidates[@]}"; do
+        { [ -x "$cmd" ] || command -v "$cmd" >/dev/null 2>&1; } || continue
+        local ver
+        ver=$("$cmd" -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')" 2>/dev/null) || continue
+        local maj min
+        maj=$(echo "$ver" | cut -d. -f1)
+        min=$(echo "$ver" | cut -d. -f2)
+        if [ "$maj" -ge 3 ] && [ "$min" -ge 11 ]; then
+            echo "$cmd"
+            return 0
+        fi
+    done
+    return 1
+}
+
+if curl -sf http://localhost:7331/ >/dev/null 2>&1; then
+  open http://localhost:7331
+  exit 0
+fi
+
+PYTHON=$(_find_python)
+if [ -z "$PYTHON" ]; then
+    osascript -e 'display alert "Python 3.11+ Required" message "M.A.R.K. Sentinel requires Python 3.11 or later.\n\nInstall from https://python.org/downloads/ or via Homebrew:\n  brew install python@3.13"'
+    exit 1
+fi
+
+nohup "$PYTHON" "$PROJ/server.py" --no-browser >"$PROJ/.sentinel.log" 2>&1 &
+echo $! > "$PROJ/.sentinel.pid"
+
+for i in $(seq 1 20); do
+  sleep 0.3
+  if curl -sf http://localhost:7331/ >/dev/null 2>&1; then
+    open http://localhost:7331
+    exit 0
+  fi
+done
+
+osascript -e 'display alert "Sentinel failed to start" message "Check .sentinel.log in the project folder for details."'
+exit 1

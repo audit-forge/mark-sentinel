@@ -1,21 +1,20 @@
 import subprocess
-import json
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-AUDIT_SAFE = ROOT / 'audit_safe.py'
+AUDIT = ROOT / 'audit.py'
 ARTIFACTS = ROOT / 'output' / 'artifacts'
 
 
 def run_audit(profile: str, target: str, out_basename: str):
     ARTIFACTS.mkdir(parents=True, exist_ok=True)
-    cmd = ["python3", str(AUDIT_SAFE), "--mode", "config", "--profile", profile, "--target", target,
+    cmd = ["python3", str(AUDIT), "--mode", "config", "--profile", profile, "--target", target,
            "--output", "json,compliance", "--out-file", str(ARTIFACTS / out_basename)]
     completed = subprocess.run(cmd, capture_output=True, text=True)
     if completed.returncode not in (0,1):
         print(completed.stdout)
         print(completed.stderr)
-        raise RuntimeError(f"audit_safe exited with {completed.returncode}")
+        raise RuntimeError(f"audit exited with {completed.returncode}")
     return completed
 
 

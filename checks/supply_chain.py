@@ -1,10 +1,10 @@
 """
 AI-SUPPLY checks — Model & Supply Chain Integrity
-Checks: AI-SUPPLY-001 through AI-SUPPLY-005
+Checks: AI-SUPPLY-001 through AI-SUPPLY-006
 All checks are evaluable in config mode.
 """
 import re
-from . import CheckResult, PASS, FAIL, WARN, SKIP
+from . import CheckResult, PASS, FAIL, WARN
 from connectors.config_connector import ScanContext
 
 CATEGORY = "AI-SUPPLY"
@@ -256,8 +256,8 @@ def check_supply_003(ctx: ScanContext) -> CheckResult:
             frameworks={"OWASP LLM": "LLM03", "FedRAMP": "SA-12, CM-7", "NIST AI RMF": "GOVERN 2.2"},
         )
 
-    lines = [l.strip() for l in ctx.requirements_txt.splitlines()
-             if l.strip() and not l.strip().startswith('#')]
+    lines = [ln.strip() for ln in ctx.requirements_txt.splitlines()
+             if ln.strip() and not ln.strip().startswith('#')]
 
     pinned = []
     unpinned = []
@@ -416,7 +416,6 @@ def check_supply_004(ctx: ScanContext) -> CheckResult:
 
 def check_supply_005(ctx: ScanContext) -> CheckResult:
     """AI-SUPPLY-005: Model Version Pinned (Not Floating Latest)"""
-    all_text = '\n'.join(ctx.files.values())
     floating_hits = []
     pinned_hits = []
 
@@ -483,6 +482,299 @@ def check_supply_005(ctx: ScanContext) -> CheckResult:
         )
 
 
+# ── AI-SUPPLY-006 data ────────────────────────────────────────────────────────
+
+# Maps tool/platform → (display_name, list_of_file_patterns)
+# Patterns are matched against the filename portion of any path in the scan.
+_AGENT_INSTRUCTION_FILES: dict[str, tuple[str, list[str]]] = {
+    "claude": (
+        "Claude / Claude Code (Anthropic)",
+        [
+            "CLAUDE.md", "claude.md",
+            ".claude/settings.json", ".claude/settings.local.json",
+            ".claude/commands",                 # directory marker
+        ],
+    ),
+    "openclaw": (
+        "OpenClaw",
+        [
+            "openclaw.json", ".openclaw/openclaw.json",
+        ],
+    ),
+    "copilot": (
+        "GitHub Copilot (OpenAI)",
+        [
+            ".github/copilot-instructions.md",
+            "copilot-instructions.md",
+            ".copilot/config.json",
+            ".copilot/instructions.md",
+        ],
+    ),
+    "cursor": (
+        "Cursor",
+        [
+            ".cursorrules", ".cursorignore",
+            ".cursor/rules",                    # directory marker
+            "CURSOR.md", "cursor.md",
+        ],
+    ),
+    "windsurf": (
+        "Windsurf / Codeium",
+        [
+            ".windsurfrules", ".windsurf/config.json",
+            "WINDSURF.md", "windsurf.md",
+            ".codeium/config.json", ".codeiumignore",
+        ],
+    ),
+    "aider": (
+        "Aider",
+        [
+            ".aider.conf.yml", ".aiderignore",
+            "AIDER.md", "aider.md",
+        ],
+    ),
+    "gemini": (
+        "Gemini / Google AI",
+        [
+            "GEMINI.md", "gemini.md",
+            ".gemini/config.json", ".gemini/settings.json",
+            "gemini-instructions.md",
+        ],
+    ),
+    "ollama": (
+        "Ollama",
+        [
+            "Modelfile", "modelfile",
+            "ollama-config.yaml", "ollama-config.yml",
+            ".ollama/config",
+        ],
+    ),
+    "continue": (
+        "Continue.dev",
+        [
+            ".continue/config.json", ".continuerc.json",
+            "CONTINUE.md", "continue.md",
+        ],
+    ),
+    "amazonq": (
+        "Amazon Q / CodeWhisperer",
+        [
+            ".amazonq/config.json",
+            "amazonq-instructions.md",
+        ],
+    ),
+    "devin": (
+        "Devin (Cognition)",
+        [
+            "DEVIN.md", "devin.md", ".devin/config.json",
+        ],
+    ),
+    "tabnine": (
+        "Tabnine",
+        [
+            ".tabnine_root", ".tabnine/config.json",
+        ],
+    ),
+    "generic": (
+        "Generic AI agent",
+        [
+            "AGENTS.md", "agents.md",
+            "AGENT.md", "agent.md",
+            "AI_INSTRUCTIONS.md", "ai_instructions.md",
+            "SYSTEM_PROMPT.md", "system_prompt.md",
+            "LLM_CONTEXT.md", "llm_context.md",
+            "CODEBASE_CONTEXT.md",
+            ".ai/config.json", ".aiprompt",
+        ],
+    ),
+}
+
+# Flatten to a set for fast path matching
+_ALL_AGENT_FILENAMES: set[str] = {
+    pat.lower()
+    for _, (_, patterns) in _AGENT_INSTRUCTION_FILES.items()
+    for pat in patterns
+}
+
+# Production artifact directories — finding agent files here is a FAIL
+_ARTIFACT_DIRS = frozenset([
+    "dist/", "build/", "out/", "release/", "pkg/", "bin/",
+    ".npm/", "node_modules/", "site-packages/",
+    ".app/Contents/", ".app/", "Payload/",          # macOS bundles
+    "artifacts/",
+])
+
+# Sensitive content patterns inside instruction files
+_SENSITIVE_IN_AGENT_RE = re.compile(
+    r'(?i)(?:'
+    r'(?:api[_-]?key|apikey|api[_-]?secret|token|password|passwd|secret)\s*[=:]\s*["\']?[A-Za-z0-9+/._\-]{16,}'
+    r'|sk-[a-zA-Z0-9]{20,}'                         # OpenAI key
+    r'|sk-ant-[a-zA-Z0-9]{20,}'                     # Anthropic key
+    r'|AIzaSy[a-zA-Z0-9_\-]{30,}'                   # Google key
+    r'|https?://(?:10\.|192\.168\.|172\.(?:1[6-9]|2\d|3[01])\.|localhost|internal[.\-])'  # internal URLs
+    r')'
+)
+
+
+def _matches_agent_pattern(filepath: str) -> str | None:
+    """Return the tool key if filepath matches any known agent instruction file pattern."""
+    fp_lower = filepath.lower().replace("\\", "/")
+    for tool_key, (_, patterns) in _AGENT_INSTRUCTION_FILES.items():
+        for pat in patterns:
+            pat_lower = pat.lower()
+            if fp_lower.endswith("/" + pat_lower) or fp_lower == pat_lower:
+                return tool_key
+            # directory markers: check if path contains the dir prefix
+            if pat_lower.endswith("/") and pat_lower.rstrip("/") in fp_lower:
+                return tool_key
+    return None
+
+
+def _in_artifact_dir(filepath: str) -> bool:
+    fp = filepath.lower().replace("\\", "/")
+    return any(d in fp for d in _ARTIFACT_DIRS)
+
+
+def check_supply_006(ctx: ScanContext) -> CheckResult:
+    """AI-SUPPLY-006: AI Agent Instruction Files Not Shipped in Production Artifacts"""
+    found: dict[str, list[str]] = {}        # tool_key → [paths]
+    artifact_leaks: list[str] = []
+    sensitive_leaks: list[str] = []
+
+    # Read ignore files once
+    gitignore  = ctx.files.get(".gitignore", "") + ctx.files.get("../.gitignore", "")
+    dockerignore = ctx.files.get(".dockerignore", "")
+    npmignore  = ctx.files.get(".npmignore", "")
+    all_ignores = (gitignore + dockerignore + npmignore).lower()
+
+    for filepath, content in ctx.files.items():
+        tool_key = _matches_agent_pattern(filepath)
+        if tool_key is None:
+            continue
+
+        found.setdefault(tool_key, []).append(filepath)
+
+        # Check if in a production artifact path
+        if _in_artifact_dir(filepath):
+            artifact_leaks.append(filepath)
+
+        # Check content for embedded secrets or internal URLs
+        if content and _SENSITIVE_IN_AGENT_RE.search(content):
+            sensitive_leaks.append(filepath)
+
+    if not found:
+        return CheckResult(
+            check_id="AI-SUPPLY-006",
+            title="AI Agent Instruction Files Not Shipped in Production Artifacts",
+            status=PASS,
+            severity="HIGH",
+            category=CATEGORY,
+            details="No AI agent instruction files detected in scanned paths.",
+            evidence=[],
+            frameworks={
+                "OWASP LLM": "LLM07",
+                "FedRAMP": "SI-12, CM-8",
+                "NIST AI RMF": "GOVERN 2.2",
+            },
+        )
+
+    # Build tool inventory summary
+    tool_summary: list[str] = []
+    for tool_key, paths in sorted(found.items()):
+        display = _AGENT_INSTRUCTION_FILES[tool_key][0]
+        tool_summary.append(f"{display}: {', '.join(paths[:2])}"
+                            + (f" (+{len(paths)-2} more)" if len(paths) > 2 else ""))
+
+    # FAIL: sensitive content embedded in instruction files
+    if sensitive_leaks:
+        return CheckResult(
+            check_id="AI-SUPPLY-006",
+            title="AI Agent Instruction Files Not Shipped in Production Artifacts",
+            status=FAIL,
+            severity="CRITICAL",
+            category=CATEGORY,
+            details=(
+                f"{len(sensitive_leaks)} AI agent instruction file(s) contain embedded secrets or "
+                f"internal URLs. These files reveal internal architecture and credentials to anyone "
+                f"who can read your repo or shipped artifact."
+            ),
+            evidence=sensitive_leaks[:5] + tool_summary,
+            remediation=(
+                "1. Remove secrets from instruction files immediately — use env vars or a secrets manager.\n"
+                "2. Rotate any exposed credentials.\n"
+                "3. Add these files to .gitignore and .dockerignore.\n"
+                "4. Audit git history: git log --all --full-history -- CLAUDE.md .cursorrules"
+            ),
+            frameworks={
+                "OWASP LLM": "LLM07",
+                "FedRAMP": "IA-5, SI-12, CM-8",
+                "NIST AI RMF": "GOVERN 2.2",
+            },
+        )
+
+    # FAIL: instruction files found inside production artifact directories
+    if artifact_leaks:
+        return CheckResult(
+            check_id="AI-SUPPLY-006",
+            title="AI Agent Instruction Files Not Shipped in Production Artifacts",
+            status=FAIL,
+            severity="HIGH",
+            category=CATEGORY,
+            details=(
+                f"{len(artifact_leaks)} AI agent instruction file(s) found inside production artifact "
+                f"directories. These expose your internal AI tooling setup, system prompt boundaries, "
+                f"and architecture to end users (see: Apple CLAUDE.md incident)."
+            ),
+            evidence=artifact_leaks[:5] + tool_summary,
+            remediation=(
+                "1. Add agent instruction files to .dockerignore and .npmignore.\n"
+                "2. Verify your build pipeline does not COPY . . without an exclusion list.\n"
+                "3. For Docker: add CLAUDE.md, .cursorrules, AGENTS.md etc. to .dockerignore.\n"
+                "4. Audit existing published artifacts for leakage."
+            ),
+            frameworks={
+                "OWASP LLM": "LLM07",
+                "FedRAMP": "SI-12, CM-8",
+                "NIST AI RMF": "GOVERN 2.2",
+            },
+        )
+
+    # WARN: files exist in repo — not necessarily bad, but flag for review
+    ignored_count = sum(
+        1 for paths in found.values()
+        for p in paths
+        if any(seg in all_ignores for seg in [p.lower(), p.lower().split("/")[-1]])
+    )
+    total_found = sum(len(v) for v in found.values())
+
+    return CheckResult(
+        check_id="AI-SUPPLY-006",
+        title="AI Agent Instruction Files Not Shipped in Production Artifacts",
+        status=WARN,
+        severity="MEDIUM",
+        category=CATEGORY,
+        details=(
+            f"{total_found} AI agent instruction file(s) found across "
+            f"{len(found)} tool(s). "
+            + (f"{ignored_count} are excluded by ignore files. " if ignored_count else "")
+            + "Verify none are shipped in production artifacts and that sensitive "
+            "system prompts or internal URLs are not embedded in their content."
+        ),
+        evidence=tool_summary,
+        remediation=(
+            "1. Review each file — ensure no secrets, internal URLs, or sensitive architecture details.\n"
+            "2. Add to .dockerignore and .npmignore to prevent shipping in artifacts.\n"
+            "3. Add to .gitignore if the content is sensitive (e.g. proprietary system prompts).\n"
+            "4. Document intentional AI tooling usage in your AI asset inventory (AI-GOV-005)."
+        ),
+        frameworks={
+            "OWASP LLM": "LLM07",
+            "FedRAMP": "SI-12, CM-8",
+            "NIST AI RMF": "GOVERN 2.2",
+        },
+    )
+
+
 def run_all(ctx: ScanContext) -> list:
     return [
         check_supply_001(ctx),
@@ -490,4 +782,5 @@ def run_all(ctx: ScanContext) -> list:
         check_supply_003(ctx),
         check_supply_004(ctx),
         check_supply_005(ctx),
+        check_supply_006(ctx),
     ]

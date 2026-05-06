@@ -1,0 +1,11 @@
+{
+  "name": "Financial Services",
+  "description": "AI security checks for financial institutions — aligned to NIST AI RMF 1.0, CRI FS AI RMF, SR 11-7, and SR 26-2 model risk management guidance.",
+  "checks": "all",
+  "default_output": "plain",
+  "include_remediation": true,
+  "include_frameworks": true,
+  "severity_threshold": "LOW",
+  "smb_language": false,
+  "framework_emphasis": "financial"
+}

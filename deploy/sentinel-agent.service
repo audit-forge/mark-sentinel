@@ -1,0 +1,27 @@
+[Unit]
+Description=M.A.R.K. Sentinel Agent
+Documentation=https://github.com/hash-ai/sentinel
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=sentinel
+Group=sentinel
+ExecStart=/usr/bin/python3 /opt/sentinel/agent.py --config /etc/sentinel/agent_config.json --daemon
+Restart=on-failure
+RestartSec=30
+TimeoutStopSec=30
+Environment=PYTHONUNBUFFERED=1
+EnvironmentFile=-/etc/sentinel/sentinel.env
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=sentinel-agent
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ReadWritePaths=/opt/sentinel /var/log
+
+[Install]
+WantedBy=multi-user.target

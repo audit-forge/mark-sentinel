@@ -1,0 +1,19 @@
+version: "3.8"
+services:
+  ai-service:
+    image: acmecorp/ai-assistant:1.0.0
+    ports:
+      - "8080:8080"
+    environment:
+      OPENAI_API_KEY: sk-proj-T3sLa8NqKm2pVx7bYc4wJ9dR6fG0hE1uZ5iO
+      DATABASE_URL: postgres://admin:AcmeProdDb2024@db:5432/aiassistant
+      APP_ENV: production
+
+  db:
+    image: postgres:16
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: aiassistant
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: AcmeProdDb2024

@@ -3,10 +3,10 @@ name: Build Docker image
 on:
   push:
     branches:
-      - phase4/smb-packaging
+      - main
   pull_request:
     branches:
-      - phase4/smb-packaging
+      - main
 
 jobs:
   build:
