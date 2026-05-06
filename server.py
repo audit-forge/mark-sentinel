@@ -66,6 +66,20 @@ def _agent_token() -> str:
     if tok_file.exists():
         return tok_file.read_text().strip()
     return ''
+
+def _dashboard_token() -> str:
+    """Return expected dashboard token. Empty = no auth required."""
+    if os.environ.get('SENTINEL_DASHBOARD_TOKEN'):
+        return os.environ['SENTINEL_DASHBOARD_TOKEN']
+    tok_file = ROOT / 'dashboard_token.txt'
+    if tok_file.exists():
+        return tok_file.read_text().strip()
+    return ''
+
+# ── per-device report rate limiting ──────────────────────────────────────────
+_report_last_seen: dict[str, float] = {}
+_report_lock = threading.Lock()
+_REPORT_MIN_INTERVAL = 60  # seconds between accepted reports per device
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -93,7 +107,7 @@ def _rebuild_dashboard(out_dir: Path) -> bool:
         label_map = {
             'config_scan':           'Config Scan',
             'openai':                'ChatGPT (gpt-4o)',
-            'claude':                'Claude (claude-opus-4-7)',
+            'claude':                'Anthropic (claude-opus-4-7)',
             'ollama___qwen2.5-7b':   'Ollama (qwen2.5-7b)',
             'hash-ai___openclaw':    'Hash-AI (openclaw)',
         }
@@ -164,8 +178,72 @@ def _run_scan(mode: str, target: str, profile: str, providers: list[str]):
 class _Handler(http.server.BaseHTTPRequestHandler):
     def log_message(self, *_): pass
 
+    # ── auth helpers ──────────────────────────────────────────────────────────
+
+    def _check_dashboard_auth(self) -> bool:
+        token = _dashboard_token()
+        if not token:
+            return True
+        for part in self.headers.get('Cookie', '').split(';'):
+            k, _, v = part.strip().partition('=')
+            if k.strip() == 'sentinel_session' and v.strip() == token:
+                return True
+        return False
+
+    def _require_dashboard_auth(self) -> bool:
+        if self._check_dashboard_auth():
+            return True
+        if self.command == 'POST':
+            self._send(401, b'Unauthorized - set SENTINEL_DASHBOARD_TOKEN', 'text/plain')
+        else:
+            from urllib.parse import quote
+            self.send_response(302)
+            self.send_header('Location', f'/login?next={quote(urlparse(self.path).path)}')
+            self.end_headers()
+        return False
+
+    def _check_agent_bearer(self) -> bool:
+        expected = _agent_token()
+        if not expected:
+            return True
+        return self.headers.get('Authorization', '') == f'Bearer {expected}'
+
+    # ── routing ───────────────────────────────────────────────────────────────
+
     def do_GET(self):
         path = urlparse(self.path).path
+
+        # Auth-exempt: health probe and login UI
+        if path == '/health':
+            self._api_health()
+            return
+        if path == '/login':
+            self._serve_login()
+            return
+        if path == '/logout':
+            self._handle_logout()
+            return
+
+        # Agent-token-gated: agents download these during self-update
+        if path in ('/agent.py', '/bundle.tar.gz'):
+            if not self._check_agent_bearer():
+                self._send(401, b'Unauthorized', 'text/plain')
+                return
+            if path == '/agent.py':
+                self._serve_agent_script()
+            else:
+                self._serve_bundle()
+            return
+
+        # Agent-token-gated: command polling (has its own internal check too)
+        if path.startswith('/api/agent/commands/'):
+            self._api_agent_commands(path[len('/api/agent/commands/'):])
+            return
+
+        # All remaining GET endpoints require dashboard auth
+        if not self._require_dashboard_auth():
+            return
+
         static = {
             '/':               self._serve_dashboard,
             '/dashboard.html': self._serve_dashboard,
@@ -173,38 +251,44 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             '/api/events':     self._api_events,
             '/api/devices':    self._api_devices,
             '/api/discover':   self._api_discover,
-            '/fleet':              self._serve_fleet,
-            '/health':             self._api_health,
-            '/agent.py':           self._serve_agent_script,
-            '/bundle.tar.gz':      self._serve_bundle,
-            '/academy':            self._serve_academy,
-            '/command':            self._serve_fleet,
-            '/api/config':         self._api_get_config,
-            '/download/shortcut':  self._serve_shortcut,
+            '/fleet':          self._serve_fleet,
+            '/academy':        self._serve_academy,
+            '/command':        self._serve_fleet,
+            '/api/config':     self._api_get_config,
+            '/download/shortcut': self._serve_shortcut,
         }
         if path in static:
             static[path]()
-        # timeseries endpoint for fleet device charts
         elif path.startswith('/fleet/device/') and path.endswith('/timeseries.json'):
             did = path[len('/fleet/device/'): -len('/timeseries.json')]
             self._api_device_timeseries(did)
-        # full single-device dashboard (all views: findings, remediation, heatmap, etc.)
         elif path.startswith('/fleet/device/') and path.endswith('/dashboard'):
             did = path[len('/fleet/device/'): -len('/dashboard')]
             self._serve_device_dashboard(did)
         elif path.startswith('/api/devices/'):
             self._api_device_report(path[len('/api/devices/'):])
-        elif path.startswith('/api/agent/commands/'):
-            self._api_agent_commands(path[len('/api/agent/commands/'):])
         else:
             self._not_found()
 
     def do_POST(self):
         path = urlparse(self.path).path
+
+        # Login form submission — no auth needed
+        if path == '/login':
+            self._handle_login_post()
+            return
+
+        # Agent report — uses its own agent-token auth
+        if path == '/api/agent/report':
+            self._api_agent_report()
+            return
+
+        # All other POST endpoints require dashboard auth
+        if not self._require_dashboard_auth():
+            return
+
         if path == '/api/scan':
             self._api_scan()
-        elif path == '/api/agent/report':
-            self._api_agent_report()
         elif path == '/api/config':
             self._api_set_config()
         elif path == '/api/system/update':
@@ -224,6 +308,71 @@ class _Handler(http.server.BaseHTTPRequestHandler):
 
     def do_OPTIONS(self):
         self._send(200, b'', 'text/plain')
+
+    # ── login / logout ────────────────────────────────────────────────────────
+
+    def _serve_login(self):
+        from urllib.parse import parse_qs
+        qs = parse_qs(urlparse(self.path).query)
+        next_url = qs.get('next', ['/'])[0]
+        error = bool(qs.get('error'))
+        err_html = '<p style="color:#f85149;font-size:13px;margin:0 0 14px">Incorrect token.</p>' if error else ''
+        body = f"""<!doctype html><html><head><meta charset="utf-8">
+<title>M.A.R.K. Sentinel — Sign in</title>
+<style>body{{font-family:system-ui;background:#0d1117;color:#8b949e;
+display:flex;align-items:center;justify-content:center;height:100vh;margin:0}}
+.box{{background:#161b22;border:1px solid #30363d;border-radius:8px;padding:40px 36px;width:320px}}
+h2{{color:#e6edf3;font-size:18px;margin:0 0 24px}}
+input{{width:100%;box-sizing:border-box;background:#0d1117;border:1px solid #30363d;
+border-radius:6px;color:#e6edf3;padding:10px 12px;font-size:14px;margin-bottom:16px}}
+button{{width:100%;background:#238636;color:#fff;border:none;border-radius:6px;
+padding:10px;font-size:14px;cursor:pointer;font-weight:600}}
+button:hover{{background:#2ea043}}
+.brand{{color:#58a6ff;font-size:12px;text-align:center;margin-top:20px}}</style>
+</head><body><div class="box">
+<h2>M.A.R.K. Sentinel</h2>{err_html}
+<form method="POST" action="/login">
+<input type="hidden" name="next" value="{next_url}">
+<input type="password" name="token" placeholder="Dashboard token" autofocus>
+<button type="submit">Sign in</button>
+</form>
+<div class="brand">Powered by Hash</div>
+</div></body></html>""".encode()
+        self.send_response(200)
+        self.send_header('Content-Type', 'text/html; charset=utf-8')
+        self.send_header('Content-Length', len(body))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _handle_login_post(self):
+        from urllib.parse import parse_qs, quote
+        length = int(self.headers.get('Content-Length', 0))
+        if length > 4096:
+            self._send(400, b'Bad request', 'text/plain')
+            return
+        params = parse_qs(self.rfile.read(length).decode(errors='ignore'))
+        submitted = params.get('token', [''])[0]
+        next_url = params.get('next', ['/'])[0]
+        if not next_url.startswith('/') or '//' in next_url:
+            next_url = '/'
+        expected = _dashboard_token()
+        if expected and submitted == expected:
+            self.send_response(302)
+            self.send_header('Set-Cookie',
+                f'sentinel_session={expected}; Path=/; HttpOnly; SameSite=Strict')
+            self.send_header('Location', next_url)
+            self.end_headers()
+        else:
+            self.send_response(302)
+            self.send_header('Location', f'/login?next={quote(next_url)}&error=1')
+            self.end_headers()
+
+    def _handle_logout(self):
+        self.send_response(302)
+        self.send_header('Set-Cookie',
+            'sentinel_session=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0')
+        self.send_header('Location', '/login')
+        self.end_headers()
 
     # ── endpoints ─────────────────────────────────────────────────────────────
 
@@ -461,6 +610,14 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         if not device_id or not report:
             self._send(400, b'Missing device_id or report', 'text/plain')
             return
+
+        now = time.time()
+        with _report_lock:
+            last = _report_last_seen.get(device_id, 0.0)
+            if now - last < _REPORT_MIN_INTERVAL:
+                self._send(429, b'Too many reports - wait 60s between submissions', 'text/plain')
+                return
+            _report_last_seen[device_id] = now
 
         try:
             _get_store().upsert_report(
