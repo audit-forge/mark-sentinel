@@ -763,7 +763,7 @@ button:hover{{background:#2ea043}}
         """POST /api/system/update — run git pull in ROOT, return output."""
         try:
             result = subprocess.run(
-                ['git', 'pull'],
+                ['git', '-c', f'safe.directory={ROOT}', 'pull'],
                 cwd=str(ROOT),
                 capture_output=True,
                 text=True,
