@@ -321,6 +321,18 @@ examples:
         help='Path to alerts_config.json — send email/webhook notifications for new critical findings',
     )
     parser.add_argument(
+        '--store-db',
+        default=None,
+        metavar='PATH',
+        help='Store scan result in agents.db at PATH for trend tracking (e.g. output/agents.db)',
+    )
+    parser.add_argument(
+        '--store-device-id',
+        default=None,
+        metavar='ID',
+        help='Device ID to use when storing with --store-db (default: hostname)',
+    )
+    parser.add_argument(
         '--compare',
         nargs=2,
         metavar=('BEFORE', 'AFTER'),
@@ -600,6 +612,25 @@ examples:
                 print(f"[WARN] Could not load alerts config: {args.alerts}", file=sys.stderr)
         except Exception as _ae:
             print(f"[WARN] Alerts failed: {_ae}", file=sys.stderr)
+
+    if getattr(args, 'store_db', None):
+        try:
+            from storage import AgentStore
+            from output.json_report import format_json as _fmt_json
+            import hashlib, platform as _platform
+            _store = AgentStore(Path(args.store_db))
+            _device_id = args.store_device_id or hashlib.sha1(socket.gethostname().encode()).hexdigest()[:16]
+            _report_dict = json.loads(_fmt_json(results, profile, str(target), args.mode))
+            _store.upsert_report(
+                device_id=_device_id,
+                hostname=socket.gethostname(),
+                platform=_platform.system().lower(),
+                agent_version='cli',
+                report=_report_dict,
+            )
+            print(f"\n[Trend data stored → {args.store_db} (device: {_device_id})]", file=sys.stderr)
+        except Exception as _se:
+            print(f"[WARN] --store-db failed: {_se}", file=sys.stderr)
 
     has_fail = any(r.status == FAIL for r in results)
     sys.exit(1 if has_fail else 0)

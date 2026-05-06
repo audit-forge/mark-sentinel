@@ -762,15 +762,21 @@ button:hover{{background:#2ea043}}
     def _api_system_update(self):
         """POST /api/system/update — run git pull in ROOT, return output."""
         try:
+            env = os.environ.copy()
+            env['GIT_TERMINAL_PROMPT'] = '0'  # fail fast instead of prompting for credentials
+            env['GIT_ASKPASS'] = 'echo'
             result = subprocess.run(
                 ['git', '-c', f'safe.directory={ROOT}', 'pull'],
                 cwd=str(ROOT),
                 capture_output=True,
                 text=True,
-                timeout=60,
+                timeout=30,
+                env=env,
             )
             output = (result.stdout + result.stderr).strip()
             self._json({'status': 'ok' if result.returncode == 0 else 'error', 'output': output})
+        except subprocess.TimeoutExpired:
+            self._json({'status': 'error', 'output': 'git pull timed out after 30s - check network or credentials'}, 500)
         except Exception as e:
             self._json({'status': 'error', 'output': str(e)}, 500)
 
@@ -1448,17 +1454,29 @@ function _sysLog(msg, color) {{
 
 async function pullUpdates() {{
   const btn = document.getElementById('btn-pull');
-  btn.disabled = true; btn.textContent = 'Pulling…';
+  btn.disabled = true;
   _sysLog('Running git pull…', '#8b949e');
+  const ctrl = new AbortController();
+  const hardTimeout = setTimeout(() => ctrl.abort(), 35000);
+  let elapsed = 0;
+  const ticker = setInterval(() => {{
+    elapsed++;
+    btn.textContent = `Pulling… ${{elapsed}}s`;
+  }}, 1000);
+  btn.textContent = 'Pulling… 0s';
   try {{
-    const r = await fetch('/api/system/update', {{method:'POST'}});
+    const r = await fetch('/api/system/update', {{method:'POST', signal: ctrl.signal}});
     const d = await r.json();
     _sysLog(d.output || '(no output)', d.status === 'ok' ? '#3fb950' : '#f85149');
-    btn.textContent = d.status === 'ok' ? '&#8659; Up to date' : '&#8659; Pull failed';
-    setTimeout(() => {{ btn.disabled = false; btn.innerHTML = '&#8659; Pull Latest Updates'; }}, 5000);
+    btn.textContent = d.status === 'ok' ? '⇓ Up to date' : '⇓ Pull failed';
+    setTimeout(() => {{ btn.disabled = false; btn.innerHTML = '⇓ Pull Latest Updates'; }}, 5000);
   }} catch(e) {{
-    _sysLog('Error: ' + e, '#f85149');
-    btn.disabled = false; btn.innerHTML = '&#8659; Pull Latest Updates';
+    const msg = e.name === 'AbortError' ? 'git pull timed out (35s) — check server logs' : 'Error: ' + e;
+    _sysLog(msg, '#f85149');
+    btn.disabled = false; btn.innerHTML = '⇓ Pull Latest Updates';
+  }} finally {{
+    clearTimeout(hardTimeout);
+    clearInterval(ticker);
   }}
 }}
 

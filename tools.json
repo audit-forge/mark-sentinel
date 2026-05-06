@@ -1,0 +1,35 @@
+{
+  "agent_name": "M.A.R.K. Sentinel Audit Agent",
+  "version": "1.0",
+  "human_in_the_loop": true,
+  "require_confirmation": true,
+  "hitl": true,
+  "audit_trail": true,
+  "action_logging": true,
+  "tools": [
+    {
+      "name": "filesystem_read",
+      "description": "Read files from the target scan directory",
+      "read_only": true,
+      "allowed_paths": ["./"],
+      "permissions": "read",
+      "scope": "scan_target_only"
+    },
+    {
+      "name": "report_generate",
+      "description": "Generate audit report from scan results",
+      "read_only": false,
+      "allowed_paths": ["./output/"],
+      "permissions": "write",
+      "scope": "output_directory_only",
+      "require_confirmation": false,
+      "confirm_irreversible": false
+    }
+  ],
+  "allowed_domains": [],
+  "egress_filter": "none",
+  "network_access": false,
+  "approved_endpoints": [],
+  "log_tool_calls": true,
+  "log_actions": true
+}

@@ -175,8 +175,9 @@ def _categorize(ctx: ScanContext, rel_path: str, filename: str, name_lower: str,
         ctx.model_config = _try_json(content)
 
     if _is_agent_config(filename):
-        ctx.agent_config_raw = content
-        ctx.agent_config = _try_json(content)
+        ctx.agent_config_raw = (ctx.agent_config_raw + '\n' + content).strip() if ctx.agent_config_raw else content
+        if not ctx.agent_config:
+            ctx.agent_config = _try_json(content)
 
     if _is_requirements(filename):
         ctx.requirements_txt = (ctx.requirements_txt + '\n' + content).strip()
