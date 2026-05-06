@@ -145,8 +145,10 @@ def _run_scan(mode: str, target: str, profile: str, providers: list[str]):
                 cmd += ['--profile', profile]
         else:
             provider = providers[0] if providers else 'config'
+            db_path = str(ROOT / 'output' / 'agents.db')
             cmd = [sys.executable, str(ROOT / 'audit.py'), target,
-                   '--mode', provider, '--profile', profile, '--output', 'json']
+                   '--mode', provider, '--profile', profile, '--output', 'json',
+                   '--store-db', db_path]
 
         emit(f'$ {" ".join(cmd)}')
         emit('')
@@ -1117,6 +1119,8 @@ body{{background:#0d1117;color:#c9d1d9;font-family:-apple-system,BlinkMacSystemF
   <div style="background:#161b22;border:1px solid #21262d;border-radius:8px;padding:20px;margin-bottom:28px">
     <div style="font-size:12px;color:#8b949e;font-weight:600;text-transform:uppercase;letter-spacing:.06em;margin-bottom:14px">System</div>
     <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px">
+      <button class="scan-btn" id="btn-scan-local" onclick="scanLocalMachine()"
+              style="color:#3fb950;border-color:#30363d">&#9654; Scan This Machine</button>
       <button class="scan-btn" id="btn-pull" onclick="pullUpdates()"
               style="color:#e3b341;border-color:#30363d">&#8659; Pull Latest Updates</button>
       <button class="scan-btn" id="btn-restart-agent" onclick="restartAgent()"
@@ -1477,6 +1481,46 @@ async function pullUpdates() {{
   }} finally {{
     clearTimeout(hardTimeout);
     clearInterval(ticker);
+  }}
+}}
+
+async function scanLocalMachine() {{
+  const btn = document.getElementById('btn-scan-local');
+  const profile = document.getElementById('cfg-profile')?.value || 'default';
+  btn.disabled = true; btn.textContent = 'Scanning…';
+  _sysLog('Running config scan on this machine…', '#8b949e');
+  try {{
+    const r = await fetch('/api/scan', {{
+      method: 'POST',
+      headers: {{'Content-Type': 'application/json'}},
+      body: JSON.stringify({{mode: 'config', target: '.', profile: profile, providers: ['config']}})
+    }});
+    const d = await r.json();
+    if (d.error) {{
+      _sysLog('Scan error: ' + d.error, '#f85149');
+    }} else {{
+      _sysLog('Scan started. Polling for results…', '#8b949e');
+      let polls = 0;
+      const poll = setInterval(async () => {{
+        polls++;
+        btn.textContent = `Scanning… ${{polls * 3}}s`;
+        try {{
+          const sr = await fetch('/api/status');
+          const sd = await sr.json();
+          if (sd.status === 'done' || sd.status === 'error') {{
+            clearInterval(poll);
+            const color = sd.status === 'done' ? '#3fb950' : '#f85149';
+            _sysLog('Scan ' + sd.status + '. Results stored — check Fleet tab for trend data.', color);
+            btn.textContent = sd.status === 'done' ? '&#9654; Scan Complete' : '&#9654; Scan Error';
+            setTimeout(() => {{ btn.disabled = false; btn.innerHTML = '&#9654; Scan This Machine'; }}, 5000);
+          }}
+        }} catch(e) {{}}
+        if (polls > 100) {{ clearInterval(poll); btn.disabled = false; btn.innerHTML = '&#9654; Scan This Machine'; }}
+      }}, 3000);
+    }}
+  }} catch(e) {{
+    _sysLog('Error: ' + e, '#f85149');
+    btn.disabled = false; btn.innerHTML = '&#9654; Scan This Machine';
   }}
 }}
 
