@@ -31,6 +31,15 @@ jobs:
           python-version: '3.11'
       - name: Install test deps
         run: python -m pip install --upgrade pip && pip install pytest && pip install -r requirements.txt || true
+      - name: Diagnose api-mode subprocess
+        run: |
+          echo "=== audit.py api-mode subprocess stdout/stderr ==="
+          python audit.py --mode api --endpoint http://127.0.0.1:19999/v1 --api-key test-key --model test-model --target test/fixtures/deploy-hardened --profile default --output json --quiet > /tmp/audit_stdout.txt 2>/tmp/audit_stderr.txt || true
+          echo "--- STDOUT (first 200 bytes) ---"
+          head -c 200 /tmp/audit_stdout.txt || echo "(empty)"
+          echo "--- STDERR ---"
+          cat /tmp/audit_stderr.txt || echo "(empty)"
+          echo "=== end diagnostic ==="
       - name: Run tests (if any)
         run: |
           if [ -d "tests" ] || [ -d "test" ]; then
