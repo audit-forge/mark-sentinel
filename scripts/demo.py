@@ -385,9 +385,9 @@ def main():
         print("  ✗  ChatGPT — OPENAI_API_KEY not set")
 
     if anthropic_key:
-        providers.append({'label': f'Claude   ({args.claude_model})', 'mode': 'anthropic',
+        providers.append({'label': f'Anthropic ({args.claude_model})', 'mode': 'anthropic',
                           'api_key': anthropic_key, 'model': args.claude_model})
-        print(f"  ✓  Claude — key found  [{args.claude_model}]")
+        print(f"  ✓  Anthropic — key found  [{args.claude_model}]")
     else:
         print("  ✗  Claude — ANTHROPIC_API_KEY not set")
 

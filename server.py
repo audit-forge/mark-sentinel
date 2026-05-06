@@ -22,6 +22,7 @@ if hasattr(sys.stderr, 'reconfigure'):
 import http.server
 import io
 import json
+import logging
 import os
 import subprocess
 import tarfile
@@ -35,6 +36,8 @@ from urllib.parse import urlparse
 PORT = 7331
 ROOT = Path(__file__).parent
 _serve_port = PORT   # updated at startup so handlers can reference it
+
+log = logging.getLogger('sentinel.server')
 
 # ── scan state ────────────────────────────────────────────────────────────────
 _lock   = threading.Lock()
@@ -63,6 +66,20 @@ def _agent_token() -> str:
     if tok_file.exists():
         return tok_file.read_text().strip()
     return ''
+
+def _dashboard_token() -> str:
+    """Return expected dashboard token. Empty = no auth required."""
+    if os.environ.get('SENTINEL_DASHBOARD_TOKEN'):
+        return os.environ['SENTINEL_DASHBOARD_TOKEN']
+    tok_file = ROOT / 'dashboard_token.txt'
+    if tok_file.exists():
+        return tok_file.read_text().strip()
+    return ''
+
+# ── per-device report rate limiting ──────────────────────────────────────────
+_report_last_seen: dict[str, float] = {}
+_report_lock = threading.Lock()
+_REPORT_MIN_INTERVAL = 60  # seconds between accepted reports per device
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -90,7 +107,7 @@ def _rebuild_dashboard(out_dir: Path) -> bool:
         label_map = {
             'config_scan':           'Config Scan',
             'openai':                'ChatGPT (gpt-4o)',
-            'claude':                'Claude (claude-opus-4-7)',
+            'claude':                'Anthropic (claude-opus-4-7)',
             'ollama___qwen2.5-7b':   'Ollama (qwen2.5-7b)',
             'hash-ai___openclaw':    'Hash-AI (openclaw)',
         }
@@ -107,8 +124,169 @@ def _rebuild_dashboard(out_dir: Path) -> bool:
             generate(reports, out_dir / 'dashboard.html')
             return True
     except Exception as e:
-        print(f'[server] dashboard rebuild error: {e}', file=sys.stderr)
+        log.error('dashboard rebuild error: %s', e)
     return False
+
+
+_SEV_ORDER_REPORT = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW', 'INFO']
+_SEV_COLOR_HTML = {'CRITICAL': '#f85149', 'HIGH': '#d29922', 'MEDIUM': '#58a6ff', 'LOW': '#3fb950', 'INFO': '#6e7681'}
+_STATUS_COLOR_HTML = {'FAIL': '#f85149', 'WARN': '#d29922', 'PASS': '#3fb950', 'SKIP': '#6e7681'}
+
+
+def _risk_score_html(fail, warn, total) -> int:
+    if not total:
+        return 0
+    return max(0, 100 - round((fail * 3 + warn) / max(total, 1) * 100))
+
+
+def _build_fleet_report_html(devices: list, tier: str) -> str:
+    from datetime import datetime, timezone
+    import html as _html
+
+    def esc(s):
+        return _html.escape(str(s or ''))
+
+    def ts(epoch):
+        if not epoch:
+            return 'never'
+        try:
+            return datetime.fromtimestamp(int(epoch), tz=timezone.utc).strftime('%Y-%m-%d %H:%M UTC')
+        except Exception:
+            return str(epoch)
+
+    tier_label = {'executive': 'Executive Summary', 'ciso': 'CISO Report', 'technical': 'Technical Findings'}.get(tier, 'Fleet Report')
+    total_fail = sum(d.get('fail_count', 0) or 0 for d in devices)
+    total_warn = sum(d.get('warn_count', 0) or 0 for d in devices)
+    total_pass = sum(d.get('pass_count', 0) or 0 for d in devices)
+    total_checks = total_fail + total_warn + total_pass
+    fleet_score = _risk_score_html(total_fail, total_warn, total_checks)
+    score_color = '#3fb950' if fleet_score >= 80 else '#d29922' if fleet_score >= 60 else '#f85149'
+    now = datetime.now(tz=timezone.utc).strftime('%Y-%m-%d %H:%M UTC')
+
+    parts = [f'''<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
+<title>M.A.R.K. Sentinel — Fleet {esc(tier_label)}</title>
+<style>
+*{{box-sizing:border-box;margin:0;padding:0}}
+body{{background:#0d1117;color:#c9d1d9;font-family:system-ui,sans-serif;padding:32px;max-width:1100px;margin:0 auto}}
+h1{{color:#58a6ff;font-size:22px;margin-bottom:4px}}
+h2{{color:#58a6ff;font-size:15px;margin:28px 0 10px;border-bottom:1px solid #21262d;padding-bottom:6px}}
+h3{{color:#8b949e;font-size:13px;margin:16px 0 6px}}
+.meta{{color:#6e7681;font-size:12px;margin-bottom:28px}}
+.score{{font-size:36px;font-weight:700;color:{score_color}}}
+.cards{{display:flex;gap:16px;flex-wrap:wrap;margin:16px 0 24px}}
+.card{{background:#161b22;border:1px solid #21262d;border-radius:8px;padding:16px 24px;min-width:120px}}
+.card-n{{font-size:28px;font-weight:700}}
+.card-l{{font-size:11px;color:#6e7681;margin-top:4px;text-transform:uppercase}}
+table{{width:100%;border-collapse:collapse;font-size:13px;margin-bottom:16px}}
+th{{background:#161b22;color:#6e7681;font-size:11px;text-transform:uppercase;padding:8px 10px;text-align:left;border-bottom:1px solid #21262d}}
+td{{padding:7px 10px;border-bottom:1px solid #161b22}}
+tr:hover td{{background:#161b22}}
+.fail{{color:#f85149}}.warn{{color:#d29922}}.pass{{color:#3fb950}}.skip{{color:#6e7681}}
+.crit{{color:#f85149}}.high{{color:#d29922}}.med{{color:#58a6ff}}.low{{color:#3fb950}}
+.device-block{{background:#161b22;border:1px solid #21262d;border-radius:8px;padding:20px;margin-bottom:20px}}
+.finding{{padding:6px 0;border-bottom:1px solid #21262d;font-size:13px}}
+.finding:last-child{{border-bottom:none}}
+.rem{{color:#3fb950;font-size:12px;margin-top:3px;font-style:italic}}
+.det{{color:#8b949e;font-size:12px;margin-top:3px}}
+@media print{{body{{background:#fff;color:#000;padding:16px}}h1,h2,h3,.card-l{{color:#000}}.card{{border:1px solid #ccc}}.fail{{color:#c00}}.pass{{color:#090}}.warn{{color:#850}}}}
+</style></head><body>
+<h1>M.A.R.K. Sentinel &mdash; Fleet {esc(tier_label)}</h1>
+<div class="meta">Generated {esc(now)} &nbsp;&bull;&nbsp; {len(devices)} device(s) &nbsp;&bull;&nbsp; Confidential</div>
+<div class="cards">
+  <div class="card"><div class="card-n score">{fleet_score}%</div><div class="card-l">Fleet Score</div></div>
+  <div class="card"><div class="card-n fail">{total_fail}</div><div class="card-l">Failing Checks</div></div>
+  <div class="card"><div class="card-n warn">{total_warn}</div><div class="card-l">Warnings</div></div>
+  <div class="card"><div class="card-n pass">{total_pass}</div><div class="card-l">Passing</div></div>
+  <div class="card"><div class="card-n" style="color:#58a6ff">{len(devices)}</div><div class="card-l">Devices</div></div>
+</div>''']
+
+    # Device summary table
+    parts.append('<h2>Device Status</h2><table><thead><tr><th>Hostname</th><th>Platform</th><th>Fail</th><th>Warn</th><th>Pass</th><th>Score</th><th>Last Seen</th></tr></thead><tbody>')
+    for d in devices:
+        f = d.get('fail_count', 0) or 0
+        w = d.get('warn_count', 0) or 0
+        p = d.get('pass_count', 0) or 0
+        sc = _risk_score_html(f, w, f + w + p)
+        sc_color = '#3fb950' if sc >= 80 else '#d29922' if sc >= 60 else '#f85149'
+        parts.append(f'<tr><td><strong>{esc(d.get("hostname","?"))}</strong></td>'
+                     f'<td style="color:#6e7681">{esc(d.get("platform",""))}</td>'
+                     f'<td class="fail">{f}</td><td class="warn">{w}</td><td class="pass">{p}</td>'
+                     f'<td style="color:{sc_color};font-weight:700">{sc}%</td>'
+                     f'<td style="color:#6e7681;font-size:12px">{esc(ts(d.get("last_seen")))}</td></tr>')
+    parts.append('</tbody></table>')
+
+    # Critical/High findings across fleet
+    all_findings = []
+    for d in devices:
+        rep = d.get('_report') or {}
+        for r in rep.get('findings', rep.get('results', [])):
+            r2 = dict(r); r2['_hostname'] = d.get('hostname', '?')
+            all_findings.append(r2)
+    crit_high = [f for f in all_findings if f.get('status') == 'FAIL' and f.get('severity') in ('CRITICAL', 'HIGH')]
+    crit_high.sort(key=lambda x: _SEV_ORDER_REPORT.index(x.get('severity', 'INFO')) if x.get('severity') in _SEV_ORDER_REPORT else 99)
+
+    parts.append(f'<h2>Critical &amp; High Findings ({len(crit_high)})</h2>')
+    if not crit_high:
+        parts.append('<p style="color:#3fb950;padding:12px 0">No critical or high severity failures found across the fleet.</p>')
+    else:
+        limit = 20 if tier == 'executive' else len(crit_high)
+        parts.append('<table><thead><tr><th>Severity</th><th>Device</th><th>Check</th><th>Finding</th></tr></thead><tbody>')
+        for f in crit_high[:limit]:
+            sev = f.get('severity', 'INFO')
+            sc = _SEV_COLOR_HTML.get(sev, '#6e7681')
+            parts.append(f'<tr><td style="color:{sc};font-weight:700">{esc(sev)}</td>'
+                         f'<td style="color:#8b949e">{esc(f.get("_hostname",""))}</td>'
+                         f'<td style="color:#8b949e;font-size:12px">{esc(f.get("check_id",""))}</td>'
+                         f'<td>{esc(f.get("title",""))}</td></tr>')
+        parts.append('</tbody></table>')
+
+    if tier == 'executive':
+        posture = ('Strong — healthy AI security posture.' if fleet_score >= 90
+                   else 'Moderate — several issues require attention.' if fleet_score >= 70
+                   else 'Elevated risk — critical findings need remediation within 30 days.' if fleet_score >= 50
+                   else 'High risk — immediate action required on critical findings.')
+        parts.append(f'<h2>Executive Recommendation</h2>'
+                     f'<div class="device-block"><p style="font-size:14px"><strong>Overall posture:</strong> {esc(posture)}</p>'
+                     f'<p style="color:#6e7681;font-size:12px;margin-top:12px">For full technical details request the CISO or Technical report.</p></div>')
+        parts.append('</body></html>')
+        return ''.join(parts)
+
+    # Per-device breakdown for ciso/technical
+    parts.append('<h2>Per-Device Breakdown</h2>')
+    for d in devices:
+        report = d.get('_report') or {}
+        results = report.get('findings', report.get('results', []))
+        f = d.get('fail_count', 0) or 0
+        w = d.get('warn_count', 0) or 0
+        p = d.get('pass_count', 0) or 0
+        sc = _risk_score_html(f, w, f + w + p)
+        sc_color = '#3fb950' if sc >= 80 else '#d29922' if sc >= 60 else '#f85149'
+        parts.append(f'<div class="device-block"><h3>{esc(d.get("hostname","?"))} '
+                     f'<span style="color:{sc_color}">{sc}%</span> &nbsp;'
+                     f'<span style="color:#6e7681;font-size:11px">{esc(d.get("platform",""))} &bull; '
+                     f'{esc(ts(d.get("last_seen")))}</span></h3>')
+        show = results if tier == 'technical' else [r for r in results if r.get('status') in ('FAIL', 'WARN')]
+        show.sort(key=lambda x: _SEV_ORDER_REPORT.index(x.get('severity', 'INFO')) if x.get('severity') in _SEV_ORDER_REPORT else 99)
+        if not show:
+            parts.append('<p style="color:#3fb950;font-size:13px;padding:8px 0">No failures on this device.</p>')
+        for r in show:
+            st = r.get('status', '')
+            sev = r.get('severity', 'INFO')
+            sc2 = _STATUS_COLOR_HTML.get(st, '#c9d1d9')
+            sv2 = _SEV_COLOR_HTML.get(sev, '#6e7681')
+            parts.append(f'<div class="finding">'
+                         f'<span style="color:{sc2};font-weight:700">[{esc(st)}]</span> '
+                         f'<span style="color:{sv2}">[{esc(sev)}]</span> '
+                         f'<strong>{esc(r.get("title",""))}</strong>')
+            if tier == 'technical' and r.get('details'):
+                parts.append(f'<div class="det">{esc(r["details"][:300])}</div>')
+            if tier == 'technical' and r.get('remediation'):
+                parts.append(f'<div class="rem">Fix: {esc(r["remediation"][:250])}</div>')
+            parts.append('</div>')
+        parts.append('</div>')
+
+    parts.append('</body></html>')
+    return ''.join(parts)
 
 
 def _run_scan(mode: str, target: str, profile: str, providers: list[str]):
@@ -128,8 +306,10 @@ def _run_scan(mode: str, target: str, profile: str, providers: list[str]):
                 cmd += ['--profile', profile]
         else:
             provider = providers[0] if providers else 'config'
+            db_path = str(ROOT / 'output' / 'agents.db')
             cmd = [sys.executable, str(ROOT / 'audit.py'), target,
-                   '--mode', provider, '--profile', profile, '--output', 'json']
+                   '--mode', provider, '--profile', profile, '--output', 'json',
+                   '--store-db', db_path]
 
         emit(f'$ {" ".join(cmd)}')
         emit('')
@@ -161,8 +341,72 @@ def _run_scan(mode: str, target: str, profile: str, providers: list[str]):
 class _Handler(http.server.BaseHTTPRequestHandler):
     def log_message(self, *_): pass
 
+    # ── auth helpers ──────────────────────────────────────────────────────────
+
+    def _check_dashboard_auth(self) -> bool:
+        token = _dashboard_token()
+        if not token:
+            return True
+        for part in self.headers.get('Cookie', '').split(';'):
+            k, _, v = part.strip().partition('=')
+            if k.strip() == 'sentinel_session' and v.strip() == token:
+                return True
+        return False
+
+    def _require_dashboard_auth(self) -> bool:
+        if self._check_dashboard_auth():
+            return True
+        if self.command == 'POST':
+            self._send(401, b'Unauthorized - set SENTINEL_DASHBOARD_TOKEN', 'text/plain')
+        else:
+            from urllib.parse import quote
+            self.send_response(302)
+            self.send_header('Location', f'/login?next={quote(urlparse(self.path).path)}')
+            self.end_headers()
+        return False
+
+    def _check_agent_bearer(self) -> bool:
+        expected = _agent_token()
+        if not expected:
+            return True
+        return self.headers.get('Authorization', '') == f'Bearer {expected}'
+
+    # ── routing ───────────────────────────────────────────────────────────────
+
     def do_GET(self):
         path = urlparse(self.path).path
+
+        # Auth-exempt: health probe and login UI
+        if path == '/health':
+            self._api_health()
+            return
+        if path == '/login':
+            self._serve_login()
+            return
+        if path == '/logout':
+            self._handle_logout()
+            return
+
+        # Agent-token-gated: agents download these during self-update
+        if path in ('/agent.py', '/bundle.tar.gz'):
+            if not self._check_agent_bearer():
+                self._send(401, b'Unauthorized', 'text/plain')
+                return
+            if path == '/agent.py':
+                self._serve_agent_script()
+            else:
+                self._serve_bundle()
+            return
+
+        # Agent-token-gated: command polling (has its own internal check too)
+        if path.startswith('/api/agent/commands/'):
+            self._api_agent_commands(path[len('/api/agent/commands/'):])
+            return
+
+        # All remaining GET endpoints require dashboard auth
+        if not self._require_dashboard_auth():
+            return
+
         static = {
             '/':               self._serve_dashboard,
             '/dashboard.html': self._serve_dashboard,
@@ -170,38 +414,46 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             '/api/events':     self._api_events,
             '/api/devices':    self._api_devices,
             '/api/discover':   self._api_discover,
-            '/fleet':              self._serve_fleet,
-            '/health':             self._api_health,
-            '/agent.py':           self._serve_agent_script,
-            '/bundle.tar.gz':      self._serve_bundle,
-            '/academy':            self._serve_academy,
-            '/command':            self._serve_fleet,
-            '/api/config':         self._api_get_config,
-            '/download/shortcut':  self._serve_shortcut,
+            '/fleet':          self._serve_fleet,
+            '/academy':        self._serve_academy,
+            '/command':        self._serve_fleet,
+            '/api/config':     self._api_get_config,
+            '/download/shortcut': self._serve_shortcut,
         }
         if path in static:
             static[path]()
-        # timeseries endpoint for fleet device charts
         elif path.startswith('/fleet/device/') and path.endswith('/timeseries.json'):
             did = path[len('/fleet/device/'): -len('/timeseries.json')]
             self._api_device_timeseries(did)
-        # full single-device dashboard (all views: findings, remediation, heatmap, etc.)
         elif path.startswith('/fleet/device/') and path.endswith('/dashboard'):
             did = path[len('/fleet/device/'): -len('/dashboard')]
             self._serve_device_dashboard(did)
         elif path.startswith('/api/devices/'):
             self._api_device_report(path[len('/api/devices/'):])
-        elif path.startswith('/api/agent/commands/'):
-            self._api_agent_commands(path[len('/api/agent/commands/'):])
+        elif path == '/api/fleet/report' or path.startswith('/api/fleet/report?'):
+            self._api_fleet_report()
         else:
             self._not_found()
 
     def do_POST(self):
         path = urlparse(self.path).path
+
+        # Login form submission — no auth needed
+        if path == '/login':
+            self._handle_login_post()
+            return
+
+        # Agent report — uses its own agent-token auth
+        if path == '/api/agent/report':
+            self._api_agent_report()
+            return
+
+        # All other POST endpoints require dashboard auth
+        if not self._require_dashboard_auth():
+            return
+
         if path == '/api/scan':
             self._api_scan()
-        elif path == '/api/agent/report':
-            self._api_agent_report()
         elif path == '/api/config':
             self._api_set_config()
         elif path == '/api/system/update':
@@ -221,6 +473,71 @@ class _Handler(http.server.BaseHTTPRequestHandler):
 
     def do_OPTIONS(self):
         self._send(200, b'', 'text/plain')
+
+    # ── login / logout ────────────────────────────────────────────────────────
+
+    def _serve_login(self):
+        from urllib.parse import parse_qs
+        qs = parse_qs(urlparse(self.path).query)
+        next_url = qs.get('next', ['/'])[0]
+        error = bool(qs.get('error'))
+        err_html = '<p style="color:#f85149;font-size:13px;margin:0 0 14px">Incorrect token.</p>' if error else ''
+        body = f"""<!doctype html><html><head><meta charset="utf-8">
+<title>M.A.R.K. Sentinel — Sign in</title>
+<style>body{{font-family:system-ui;background:#0d1117;color:#8b949e;
+display:flex;align-items:center;justify-content:center;height:100vh;margin:0}}
+.box{{background:#161b22;border:1px solid #30363d;border-radius:8px;padding:40px 36px;width:320px}}
+h2{{color:#e6edf3;font-size:18px;margin:0 0 24px}}
+input{{width:100%;box-sizing:border-box;background:#0d1117;border:1px solid #30363d;
+border-radius:6px;color:#e6edf3;padding:10px 12px;font-size:14px;margin-bottom:16px}}
+button{{width:100%;background:#238636;color:#fff;border:none;border-radius:6px;
+padding:10px;font-size:14px;cursor:pointer;font-weight:600}}
+button:hover{{background:#2ea043}}
+.brand{{color:#58a6ff;font-size:12px;text-align:center;margin-top:20px}}</style>
+</head><body><div class="box">
+<h2>M.A.R.K. Sentinel</h2>{err_html}
+<form method="POST" action="/login">
+<input type="hidden" name="next" value="{next_url}">
+<input type="password" name="token" placeholder="Dashboard token" autofocus>
+<button type="submit">Sign in</button>
+</form>
+<div class="brand">Powered by Hash</div>
+</div></body></html>""".encode()
+        self.send_response(200)
+        self.send_header('Content-Type', 'text/html; charset=utf-8')
+        self.send_header('Content-Length', len(body))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _handle_login_post(self):
+        from urllib.parse import parse_qs, quote
+        length = int(self.headers.get('Content-Length', 0))
+        if length > 4096:
+            self._send(400, b'Bad request', 'text/plain')
+            return
+        params = parse_qs(self.rfile.read(length).decode(errors='ignore'))
+        submitted = params.get('token', [''])[0]
+        next_url = params.get('next', ['/'])[0]
+        if not next_url.startswith('/') or '//' in next_url:
+            next_url = '/'
+        expected = _dashboard_token()
+        if expected and submitted == expected:
+            self.send_response(302)
+            self.send_header('Set-Cookie',
+                f'sentinel_session={expected}; Path=/; HttpOnly; SameSite=Strict')
+            self.send_header('Location', next_url)
+            self.end_headers()
+        else:
+            self.send_response(302)
+            self.send_header('Location', f'/login?next={quote(next_url)}&error=1')
+            self.end_headers()
+
+    def _handle_logout(self):
+        self.send_response(302)
+        self.send_header('Set-Cookie',
+            'sentinel_session=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0')
+        self.send_header('Location', '/login')
+        self.end_headers()
 
     # ── endpoints ─────────────────────────────────────────────────────────────
 
@@ -339,7 +656,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         try:
             report = _get_store().get_latest_report(device_id)
         except Exception as e:
-            print(f'[server] get_latest_report error for {device_id}: {e}', file=sys.stderr)
+            log.error('get_latest_report error for %s: %s', device_id, e)
             self._send(500, f'Store error: {e}'.encode(), 'text/plain')
             return
         if report is None:
@@ -358,7 +675,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                     b'display:flex;align-items:center;justify-content:center;height:100vh;margin:0}'
                     b'div{text-align:center}.title{font-size:18px;color:#e6edf3;margin-bottom:8px}'
                     b'.sub{font-size:13px}</style></head><body><div>'
-                    b'<div class="title">No scan report yet for ' + hostname.encode() + b'</div>'
+                    b'<div class="title">No scan report yet for ' + __import__('html').escape(hostname).encode() + b'</div>'
                     b'<div class="sub">The agent has registered but has not completed a scan.<br>'
                     b'Reports arrive automatically after each scan cycle.</div>'
                     b'</div></body></html>'
@@ -379,7 +696,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             _os.unlink(tmp_path)
             self._send(200, html, 'text/html; charset=utf-8')
         except Exception as e:
-            print(f'[server] dashboard generation error for {device_id}: {e}', file=sys.stderr)
+            log.error('dashboard generation error for %s: %s', device_id, e)
             self._send(500, f'Dashboard generation failed: {e}'.encode(), 'text/plain')
 
     def _api_events(self):
@@ -409,20 +726,27 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             pass
 
     def _api_scan(self):
+        global _status
         with _lock:
             if _status == 'running':
                 self._json({'error': 'scan already running'}, 409)
                 return
+            _status = 'running'
         length = int(self.headers.get('Content-Length', 0))
         body = json.loads(self.rfile.read(length)) if length else {}
+        raw_target = body.get('target', '.')
+        safe_target = os.path.realpath(raw_target)
+        if not safe_target.startswith(os.path.realpath(str(ROOT))):
+            safe_target = str(ROOT)
+        mode = body.get('mode', 'demo')
+        if mode not in ('demo', 'config', 'api', 'local', 'gemini', 'vertex', 'anthropic', 'hash'):
+            mode = 'demo'
+        profile = body.get('profile', 'default')
+        if not profile.replace('-', '').replace('_', '').isalnum():
+            profile = 'default'
         threading.Thread(
             target=_run_scan,
-            args=(
-                body.get('mode', 'demo'),
-                body.get('target', '.'),
-                body.get('profile', 'default'),
-                body.get('providers', []),
-            ),
+            args=(mode, safe_target, profile, body.get('providers', [])),
             daemon=True,
         ).start()
         self._json({'status': 'started'})
@@ -441,6 +765,9 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         if not length:
             self._send(400, b'Empty body', 'text/plain')
             return
+        if length > 1_048_576:
+            self._send(413, b'Payload too large', 'text/plain')
+            return
         try:
             body = json.loads(self.rfile.read(length))
         except json.JSONDecodeError:
@@ -454,6 +781,14 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self._send(400, b'Missing device_id or report', 'text/plain')
             return
 
+        now = time.time()
+        with _report_lock:
+            last = _report_last_seen.get(device_id, 0.0)
+            if now - last < _REPORT_MIN_INTERVAL:
+                self._send(429, b'Too many reports - wait 60s between submissions', 'text/plain')
+                return
+            _report_last_seen[device_id] = now
+
         try:
             _get_store().upsert_report(
                 device_id=device_id,
@@ -463,7 +798,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                 agent_version=body.get('agent_version', ''),
             )
         except Exception as e:
-            print(f'[server] agent store error: {e}', file=__import__('sys').stderr)
+            log.error('agent store error: %s', e)
             self._send(500, b'Storage error', 'text/plain')
             return
 
@@ -471,9 +806,13 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             from alerts import load_alert_config, fire_alerts
             alert_cfg = load_alert_config(ROOT / 'alerts_config.json')
             if alert_cfg:
-                fire_alerts(report, device_id, hostname, alert_cfg)
+                threading.Thread(
+                    target=fire_alerts,
+                    args=(report, device_id, hostname, alert_cfg),
+                    daemon=True,
+                ).start()
         except Exception as _ae:
-            print(f'[server] alerts error: {_ae}', file=sys.stderr)
+            log.error('alerts error: %s', _ae)
 
         self._json({'status': 'accepted', 'device_id': device_id})
 
@@ -527,6 +866,57 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                 queued.append(did)
         self._json({'status': 'queued', 'count': len(queued), 'devices': queued})
 
+    def _api_fleet_report(self):
+        """GET /api/fleet/report?tier=executive|ciso|technical&fmt=pdf|html|json"""
+        from urllib.parse import parse_qs, urlparse as _up
+        qs = parse_qs(_up(self.path).query)
+        tier = (qs.get('tier', ['ciso'])[0]).lower()
+        fmt  = (qs.get('fmt',  ['html'])[0]).lower()
+        if tier not in ('executive', 'ciso', 'technical'):
+            tier = 'ciso'
+        try:
+            store = _get_store()
+            devices = store.list_devices()
+            for d in devices:
+                d['_report'] = store.get_latest_report(d['device_id']) or {}
+
+            if fmt == 'json':
+                payload = [{'device_id': d['device_id'], 'hostname': d['hostname'],
+                            'platform': d.get('platform', ''), 'fail_count': d.get('fail_count', 0),
+                            'warn_count': d.get('warn_count', 0), 'pass_count': d.get('pass_count', 0),
+                            'last_seen': d.get('last_seen'), 'results': d['_report'].get('findings', d['_report'].get('results', []))}
+                           for d in devices]
+                self._json({'tier': tier, 'devices': payload})
+                return
+
+            if fmt == 'pdf':
+                try:
+                    from output.fleet_report import generate_fleet_pdf
+                    pdf_bytes = generate_fleet_pdf(devices, tier=tier)
+                    fname = f'sentinel_fleet_{tier}.pdf'
+                    self.send_response(200)
+                    self.send_header('Content-Type', 'application/pdf')
+                    self.send_header('Content-Disposition', f'attachment; filename="{fname}"')
+                    self.send_header('Content-Length', str(len(pdf_bytes)))
+                    self.end_headers()
+                    self.wfile.write(pdf_bytes)
+                    return
+                except ImportError:
+                    fmt = 'html'
+
+            html = _build_fleet_report_html(devices, tier)
+            data = html.encode('utf-8')
+            self.send_response(200)
+            self.send_header('Content-Type', 'text/html; charset=utf-8')
+            self.send_header('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'; img-src data:")
+            self.send_header('X-Content-Type-Options', 'nosniff')
+            self.send_header('Content-Length', str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+        except Exception as e:
+            log.error('fleet report error: %s', e)
+            self._json({'error': str(e)}, 500)
+
     def _api_discover(self):
         """GET /api/discover — scan local subnet for AI services (runs in thread)."""
         try:
@@ -572,7 +962,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         try:
             store = _get_store()
             # Use a direct DB connection to read historical reports for this device.
-            with store._conn() as conn:
+            with store._lock, store._conn() as conn:
                 rows = conn.execute(
                     "SELECT received_at, fail_count, warn_count, pass_count FROM reports "
                     "WHERE device_id = ? ORDER BY received_at ASC",
@@ -593,15 +983,21 @@ class _Handler(http.server.BaseHTTPRequestHandler):
     def _api_system_update(self):
         """POST /api/system/update — run git pull in ROOT, return output."""
         try:
+            env = os.environ.copy()
+            env['GIT_TERMINAL_PROMPT'] = '0'  # fail fast instead of prompting for credentials
+            env['GIT_ASKPASS'] = 'echo'
             result = subprocess.run(
-                ['git', 'pull'],
+                ['git', '-c', f'safe.directory={ROOT}', 'pull'],
                 cwd=str(ROOT),
                 capture_output=True,
                 text=True,
-                timeout=60,
+                timeout=30,
+                env=env,
             )
             output = (result.stdout + result.stderr).strip()
             self._json({'status': 'ok' if result.returncode == 0 else 'error', 'output': output})
+        except subprocess.TimeoutExpired:
+            self._json({'status': 'error', 'output': 'git pull timed out after 30s - check network or credentials'}, 500)
         except Exception as e:
             self._json({'status': 'error', 'output': str(e)}, 500)
 
@@ -619,7 +1015,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                 else:
                     subprocess.run(['systemctl', 'restart', 'sentinel-agent'], capture_output=True)
             except Exception as e:
-                print(f'[server] restart-agent error: {e}', file=sys.stderr)
+                log.error('restart-agent error: %s', e)
         threading.Thread(target=_do_restart, daemon=True).start()
         self._json({'status': 'restarting'})
 
@@ -881,10 +1277,18 @@ body{{background:#0d1117;color:#c9d1d9;font-family:-apple-system,BlinkMacSystemF
     <div class="scard"><div class="scard-n c-green" id="sc-pass">{total_pass}</div><div class="scard-l">Total Passes</div></div>
   </div>
 
-  <div class="sec-hdr" style="display:flex;align-items:center;justify-content:space-between">
+  <div class="sec-hdr" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
     <span>Connected Devices</span>
-    <button class="scan-btn" onclick="updateAllDevices()"
-            style="color:#e3b341;border-color:#30363d;font-size:12px">Update All Agents</button>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <a href="/api/fleet/report?tier=executive&fmt=html" target="_blank" class="scan-btn"
+         style="text-decoration:none;color:#3fb950;border-color:#30363d;font-size:12px">&#8599; Executive Report</a>
+      <a href="/api/fleet/report?tier=ciso&fmt=html" target="_blank" class="scan-btn"
+         style="text-decoration:none;color:#58a6ff;border-color:#30363d;font-size:12px">&#8599; CISO Report</a>
+      <a href="/api/fleet/report?tier=technical&fmt=html" target="_blank" class="scan-btn"
+         style="text-decoration:none;color:#8b949e;border-color:#30363d;font-size:12px">&#8599; Technical Report</a>
+      <button class="scan-btn" onclick="updateAllDevices()"
+              style="color:#e3b341;border-color:#30363d;font-size:12px">Update All Agents</button>
+    </div>
   </div>
   <div class="refresh-note" id="refresh-note">Auto-refreshes every 60s</div>
   <table class="dev-table">
@@ -942,6 +1346,8 @@ body{{background:#0d1117;color:#c9d1d9;font-family:-apple-system,BlinkMacSystemF
   <div style="background:#161b22;border:1px solid #21262d;border-radius:8px;padding:20px;margin-bottom:28px">
     <div style="font-size:12px;color:#8b949e;font-weight:600;text-transform:uppercase;letter-spacing:.06em;margin-bottom:14px">System</div>
     <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px">
+      <button class="scan-btn" id="btn-scan-local" onclick="scanLocalMachine()"
+              style="color:#3fb950;border-color:#30363d">&#9654; Scan This Machine</button>
       <button class="scan-btn" id="btn-pull" onclick="pullUpdates()"
               style="color:#e3b341;border-color:#30363d">&#8659; Pull Latest Updates</button>
       <button class="scan-btn" id="btn-restart-agent" onclick="restartAgent()"
@@ -1279,17 +1685,69 @@ function _sysLog(msg, color) {{
 
 async function pullUpdates() {{
   const btn = document.getElementById('btn-pull');
-  btn.disabled = true; btn.textContent = 'Pulling…';
+  btn.disabled = true;
   _sysLog('Running git pull…', '#8b949e');
+  const ctrl = new AbortController();
+  const hardTimeout = setTimeout(() => ctrl.abort(), 35000);
+  let elapsed = 0;
+  const ticker = setInterval(() => {{
+    elapsed++;
+    btn.textContent = `Pulling… ${{elapsed}}s`;
+  }}, 1000);
+  btn.textContent = 'Pulling… 0s';
   try {{
-    const r = await fetch('/api/system/update', {{method:'POST'}});
+    const r = await fetch('/api/system/update', {{method:'POST', signal: ctrl.signal}});
     const d = await r.json();
     _sysLog(d.output || '(no output)', d.status === 'ok' ? '#3fb950' : '#f85149');
-    btn.textContent = d.status === 'ok' ? '&#8659; Up to date' : '&#8659; Pull failed';
-    setTimeout(() => {{ btn.disabled = false; btn.innerHTML = '&#8659; Pull Latest Updates'; }}, 5000);
+    btn.textContent = d.status === 'ok' ? '⇓ Up to date' : '⇓ Pull failed';
+    setTimeout(() => {{ btn.disabled = false; btn.innerHTML = '⇓ Pull Latest Updates'; }}, 5000);
+  }} catch(e) {{
+    const msg = e.name === 'AbortError' ? 'git pull timed out (35s) — check server logs' : 'Error: ' + e;
+    _sysLog(msg, '#f85149');
+    btn.disabled = false; btn.innerHTML = '⇓ Pull Latest Updates';
+  }} finally {{
+    clearTimeout(hardTimeout);
+    clearInterval(ticker);
+  }}
+}}
+
+async function scanLocalMachine() {{
+  const btn = document.getElementById('btn-scan-local');
+  const profile = document.getElementById('cfg-profile')?.value || 'default';
+  btn.disabled = true; btn.textContent = 'Scanning…';
+  _sysLog('Running config scan on this machine…', '#8b949e');
+  try {{
+    const r = await fetch('/api/scan', {{
+      method: 'POST',
+      headers: {{'Content-Type': 'application/json'}},
+      body: JSON.stringify({{mode: 'config', target: '.', profile: profile, providers: ['config']}})
+    }});
+    const d = await r.json();
+    if (d.error) {{
+      _sysLog('Scan error: ' + d.error, '#f85149');
+    }} else {{
+      _sysLog('Scan started. Polling for results…', '#8b949e');
+      let polls = 0;
+      const poll = setInterval(async () => {{
+        polls++;
+        btn.textContent = `Scanning… ${{polls * 3}}s`;
+        try {{
+          const sr = await fetch('/api/status');
+          const sd = await sr.json();
+          if (sd.status === 'done' || sd.status === 'error') {{
+            clearInterval(poll);
+            const color = sd.status === 'done' ? '#3fb950' : '#f85149';
+            _sysLog('Scan ' + sd.status + '. Results stored — check Fleet tab for trend data.', color);
+            btn.textContent = sd.status === 'done' ? '&#9654; Scan Complete' : '&#9654; Scan Error';
+            setTimeout(() => {{ btn.disabled = false; btn.innerHTML = '&#9654; Scan This Machine'; }}, 5000);
+          }}
+        }} catch(e) {{}}
+        if (polls > 100) {{ clearInterval(poll); btn.disabled = false; btn.innerHTML = '&#9654; Scan This Machine'; }}
+      }}, 3000);
+    }}
   }} catch(e) {{
     _sysLog('Error: ' + e, '#f85149');
-    btn.disabled = false; btn.innerHTML = '&#8659; Pull Latest Updates';
+    btn.disabled = false; btn.innerHTML = '&#9654; Scan This Machine';
   }}
 }}
 
@@ -1370,6 +1828,17 @@ def main():
 
     global _serve_port
     _serve_port = args.port
+
+    log_file = ROOT / '.sentinel-server.log'
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s %(levelname)s %(name)s %(message)s',
+        handlers=[
+            logging.FileHandler(log_file, encoding='utf-8'),
+            logging.StreamHandler(sys.stderr),
+        ],
+    )
+
     server = http.server.ThreadingHTTPServer((args.host, args.port), _Handler)
     url = f'http://localhost:{args.port}'
     print('\n  M.A.R.K. Sentinel  ·  Dashboard Server')

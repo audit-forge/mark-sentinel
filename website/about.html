@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>About — M.A.R.K.</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="site-header">
+    <div class="container">
+      <h1 class="logo">M.A.R.K.</h1>
+      <nav>
+        <a href="index.html">Home</a>
+        <a href="about.html">About</a>
+        <a href="contact.html">Contact</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="container">
+    <h2>About M.A.R.K.</h2>
+    <p>M.A.R.K. stands for Machine Assisted Real-Time Knowledge. This project helps teams capture operational findings, surface recommendations, and keep knowledge accessible and actionable.</p>
+
+    <h3>Current status (mockup)</h3>
+    <ul>
+      <li>Prototype agents for lightweight reporting</li>
+      <li>Local storage and simple web UI</li>
+      <li>Security and audit controls in development</li>
+    </ul>
+
+    <h3>Goals</h3>
+    <p>Make operational knowledge searchable, machine-augmented, and tightly integrated with security and compliance workflows.</p>
+
+    <h3>Sentinel — what it is</h3>
+    <p>Sentinel is a lightweight agent-server system that collects scan reports and operational findings from deployed hosts, stores them for audit and analysis, and surfaces actionable recommendations. Key points:</p>
+    <ul>
+      <li>Small-footprint agents report JSON scan results to a central server.</li>
+      <li>Reports are stored in a searchable backend and can be exported in machine-readable formats (SARIF, JSON) for CI/CD and security platforms.</li>
+      <li>Designed for auditability and integration with compliance workflows (CIS/DISA/NIST mappings available).</li>
+      <li>Supports command queueing for remote-triggered scans and has flexible storage adapters (SQLite for local/dev, PostgreSQL for production).</li>
+    </ul>
+
+    <p class="powered">Powered by HASH#</p>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container">
+      <p>© 2026 M.A.R.K. AI Systems</p>
+    </div>
+  </footer>
+</body>
+</html>

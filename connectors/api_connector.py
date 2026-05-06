@@ -218,8 +218,8 @@ def _evaluate(probe: Probe, response: str, error: str) -> ProbeResult:
             description=probe.description,
             response=response,
             error=error,
-            passed=True,
-            fail_reason="",
+            passed=False,
+            fail_reason=f"Probe could not be evaluated: {error}",
         )
 
     resp_lower = response.lower()
