@@ -13,7 +13,7 @@ Provides:
 This module is intentionally lightweight and deterministic so it can be used in
 unit tests and in pilot handoffs without external dependencies.
 """
-from datetime import datetime
+from datetime import datetime, timezone
 def _severity_emoji(sev: str) -> str:
     sev = (sev or "").lower()
     if sev in ("critical", "high"):
@@ -27,10 +27,10 @@ def _severity_emoji(sev: str) -> str:
 
 def generate_compliance_report(findings: list[dict], profile_name: str | None = None) -> str:
     """Return a markdown compliance report summarizing findings and mapping to frameworks."""
-    now = datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
+    now = datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace('+00:00', 'Z')
     total = len(findings or [])
-    passes = sum(1 for f in findings if f.get("result") == "PASS")
-    fails = sum(1 for f in findings if f.get("result") == "FAIL")
+    passes = sum(1 for f in findings if f.get("status") == "PASS")
+    fails = sum(1 for f in findings if f.get("status") == "FAIL")
 
     header = [
         "# M.A.R.K. Sentinel — Compliance Report",
@@ -62,10 +62,10 @@ def generate_compliance_report(findings: list[dict], profile_name: str | None = 
             sections.append(f"### {cat} ({len(items)})")
             sections.append("")
             for f in items:
-                eid = f.get("id", "UNKNOWN")
+                eid = f.get("check_id", "UNKNOWN")
                 title = f.get("title", "Untitled check")
                 sev = f.get("severity", "info")
-                res = f.get("result", "UNKNOWN")
+                res = f.get("status", "UNKNOWN")
                 emoji = _severity_emoji(sev) if res != "PASS" else "✅"
                 sections.append(f"- **{eid} — {title}** — {emoji}  ")
                 if f.get("description"):

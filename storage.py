@@ -144,7 +144,7 @@ class AgentStore:
 
     def get_latest_report(self, device_id: str) -> dict | None:
         """Return the most recent full report JSON for a device."""
-        with self._conn() as conn:
+        with self._lock, self._conn() as conn:
             row = conn.execute("""
                 SELECT report_json FROM reports
                 WHERE device_id = ?
@@ -154,7 +154,7 @@ class AgentStore:
 
     def get_device(self, device_id: str) -> dict | None:
         """Return device metadata row or None."""
-        with self._conn() as conn:
+        with self._lock, self._conn() as conn:
             row = conn.execute(
                 "SELECT * FROM devices WHERE device_id = ?", (device_id,)
             ).fetchone()
@@ -162,7 +162,7 @@ class AgentStore:
 
     def get_all_latest_reports(self) -> list[dict]:
         """Return the latest report for every known device."""
-        with self._conn() as conn:
+        with self._lock, self._conn() as conn:
             rows = conn.execute("""
                 SELECT r.device_id, d.hostname, r.report_json
                 FROM reports r
@@ -182,7 +182,7 @@ class AgentStore:
         return result
 
     def device_count(self) -> int:
-        with self._conn() as conn:
+        with self._lock, self._conn() as conn:
             return conn.execute("SELECT COUNT(*) FROM devices").fetchone()[0]
 
     def enqueue_command(self, device_id: str, command: str = 'scan_now') -> int:
@@ -215,8 +215,22 @@ class AgentStore:
 
     def pending_command_count(self, device_id: str) -> int:
         """Return how many unclaimed commands are queued for a device."""
-        with self._conn() as conn:
+        with self._lock, self._conn() as conn:
             return conn.execute(
                 "SELECT COUNT(*) FROM commands WHERE device_id = ? AND claimed_at IS NULL",
                 (device_id,),
             ).fetchone()[0]
+
+    def get_device_timeseries(self, device_id: str) -> list[dict]:
+        """Return ordered list of {t, fail, warn, pass} scan history points for a device."""
+        with self._lock, self._conn() as conn:
+            rows = conn.execute(
+                "SELECT received_at, fail_count, warn_count, pass_count FROM reports "
+                "WHERE device_id = ? ORDER BY received_at ASC",
+                (device_id,),
+            ).fetchall()
+        return [
+            {'t': int(r['received_at']), 'fail': int(r['fail_count']),
+             'warn': int(r['warn_count']), 'pass': int(r['pass_count'])}
+            for r in rows
+        ]

@@ -156,10 +156,10 @@ def _per_check_rules(results: list) -> str:
     for r in active:
         verb = "failed" if r.status == "FAIL" else "flagged"
         block_or_warn = "deny" if r.status == "FAIL" else "warn"
-        safe_id = str(r.check_id).replace('"', '\\"')
-        safe_title = str(r.title).replace('"', '\\"')
-        safe_status = str(r.status).replace('"', '\\"')
-        safe_verb = verb.replace('"', '\\"')
+        safe_id = str(r.check_id).replace('\\', '\\\\').replace('"', '\\"')
+        safe_title = str(r.title).replace('\\', '\\\\').replace('"', '\\"')
+        safe_status = str(r.status).replace('\\', '\\\\').replace('"', '\\"')
+        safe_verb = verb.replace('\\', '\\\\').replace('"', '\\"')
         lines += [
             f"# {safe_id}: {safe_title}",
             f"{block_or_warn}[msg] if {{",
@@ -175,7 +175,8 @@ def _per_check_rules(results: list) -> str:
 
 def format_rego(results: list, profile: dict, target: str, mode: str) -> str:
     profile_name = profile.get("name", "default")
-    pkg = profile_name.lower().replace(" ", "_").replace("-", "_")
+    import re as _re
+    pkg = _re.sub(r'[^a-z0-9_]', '_', profile_name.lower())
     today = str(date.today())
 
     sections = [

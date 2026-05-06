@@ -77,16 +77,8 @@ def _policy_no_plaintext_creds(today: str, action: str) -> str:
                   operator: NotEquals
                   value: ""
                 - key: "{{ element.name }}"
-                  operator: AnyIn
-                  value:
-                  - "*API_KEY*"
-                  - "*SECRET*"
-                  - "*TOKEN*"
-                  - "*PASSWORD*"
-                  - "*OPENAI*"
-                  - "*ANTHROPIC*"
-                  - "*GEMINI*"
-                  - "*GROQ*"
+                  operator: Match
+                  value: "(?i).*(API_KEY|SECRET|TOKEN|PASSWORD|OPENAI|ANTHROPIC|GEMINI|GROQ).*"
 """
 
 
@@ -265,11 +257,11 @@ def _policy_require_pinned_image(today: str, action: str) -> str:
               conditions:
                 any:
                 - key: "{{ element.image }}"
-                  operator: Equals
-                  value: "*:latest"
+                  operator: Match
+                  value: ".*:latest$"
                 - key: "{{ element.image }}"
                   operator: NotMatch
-                  value: "*:*"
+                  value: ".+:.+"
 """
 
 

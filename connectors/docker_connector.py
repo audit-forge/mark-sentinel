@@ -89,9 +89,16 @@ def scan_container_by_compose(compose_path: str, service_name: str) -> dict[str,
             "description": "Service does not pin an image; builds from local source may vary.",
             "remediation": "Pin explicit image versions or include provenance metadata.",
         })
-    env = service.get("environment") or {}
-    # naive check for API keys in env values
-    for k, v in (env.items() if isinstance(env, dict) else []):
+    raw_env = service.get("environment") or {}
+    if isinstance(raw_env, list):
+        env = {}
+        for item in raw_env:
+            if isinstance(item, str) and '=' in item:
+                k, _, v = item.partition('=')
+                env[k] = v
+    else:
+        env = raw_env
+    for k, v in env.items():
         if isinstance(v, str) and ("KEY" in k.upper() or "SECRET" in k.upper()):
             findings.append({
                 "id": "AI-DEPLOY-001",

@@ -31,7 +31,7 @@ def format_json(results: list, profile: dict, target: str, mode: str) -> str:
         "profile_framework": profile.get("framework_emphasis"),
         "profile_description": profile.get("description"),
         "summary": summary,
-        "findings": [_result_to_dict(r, profile) for r in results],
+        "findings": [_result_to_dict(r, profile) for r in results if r.status != "SKIP"],
     }
 
     return json.dumps(report, indent=2)

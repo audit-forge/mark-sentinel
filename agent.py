@@ -100,16 +100,34 @@ log = logging.getLogger('sentinel-agent')
 # ── Device identity ────────────────────────────────────────────────────────────
 
 def _device_id() -> str:
-    """Stable 16-char hex ID derived from hostname + MAC address."""
+    """Stable 16-char hex ID. Persisted to disk so containers/VMs get a consistent ID."""
+    id_file = ROOT / 'output' / '.device_id'
+    if id_file.exists():
+        try:
+            stored = id_file.read_text().strip()
+            if len(stored) == 16 and stored.isalnum():
+                return stored
+        except OSError:
+            pass
     hostname = socket.gethostname()
     try:
-        import uuid
-        # node = 48-bit MAC integer
-        node = uuid.getnode()
-        mac = ':'.join(f'{(node >> i) & 0xff:02x}' for i in range(0, 48, 8))
+        import uuid as _uuid
+        node = _uuid.getnode()
+        # getnode() returns a random value when MAC is unavailable — detect this
+        # by checking the multicast bit (bit 40), which is set on random values.
+        if node & (1 << 40):
+            mac = 'random'
+        else:
+            mac = ':'.join(f'{(node >> i) & 0xff:02x}' for i in range(0, 48, 8))
     except Exception:
         mac = 'unknown'
-    return hashlib.sha256(f'{hostname}:{mac}'.encode()).hexdigest()[:16]
+    new_id = hashlib.sha256(f'{hostname}:{mac}'.encode()).hexdigest()[:16]
+    try:
+        id_file.parent.mkdir(parents=True, exist_ok=True)
+        id_file.write_text(new_id)
+    except OSError:
+        pass
+    return new_id
 
 
 # ── Config loading ─────────────────────────────────────────────────────────────
@@ -171,11 +189,17 @@ def run_scan(target: str, profile: str) -> dict | None:
                   proc.returncode, (proc.stderr or '')[-400:])
         return None
 
+    # Find the first '{' — audit.py should only write JSON to stdout when --output json
+    # is set, but guard against any stray preamble lines.
+    json_start = stdout.find('{')
+    if json_start > 0:
+        log.debug('Stripping %d bytes of non-JSON preamble from audit stdout', json_start)
+        stdout = stdout[json_start:]
     try:
         return json.loads(stdout)
     except json.JSONDecodeError as e:
-        log.error('Could not parse scan JSON (exit %d): %s\nOutput: %s',
-                  proc.returncode, e, stdout[:300])
+        log.error('Could not parse scan JSON (exit %d): %s\nOutput: %s\nStderr: %s',
+                  proc.returncode, e, stdout[:300], (proc.stderr or '')[-200:])
         return None
 
 
@@ -269,7 +293,12 @@ def self_update(config: dict) -> bool:
         log.info('self_update: downloading bundle from %s', url)
         req = _urlreq.Request(url, headers=headers)
         with _urlreq.urlopen(req, timeout=60) as resp:
+            expected_hash = resp.headers.get('X-Bundle-SHA256', '')
             data = resp.read()
+        actual_hash = hashlib.sha256(data).hexdigest()
+        if expected_hash and actual_hash != expected_hash:
+            log.error('self_update: bundle hash mismatch (expected %s got %s)', expected_hash, actual_hash)
+            return False
         with tarfile.open(fileobj=io.BytesIO(data), mode='r:gz') as tar:
             for member in tar.getmembers():
                 # strip leading 'sentinel/' prefix from archive paths
@@ -280,7 +309,10 @@ def self_update(config: dict) -> bool:
                     rel = Path(member.name)
                 if rel is None or not member.isfile():
                     continue
-                if rel.is_absolute() or any(p == '..' for p in rel.parts):
+                if (rel.is_absolute()
+                        or any(p == '..' for p in rel.parts)
+                        or member.issym()
+                        or member.islnk()):
                     log.warning('self_update: skipping unsafe path %s', member.name)
                     continue
                 dest = ROOT / rel

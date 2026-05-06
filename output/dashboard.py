@@ -1216,7 +1216,7 @@ window.addEventListener('DOMContentLoaded',init);
 
 
 def _build_html(data: dict) -> str:
-    data_json = json.dumps(data, ensure_ascii=False).replace('</script>', r'<\/script>')
+    data_json = json.dumps(data, ensure_ascii=True).replace('</script>', r'<\/script>').replace('</SCRIPT>', r'<\/SCRIPT>')
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>

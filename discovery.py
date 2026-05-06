@@ -53,8 +53,14 @@ def _http_probe(host: str, port: int, path: str) -> int | None:
 
 def _local_subnet_hosts(max_hosts: int = 254) -> list[str]:
     try:
-        hostname = socket.gethostname()
-        local_ip = socket.gethostbyname(hostname)
+        # gethostbyname() often returns 127.0.0.1 on Linux where the hostname
+        # is mapped to loopback in /etc/hosts. Use a UDP connect trick instead
+        # to find the real outbound interface address.
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+            s.connect(('8.8.8.8', 80))
+            local_ip = s.getsockname()[0]
+        if local_ip.startswith('127.'):
+            raise ValueError('loopback address')
         net = ipaddress.IPv4Network(f'{local_ip}/24', strict=False)
         return [str(h) for h in list(net.hosts())[:max_hosts]]
     except Exception:
@@ -63,7 +69,7 @@ def _local_subnet_hosts(max_hosts: int = 254) -> list[str]:
 
 async def _discover_async(hosts: list[str]) -> list[dict]:
     sem = asyncio.Semaphore(_MAX_CONCURRENT)
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     results: list[dict] = []
 
     async def probe(host: str, port: int, label: str, path: str):

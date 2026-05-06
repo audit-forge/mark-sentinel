@@ -517,4 +517,5 @@ def run_all(ctx: ScanContext) -> list:
         check_deploy_004(ctx),
         check_deploy_005(ctx),
         check_deploy_006(ctx),
+        check_inp_005_config(ctx),
     ]
