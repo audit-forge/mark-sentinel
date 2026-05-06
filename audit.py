@@ -338,13 +338,14 @@ examples:
         metavar=('BEFORE', 'AFTER'),
         help='Compare two JSON scan reports and show before/after delta',
     )
-    args = parser.parse_args()
-
-    # history subcommand — delegate to audit_history.py CLI
+    # history subcommand must be intercepted BEFORE parse_args() or argparse will
+    # reject 'history' as an unknown argument and exit with an error.
     if len(sys.argv) > 1 and sys.argv[1] == 'history':
         import subprocess as _sp
         _sp.run([sys.executable, str(Path(__file__).parent / 'audit_history.py')] + sys.argv[2:])
         return
+
+    args = parser.parse_args()
 
     # --compare: short-circuit the CLI to compare two existing JSON reports
     if getattr(args, 'compare', None):
@@ -352,8 +353,10 @@ examples:
             from output.comparison import compare_reports
             import json as _json
             before_path, after_path = args.compare
-            before = _json.load(open(before_path))
-            after = _json.load(open(after_path))
+            with open(before_path) as _bf:
+                before = _json.load(_bf)
+            with open(after_path) as _af:
+                after = _json.load(_af)
             out = compare_reports(before, after)
             print(out)
             return
@@ -619,7 +622,7 @@ examples:
             from output.json_report import format_json as _fmt_json
             import hashlib, platform as _platform
             _store = AgentStore(Path(args.store_db))
-            _device_id = args.store_device_id or hashlib.sha1(socket.gethostname().encode()).hexdigest()[:16]
+            _device_id = args.store_device_id or hashlib.sha256(socket.gethostname().encode()).hexdigest()[:16]
             _report_dict = json.loads(_fmt_json(results, profile, str(target), args.mode))
             _store.upsert_report(
                 device_id=_device_id,

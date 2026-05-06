@@ -233,7 +233,7 @@ def _format_result(r: CheckResult, is_smb: bool, show_fix: bool = True,
 
     lines.append(f"  {icon} [{label}] [{r.severity}] {r.check_id}: {r.title}")
 
-    details = _SMB_DETAILS.get(r.check_id) if (is_smb and r.check_id in _SMB_DETAILS) else r.details
+    details = _SMB_DETAILS.get(r.check_id) if (is_smb and r.check_id in _SMB_DETAILS) else (r.details or "")
     lines += _wrap(details, indent="     ")
 
     if r.evidence:

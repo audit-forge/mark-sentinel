@@ -12,12 +12,12 @@ import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 
-DEFAULT_DB = Path('output/agents.db')
+DEFAULT_DB = Path(__file__).parent / 'output' / 'agents.db'
 BAR_WIDTH = 8
 
 
 def _conn(db_path: Path) -> sqlite3.Connection:
-    conn = sqlite3.connect(str(db_path), check_same_thread=False)
+    conn = sqlite3.connect(f'file:{db_path}?mode=ro', uri=True, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     return conn
 

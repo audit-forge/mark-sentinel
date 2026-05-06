@@ -11,6 +11,7 @@ SARIF_SCHEMA = (
 )
 
 _LEVEL = {"PASS": "note", "FAIL": "error", "WARN": "warning", "SKIP": "none"}
+_SEV_LEVEL = {"CRITICAL": "error", "HIGH": "error", "MEDIUM": "warning", "LOW": "note"}
 
 _CATEGORY_DOC = {
     "AI-DEPLOY": "AI-DEPLOY.md",
@@ -84,7 +85,7 @@ def _make_rule(r: CheckResult) -> dict:
         "shortDescription": {"text": r.title},
         "fullDescription": {"text": r.details},
         "helpUri": f"{_REPO_BASE}/{doc_file}#{r.check_id.lower()}",
-        "defaultConfiguration": {"level": _LEVEL.get(r.status, "note")},
+        "defaultConfiguration": {"level": _SEV_LEVEL.get(r.severity.upper(), "note")},
         "properties": {
             "severity": r.severity,
             "category": r.category,
@@ -95,7 +96,7 @@ def _make_rule(r: CheckResult) -> dict:
 
 
 def _make_result(r: CheckResult, target: str) -> dict:
-    msg_parts = [r.details]
+    msg_parts = [r.details or ""]
     if r.evidence:
         msg_parts.append("\nEvidence:")
         msg_parts.extend(f"  • {e}" for e in r.evidence)

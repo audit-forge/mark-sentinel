@@ -21,7 +21,8 @@ _BROAD_TOOL_RE = [
 ]
 
 _LEAST_PRIV_RE = [
-    re.compile(r'(?i)"(?:permissions?|scope)"\s*:\s*"\w'),
+    # Must name a safe, scoped permission level — not admin/all/full/root/*
+    re.compile(r'(?i)"(?:permissions?|scope)"\s*:\s*"(?:read|write|query|view|limited|custom|specific|minimal|narrow)\w*"'),
     re.compile(r'(?i)"read[_-]?only"\s*:\s*true'),
     re.compile(r'(?i)"allowed[_-]?paths?"\s*:'),
     re.compile(r'(?i)"allowed[_-]?domains?"\s*:'),

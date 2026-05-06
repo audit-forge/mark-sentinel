@@ -16,7 +16,7 @@ import secrets
 from datetime import date, timedelta
 from pathlib import Path
 
-DEFAULT_STORE = Path('output/agent_tokens.json')
+DEFAULT_STORE = Path(__file__).parent / 'output' / 'agent_tokens.json'
 
 
 def _load(store: Path) -> dict:
@@ -29,8 +29,13 @@ def _load(store: Path) -> dict:
 
 
 def _save(store: Path, data: dict) -> None:
+    import os
     store.parent.mkdir(parents=True, exist_ok=True)
     store.write_text(json.dumps(data, indent=2) + '\n')
+    try:
+        os.chmod(store, 0o600)
+    except OSError:
+        pass
 
 
 def cmd_generate(args: argparse.Namespace) -> None:

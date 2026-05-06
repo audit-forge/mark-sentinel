@@ -5,8 +5,8 @@ def compare_reports(before: Dict, after: Dict) -> str:
     """Compare two parsed JSON report dicts and return a plain-text summary."""
     b_summary = before.get('summary', {})
     a_summary = after.get('summary', {})
-    b_findings = {f.get('check_id'): f for f in before.get('findings', [])}
-    a_findings = {f.get('check_id'): f for f in after.get('findings', [])}
+    b_findings = {f['check_id']: f for f in before.get('findings', []) if f.get('check_id')}
+    a_findings = {f['check_id']: f for f in after.get('findings', []) if f.get('check_id')}
 
     target = after.get('target') or before.get('target') or ''
     profile = after.get('profile') or before.get('profile') or ''

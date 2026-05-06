@@ -30,6 +30,9 @@ def load_alert_config(path: Path) -> AlertConfig | None:
         return AlertConfig(**{k: v for k, v in data.items() if k in AlertConfig.__dataclass_fields__})
     except FileNotFoundError:
         return None
+    except (json.JSONDecodeError, OSError) as e:
+        log.warning('Could not parse alerts config %s: %s', path, e)
+        return None
 
 
 def should_alert(report: dict, config: AlertConfig) -> list[dict]:
@@ -106,7 +109,8 @@ def send_slack(findings: list[dict], device_id: str, hostname: str, config: Aler
 
 def send_email(findings: list[dict], device_id: str, hostname: str, config: AlertConfig) -> bool:
     password = os.environ.get('SENTINEL_SMTP_PASSWORD', '')
-    subject = f'Sentinel Alert: {len(findings)} critical finding(s) on {hostname}'
+    safe_hostname = hostname.replace('\r', '').replace('\n', '').replace('\0', '')[:253]
+    subject = f'Sentinel Alert: {len(findings)} critical finding(s) on {safe_hostname}'
     lines = [
         f'M.A.R.K. Sentinel detected {len(findings)} finding(s) requiring attention.',
         f'Device: {hostname} ({device_id})',

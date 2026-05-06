@@ -10,7 +10,7 @@ try:
     from presidio_analyzer import AnalyzerEngine as _Engine
     _analyzer = _Engine()
     HAS_PRESIDIO = True
-except ImportError:
+except (ImportError, OSError):
     _analyzer = None
     HAS_PRESIDIO = False
 

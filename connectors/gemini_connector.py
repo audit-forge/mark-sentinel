@@ -18,7 +18,7 @@ _GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta/models"
 
 def _chat_request(api_key: str, model: str, system_prompt: str, user_message: str) -> tuple[str, str]:
     """Returns (response_text, error_string)."""
-    url = f"{_GEMINI_API_BASE}/{model}:generateContent?key={api_key}"
+    url = f"{_GEMINI_API_BASE}/{model}:generateContent"
     payload: dict = {
         "contents": [
             {"role": "user", "parts": [{"text": user_message}]}
@@ -32,7 +32,11 @@ def _chat_request(api_key: str, model: str, system_prompt: str, user_message: st
         payload["systemInstruction"] = {"parts": [{"text": system_prompt}]}
 
     data = json.dumps(payload).encode()
-    headers = {"Content-Type": "application/json", "Accept": "application/json"}
+    headers = {
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        "x-goog-api-key": api_key,
+    }
     req = urllib.request.Request(url, data=data, headers=headers, method="POST")
     try:
         with urllib.request.urlopen(req, timeout=PROBE_TIMEOUT) as resp:

@@ -58,14 +58,53 @@ def _get_store():
                 _store = AgentStore(ROOT / 'output' / 'agents.db')
     return _store
 
+def _content_length(headers) -> int:
+    """Safely parse Content-Length header; returns 0 on missing or invalid value."""
+    try:
+        return max(0, int(headers.get('Content-Length', 0)))
+    except (ValueError, TypeError):
+        return 0
+
+
 def _agent_token() -> str:
-    """Return expected bearer token from env or token file. Empty = no auth."""
+    """Return legacy single-token value. Empty string means no auth configured."""
     if os.environ.get('SENTINEL_AGENT_TOKEN'):
         return os.environ['SENTINEL_AGENT_TOKEN']
     tok_file = ROOT / 'agent_token.txt'
     if tok_file.exists():
         return tok_file.read_text().strip()
     return ''
+
+
+def _check_agent_token(submitted: str) -> bool:
+    """Return True if submitted token is valid (single-token or multi-token store)."""
+    if not submitted:
+        return False
+    import hmac as _hmac
+    # Check legacy single token
+    single = _agent_token()
+    if single and _hmac.compare_digest(submitted, single):
+        return True
+    # Check multi-token store (tokens.py)
+    store_path_env = os.environ.get('SENTINEL_TOKEN_STORE', '')
+    store_path = Path(store_path_env) if store_path_env else ROOT / 'output' / 'agent_tokens.json'
+    if store_path.exists():
+        try:
+            import json as _json
+            from datetime import date as _date
+            data = _json.loads(store_path.read_text())
+            for t in data.get('tokens', []):
+                tok = t.get('token', '')
+                if not tok:
+                    continue
+                expires = t.get('expires_at')
+                if expires and expires < str(_date.today()):
+                    continue
+                if _hmac.compare_digest(submitted, tok):
+                    return True
+        except Exception:
+            pass
+    return False
 
 def _dashboard_token() -> str:
     """Return expected dashboard token. Empty = no auth required."""
@@ -307,7 +346,8 @@ def _run_scan(mode: str, target: str, profile: str, providers: list[str]):
         else:
             provider = providers[0] if providers else 'config'
             db_path = str(ROOT / 'output' / 'agents.db')
-            cmd = [sys.executable, str(ROOT / 'audit.py'), target,
+            cmd = [sys.executable, str(ROOT / 'audit.py'),
+                   '--target', target,
                    '--mode', provider, '--profile', profile, '--output', 'json',
                    '--store-db', db_path]
 
@@ -344,12 +384,13 @@ class _Handler(http.server.BaseHTTPRequestHandler):
     # ── auth helpers ──────────────────────────────────────────────────────────
 
     def _check_dashboard_auth(self) -> bool:
+        import hmac as _hmac
         token = _dashboard_token()
         if not token:
             return True
         for part in self.headers.get('Cookie', '').split(';'):
             k, _, v = part.strip().partition('=')
-            if k.strip() == 'sentinel_session' and v.strip() == token:
+            if k.strip() == 'sentinel_session' and _hmac.compare_digest(v.strip(), token):
                 return True
         return False
 
@@ -366,10 +407,12 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         return False
 
     def _check_agent_bearer(self) -> bool:
-        expected = _agent_token()
-        if not expected:
-            return True
-        return self.headers.get('Authorization', '') == f'Bearer {expected}'
+        if not _agent_token() and not (ROOT / 'output' / 'agent_tokens.json').exists():
+            return True  # no auth configured
+        submitted = self.headers.get('Authorization', '')
+        if submitted.startswith('Bearer '):
+            submitted = submitted[len('Bearer '):]
+        return _check_agent_token(submitted)
 
     # ── routing ───────────────────────────────────────────────────────────────
 
@@ -477,9 +520,13 @@ class _Handler(http.server.BaseHTTPRequestHandler):
     # ── login / logout ────────────────────────────────────────────────────────
 
     def _serve_login(self):
+        import html as _html
         from urllib.parse import parse_qs
         qs = parse_qs(urlparse(self.path).query)
         next_url = qs.get('next', ['/'])[0]
+        if not next_url.startswith('/') or '//' in next_url:
+            next_url = '/'
+        safe_next = _html.escape(next_url, quote=True)
         error = bool(qs.get('error'))
         err_html = '<p style="color:#f85149;font-size:13px;margin:0 0 14px">Incorrect token.</p>' if error else ''
         body = f"""<!doctype html><html><head><meta charset="utf-8">
@@ -497,7 +544,7 @@ button:hover{{background:#2ea043}}
 </head><body><div class="box">
 <h2>M.A.R.K. Sentinel</h2>{err_html}
 <form method="POST" action="/login">
-<input type="hidden" name="next" value="{next_url}">
+<input type="hidden" name="next" value="{safe_next}">
 <input type="password" name="token" placeholder="Dashboard token" autofocus>
 <button type="submit">Sign in</button>
 </form>
@@ -511,7 +558,7 @@ button:hover{{background:#2ea043}}
 
     def _handle_login_post(self):
         from urllib.parse import parse_qs, quote
-        length = int(self.headers.get('Content-Length', 0))
+        length = _content_length(self.headers)
         if length > 4096:
             self._send(400, b'Bad request', 'text/plain')
             return
@@ -520,8 +567,9 @@ button:hover{{background:#2ea043}}
         next_url = params.get('next', ['/'])[0]
         if not next_url.startswith('/') or '//' in next_url:
             next_url = '/'
+        import hmac as _hmac
         expected = _dashboard_token()
-        if expected and submitted == expected:
+        if expected and _hmac.compare_digest(submitted, expected):
             self.send_response(302)
             self.send_header('Set-Cookie',
                 f'sentinel_session={expected}; Path=/; HttpOnly; SameSite=Strict')
@@ -641,10 +689,13 @@ button:hover{{background:#2ea043}}
                     continue
                 tar.add(path, arcname=str(Path('sentinel') / rel))
         data = buf.getvalue()
+        import hashlib as _hashlib
+        bundle_sha256 = _hashlib.sha256(data).hexdigest()
         self.send_response(200)
         self.send_header('Content-Type', 'application/gzip')
         self.send_header('Content-Disposition', 'attachment; filename="sentinel.tar.gz"')
         self.send_header('Content-Length', str(len(data)))
+        self.send_header('X-Bundle-SHA256', bundle_sha256)
         self.end_headers()
         self.wfile.write(data)
 
@@ -689,11 +740,16 @@ button:hover{{background:#2ea043}}
             import os as _os
             with tempfile.NamedTemporaryFile(suffix='.html', delete=False) as tf:
                 tmp_path = tf.name
-            generate([report], tmp_path,
-                     meta={'scan_date': report.get('scan_date', ''),
-                           'target':    report.get('target', device_id)})
-            html = Path(tmp_path).read_bytes()
-            _os.unlink(tmp_path)
+            try:
+                generate([report], tmp_path,
+                         meta={'scan_date': report.get('scan_date', ''),
+                               'target':    report.get('target', device_id)})
+                html = Path(tmp_path).read_bytes()
+            finally:
+                try:
+                    _os.unlink(tmp_path)
+                except OSError:
+                    pass
             self._send(200, html, 'text/html; charset=utf-8')
         except Exception as e:
             log.error('dashboard generation error for %s: %s', device_id, e)
@@ -732,7 +788,10 @@ button:hover{{background:#2ea043}}
                 self._json({'error': 'scan already running'}, 409)
                 return
             _status = 'running'
-        length = int(self.headers.get('Content-Length', 0))
+        length = _content_length(self.headers)
+        if length > 65_536:
+            self._send(413, b'Payload too large', 'text/plain')
+            return
         body = json.loads(self.rfile.read(length)) if length else {}
         raw_target = body.get('target', '.')
         safe_target = os.path.realpath(raw_target)
@@ -754,14 +813,11 @@ button:hover{{background:#2ea043}}
     # ── agent API ─────────────────────────────────────────────────────────────
 
     def _api_agent_report(self):
-        expected = _agent_token()
-        if expected:
-            auth = self.headers.get('Authorization', '')
-            if auth != f'Bearer {expected}':
-                self._send(401, b'Unauthorized', 'text/plain')
-                return
+        if not self._check_agent_bearer():
+            self._send(401, b'Unauthorized', 'text/plain')
+            return
 
-        length = int(self.headers.get('Content-Length', 0))
+        length = _content_length(self.headers)
         if not length:
             self._send(400, b'Empty body', 'text/plain')
             return
@@ -960,22 +1016,7 @@ button:hover{{background:#2ea043}}
             self._not_found()
             return
         try:
-            store = _get_store()
-            # Use a direct DB connection to read historical reports for this device.
-            with store._lock, store._conn() as conn:
-                rows = conn.execute(
-                    "SELECT received_at, fail_count, warn_count, pass_count FROM reports "
-                    "WHERE device_id = ? ORDER BY received_at ASC",
-                    (device_id,)
-                ).fetchall()
-            points = []
-            for r in rows:
-                points.append({
-                    't': int(r['received_at']),
-                    'fail': int(r['fail_count']),
-                    'warn': int(r['warn_count']),
-                    'pass': int(r['pass_count']),
-                })
+            points = _get_store().get_device_timeseries(device_id)
             self._json({'points': points})
         except Exception as e:
             self._json({'error': str(e)}, 500)
@@ -1038,7 +1079,7 @@ button:hover{{background:#2ea043}}
             self._json({'error': str(e)}, 500)
 
     def _api_set_config(self):
-        length = int(self.headers.get('Content-Length', 0))
+        length = _content_length(self.headers)
         if not length:
             self._send(400, b'Empty body', 'text/plain')
             return
@@ -1840,13 +1881,32 @@ def main():
     )
 
     server = http.server.ThreadingHTTPServer((args.host, args.port), _Handler)
-    url = f'http://localhost:{args.port}'
+
+    tls_cert = os.environ.get('SENTINEL_TLS_CERT', '')
+    tls_key  = os.environ.get('SENTINEL_TLS_KEY', '')
+    if tls_cert and tls_key:
+        import ssl as _ssl
+        ctx = _ssl.SSLContext(_ssl.PROTOCOL_TLS_SERVER)
+        ctx.load_cert_chain(tls_cert, tls_key)
+        server.socket = ctx.wrap_socket(server.socket, server_side=True)
+        scheme = 'https'
+    else:
+        scheme = 'http'
+        log.warning(
+            'TLS not configured — fleet traffic is unencrypted. '
+            'Set SENTINEL_TLS_CERT and SENTINEL_TLS_KEY env vars to enable HTTPS, '
+            'or run behind a TLS-terminating reverse proxy (nginx, Caddy).'
+        )
+
+    url = f'{scheme}://localhost:{args.port}'
     print('\n  M.A.R.K. Sentinel  ·  Dashboard Server')
     print(f'  Project  : {ROOT}')
     print(f'  Dashboard: {url}')
     print(f'  Command Center: {url}/command (also available at {url}/fleet)')
     print(f'  Devices  : {url}/api/devices')
-    print(f'  Network  : http://0.0.0.0:{args.port} (accessible from LAN)')
+    print(f'  Network  : {scheme}://0.0.0.0:{args.port} (accessible from LAN)')
+    if scheme == 'http':
+        print('  WARNING  : TLS not enabled — set SENTINEL_TLS_CERT + SENTINEL_TLS_KEY for HTTPS')
     print('  Stop     : Ctrl+C\n')
     if not args.no_browser:
         threading.Timer(0.6, lambda: webbrowser.open(url)).start()
