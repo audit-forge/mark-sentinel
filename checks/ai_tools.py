@@ -28,11 +28,24 @@ _API_KEY_RE = re.compile(
 def _home_dirs() -> list:
     homes = {Path.home()}
     home_root = Path('/home')
-    if home_root.exists():
-        for p in home_root.iterdir():
-            if p.is_dir():
-                homes.add(p)
+    try:
+        if home_root.exists():
+            for p in home_root.iterdir():
+                try:
+                    if p.is_dir():
+                        homes.add(p)
+                except OSError:
+                    pass
+    except OSError:
+        pass
     return list(homes)
+
+
+def _path_exists(path: Path) -> bool:
+    try:
+        return path.exists()
+    except OSError:
+        return False
 
 
 def _is_world_readable(path: Path) -> bool:
@@ -92,10 +105,10 @@ def check_tool_001(ctx: ScanContext) -> CheckResult:
     world_readable = []
     for home in _home_dirs():
         d = home / '.gemini'
-        if d.exists():
+        if _path_exists(d):
             for fname in ['credentials.json', 'config.json', '.env']:
                 p = d / fname
-                if p.exists():
+                if _path_exists(p):
                     cred_files.append(str(p))
                     if _is_world_readable(p):
                         world_readable.append(str(p))
@@ -152,7 +165,7 @@ def check_tool_002(ctx: ScanContext) -> CheckResult:
     config_found = False
     for home in _home_dirs():
         d = home / '.claude'
-        if d.exists():
+        if _path_exists(d):
             config_found = True
             world_readable.extend(_world_readable_in(d))
 
@@ -208,7 +221,7 @@ def check_tool_003(ctx: ScanContext) -> CheckResult:
     for home in _home_dirs():
         for rel in ['.openai', '.config/openai']:
             d = home / rel
-            if d.exists():
+            if _path_exists(d):
                 for p in d.rglob('*'):
                     if p.is_file():
                         cred_files.append(str(p))
@@ -334,7 +347,7 @@ def check_tool_005(ctx: ScanContext) -> CheckResult:
     config_found = False
     for home in _home_dirs():
         d = home / '.config' / 'github-copilot'
-        if d.exists():
+        if _path_exists(d):
             config_found = True
             world_readable.extend(_world_readable_in(d))
 
