@@ -3,7 +3,7 @@ name: Build & Publish Python package
 on:
   push:
     branches:
-      - phase4/smb-packaging
+      - main
   workflow_dispatch:
 
 jobs:

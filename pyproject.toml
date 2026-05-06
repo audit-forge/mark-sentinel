@@ -1,15 +1,31 @@
 [build-system]
-requires = ["setuptools>=61.0", "wheel"]
-build-backend = "setuptools.build_meta"
+requires = ["hatchling>=1.13,<2.0"]
+build-backend = "hatchling.build"
 
 [project]
-name = "ai-stig-audit"
+name = "mark-sentinel"
 version = "0.1.0"
-description = "AI security & compliance audit tool (M.A.R.K. Sentinel)"
-authors = [ { name="Keith Ferguson", email="keithferg2018@gmail.com" } ]
+description = "M.A.R.K. Sentinel — AI Security Audit Tool (packaged entry)"
 readme = "README.md"
+requires-python = ">=3.11"
+authors = [ { name = "Keith Ferguson", email = "keithferg2018@gmail.com" } ]
 license = { file = "LICENSE" }
+keywords = ["ai","security","audit","sentinel"]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: OS Independent",
+]
 
-[tool.setuptools.packages.find]
-where = ["."]
-exclude = ["test*", "docs*"]
+# Project dependencies (from requirements.txt)
+dependencies = [
+  "PyYAML==6.0.2",
+  "google-auth>=2.0.0",
+]
+
+[project.scripts]
+mark-sentinel = "server:main"
+
+[tool.hatch.build.targets.wheel]
+include = ["**/*"]
+

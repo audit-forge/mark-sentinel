@@ -4,7 +4,7 @@ Checks: AI-GOV-001 through AI-GOV-005
 All checks are evaluable in config mode via documentation audit.
 """
 import re
-from . import CheckResult, PASS, FAIL, WARN, SKIP
+from . import CheckResult, PASS, FAIL, WARN
 from connectors.config_connector import ScanContext
 
 CATEGORY = "AI-GOV"

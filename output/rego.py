@@ -154,17 +154,16 @@ def _per_check_rules(results: list) -> str:
         "",
     ]
     for r in active:
-        safe_details = r.details.replace('"', "'").replace("\n", " ")[:150]
         verb = "failed" if r.status == "FAIL" else "flagged"
         block_or_warn = "deny" if r.status == "FAIL" else "warn"
         lines += [
             f"# {r.check_id}: {r.title}",
             f"{block_or_warn}[msg] if {{",
-            f'    finding := input.findings[_]',
+            '    finding := input.findings[_]',
             f'    finding.check_id == "{r.check_id}"',
             f'    finding.status == "{r.status}"',
             f'    msg := sprintf("{r.check_id} {verb} — %v", [finding.details])',
-            f"}}",
+            "}",
             "",
         ]
     return "\n".join(lines)

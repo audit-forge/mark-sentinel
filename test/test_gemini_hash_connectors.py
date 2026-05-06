@@ -10,22 +10,18 @@ import sys
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
-from urllib.parse import urlparse, parse_qs
 
-import pytest
 
 ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT))
 
-from connectors.api_connector import (
+from connectors.api_connector import (  # noqa: E402
     _CANARY_OVERRIDE, _CANARY_INJECT, _CANARY_JAILBREAK,
     _CANARY_SYSPROMPT, _CANARY_PII_NAME, _CANARY_PII_EMAIL,
-    ProbeResult,
 )
-from connectors.gemini_connector import _chat_request as gemini_request, run_probes as gemini_run_probes
-from connectors.hash_connector import (
+from connectors.hash_connector import (  # noqa: E402
     _chat_request as hash_request, run_probes as hash_run_probes,
-    _SYSTEM_PROMPT_PROBES, _SKIP_REASON,
+    _SYSTEM_PROMPT_PROBES,
 )
 
 HARDENED = str(ROOT / "test/fixtures/deploy-hardened")

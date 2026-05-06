@@ -30,10 +30,17 @@
   "AI-SUPPLY-003": ["CM-2", "CM-6", "SI-7"],
   "AI-SUPPLY-004": ["AU-6", "AC-2"],
   "AI-SUPPLY-005": ["CM-2"],
+  "AI-SUPPLY-006": ["SI-12", "CM-8", "IA-5"],
 
   "AI-GOV-001": ["PL-2"],
   "AI-GOV-002": ["MP-6", "PL-2"],
   "AI-GOV-003": ["IR-4", "AU-6"],
   "AI-GOV-004": ["PL-2", "AC-2"],
-  "AI-GOV-005": ["CM-2", "CM-8", "PL-2"]
+  "AI-GOV-005": ["CM-2", "CM-8", "PL-2"],
+
+  "AI-RUNTIME-001": ["AU-2", "AU-12", "SI-4"],
+  "AI-RUNTIME-002": ["SI-4", "IR-4", "AU-6"],
+  "AI-RUNTIME-003": ["AC-6", "IR-4", "PL-2"],
+  "AI-RUNTIME-004": ["SC-5", "SI-10", "CM-6"],
+  "AI-RUNTIME-005": ["AU-9", "AU-11", "SI-12"]
 }

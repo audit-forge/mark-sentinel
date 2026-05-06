@@ -3,7 +3,7 @@ AI-DEPLOY checks — Deployment Security
 Checks: AI-DEPLOY-001 through AI-DEPLOY-006
 """
 import re
-from . import CheckResult, PASS, FAIL, WARN, SKIP
+from . import CheckResult, PASS, FAIL, WARN
 from connectors.config_connector import ScanContext
 
 CATEGORY = "AI-DEPLOY"
@@ -25,6 +25,7 @@ _PLACEHOLDER_FRAGMENTS = (
     'xxx', '...', 'your-', 'your_', 'replace', 'placeholder', 'example',
     'changeme', 'insert', 'todo', 'sk-test', 'add_your', 'put_your',
     'enter_your', 'sk-xxxx', 'sk-proj-xxxx',
+    'fixture', 'fake', 'sample', 'dummy', 'test-key', 'testkey', 'demo-',
 )
 
 _CRED_RE = [
@@ -398,7 +399,7 @@ def check_deploy_005(ctx: ScanContext) -> CheckResult:
                 "Plain HTTP endpoints detected with no TLS configuration. "
                 "AI traffic is sensitive — unencrypted connections expose prompts, responses, and API keys."
             ),
-            evidence=[f"{p}:{n} — {l}" for p, n, l in http_only_hits[:3]],
+            evidence=[f"{p}:{n} — {ln}" for p, n, ln in http_only_hits[:3]],
             remediation=(
                 "1. Obtain a TLS certificate (Let's Encrypt is free: certbot).\n"
                 "2. Configure your web server to reject plain HTTP or redirect to HTTPS.\n"

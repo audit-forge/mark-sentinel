@@ -2,3 +2,7 @@
 # Core engine requires Python 3.9+ stdlib only.
 # pyyaml is optional but recommended for docker-compose.yml parsing.
 pyyaml==6.0.2
+# google-auth is required only for --mode vertex (Vertex AI Gemini).
+google-auth==2.40.0
+# PDF report generation
+fpdf2==2.8.3

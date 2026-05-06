@@ -3,7 +3,6 @@ M.A.R.K. Sentinel — Config Connector
 Scans a directory for AI deployment files and returns a structured ScanContext.
 """
 import os
-import re
 import json
 from pathlib import Path
 from dataclasses import dataclass, field
@@ -21,10 +20,11 @@ SKIP_DIRS = frozenset({
 TEXT_EXTS = frozenset({
     '.py', '.json', '.yml', '.yaml', '.txt', '.md', '.env',
     '.cfg', '.ini', '.conf', '.toml', '.sh', '.bash', '.nginx',
-    '.htaccess', '.properties',
+    '.htaccess', '.properties', '.xml', '.tf', '.tfvars',
 })
 MAX_FILE_BYTES = 200_000
-MAX_FILES = 500
+# Configurable via SENTINEL_MAX_FILES env var — default 2000 for enterprise use
+MAX_FILES = int(os.environ.get('SENTINEL_MAX_FILES', '2000'))
 
 _POLICY_KEYS = ('ai_usage_policy', 'ai-usage-policy', 'ai_policy', 'ai-policy', 'usage_policy', 'aipolicy')
 _RETENTION_KEYS = ('data_retention', 'retention_policy', 'data-retention', 'ai_retention')
@@ -93,9 +93,10 @@ class ScanContext:
     live_error: str = ""
 
 
-def scan_directory(target_dir: str, mode: str = "config") -> ScanContext:
+def scan_directory(target_dir: str, mode: str = "config", max_files: int | None = None) -> ScanContext:
     ctx = ScanContext(target_dir=str(Path(target_dir).resolve()), mode=mode)
     root = Path(target_dir).resolve()
+    limit = max_files if max_files is not None else MAX_FILES
     count = 0
 
     for dirpath, dirnames, filenames in os.walk(root):
@@ -103,7 +104,7 @@ def scan_directory(target_dir: str, mode: str = "config") -> ScanContext:
         rel_dir = Path(dirpath).relative_to(root)
 
         for filename in filenames:
-            if count >= MAX_FILES:
+            if count >= limit:
                 break
 
             filepath = Path(dirpath) / filename
@@ -120,9 +121,15 @@ def scan_directory(target_dir: str, mode: str = "config") -> ScanContext:
 
             ext = filepath.suffix.lower()
             name_lower = filename.lower()
-            _special = {'.gitignore', '.dockerignore', '.gitattributes', '.editorconfig'}
+            _special = {
+                '.gitignore', '.dockerignore', '.gitattributes', '.editorconfig',
+                # AI agent instruction files (extensionless or non-standard extensions)
+                'modelfile', '.cursorrules', '.cursorignore', '.windsurfrules',
+                '.aiderignore', '.tabnine_root', '.aiprompt', '.continuerc.json',
+                'claude.md', 'agents.md', 'agent.md', 'gemini.md',
+            }
             if ext not in TEXT_EXTS and not name_lower.startswith('.env') and 'dockerfile' not in name_lower:
-                if filename not in _special:
+                if name_lower not in _special:
                     continue
 
             try:
@@ -227,21 +234,65 @@ def _is_nginx_conf(name: str) -> bool:
 
 
 def _is_config_json(name: str) -> bool:
-    return name in ('config.json', 'config.prod.json', 'app.json', 'settings.json', 'app_config.json')
+    return name in {
+        # Generic
+        'config.json', 'config.prod.json', 'app.json', 'settings.json',
+        'app_config.json', 'app_settings.json', 'appsettings.json',
+        'appsettings.production.json',
+        # Azure / Microsoft
+        'azure_openai.json', 'azure_openai_config.json', 'azure_ai_config.json',
+        'azure_ai_services.json', 'cognitive_services.json',
+        'copilot_config.json', 'copilot.json', 'm365_copilot.json',
+        'openai_config.json', 'openai_settings.json', 'openai.json',
+        # AWS
+        'bedrock_config.json', 'aws_bedrock.json', 'aws_ai_config.json',
+        'sagemaker_config.json',
+        # Google
+        'vertex_config.json', 'vertexai_config.json', 'google_ai_config.json',
+        'gemini_config.json',
+        # Streamlit (often contains AI API keys)
+        'secrets.toml',
+    }
 
 
 def _is_model_config(name: str) -> bool:
-    return name in (
+    return name in {
+        # Generic
         'model_config.json', 'model.json', 'llm_config.json',
-        'ai_config.json', 'model_settings.json',
-    )
+        'ai_config.json', 'model_settings.json', 'llm_settings.json',
+        'model_params.json', 'inference_config.json',
+        # LangChain / LangGraph
+        'langchain.json', 'langchain_config.json', '.langchain.yaml',
+        'langgraph.json', 'langgraph_config.json',
+        # LlamaIndex
+        'llamaindex_config.json', 'llama_index.json', 'llama_config.json',
+        # Hugging Face
+        'huggingface_config.json', 'hf_config.json', 'tokenizer_config.json',
+        # LiteLLM (proxy config used by many enterprises)
+        'litellm_config.yaml', 'litellm.yaml', 'litellm_config.json',
+        # Ollama
+        'ollama_config.json', 'ollama.json', 'Modelfile',
+    }
 
 
 def _is_agent_config(name: str) -> bool:
-    return name in (
+    return name in {
+        # Generic
         'agent_config.json', 'agent.json', 'tools.json',
         'agent.yml', 'agent.yaml', 'tools_config.json',
-    )
+        # Microsoft Semantic Kernel
+        'kernel_config.json', 'semantic_kernel_config.json', 'sk_config.json',
+        # AutoGen (Microsoft)
+        'autogen_config.json', 'OAI_CONFIG_LIST.json', 'OAI_CONFIG_LIST',
+        # CrewAI
+        'crewai_config.json', 'crew_config.json',
+        # Chainlit
+        '.chainlit', 'chainlit.yaml', 'chainlit.toml',
+        # OpenAI Assistants / function calling
+        'assistants_config.json', 'functions.json', 'tools_schema.json',
+        # Dify / Flowise / n8n AI workflows
+        'dify_config.json', 'flowise_config.json',
+    }
 
 
 def _is_requirements(name: str) -> bool:

@@ -14,9 +14,6 @@ This module is intentionally lightweight and deterministic so it can be used in
 unit tests and in pilot handoffs without external dependencies.
 """
 from datetime import datetime
-from typing import List, Dict, Optional
-
-
 def _severity_emoji(sev: str) -> str:
     sev = (sev or "").lower()
     if sev in ("critical", "high"):
@@ -28,7 +25,7 @@ def _severity_emoji(sev: str) -> str:
     return "⚪"
 
 
-def generate_compliance_report(findings: List[Dict], profile_name: Optional[str] = None) -> str:
+def generate_compliance_report(findings: list[dict], profile_name: str | None = None) -> str:
     """Return a markdown compliance report summarizing findings and mapping to frameworks."""
     now = datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
     total = len(findings or [])
@@ -36,7 +33,7 @@ def generate_compliance_report(findings: List[Dict], profile_name: Optional[str]
     fails = sum(1 for f in findings if f.get("result") == "FAIL")
 
     header = [
-        f"# M.A.R.K. Sentinel — Compliance Report",
+        "# M.A.R.K. Sentinel — Compliance Report",
         f"Generated: {now}",
     ]
     if profile_name:
@@ -88,7 +85,7 @@ def generate_compliance_report(findings: List[Dict], profile_name: Optional[str]
     return report
 
 
-def write_compliance_report(path: str, findings: List[Dict], profile_name: Optional[str] = None) -> None:
+def write_compliance_report(path: str, findings: list[dict], profile_name: str | None = None) -> None:
     content = generate_compliance_report(findings, profile_name=profile_name)
     with open(path, "w", encoding="utf-8") as f:
         f.write(content)
@@ -96,7 +93,8 @@ def write_compliance_report(path: str, findings: List[Dict], profile_name: Optio
 
 # Minimal CLI for manual invocation during handoffs (keeps dependencies low)
 if __name__ == "__main__":
-    import json, sys
+    import json
+    import sys
     if len(sys.argv) < 3:
         print("Usage: compliance.py <findings.json> <out.md> [profile]")
         sys.exit(2)

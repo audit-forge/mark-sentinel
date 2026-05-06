@@ -8,9 +8,6 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from datetime import date
-from typing import Optional
-
-
 _SEVERITY_MAP = {
     "CRITICAL": "Critical",
     "HIGH": "High",
@@ -29,8 +26,8 @@ def push_findings(
     mode: str,
     url: str,
     api_key: str,
-    product_name: Optional[str] = None,
-    engagement_name: Optional[str] = None,
+    product_name: str | None = None,
+    engagement_name: str | None = None,
     push_passing: bool = False,
 ) -> dict:
     """Push M.A.R.K. Sentinel findings to a DefectDojo instance.
