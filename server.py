@@ -734,14 +734,19 @@ button:hover{{background:#2ea043}}
             _status = 'running'
         length = int(self.headers.get('Content-Length', 0))
         body = json.loads(self.rfile.read(length)) if length else {}
+        raw_target = body.get('target', '.')
+        safe_target = os.path.realpath(raw_target)
+        if not safe_target.startswith(os.path.realpath(str(ROOT))):
+            safe_target = str(ROOT)
+        mode = body.get('mode', 'demo')
+        if mode not in ('demo', 'config', 'api', 'local', 'gemini', 'vertex', 'anthropic', 'hash'):
+            mode = 'demo'
+        profile = body.get('profile', 'default')
+        if not profile.replace('-', '').replace('_', '').isalnum():
+            profile = 'default'
         threading.Thread(
             target=_run_scan,
-            args=(
-                body.get('mode', 'demo'),
-                body.get('target', '.'),
-                body.get('profile', 'default'),
-                body.get('providers', []),
-            ),
+            args=(mode, safe_target, profile, body.get('providers', [])),
             daemon=True,
         ).start()
         self._json({'status': 'started'})
@@ -903,6 +908,8 @@ button:hover{{background:#2ea043}}
             data = html.encode('utf-8')
             self.send_response(200)
             self.send_header('Content-Type', 'text/html; charset=utf-8')
+            self.send_header('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'; img-src data:")
+            self.send_header('X-Content-Type-Options', 'nosniff')
             self.send_header('Content-Length', str(len(data)))
             self.end_headers()
             self.wfile.write(data)
