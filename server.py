@@ -128,6 +128,166 @@ def _rebuild_dashboard(out_dir: Path) -> bool:
     return False
 
 
+_SEV_ORDER_REPORT = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW', 'INFO']
+_SEV_COLOR_HTML = {'CRITICAL': '#f85149', 'HIGH': '#d29922', 'MEDIUM': '#58a6ff', 'LOW': '#3fb950', 'INFO': '#6e7681'}
+_STATUS_COLOR_HTML = {'FAIL': '#f85149', 'WARN': '#d29922', 'PASS': '#3fb950', 'SKIP': '#6e7681'}
+
+
+def _risk_score_html(fail, warn, total) -> int:
+    if not total:
+        return 0
+    return max(0, 100 - round((fail * 3 + warn) / max(total, 1) * 100))
+
+
+def _build_fleet_report_html(devices: list, tier: str) -> str:
+    from datetime import datetime, timezone
+    import html as _html
+
+    def esc(s):
+        return _html.escape(str(s or ''))
+
+    def ts(epoch):
+        if not epoch:
+            return 'never'
+        try:
+            return datetime.fromtimestamp(int(epoch), tz=timezone.utc).strftime('%Y-%m-%d %H:%M UTC')
+        except Exception:
+            return str(epoch)
+
+    tier_label = {'executive': 'Executive Summary', 'ciso': 'CISO Report', 'technical': 'Technical Findings'}.get(tier, 'Fleet Report')
+    total_fail = sum(d.get('fail_count', 0) or 0 for d in devices)
+    total_warn = sum(d.get('warn_count', 0) or 0 for d in devices)
+    total_pass = sum(d.get('pass_count', 0) or 0 for d in devices)
+    total_checks = total_fail + total_warn + total_pass
+    fleet_score = _risk_score_html(total_fail, total_warn, total_checks)
+    score_color = '#3fb950' if fleet_score >= 80 else '#d29922' if fleet_score >= 60 else '#f85149'
+    now = datetime.now(tz=timezone.utc).strftime('%Y-%m-%d %H:%M UTC')
+
+    parts = [f'''<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
+<title>M.A.R.K. Sentinel — Fleet {esc(tier_label)}</title>
+<style>
+*{{box-sizing:border-box;margin:0;padding:0}}
+body{{background:#0d1117;color:#c9d1d9;font-family:system-ui,sans-serif;padding:32px;max-width:1100px;margin:0 auto}}
+h1{{color:#58a6ff;font-size:22px;margin-bottom:4px}}
+h2{{color:#58a6ff;font-size:15px;margin:28px 0 10px;border-bottom:1px solid #21262d;padding-bottom:6px}}
+h3{{color:#8b949e;font-size:13px;margin:16px 0 6px}}
+.meta{{color:#6e7681;font-size:12px;margin-bottom:28px}}
+.score{{font-size:36px;font-weight:700;color:{score_color}}}
+.cards{{display:flex;gap:16px;flex-wrap:wrap;margin:16px 0 24px}}
+.card{{background:#161b22;border:1px solid #21262d;border-radius:8px;padding:16px 24px;min-width:120px}}
+.card-n{{font-size:28px;font-weight:700}}
+.card-l{{font-size:11px;color:#6e7681;margin-top:4px;text-transform:uppercase}}
+table{{width:100%;border-collapse:collapse;font-size:13px;margin-bottom:16px}}
+th{{background:#161b22;color:#6e7681;font-size:11px;text-transform:uppercase;padding:8px 10px;text-align:left;border-bottom:1px solid #21262d}}
+td{{padding:7px 10px;border-bottom:1px solid #161b22}}
+tr:hover td{{background:#161b22}}
+.fail{{color:#f85149}}.warn{{color:#d29922}}.pass{{color:#3fb950}}.skip{{color:#6e7681}}
+.crit{{color:#f85149}}.high{{color:#d29922}}.med{{color:#58a6ff}}.low{{color:#3fb950}}
+.device-block{{background:#161b22;border:1px solid #21262d;border-radius:8px;padding:20px;margin-bottom:20px}}
+.finding{{padding:6px 0;border-bottom:1px solid #21262d;font-size:13px}}
+.finding:last-child{{border-bottom:none}}
+.rem{{color:#3fb950;font-size:12px;margin-top:3px;font-style:italic}}
+.det{{color:#8b949e;font-size:12px;margin-top:3px}}
+@media print{{body{{background:#fff;color:#000;padding:16px}}h1,h2,h3,.card-l{{color:#000}}.card{{border:1px solid #ccc}}.fail{{color:#c00}}.pass{{color:#090}}.warn{{color:#850}}}}
+</style></head><body>
+<h1>M.A.R.K. Sentinel &mdash; Fleet {esc(tier_label)}</h1>
+<div class="meta">Generated {esc(now)} &nbsp;&bull;&nbsp; {len(devices)} device(s) &nbsp;&bull;&nbsp; Confidential</div>
+<div class="cards">
+  <div class="card"><div class="card-n score">{fleet_score}%</div><div class="card-l">Fleet Score</div></div>
+  <div class="card"><div class="card-n fail">{total_fail}</div><div class="card-l">Failing Checks</div></div>
+  <div class="card"><div class="card-n warn">{total_warn}</div><div class="card-l">Warnings</div></div>
+  <div class="card"><div class="card-n pass">{total_pass}</div><div class="card-l">Passing</div></div>
+  <div class="card"><div class="card-n" style="color:#58a6ff">{len(devices)}</div><div class="card-l">Devices</div></div>
+</div>''']
+
+    # Device summary table
+    parts.append('<h2>Device Status</h2><table><thead><tr><th>Hostname</th><th>Platform</th><th>Fail</th><th>Warn</th><th>Pass</th><th>Score</th><th>Last Seen</th></tr></thead><tbody>')
+    for d in devices:
+        f = d.get('fail_count', 0) or 0
+        w = d.get('warn_count', 0) or 0
+        p = d.get('pass_count', 0) or 0
+        sc = _risk_score_html(f, w, f + w + p)
+        sc_color = '#3fb950' if sc >= 80 else '#d29922' if sc >= 60 else '#f85149'
+        parts.append(f'<tr><td><strong>{esc(d.get("hostname","?"))}</strong></td>'
+                     f'<td style="color:#6e7681">{esc(d.get("platform",""))}</td>'
+                     f'<td class="fail">{f}</td><td class="warn">{w}</td><td class="pass">{p}</td>'
+                     f'<td style="color:{sc_color};font-weight:700">{sc}%</td>'
+                     f'<td style="color:#6e7681;font-size:12px">{esc(ts(d.get("last_seen")))}</td></tr>')
+    parts.append('</tbody></table>')
+
+    # Critical/High findings across fleet
+    all_findings = []
+    for d in devices:
+        for r in (d.get('_report') or {}).get('results', []):
+            r2 = dict(r); r2['_hostname'] = d.get('hostname', '?')
+            all_findings.append(r2)
+    crit_high = [f for f in all_findings if f.get('status') == 'FAIL' and f.get('severity') in ('CRITICAL', 'HIGH')]
+    crit_high.sort(key=lambda x: _SEV_ORDER_REPORT.index(x.get('severity', 'INFO')) if x.get('severity') in _SEV_ORDER_REPORT else 99)
+
+    parts.append(f'<h2>Critical &amp; High Findings ({len(crit_high)})</h2>')
+    if not crit_high:
+        parts.append('<p style="color:#3fb950;padding:12px 0">No critical or high severity failures found across the fleet.</p>')
+    else:
+        limit = 20 if tier == 'executive' else len(crit_high)
+        parts.append('<table><thead><tr><th>Severity</th><th>Device</th><th>Check</th><th>Finding</th></tr></thead><tbody>')
+        for f in crit_high[:limit]:
+            sev = f.get('severity', 'INFO')
+            sc = _SEV_COLOR_HTML.get(sev, '#6e7681')
+            parts.append(f'<tr><td style="color:{sc};font-weight:700">{esc(sev)}</td>'
+                         f'<td style="color:#8b949e">{esc(f.get("_hostname",""))}</td>'
+                         f'<td style="color:#8b949e;font-size:12px">{esc(f.get("check_id",""))}</td>'
+                         f'<td>{esc(f.get("title",""))}</td></tr>')
+        parts.append('</tbody></table>')
+
+    if tier == 'executive':
+        posture = ('Strong — healthy AI security posture.' if fleet_score >= 90
+                   else 'Moderate — several issues require attention.' if fleet_score >= 70
+                   else 'Elevated risk — critical findings need remediation within 30 days.' if fleet_score >= 50
+                   else 'High risk — immediate action required on critical findings.')
+        parts.append(f'<h2>Executive Recommendation</h2>'
+                     f'<div class="device-block"><p style="font-size:14px"><strong>Overall posture:</strong> {esc(posture)}</p>'
+                     f'<p style="color:#6e7681;font-size:12px;margin-top:12px">For full technical details request the CISO or Technical report.</p></div>')
+        parts.append('</body></html>')
+        return ''.join(parts)
+
+    # Per-device breakdown for ciso/technical
+    parts.append('<h2>Per-Device Breakdown</h2>')
+    for d in devices:
+        report = d.get('_report') or {}
+        results = report.get('results', [])
+        f = d.get('fail_count', 0) or 0
+        w = d.get('warn_count', 0) or 0
+        p = d.get('pass_count', 0) or 0
+        sc = _risk_score_html(f, w, f + w + p)
+        sc_color = '#3fb950' if sc >= 80 else '#d29922' if sc >= 60 else '#f85149'
+        parts.append(f'<div class="device-block"><h3>{esc(d.get("hostname","?"))} '
+                     f'<span style="color:{sc_color}">{sc}%</span> &nbsp;'
+                     f'<span style="color:#6e7681;font-size:11px">{esc(d.get("platform",""))} &bull; '
+                     f'{esc(ts(d.get("last_seen")))}</span></h3>')
+        show = results if tier == 'technical' else [r for r in results if r.get('status') in ('FAIL', 'WARN')]
+        show.sort(key=lambda x: _SEV_ORDER_REPORT.index(x.get('severity', 'INFO')) if x.get('severity') in _SEV_ORDER_REPORT else 99)
+        if not show:
+            parts.append('<p style="color:#3fb950;font-size:13px;padding:8px 0">No failures on this device.</p>')
+        for r in show:
+            st = r.get('status', '')
+            sev = r.get('severity', 'INFO')
+            sc2 = _STATUS_COLOR_HTML.get(st, '#c9d1d9')
+            sv2 = _SEV_COLOR_HTML.get(sev, '#6e7681')
+            parts.append(f'<div class="finding">'
+                         f'<span style="color:{sc2};font-weight:700">[{esc(st)}]</span> '
+                         f'<span style="color:{sv2}">[{esc(sev)}]</span> '
+                         f'<strong>{esc(r.get("title",""))}</strong>')
+            if tier == 'technical' and r.get('details'):
+                parts.append(f'<div class="det">{esc(r["details"][:300])}</div>')
+            if tier == 'technical' and r.get('remediation'):
+                parts.append(f'<div class="rem">Fix: {esc(r["remediation"][:250])}</div>')
+            parts.append('</div>')
+        parts.append('</div>')
+
+    parts.append('</body></html>')
+    return ''.join(parts)
+
+
 def _run_scan(mode: str, target: str, profile: str, providers: list[str]):
     global _status, _log
     with _lock:
@@ -701,11 +861,11 @@ button:hover{{background:#2ea043}}
         self._json({'status': 'queued', 'count': len(queued), 'devices': queued})
 
     def _api_fleet_report(self):
-        """GET /api/fleet/report?tier=executive|ciso|technical&fmt=pdf|json"""
+        """GET /api/fleet/report?tier=executive|ciso|technical&fmt=pdf|html|json"""
         from urllib.parse import parse_qs, urlparse as _up
         qs = parse_qs(_up(self.path).query)
         tier = (qs.get('tier', ['ciso'])[0]).lower()
-        fmt  = (qs.get('fmt',  ['pdf'])[0]).lower()
+        fmt  = (qs.get('fmt',  ['html'])[0]).lower()
         if tier not in ('executive', 'ciso', 'technical'):
             tier = 'ciso'
         try:
@@ -713,30 +873,38 @@ button:hover{{background:#2ea043}}
             devices = store.list_devices()
             for d in devices:
                 d['_report'] = store.get_latest_report(d['device_id']) or {}
+
             if fmt == 'json':
-                payload = []
-                for d in devices:
-                    payload.append({
-                        'device_id': d['device_id'],
-                        'hostname':  d['hostname'],
-                        'platform':  d.get('platform', ''),
-                        'fail_count': d.get('fail_count', 0),
-                        'warn_count': d.get('warn_count', 0),
-                        'pass_count': d.get('pass_count', 0),
-                        'last_seen':  d.get('last_seen'),
-                        'results':   d['_report'].get('results', []),
-                    })
+                payload = [{'device_id': d['device_id'], 'hostname': d['hostname'],
+                            'platform': d.get('platform', ''), 'fail_count': d.get('fail_count', 0),
+                            'warn_count': d.get('warn_count', 0), 'pass_count': d.get('pass_count', 0),
+                            'last_seen': d.get('last_seen'), 'results': d['_report'].get('results', [])}
+                           for d in devices]
                 self._json({'tier': tier, 'devices': payload})
                 return
-            from output.fleet_report import generate_fleet_pdf
-            pdf_bytes = generate_fleet_pdf(devices, tier=tier)
-            fname = f'sentinel_fleet_{tier}.pdf'
+
+            if fmt == 'pdf':
+                try:
+                    from output.fleet_report import generate_fleet_pdf
+                    pdf_bytes = generate_fleet_pdf(devices, tier=tier)
+                    fname = f'sentinel_fleet_{tier}.pdf'
+                    self.send_response(200)
+                    self.send_header('Content-Type', 'application/pdf')
+                    self.send_header('Content-Disposition', f'attachment; filename="{fname}"')
+                    self.send_header('Content-Length', str(len(pdf_bytes)))
+                    self.end_headers()
+                    self.wfile.write(pdf_bytes)
+                    return
+                except ImportError:
+                    fmt = 'html'
+
+            html = _build_fleet_report_html(devices, tier)
+            data = html.encode('utf-8')
             self.send_response(200)
-            self.send_header('Content-Type', 'application/pdf')
-            self.send_header('Content-Disposition', f'attachment; filename="{fname}"')
-            self.send_header('Content-Length', str(len(pdf_bytes)))
+            self.send_header('Content-Type', 'text/html; charset=utf-8')
+            self.send_header('Content-Length', str(len(data)))
             self.end_headers()
-            self.wfile.write(pdf_bytes)
+            self.wfile.write(data)
         except Exception as e:
             log.error('fleet report error: %s', e)
             self._json({'error': str(e)}, 500)
@@ -1104,12 +1272,12 @@ body{{background:#0d1117;color:#c9d1d9;font-family:-apple-system,BlinkMacSystemF
   <div class="sec-hdr" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
     <span>Connected Devices</span>
     <div style="display:flex;gap:8px;flex-wrap:wrap">
-      <a href="/api/fleet/report?tier=executive&fmt=pdf" class="scan-btn"
-         style="text-decoration:none;color:#3fb950;border-color:#30363d;font-size:12px">&#8659; Executive Report</a>
-      <a href="/api/fleet/report?tier=ciso&fmt=pdf" class="scan-btn"
-         style="text-decoration:none;color:#58a6ff;border-color:#30363d;font-size:12px">&#8659; CISO Report</a>
-      <a href="/api/fleet/report?tier=technical&fmt=pdf" class="scan-btn"
-         style="text-decoration:none;color:#8b949e;border-color:#30363d;font-size:12px">&#8659; Technical Report</a>
+      <a href="/api/fleet/report?tier=executive&fmt=html" target="_blank" class="scan-btn"
+         style="text-decoration:none;color:#3fb950;border-color:#30363d;font-size:12px">&#8599; Executive Report</a>
+      <a href="/api/fleet/report?tier=ciso&fmt=html" target="_blank" class="scan-btn"
+         style="text-decoration:none;color:#58a6ff;border-color:#30363d;font-size:12px">&#8599; CISO Report</a>
+      <a href="/api/fleet/report?tier=technical&fmt=html" target="_blank" class="scan-btn"
+         style="text-decoration:none;color:#8b949e;border-color:#30363d;font-size:12px">&#8599; Technical Report</a>
       <button class="scan-btn" onclick="updateAllDevices()"
               style="color:#e3b341;border-color:#30363d;font-size:12px">Update All Agents</button>
     </div>
