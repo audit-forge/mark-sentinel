@@ -1082,18 +1082,26 @@ button:hover{{background:#2ea043}}
 
     def _api_system_update(self):
         """POST /api/system/update — git pull then restart if new commits landed."""
+        import shutil
+
+        # App bundles get a minimal PATH — probe common git locations explicitly
+        env = os.environ.copy()
+        env['GIT_TERMINAL_PROMPT'] = '0'
+        env['PATH'] = '/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:' + env.get('PATH', '')
+
+        git_cmd = shutil.which('git', path=env['PATH']) or 'git'
+
         try:
-            env = os.environ.copy()
-            env['GIT_TERMINAL_PROMPT'] = '0'
             result = subprocess.run(
-                ['git', '-c', f'safe.directory={ROOT}', 'pull', '--ff-only'],
-                cwd=str(ROOT),
+                [git_cmd, '-C', str(ROOT), 'pull', '--ff-only'],
                 capture_output=True,
                 text=True,
                 timeout=30,
                 env=env,
             )
-            output = (result.stdout + result.stderr).strip() or '(no output from git)'
+            output = (result.stdout + result.stderr).strip()
+            if not output:
+                output = f'git exited with code {result.returncode} and no output'
             already_current = 'already up to date' in output.lower()
             if result.returncode == 0 and not already_current:
                 self._json({'status': 'restarting', 'output': output + '\n\nRestarting server…'})
