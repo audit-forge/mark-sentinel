@@ -1016,8 +1016,10 @@ button:hover{{background:#2ea043}}
                     self.end_headers()
                     self.wfile.write(pdf_bytes)
                     return
-                except ImportError:
-                    fmt = 'html'
+                except Exception as pdf_err:
+                    log.error('fleet PDF generation error: %s', pdf_err)
+                    self._send(500, f'PDF generation failed: {pdf_err}\n\nRun: pip install fpdf2'.encode(), 'text/plain')
+                    return
 
             html = _build_fleet_report_html(devices, tier)
             data = html.encode('utf-8')
@@ -1404,12 +1406,12 @@ body{{background:#0d1117;color:#c9d1d9;font-family:-apple-system,BlinkMacSystemF
   <div class="sec-hdr" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
     <span>Connected Devices</span>
     <div style="display:flex;gap:8px;flex-wrap:wrap">
-      <a href="/api/fleet/report?tier=executive&fmt=pdf" target="_blank" class="scan-btn"
-         style="text-decoration:none;color:#3fb950;border-color:#30363d;font-size:12px">&#8659; Executive PDF</a>
-      <a href="/api/fleet/report?tier=ciso&fmt=pdf" target="_blank" class="scan-btn"
-         style="text-decoration:none;color:#58a6ff;border-color:#30363d;font-size:12px">&#8659; CISO PDF</a>
-      <a href="/api/fleet/report?tier=technical&fmt=pdf" target="_blank" class="scan-btn"
-         style="text-decoration:none;color:#8b949e;border-color:#30363d;font-size:12px">&#8659; Technical PDF</a>
+      <button class="scan-btn" onclick="downloadFleetReport('executive',this)"
+              style="color:#3fb950;border-color:#30363d;font-size:12px">&#8659; Executive PDF</button>
+      <button class="scan-btn" onclick="downloadFleetReport('ciso',this)"
+              style="color:#58a6ff;border-color:#30363d;font-size:12px">&#8659; CISO PDF</button>
+      <button class="scan-btn" onclick="downloadFleetReport('technical',this)"
+              style="color:#8b949e;border-color:#30363d;font-size:12px">&#8659; Technical PDF</button>
       <button class="scan-btn" onclick="updateAllDevices()"
               style="color:#e3b341;border-color:#30363d;font-size:12px">Update All Agents</button>
     </div>
@@ -1898,6 +1900,34 @@ function _sysLog(msg, color) {{
   el.style.display = 'block';
   el.style.color = color || '#8b949e';
   el.textContent = msg;
+}}
+
+async function downloadFleetReport(tier, btn) {{
+  const orig = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = 'Generating…';
+  try {{
+    const r = await fetch('/api/fleet/report?tier=' + tier + '&fmt=pdf');
+    if (!r.ok) {{
+      const msg = await r.text().catch(() => r.status);
+      alert('Report failed: ' + msg);
+      return;
+    }}
+    const blob = await r.blob();
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href     = url;
+    a.download = 'sentinel_fleet_' + tier + '.pdf';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }} catch(e) {{
+    alert('Download error: ' + e);
+  }} finally {{
+    btn.disabled  = false;
+    btn.textContent = orig;
+  }}
 }}
 
 async function pullUpdates() {{
