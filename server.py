@@ -1136,14 +1136,15 @@ button:hover{{background:#2ea043}}
         try:
             for attempt in range(2):
                 if sys.platform == 'win32':
-                    root_str = str(ROOT).replace('"', '')
+                    root_str = str(ROOT).replace('"', '').replace("'", '')
                     result = subprocess.run(
-                        f'git -C "{root_str}" pull --ff-only',
+                        ['powershell.exe', '-NoProfile', '-NonInteractive', '-Command',
+                         f'git -C "{root_str}" pull --ff-only; exit $LASTEXITCODE'],
                         capture_output=True,
                         text=True,
                         timeout=30,
                         env=env,
-                        shell=True,
+                        creationflags=subprocess.CREATE_NO_WINDOW,
                     )
                 else:
                     extra = '/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin'
