@@ -1214,7 +1214,14 @@ button:hover{{background:#2ea043}}
             devices = _get_store().list_devices()
         except Exception:
             devices = []
-        self._send(200, _build_fleet_html(devices).encode(), 'text/html; charset=utf-8')
+        body = _build_fleet_html(devices).encode()
+        self.send_response(200)
+        self.send_header('Content-Type', 'text/html; charset=utf-8')
+        self.send_header('Content-Length', len(body))
+        self.send_header('Cache-Control', 'no-store')
+        self.send_header('Access-Control-Allow-Origin', '*')
+        self.end_headers()
+        self.wfile.write(body)
 
     def _serve_academy(self):
         try:
