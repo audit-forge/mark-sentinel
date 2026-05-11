@@ -1033,23 +1033,30 @@ button:hover{{background:#2ea043}}
             self._json({'error': str(e)}, 500)
 
     def _api_system_update(self):
-        """POST /api/system/update — run git pull in ROOT, return output."""
+        """POST /api/system/update — git pull then restart if new commits landed."""
         try:
             env = os.environ.copy()
-            env['GIT_TERMINAL_PROMPT'] = '0'  # fail fast instead of prompting for credentials
-            env['GIT_ASKPASS'] = 'echo'
+            env['GIT_TERMINAL_PROMPT'] = '0'
             result = subprocess.run(
-                ['git', '-c', f'safe.directory={ROOT}', 'pull'],
+                ['git', '-c', f'safe.directory={ROOT}', 'pull', '--ff-only'],
                 cwd=str(ROOT),
                 capture_output=True,
                 text=True,
                 timeout=30,
                 env=env,
             )
-            output = (result.stdout + result.stderr).strip()
-            self._json({'status': 'ok' if result.returncode == 0 else 'error', 'output': output})
+            output = (result.stdout + result.stderr).strip() or '(no output from git)'
+            already_current = 'already up to date' in output.lower()
+            if result.returncode == 0 and not already_current:
+                self._json({'status': 'restarting', 'output': output + '\n\nRestarting server…'})
+                def _restart():
+                    time.sleep(0.6)
+                    os.execv(sys.executable, [sys.executable] + sys.argv)
+                threading.Thread(target=_restart, daemon=True).start()
+            else:
+                self._json({'status': 'ok' if result.returncode == 0 else 'error', 'output': output})
         except subprocess.TimeoutExpired:
-            self._json({'status': 'error', 'output': 'git pull timed out after 30s - check network or credentials'}, 500)
+            self._json({'status': 'error', 'output': 'git pull timed out — check network'}, 500)
         except Exception as e:
             self._json({'status': 'error', 'output': str(e)}, 500)
 
@@ -1831,28 +1838,37 @@ function _sysLog(msg, color) {{
 async function pullUpdates() {{
   const btn = document.getElementById('btn-pull');
   btn.disabled = true;
-  _sysLog('Running git pull…', '#8b949e');
-  const ctrl = new AbortController();
-  const hardTimeout = setTimeout(() => ctrl.abort(), 35000);
-  let elapsed = 0;
-  const ticker = setInterval(() => {{
-    elapsed++;
-    btn.textContent = `Pulling… ${{elapsed}}s`;
-  }}, 1000);
-  btn.textContent = 'Pulling… 0s';
+  _sysLog('Checking for updates…', '#8b949e');
   try {{
-    const r = await fetch('/api/system/update', {{method:'POST', signal: ctrl.signal}});
+    const r = await fetch('/api/system/update', {{method:'POST'}});
     const d = await r.json();
-    _sysLog(d.output || '(no output)', d.status === 'ok' ? '#3fb950' : '#f85149');
-    btn.textContent = d.status === 'ok' ? '⇓ Up to date' : '⇓ Pull failed';
-    setTimeout(() => {{ btn.disabled = false; btn.innerHTML = '⇓ Pull Latest Updates'; }}, 5000);
+    _sysLog(d.output || '(no output)', d.status === 'error' ? '#f85149' : '#3fb950');
+    if (d.status === 'restarting') {{
+      btn.textContent = '↻ Restarting…';
+      _sysLog('Server restarting with new code — reconnecting…', '#e3b341');
+      await _waitForRestart();
+      _sysLog('Server is back online. Page will reload.', '#3fb950');
+      setTimeout(() => location.reload(), 800);
+    }} else if (d.status === 'ok') {{
+      btn.textContent = '⇓ Already up to date';
+      setTimeout(() => {{ btn.disabled = false; btn.innerHTML = '&#8659; Pull Latest Updates'; }}, 4000);
+    }} else {{
+      btn.textContent = '⇓ Pull failed';
+      setTimeout(() => {{ btn.disabled = false; btn.innerHTML = '&#8659; Pull Latest Updates'; }}, 5000);
+    }}
   }} catch(e) {{
-    const msg = e.name === 'AbortError' ? 'git pull timed out (35s) — check server logs' : 'Error: ' + e;
-    _sysLog(msg, '#f85149');
-    btn.disabled = false; btn.innerHTML = '⇓ Pull Latest Updates';
-  }} finally {{
-    clearTimeout(hardTimeout);
-    clearInterval(ticker);
+    _sysLog('Error: ' + e, '#f85149');
+    btn.disabled = false; btn.innerHTML = '&#8659; Pull Latest Updates';
+  }}
+}}
+
+async function _waitForRestart() {{
+  for (let i = 0; i < 30; i++) {{
+    await new Promise(r => setTimeout(r, 1000));
+    try {{
+      const r = await fetch('/api/status', {{cache:'no-store'}});
+      if (r.ok) return;
+    }} catch (_) {{}}
   }}
 }}
 
