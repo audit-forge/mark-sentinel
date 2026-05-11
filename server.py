@@ -19,6 +19,23 @@ if hasattr(sys.stdout, 'reconfigure'):
     sys.stdout.reconfigure(encoding='utf-8', errors='replace')
 if hasattr(sys.stderr, 'reconfigure'):
     sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+
+# Auto-install packages that aren't part of stdlib but are required for full
+# functionality. Runs with the same Python binary that launched the server so
+# app-bundle and venv environments get the right site-packages.
+def _ensure_packages():
+    import importlib, subprocess as _sp
+    _needed = [('fpdf', 'fpdf2'), ('yaml', 'pyyaml')]
+    for module, package in _needed:
+        try:
+            importlib.import_module(module)
+        except ImportError:
+            print(f'[sentinel] installing {package}…', flush=True)
+            _sp.run([sys.executable, '-m', 'pip', 'install', package, '-q'],
+                    capture_output=True)
+
+_ensure_packages()
+
 import http.server
 import io
 import json
