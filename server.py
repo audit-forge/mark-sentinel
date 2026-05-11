@@ -1050,8 +1050,10 @@ button:hover{{background:#2ea043}}
                     self.wfile.write(pdf_bytes)
                     return
                 except Exception as pdf_err:
-                    log.error('fleet PDF generation error: %s', pdf_err)
-                    self._send(500, f'PDF generation failed: {pdf_err}\n\nRun: pip install fpdf2'.encode(), 'text/plain')
+                    import traceback
+                    tb = traceback.format_exc()
+                    log.error('fleet PDF generation error:\n%s', tb)
+                    self._send(500, f'PDF generation failed: {pdf_err}\n\n{tb}'.encode(), 'text/plain')
                     return
 
             html = _build_fleet_report_html(devices, tier)
@@ -1965,6 +1967,10 @@ async function downloadFleetReport(tier, btn) {{
       return;
     }}
     const blob = await r.blob();
+    if (blob.size === 0) {{
+      alert('Server returned an empty PDF. Check .sentinel.log for details.');
+      return;
+    }}
     const url  = URL.createObjectURL(blob);
     const a    = document.createElement('a');
     a.href     = url;
