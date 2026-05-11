@@ -197,7 +197,7 @@ def generate_fleet_pdf(devices: list, tier: str = 'ciso') -> bytes:
 
     _section_header(pdf, 'Top Critical & High Findings Across Fleet')
     crit_high = [f for f in all_findings if f['severity'] in ('CRITICAL', 'HIGH') and f['status'] == 'FAIL']
-    crit_high.sort(key=lambda x: (_SEV_ORDER.index(x['severity']), x['hostname']))
+    crit_high.sort(key=lambda x: (_SEV_ORDER.index(x['severity']), x.get('hostname') or ''))
 
     if not crit_high:
         pdf.set_font('Helvetica', size=10)
@@ -290,7 +290,7 @@ def _finding_row(pdf: _PDF, f: dict, show_device: bool, verbose: bool):
     if show_device:
         pdf.set_text_color(110, 118, 129)
         pdf.set_font('Helvetica', size=9)
-        pdf.cell(35, 5, _safe(f.get('hostname', '')[:20]), ln=False)
+        pdf.cell(35, 5, _safe((f.get('hostname') or '')[:20]), ln=False)
 
     pdf.set_text_color(201, 209, 217)
     pdf.set_font('Helvetica', size=9)
