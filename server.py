@@ -1134,53 +1134,103 @@ button:hover{{background:#2ea043}}
         env['GCM_INTERACTIVE'] = 'never'
 
         try:
-            for attempt in range(2):
-                if sys.platform == 'win32':
-                    root_str = str(ROOT).replace('"', '').replace("'", '')
-                    result = subprocess.run(
-                        ['powershell.exe', '-NoProfile', '-NonInteractive', '-Command',
-                         f'git -C "{root_str}" pull --ff-only; exit $LASTEXITCODE'],
-                        capture_output=True,
-                        text=True,
-                        timeout=30,
-                        env=env,
-                        creationflags=subprocess.CREATE_NO_WINDOW,
-                    )
-                else:
-                    extra = '/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin'
-                    env['PATH'] = extra + ':' + env.get('PATH', '')
-                    git_cmd = shutil.which('git', path=env['PATH']) or 'git'
-                    result = subprocess.run(
-                        [git_cmd, '-C', str(ROOT), 'pull', '--ff-only'],
-                        capture_output=True,
-                        text=True,
-                        timeout=30,
-                        env=env,
-                    )
-                if result.returncode == 0 or attempt == 1:
-                    break
-                time.sleep(1)
-            output = (result.stdout + result.stderr).strip()
+            if sys.platform == 'win32':
+                output, returncode = self._git_pull_windows(env)
+            else:
+                extra = '/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin'
+                env['PATH'] = extra + ':' + env.get('PATH', '')
+                git_cmd = shutil.which('git', path=env['PATH']) or 'git'
+                result = subprocess.run(
+                    [git_cmd, '-C', str(ROOT), 'pull', '--ff-only'],
+                    capture_output=True, text=True, timeout=30, env=env,
+                )
+                output = (result.stdout + result.stderr).strip()
+                returncode = result.returncode
             if not output:
-                output = f'git exited with code {result.returncode} and no output'
+                output = f'git exited with code {returncode} and no output'
             already_current = 'already up to date' in output.lower()
-            if result.returncode == 0 and not already_current:
+            if returncode == 0 and not already_current:
                 self._json({'status': 'restarting', 'output': output + '\n\nRestarting server…'})
                 def _restart():
                     time.sleep(0.6)
                     if sys.platform == 'win32':
                         subprocess.Popen([sys.executable] + sys.argv,
-                                         creationflags=subprocess.CREATE_NEW_PROCESS_GROUP)
+                                         creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,
+                                         stdin=subprocess.DEVNULL,
+                                         stdout=subprocess.DEVNULL,
+                                         stderr=subprocess.DEVNULL)
                         os._exit(0)
                     else:
                         os.execv(sys.executable, [sys.executable] + sys.argv)
                 threading.Thread(target=_restart, daemon=True).start()
             else:
-                self._json({'status': 'ok' if result.returncode == 0 else 'error', 'output': output})
+                self._json({'status': 'ok' if returncode == 0 else 'error', 'output': output})
         except subprocess.TimeoutExpired:
             self._json({'status': 'error', 'output': 'git pull timed out — check network'}, 500)
         except Exception as e:
             self._json({'status': 'error', 'output': str(e)}, 500)
+
+    def _git_pull_windows(self, env: dict):
+        """Find git.exe via registry/common paths and run pull with proper Win32 flags."""
+        import shutil
+
+        # Registry is the most reliable way to find Git for Windows
+        git_exe = None
+        try:
+            import winreg
+            for hive in (winreg.HKEY_LOCAL_MACHINE, winreg.HKEY_CURRENT_USER):
+                for subkey in (r'SOFTWARE\GitForWindows', r'SOFTWARE\WOW6432Node\GitForWindows'):
+                    try:
+                        key = winreg.OpenKey(hive, subkey)
+                        install_path = winreg.QueryValueEx(key, 'InstallPath')[0]
+                        candidate = os.path.join(install_path, 'bin', 'git.exe')
+                        if os.path.isfile(candidate):
+                            git_exe = candidate
+                            break
+                    except OSError:
+                        continue
+                if git_exe:
+                    break
+        except Exception:
+            pass
+
+        if git_exe is None:
+            for candidate in [
+                r'C:\Program Files\Git\bin\git.exe',
+                r'C:\Program Files\Git\cmd\git.exe',
+                r'C:\Program Files (x86)\Git\bin\git.exe',
+            ]:
+                if os.path.isfile(candidate):
+                    git_exe = candidate
+                    break
+
+        if git_exe is None:
+            git_exe = shutil.which('git') or 'git'
+
+        # STARTUPINFO with SW_HIDE prevents the child needing a console window,
+        # which causes DLL init failures when the server has no attached console.
+        si = subprocess.STARTUPINFO()
+        si.dwFlags = subprocess.STARTF_USESHOWWINDOW
+        si.wShowWindow = 0  # SW_HIDE
+
+        try:
+            result = subprocess.run(
+                [git_exe, '-C', str(ROOT), 'pull', '--ff-only'],
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                timeout=30,
+                env=env,
+                startupinfo=si,
+                creationflags=subprocess.CREATE_NO_WINDOW,
+            )
+            output = (result.stdout + result.stderr).strip()
+            return output, result.returncode
+        except Exception as e:
+            return (f'git pull failed: {e}\n\n'
+                    f'Git found at: {git_exe}\n'
+                    f'Open PowerShell in the project folder and run: git pull'), 1
 
     def _api_system_restart_agent(self):
         """POST /api/system/restart-agent — restart the agent service."""
