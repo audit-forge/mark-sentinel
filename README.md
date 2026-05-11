@@ -114,3 +114,9 @@ A: Open an issue on GitHub or email the maintainer (see repo contact). The SMB Q
 Support
 - Open an issue on GitHub or email the maintainer.
 
+
+
+---
+
+© 2026 M.A.R.K. AI Systems. All rights reserved. Patent Pending.
+M.A.R.K. Sentinel is protected by U.S. and international copyright law.

@@ -14,5 +14,4 @@ Notes for reviewers
 - The Docker publish and PyPI publish workflows are intentionally gated; provide DOCKERHUB_TOKEN / PYPI_API_TOKEN as repo secrets to enable publishing.
 - The PDF generator uses ReportLab as a fallback; if higher-fidelity rendering is required, install wkhtmltopdf or a TeX engine.
 
-Signed,
-Hash (assistant)
+— M.A.R.K. Sentinel maintainers
