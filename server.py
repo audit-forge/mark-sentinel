@@ -24,15 +24,31 @@ if hasattr(sys.stderr, 'reconfigure'):
 # functionality. Runs with the same Python binary that launched the server so
 # app-bundle and venv environments get the right site-packages.
 def _ensure_packages():
-    import importlib, subprocess as _sp
+    import importlib, subprocess as _sp, os as _os, time as _time
     _needed = [('fpdf', 'fpdf2'), ('yaml', 'pyyaml')]
+    installed_any = False
     for module, package in _needed:
         try:
             importlib.import_module(module)
         except ImportError:
             print(f'[sentinel] installing {package}…', flush=True)
-            _sp.run([sys.executable, '-m', 'pip', 'install', package, '-q'],
-                    capture_output=True)
+            r = _sp.run([sys.executable, '-m', 'pip', 'install', package, '-q'],
+                        capture_output=True)
+            if r.returncode == 0:
+                installed_any = True
+            else:
+                print(f'[sentinel] pip failed: {r.stderr.decode(errors="replace").strip()}', flush=True)
+    if installed_any:
+        # Newly installed packages aren't visible to the running interpreter —
+        # restart immediately so the next launch finds them in site-packages.
+        print('[sentinel] packages installed — restarting…', flush=True)
+        _time.sleep(0.5)
+        if sys.platform == 'win32':
+            _sp.Popen([sys.executable] + sys.argv,
+                      creationflags=_sp.CREATE_NEW_PROCESS_GROUP)
+            _os._exit(0)
+        else:
+            _os.execv(sys.executable, [sys.executable] + sys.argv)
 
 _ensure_packages()
 
