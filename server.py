@@ -511,6 +511,8 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self._api_fleet_update_all()
         elif path.startswith('/api/fleet/update/'):
             self._api_fleet_update(path[len('/api/fleet/update/'):])
+        elif path.startswith('/api/fleet/remove/'):
+            self._api_fleet_remove(path[len('/api/fleet/remove/'):])
         else:
             self._not_found()
 
@@ -922,6 +924,15 @@ button:hover{{background:#2ea043}}
                 queued.append(did)
         self._json({'status': 'queued', 'count': len(queued), 'devices': queued})
 
+    def _api_fleet_remove(self, device_id: str):
+        """POST /api/fleet/remove/<id> — permanently delete a device and its history."""
+        device_id = device_id.strip()
+        if not device_id:
+            self._json({'error': 'missing device_id'}, 400)
+            return
+        found = _get_store().delete_device(device_id)
+        self._json({'status': 'removed' if found else 'not_found', 'device_id': device_id})
+
     def _api_fleet_report(self):
         """GET /api/fleet/report?tier=executive|ciso|technical&fmt=pdf|html|json"""
         from urllib.parse import parse_qs, urlparse as _up
@@ -1226,6 +1237,8 @@ def _build_fleet_html(devices: list[dict]) -> str:
                       display:inline-block;white-space:nowrap"
                onmouseover="this.style.borderColor='#58a6ff';this.style.color='#c9d1d9'"
                onmouseout="this.style.borderColor='#30363d';this.style.color='#8b949e'">Full Report</a>
+            <button class="scan-btn" onclick="removeDevice('{did}','{d.get('hostname','')}')"
+                    style="margin-left:4px;color:#f85149;border-color:#30363d;font-size:11px">Remove</button>
           </td>
         </tr>"""
 
@@ -1321,12 +1334,12 @@ body{{background:#0d1117;color:#c9d1d9;font-family:-apple-system,BlinkMacSystemF
   <div class="sec-hdr" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
     <span>Connected Devices</span>
     <div style="display:flex;gap:8px;flex-wrap:wrap">
-      <a href="/api/fleet/report?tier=executive&fmt=html" target="_blank" class="scan-btn"
-         style="text-decoration:none;color:#3fb950;border-color:#30363d;font-size:12px">&#8599; Executive Report</a>
-      <a href="/api/fleet/report?tier=ciso&fmt=html" target="_blank" class="scan-btn"
-         style="text-decoration:none;color:#58a6ff;border-color:#30363d;font-size:12px">&#8599; CISO Report</a>
-      <a href="/api/fleet/report?tier=technical&fmt=html" target="_blank" class="scan-btn"
-         style="text-decoration:none;color:#8b949e;border-color:#30363d;font-size:12px">&#8599; Technical Report</a>
+      <a href="/api/fleet/report?tier=executive&fmt=pdf" class="scan-btn"
+         style="text-decoration:none;color:#3fb950;border-color:#30363d;font-size:12px">&#8659; Executive PDF</a>
+      <a href="/api/fleet/report?tier=ciso&fmt=pdf" class="scan-btn"
+         style="text-decoration:none;color:#58a6ff;border-color:#30363d;font-size:12px">&#8659; CISO PDF</a>
+      <a href="/api/fleet/report?tier=technical&fmt=pdf" class="scan-btn"
+         style="text-decoration:none;color:#8b949e;border-color:#30363d;font-size:12px">&#8659; Technical PDF</a>
       <button class="scan-btn" onclick="updateAllDevices()"
               style="color:#e3b341;border-color:#30363d;font-size:12px">Update All Agents</button>
     </div>
@@ -1468,6 +1481,8 @@ async function refreshDevices() {{
                     display:inline-block"
              onmouseover="this.style.borderColor='#58a6ff';this.style.color='#c9d1d9'"
              onmouseout="this.style.borderColor='#30363d';this.style.color='#8b949e'">Full Report</a>
+          <button class="scan-btn" onclick="removeDevice('${{esc(did)}}','${{esc(d.hostname||'')}}')"
+                  style="margin-left:4px;color:#f85149;border-color:#30363d;font-size:11px">Remove</button>
         </td>
       </tr>`;
     }}).join('');
@@ -1477,6 +1492,20 @@ async function refreshDevices() {{
 function esc(s) {{
   if (!s) return '';
   return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}}
+
+async function removeDevice(did, hostname) {{
+  if (!confirm(`Remove "${{hostname || did}}" from the fleet?\n\nThis deletes all scan history for this device and cannot be undone.`)) return;
+  try {{
+    const resp = await fetch('/api/fleet/remove/' + encodeURIComponent(did), {{method: 'POST'}});
+    const data = await resp.json();
+    if (resp.ok) {{
+      document.querySelector(`[id="sb-${{did}}"]`)?.closest('tr')?.remove();
+      refreshFleet();
+    }} else {{
+      alert('Remove failed: ' + (data.error || resp.status));
+    }}
+  }} catch (e) {{ alert('Remove failed: ' + e); }}
 }}
 
 async function runDiscovery() {{

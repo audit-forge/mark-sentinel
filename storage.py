@@ -221,6 +221,14 @@ class AgentStore:
                 (device_id,),
             ).fetchone()[0]
 
+    def delete_device(self, device_id: str) -> bool:
+        """Remove a device and all its reports/commands. Returns True if found."""
+        with self._lock, self._conn() as conn:
+            cur = conn.execute("DELETE FROM reports WHERE device_id = ?", (device_id,))
+            conn.execute("DELETE FROM commands WHERE device_id = ?", (device_id,))
+            conn.execute("DELETE FROM devices WHERE device_id = ?", (device_id,))
+            return cur.rowcount > 0
+
     def get_device_timeseries(self, device_id: str) -> list[dict]:
         """Return ordered list of {t, fail, warn, pass} scan history points for a device."""
         with self._lock, self._conn() as conn:

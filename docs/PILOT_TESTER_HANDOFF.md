@@ -31,5 +31,5 @@ Notes for pilot testers
   Use Ollama or OpenAI-compatible endpoints for equivalent testing during the pilot.
 
 Contact
-- Project owner: Keith Ferguson
+- Project owner: M.A.R.K. Sentinel maintainers (open an issue in the repo)
 - Technical owner for handoff: Hash (local agent)

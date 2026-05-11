@@ -17,7 +17,7 @@ Define approved AI use inside the business and reduce risk from unsafe or unauth
 - Production secrets must remain in environment variables or secret stores, never in repo files
 
 ## Ownership
-- System owner: Keith Ferguson
+- System owner: [Your Name / Organization]
 - Security/review owner: designated maintainer or security lead
 
 ## Review cadence
