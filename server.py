@@ -1353,6 +1353,20 @@ body{{background:#0d1117;color:#c9d1d9;font-family:-apple-system,BlinkMacSystemF
     </tr></thead>
     <tbody id="device-tbody">{rows}</tbody>
   </table>
+  <div id="device-pagination" style="display:none;align-items:center;justify-content:space-between;padding:10px 2px 4px;font-size:13px;color:#8b949e;flex-wrap:wrap;gap:8px">
+    <div style="display:flex;align-items:center;gap:8px">
+      <span>Show</span>
+      <select id="page-size-sel" onchange="changePageSize(+this.value)"
+              style="background:#161b22;border:1px solid #30363d;color:#c9d1d9;border-radius:4px;padding:2px 8px;font-size:12px;cursor:pointer">
+        <option value="10" selected>10</option>
+        <option value="25">25</option>
+        <option value="50">50</option>
+        <option value="100">100</option>
+      </select>
+      <span id="page-info" style="color:#6e7681"></span>
+    </div>
+    <div id="page-btns" style="display:flex;gap:4px;align-items:center;flex-wrap:wrap"></div>
+  </div>
 
   <div class="sec-hdr" style="margin-top:32px">
     AI Service Discovery
@@ -1417,12 +1431,16 @@ body{{background:#0d1117;color:#c9d1d9;font-family:-apple-system,BlinkMacSystemF
 
 <script>
 let _countdown = 60;
+let _allDevices = [];
+let _pageSize = 10;
+let _currentPage = 1;
 const _note = document.getElementById('refresh-note');
 setInterval(() => {{
   _countdown--;
   if (_countdown <= 0) {{ _countdown = 60; refreshDevices(); }}
   _note.textContent = 'Devices refresh in ' + _countdown + 's';
 }}, 1000);
+refreshDevices();
 
 function _age(ts) {{
   if (!ts) return 'never';
@@ -1443,50 +1461,104 @@ async function refreshDevices() {{
     if (!resp.ok) return;
     const data = await resp.json();
     const devs = data.devices || [];
-    const tFail = devs.reduce((s,d)=>s+(d.fail_count||0),0);
-    const tWarn = devs.reduce((s,d)=>s+(d.warn_count||0),0);
-    const tPass = devs.reduce((s,d)=>s+(d.pass_count||0),0);
     document.getElementById('sc-count').textContent = devs.length;
-    document.getElementById('sc-fail').textContent  = tFail;
-    document.getElementById('sc-warn').textContent  = tWarn;
-    document.getElementById('sc-pass').textContent  = tPass;
-    const tbody = document.getElementById('device-tbody');
-    if (!devs.length) {{
-      tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:32px;color:#484f58">No agents have reported yet.</td></tr>';
-      return;
-    }}
-    tbody.innerHTML = devs.map(d => {{
-      const did  = d.device_id || '';
-      const fail = d.fail_count || 0;
-      const warn = d.warn_count || 0;
-      const pas  = d.pass_count || 0;
-      const rc   = _riskCls(fail, warn);
-      const age  = _age(d.last_seen);
-      return `<tr class="dev-row" onclick="selectDevice('${{esc(did)}}')" >
-        <td class="dev-host">${{esc(d.hostname||'unknown')}}</td>
-        <td>${{esc(d.platform||'')}}</td>
-        <td class="c-red">${{fail}}</td>
-        <td class="c-yellow">${{warn}}</td>
-        <td class="c-green">${{pas}}</td>
-        <td>${{esc(d.profile||'')}}</td>
-        <td>${{age}}</td>
-        <td><span class="risk-dot ${{rc}}"></span></td>
-        <td onclick="event.stopPropagation()" style="white-space:nowrap">
-          <button class="scan-btn" id="sb-${{esc(did)}}" onclick="scanDevice('${{esc(did)}}')" >Scan Now</button>
-          <button class="scan-btn" id="ub-${{esc(did)}}" onclick="updateDevice('${{esc(did)}}')"
-                  style="margin-left:4px;color:#e3b341;border-color:#30363d">Update</button>
-          <a href="/fleet/device/${{esc(did)}}/dashboard" target="_blank"
-             style="margin-left:8px;background:#161b22;border:1px solid #30363d;color:#8b949e;
-                    border-radius:4px;padding:3px 10px;font-size:12px;text-decoration:none;
-                    display:inline-block"
-             onmouseover="this.style.borderColor='#58a6ff';this.style.color='#c9d1d9'"
-             onmouseout="this.style.borderColor='#30363d';this.style.color='#8b949e'">Full Report</a>
-          <button class="scan-btn" onclick="removeDevice('${{esc(did)}}','${{esc(d.hostname||'')}}')"
-                  style="margin-left:4px;color:#f85149;border-color:#30363d;font-size:11px">Remove</button>
-        </td>
-      </tr>`;
-    }}).join('');
+    document.getElementById('sc-fail').textContent  = devs.reduce((s,d)=>s+(d.fail_count||0),0);
+    document.getElementById('sc-warn').textContent  = devs.reduce((s,d)=>s+(d.warn_count||0),0);
+    document.getElementById('sc-pass').textContent  = devs.reduce((s,d)=>s+(d.pass_count||0),0);
+    _allDevices = devs;
+    const maxPage = Math.max(1, Math.ceil(devs.length / _pageSize));
+    if (_currentPage > maxPage) _currentPage = maxPage;
+    renderDevicePage();
   }} catch (_) {{ /* silently ignore refresh errors */ }}
+}}
+
+function renderDevicePage() {{
+  const tbody = document.getElementById('device-tbody');
+  const pgEl  = document.getElementById('device-pagination');
+  if (!_allDevices.length) {{
+    tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:32px;color:#484f58">No agents have reported yet.</td></tr>';
+    pgEl.style.display = 'none';
+    return;
+  }}
+  const start = (_currentPage - 1) * _pageSize;
+  const page  = _allDevices.slice(start, start + _pageSize);
+  tbody.innerHTML = page.map(d => {{
+    const did  = d.device_id || '';
+    const fail = d.fail_count || 0;
+    const warn = d.warn_count || 0;
+    const pas  = d.pass_count || 0;
+    const rc   = _riskCls(fail, warn);
+    const age  = _age(d.last_seen);
+    return `<tr class="dev-row" onclick="selectDevice('${{esc(did)}}')" >
+      <td class="dev-host">${{esc(d.hostname||'unknown')}}</td>
+      <td>${{esc(d.platform||'')}}</td>
+      <td class="c-red">${{fail}}</td>
+      <td class="c-yellow">${{warn}}</td>
+      <td class="c-green">${{pas}}</td>
+      <td>${{esc(d.profile||'')}}</td>
+      <td>${{age}}</td>
+      <td><span class="risk-dot ${{rc}}"></span></td>
+      <td onclick="event.stopPropagation()" style="white-space:nowrap">
+        <button class="scan-btn" id="sb-${{esc(did)}}" onclick="scanDevice('${{esc(did)}}')" >Scan Now</button>
+        <button class="scan-btn" id="ub-${{esc(did)}}" onclick="updateDevice('${{esc(did)}}')"
+                style="margin-left:4px;color:#e3b341;border-color:#30363d">Update</button>
+        <a href="/fleet/device/${{esc(did)}}/dashboard" target="_blank"
+           style="margin-left:8px;background:#161b22;border:1px solid #30363d;color:#8b949e;
+                  border-radius:4px;padding:3px 10px;font-size:12px;text-decoration:none;display:inline-block"
+           onmouseover="this.style.borderColor='#58a6ff';this.style.color='#c9d1d9'"
+           onmouseout="this.style.borderColor='#30363d';this.style.color='#8b949e'">Full Report</a>
+        <button class="scan-btn" onclick="removeDevice('${{esc(did)}}','${{esc(d.hostname||'')}}')"
+                style="margin-left:4px;color:#f85149;border-color:#30363d;font-size:11px">Remove</button>
+      </td>
+    </tr>`;
+  }}).join('');
+  renderPagination();
+}}
+
+function renderPagination() {{
+  const total = _allDevices.length;
+  const pages = Math.max(1, Math.ceil(total / _pageSize));
+  const pgEl  = document.getElementById('device-pagination');
+  pgEl.style.display = 'flex';
+  const start = (_currentPage - 1) * _pageSize + 1;
+  const end   = Math.min(_currentPage * _pageSize, total);
+  document.getElementById('page-info').textContent = start + '–' + end + ' of ' + total + ' device' + (total !== 1 ? 's' : '');
+  const btns = document.getElementById('page-btns');
+  const btnStyle = 'font-size:12px;padding:2px 8px;min-width:28px;';
+  let html = `<button class="scan-btn" onclick="goToPage(${{_currentPage-1}})" ${{_currentPage===1?'disabled':''}} style="${{btnStyle}}">&#8249;</button>`;
+  const nums = _pageNums(pages, _currentPage);
+  let prev = null;
+  for (const p of nums) {{
+    if (prev !== null && p > prev + 1) html += `<span style="color:#484f58;padding:0 2px;line-height:24px">&#8230;</span>`;
+    const active = p === _currentPage ? 'color:#58a6ff;border-color:#58a6ff;' : '';
+    html += `<button class="scan-btn" onclick="goToPage(${{p}})" style="${{btnStyle}}${{active}}">${{p}}</button>`;
+    prev = p;
+  }}
+  html += `<button class="scan-btn" onclick="goToPage(${{_currentPage+1}})" ${{_currentPage===pages?'disabled':''}} style="${{btnStyle}}">&#8250;</button>`;
+  btns.innerHTML = html;
+}}
+
+function _pageNums(pages, cur) {{
+  if (pages <= 7) return Array.from({{length: pages}}, (_, i) => i + 1);
+  const s = new Set([1, pages, cur]);
+  for (let d = 1; d <= 2; d++) {{
+    if (cur - d >= 1) s.add(cur - d);
+    if (cur + d <= pages) s.add(cur + d);
+  }}
+  return [...s].sort((a, b) => a - b);
+}}
+
+function changePageSize(size) {{
+  _pageSize = size;
+  _currentPage = 1;
+  renderDevicePage();
+}}
+
+function goToPage(p) {{
+  const pages = Math.ceil(_allDevices.length / _pageSize);
+  if (p < 1 || p > pages) return;
+  _currentPage = p;
+  renderDevicePage();
 }}
 
 function esc(s) {{
@@ -1500,8 +1572,11 @@ async function removeDevice(did, hostname) {{
     const resp = await fetch('/api/fleet/remove/' + encodeURIComponent(did), {{method: 'POST'}});
     const data = await resp.json();
     if (resp.ok) {{
-      document.querySelector(`[id="sb-${{did}}"]`)?.closest('tr')?.remove();
-      refreshFleet();
+      _allDevices = _allDevices.filter(d => d.device_id !== did);
+      const maxPage = Math.max(1, Math.ceil(_allDevices.length / _pageSize));
+      if (_currentPage > maxPage) _currentPage = maxPage;
+      renderDevicePage();
+      document.getElementById('sc-count').textContent = _allDevices.length;
     }} else {{
       alert('Remove failed: ' + (data.error || resp.status));
     }}
