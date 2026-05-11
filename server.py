@@ -471,6 +471,9 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         elif path.startswith('/fleet/device/') and path.endswith('/dashboard'):
             did = path[len('/fleet/device/'): -len('/dashboard')]
             self._serve_device_dashboard(did)
+        elif path.startswith('/fleet/device/') and path.endswith('/report.pdf'):
+            did = path[len('/fleet/device/'): -len('/report.pdf')]
+            self._serve_device_pdf(did)
         elif path.startswith('/api/devices/'):
             self._api_device_report(path[len('/api/devices/'):])
         elif path == '/api/fleet/report' or path.startswith('/api/fleet/report?'):
@@ -756,6 +759,51 @@ button:hover{{background:#2ea043}}
         except Exception as e:
             log.error('dashboard generation error for %s: %s', device_id, e)
             self._send(500, f'Dashboard generation failed: {e}'.encode(), 'text/plain')
+
+    def _serve_device_pdf(self, device_id: str):
+        """GET /fleet/device/<id>/report.pdf — download single-device audit report as PDF."""
+        if not device_id:
+            self._not_found()
+            return
+        try:
+            report = _get_store().get_latest_report(device_id)
+        except Exception as e:
+            log.error('get_latest_report error for %s: %s', device_id, e)
+            self._send(500, f'Store error: {e}'.encode(), 'text/plain')
+            return
+        if report is None:
+            self._send(404, b'No report found for this device', 'text/plain')
+            return
+        try:
+            sys.path.insert(0, str(ROOT))
+            from output.pdf_report import format_pdf
+            results_raw = report.get('results', [])
+            profile = {'name': report.get('profile', 'AI-STIG')}
+            target = report.get('target', device_id)
+            mode = report.get('mode', 'config')
+
+            class _R:
+                def __init__(self, d):
+                    self.check_id  = d.get('check_id', '')
+                    self.title     = d.get('title', '')
+                    self.status    = d.get('status', '')
+                    self.severity  = d.get('severity', '')
+                    self.details   = d.get('details', '')
+                    self.remediation = d.get('remediation', '')
+
+            results = [_R(r) for r in results_raw]
+            pdf_bytes = format_pdf(results, profile, target, mode)
+            hostname = report.get('target', device_id).replace('/', '_').replace(' ', '_')
+            filename = f'sentinel_{hostname}.pdf'
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/pdf')
+            self.send_header('Content-Disposition', f'attachment; filename="{filename}"')
+            self.send_header('Content-Length', str(len(pdf_bytes)))
+            self.end_headers()
+            self.wfile.write(pdf_bytes)
+        except Exception as e:
+            log.error('device pdf generation error for %s: %s', device_id, e)
+            self._send(500, f'PDF generation failed: {e}'.encode(), 'text/plain')
 
     def _api_events(self):
         self.send_response(200)
@@ -1341,11 +1389,11 @@ body{{background:#0d1117;color:#c9d1d9;font-family:-apple-system,BlinkMacSystemF
   <div class="sec-hdr" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
     <span>Connected Devices</span>
     <div style="display:flex;gap:8px;flex-wrap:wrap">
-      <a href="/api/fleet/report?tier=executive&fmt=pdf" class="scan-btn"
+      <a href="/api/fleet/report?tier=executive&fmt=pdf" target="_blank" class="scan-btn"
          style="text-decoration:none;color:#3fb950;border-color:#30363d;font-size:12px">&#8659; Executive PDF</a>
-      <a href="/api/fleet/report?tier=ciso&fmt=pdf" class="scan-btn"
+      <a href="/api/fleet/report?tier=ciso&fmt=pdf" target="_blank" class="scan-btn"
          style="text-decoration:none;color:#58a6ff;border-color:#30363d;font-size:12px">&#8659; CISO PDF</a>
-      <a href="/api/fleet/report?tier=technical&fmt=pdf" class="scan-btn"
+      <a href="/api/fleet/report?tier=technical&fmt=pdf" target="_blank" class="scan-btn"
          style="text-decoration:none;color:#8b949e;border-color:#30363d;font-size:12px">&#8659; Technical PDF</a>
       <button class="scan-btn" onclick="updateAllDevices()"
               style="color:#e3b341;border-color:#30363d;font-size:12px">Update All Agents</button>
@@ -1714,6 +1762,8 @@ async function selectDevice(id) {{
         <span id="dash-title" style="font-size:12px;color:#8b949e"></span>
         <a id="dash-ext" href="/fleet/device/${{id}}/dashboard" target="_blank"
            style="font-size:11px;color:#58a6ff;text-decoration:none">open in new tab ↗</a>
+        <a href="/fleet/device/${{id}}/report.pdf"
+           style="font-size:11px;color:#3fb950;text-decoration:none">&#8659; Download PDF</a>
         <button onclick="closeDevice()"
                 style="background:none;border:1px solid #30363d;color:#6e7681;
                        border-radius:4px;padding:2px 9px;font-size:12px;cursor:pointer">✕</button>
