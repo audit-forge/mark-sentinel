@@ -1884,6 +1884,9 @@ async function saveConfig() {{
 
 loadConfig();
 </script>
+<div style="margin-top:48px;padding:16px 0 24px;border-top:1px solid #21262d;text-align:center;font-size:11px;color:#484f58">
+  © 2026 M.A.R.K. AI Systems. All rights reserved. Patent Pending.
+</div>
 </body>
 </html>"""
 

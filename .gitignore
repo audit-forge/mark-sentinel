@@ -61,3 +61,7 @@ DEVIN.md
 .tabnine_root
 .copilot/
 .github/copilot-instructions.md
+# SQLite WAL
+*.db-shm
+*.db-wal
+sentinel_report.pdf

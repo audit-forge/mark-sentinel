@@ -66,7 +66,7 @@ class _PDF(FPDF):
         self.set_y(-13)
         self.set_font('Helvetica', size=8)
         self.set_text_color(110, 118, 129)
-        self.cell(0, 5, f'Generated {datetime.now(tz=timezone.utc).strftime("%Y-%m-%d %H:%M UTC")}', align='L')
+        self.cell(0, 5, f'Generated {datetime.now(tz=timezone.utc).strftime("%Y-%m-%d %H:%M UTC")}  |  © 2026 M.A.R.K. AI Systems. Patent Pending.', align='L')
         self.cell(0, 5, f'Page {self.page_no()}', align='R')
 
 
