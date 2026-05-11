@@ -1105,31 +1105,32 @@ button:hover{{background:#2ea043}}
 
         env = os.environ.copy()
         env['GIT_TERMINAL_PROMPT'] = '0'
-
-        if sys.platform == 'win32':
-            win_paths = [
-                r'C:\Program Files\Git\cmd',
-                r'C:\Program Files\Git\bin',
-                r'C:\Program Files (x86)\Git\cmd',
-                r'C:\Program Files (x86)\Git\bin',
-            ]
-            sep = ';'
-            extra = sep.join(p for p in win_paths if os.path.isdir(p))
-        else:
-            extra = '/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin'
-            sep = ':'
-
-        env['PATH'] = extra + sep + env.get('PATH', '')
-        git_cmd = shutil.which('git', path=env['PATH']) or 'git'
+        env['GCM_INTERACTIVE'] = 'never'
 
         try:
-            result = subprocess.run(
-                [git_cmd, '-C', str(ROOT), 'pull', '--ff-only'],
-                capture_output=True,
-                text=True,
-                timeout=30,
-                env=env,
-            )
+            if sys.platform == 'win32':
+                # shell=True routes through cmd.exe which has the full user PATH
+                # and native credential handling, avoiding subprocess launch issues
+                root_str = str(ROOT).replace('"', '')
+                result = subprocess.run(
+                    f'git -C "{root_str}" pull --ff-only',
+                    capture_output=True,
+                    text=True,
+                    timeout=30,
+                    env=env,
+                    shell=True,
+                )
+            else:
+                extra = '/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin'
+                env['PATH'] = extra + ':' + env.get('PATH', '')
+                git_cmd = shutil.which('git', path=env['PATH']) or 'git'
+                result = subprocess.run(
+                    [git_cmd, '-C', str(ROOT), 'pull', '--ff-only'],
+                    capture_output=True,
+                    text=True,
+                    timeout=30,
+                    env=env,
+                )
             output = (result.stdout + result.stderr).strip()
             if not output:
                 output = f'git exited with code {result.returncode} and no output'
