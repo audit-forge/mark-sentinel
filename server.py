@@ -288,7 +288,7 @@ tr:hover td{{background:#161b22}}
         p = d.get('pass_count', 0) or 0
         sc = _risk_score_html(f, w, f + w + p)
         sc_color = '#3fb950' if sc >= 80 else '#d29922' if sc >= 60 else '#f85149'
-        parts.append(f'<tr><td><strong>{esc(d.get("hostname","?"))}</strong></td>'
+        parts.append(f'<tr><td><strong>{esc(d.get("hostname") or d.get("device_id") or "?")}</strong></td>'
                      f'<td style="color:#6e7681">{esc(d.get("platform",""))}</td>'
                      f'<td class="fail">{f}</td><td class="warn">{w}</td><td class="pass">{p}</td>'
                      f'<td style="color:{sc_color};font-weight:700">{sc}%</td>'
@@ -300,7 +300,7 @@ tr:hover td{{background:#161b22}}
     for d in devices:
         rep = d.get('_report') or {}
         for r in rep.get('findings', rep.get('results', [])):
-            r2 = dict(r); r2['_hostname'] = d.get('hostname', '?')
+            r2 = dict(r); r2['_hostname'] = d.get('hostname') or d.get('device_id') or '?'
             all_findings.append(r2)
     crit_high = [f for f in all_findings if f.get('status') == 'FAIL' and f.get('severity') in ('CRITICAL', 'HIGH')]
     crit_high.sort(key=lambda x: _SEV_ORDER_REPORT.index(x.get('severity', 'INFO')) if x.get('severity') in _SEV_ORDER_REPORT else 99)
@@ -341,7 +341,7 @@ tr:hover td{{background:#161b22}}
         p = d.get('pass_count', 0) or 0
         sc = _risk_score_html(f, w, f + w + p)
         sc_color = '#3fb950' if sc >= 80 else '#d29922' if sc >= 60 else '#f85149'
-        parts.append(f'<div class="device-block"><h3>{esc(d.get("hostname","?"))} '
+        parts.append(f'<div class="device-block"><h3>{esc(d.get("hostname") or d.get("device_id") or "?")} '
                      f'<span style="color:{sc_color}">{sc}%</span> &nbsp;'
                      f'<span style="color:#6e7681;font-size:11px">{esc(d.get("platform",""))} &bull; '
                      f'{esc(ts(d.get("last_seen")))}</span></h3>')
@@ -1134,29 +1134,31 @@ button:hover{{background:#2ea043}}
         env['GCM_INTERACTIVE'] = 'never'
 
         try:
-            if sys.platform == 'win32':
-                # shell=True routes through cmd.exe which has the full user PATH
-                # and native credential handling, avoiding subprocess launch issues
-                root_str = str(ROOT).replace('"', '')
-                result = subprocess.run(
-                    f'git -C "{root_str}" pull --ff-only',
-                    capture_output=True,
-                    text=True,
-                    timeout=30,
-                    env=env,
-                    shell=True,
-                )
-            else:
-                extra = '/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin'
-                env['PATH'] = extra + ':' + env.get('PATH', '')
-                git_cmd = shutil.which('git', path=env['PATH']) or 'git'
-                result = subprocess.run(
-                    [git_cmd, '-C', str(ROOT), 'pull', '--ff-only'],
-                    capture_output=True,
-                    text=True,
-                    timeout=30,
-                    env=env,
-                )
+            for attempt in range(2):
+                if sys.platform == 'win32':
+                    root_str = str(ROOT).replace('"', '')
+                    result = subprocess.run(
+                        f'git -C "{root_str}" pull --ff-only',
+                        capture_output=True,
+                        text=True,
+                        timeout=30,
+                        env=env,
+                        shell=True,
+                    )
+                else:
+                    extra = '/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin'
+                    env['PATH'] = extra + ':' + env.get('PATH', '')
+                    git_cmd = shutil.which('git', path=env['PATH']) or 'git'
+                    result = subprocess.run(
+                        [git_cmd, '-C', str(ROOT), 'pull', '--ff-only'],
+                        capture_output=True,
+                        text=True,
+                        timeout=30,
+                        env=env,
+                    )
+                if result.returncode == 0 or attempt == 1:
+                    break
+                time.sleep(1)
             output = (result.stdout + result.stderr).strip()
             if not output:
                 output = f'git exited with code {result.returncode} and no output'

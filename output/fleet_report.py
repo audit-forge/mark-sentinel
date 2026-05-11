@@ -187,7 +187,7 @@ def generate_fleet_pdf(devices: list, tier: str = 'ciso') -> bytes:
         warn  = d.get('warn_count', 0) or 0
         passed = d.get('pass_count', 0) or 0
         score = _risk_score(fail, warn, fail + warn + passed)
-        _device_row(pdf, d.get('hostname', d.get('device_id', '?')),
+        _device_row(pdf, d.get('hostname') or d.get('device_id') or '?',
                     d.get('platform', ''), fail, warn, passed, score,
                     d.get('last_seen') or d.get('report_time'))
     pdf.ln(4)
@@ -226,7 +226,7 @@ def generate_fleet_pdf(devices: list, tier: str = 'ciso') -> bytes:
 
         pdf.set_font('Helvetica', 'B', 11)
         pdf.set_text_color(88, 166, 255)
-        pdf.cell(0, 7, _safe(f"Device: {d.get('hostname', d.get('device_id', '?'))}"), ln=True)
+        pdf.cell(0, 7, _safe(f"Device: {d.get('hostname') or d.get('device_id') or '?'}"), ln=True)
         pdf.set_font('Helvetica', size=9)
         pdf.set_text_color(110, 118, 129)
         pdf.cell(0, 5, _safe(
@@ -267,7 +267,7 @@ def _collect_all_findings(devices: list) -> list:
         report = d.get('_report') or {}
         for r in report.get('findings', report.get('results', [])):
             f = dict(r)
-            f['hostname'] = d.get('hostname', d.get('device_id', '?'))
+            f['hostname'] = d.get('hostname') or d.get('device_id') or '?'
             out.append(f)
     return out
 
@@ -290,7 +290,7 @@ def _finding_row(pdf: _PDF, f: dict, show_device: bool, verbose: bool):
     if show_device:
         pdf.set_text_color(110, 118, 129)
         pdf.set_font('Helvetica', size=9)
-        pdf.cell(35, 5, _safe((f.get('hostname') or '')[:20]), ln=False)
+        pdf.cell(35, 5, _safe((f.get('hostname') or f.get('device_id') or '?')[:20]), ln=False)
 
     pdf.set_text_color(201, 209, 217)
     pdf.set_font('Helvetica', size=9)
@@ -370,7 +370,7 @@ def _exec_recommendations(pdf: _PDF, crit_high: list, score: int, at_risk: int, 
         pdf.set_text_color(248, 81, 73)
         pdf.cell(5, 5, '-', ln=False)
         pdf.set_text_color(201, 209, 217)
-        pdf.multi_cell(0, 5, _safe(f"{f.get('title', '')} ({f.get('hostname', '')})"
+        pdf.multi_cell(0, 5, _safe(f"{f.get('title', '')} ({f.get('hostname') or f.get('device_id') or '?'})"
                                    + (f'  ->  {rem}' if rem else '')))
     pdf.ln(3)
     pdf.set_font('Helvetica', 'I', 9)
@@ -392,7 +392,7 @@ def _ciso_remediation_plan(pdf: _PDF, crit_high: list):
         if key in seen:
             continue
         seen.add(key)
-        devices_affected = [x.get('hostname', '') for x in crit_high if x.get('check_id') == key]
+        devices_affected = [x.get('hostname') or x.get('device_id') or '?' for x in crit_high if x.get('check_id') == key]
 
         pdf.set_text_color(88, 166, 255)
         pdf.set_font('Helvetica', 'B', 9)
