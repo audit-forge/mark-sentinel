@@ -1103,11 +1103,23 @@ button:hover{{background:#2ea043}}
         """POST /api/system/update — git pull then restart if new commits landed."""
         import shutil
 
-        # App bundles get a minimal PATH — probe common git locations explicitly
         env = os.environ.copy()
         env['GIT_TERMINAL_PROMPT'] = '0'
-        env['PATH'] = '/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:' + env.get('PATH', '')
 
+        if sys.platform == 'win32':
+            win_paths = [
+                r'C:\Program Files\Git\cmd',
+                r'C:\Program Files\Git\bin',
+                r'C:\Program Files (x86)\Git\cmd',
+                r'C:\Program Files (x86)\Git\bin',
+            ]
+            sep = ';'
+            extra = sep.join(p for p in win_paths if os.path.isdir(p))
+        else:
+            extra = '/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin'
+            sep = ':'
+
+        env['PATH'] = extra + sep + env.get('PATH', '')
         git_cmd = shutil.which('git', path=env['PATH']) or 'git'
 
         try:
@@ -1126,7 +1138,12 @@ button:hover{{background:#2ea043}}
                 self._json({'status': 'restarting', 'output': output + '\n\nRestarting server…'})
                 def _restart():
                     time.sleep(0.6)
-                    os.execv(sys.executable, [sys.executable] + sys.argv)
+                    if sys.platform == 'win32':
+                        subprocess.Popen([sys.executable] + sys.argv,
+                                         creationflags=subprocess.CREATE_NEW_PROCESS_GROUP)
+                        os._exit(0)
+                    else:
+                        os.execv(sys.executable, [sys.executable] + sys.argv)
                 threading.Thread(target=_restart, daemon=True).start()
             else:
                 self._json({'status': 'ok' if result.returncode == 0 else 'error', 'output': output})
