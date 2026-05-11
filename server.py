@@ -235,6 +235,7 @@ def _build_fleet_report_html(devices: list, tier: str) -> str:
     score_color = '#3fb950' if fleet_score >= 80 else '#d29922' if fleet_score >= 60 else '#f85149'
     now = datetime.now(tz=timezone.utc).strftime('%Y-%m-%d %H:%M UTC')
 
+    btn_style = 'display:inline-block;padding:6px 14px;border-radius:6px;font-size:12px;font-weight:600;text-decoration:none;cursor:pointer;border:1px solid #30363d;background:#21262d;color:#c9d1d9'
     parts = [f'''<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
 <title>M.A.R.K. Sentinel — Fleet {esc(tier_label)}</title>
 <style>
@@ -260,8 +261,15 @@ tr:hover td{{background:#161b22}}
 .finding:last-child{{border-bottom:none}}
 .rem{{color:#3fb950;font-size:12px;margin-top:3px;font-style:italic}}
 .det{{color:#8b949e;font-size:12px;margin-top:3px}}
-@media print{{body{{background:#fff;color:#000;padding:16px}}h1,h2,h3,.card-l{{color:#000}}.card{{border:1px solid #ccc}}.fail{{color:#c00}}.pass{{color:#090}}.warn{{color:#850}}}}
+.toolbar{{position:sticky;top:0;z-index:100;background:#161b22;border-bottom:1px solid #21262d;
+          margin:-32px -32px 28px;padding:10px 32px;display:flex;align-items:center;gap:10px}}
+@media print{{.toolbar{{display:none}}body{{background:#fff;color:#000;padding:16px}}h1,h2,h3,.card-l{{color:#000}}.card{{border:1px solid #ccc}}.fail{{color:#c00}}.pass{{color:#090}}.warn{{color:#850}}}}
 </style></head><body>
+<div class="toolbar">
+  <span style="flex:1;font-size:13px;font-weight:600;color:#c9d1d9">M.A.R.K. Sentinel &mdash; Fleet {esc(tier_label)}</span>
+  <a href="/api/fleet/report?tier={tier}&fmt=pdf" download="sentinel_fleet_{tier}.pdf" style="{btn_style};color:#3fb950;border-color:#238636">&#8659; Download PDF</a>
+  <button onclick="window.print()" style="{btn_style}">&#128438; Print</button>
+</div>
 <h1>M.A.R.K. Sentinel &mdash; Fleet {esc(tier_label)}</h1>
 <div class="meta">Generated {esc(now)} &nbsp;&bull;&nbsp; {len(devices)} device(s) &nbsp;&bull;&nbsp; Confidential</div>
 <div class="cards">
@@ -1459,12 +1467,12 @@ body{{background:#0d1117;color:#c9d1d9;font-family:-apple-system,BlinkMacSystemF
   <div class="sec-hdr" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
     <span>Connected Devices</span>
     <div style="display:flex;gap:8px;flex-wrap:wrap">
-      <button class="scan-btn" onclick="downloadFleetReport('executive',this)"
-              style="color:#3fb950;border-color:#30363d;font-size:12px">&#8659; Executive PDF</button>
-      <button class="scan-btn" onclick="downloadFleetReport('ciso',this)"
-              style="color:#58a6ff;border-color:#30363d;font-size:12px">&#8659; CISO PDF</button>
-      <button class="scan-btn" onclick="downloadFleetReport('technical',this)"
-              style="color:#8b949e;border-color:#30363d;font-size:12px">&#8659; Technical PDF</button>
+      <a href="/api/fleet/report?tier=executive&fmt=html" target="_blank" class="scan-btn"
+         style="text-decoration:none;color:#3fb950;border-color:#30363d;font-size:12px">&#9654; Executive Report</a>
+      <a href="/api/fleet/report?tier=ciso&fmt=html" target="_blank" class="scan-btn"
+         style="text-decoration:none;color:#58a6ff;border-color:#30363d;font-size:12px">&#9654; CISO Report</a>
+      <a href="/api/fleet/report?tier=technical&fmt=html" target="_blank" class="scan-btn"
+         style="text-decoration:none;color:#8b949e;border-color:#30363d;font-size:12px">&#9654; Technical Report</a>
       <button class="scan-btn" onclick="updateAllDevices()"
               style="color:#e3b341;border-color:#30363d;font-size:12px">Update All Agents</button>
     </div>
