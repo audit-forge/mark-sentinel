@@ -121,7 +121,8 @@ def _device_id() -> str:
             mac = ':'.join(f'{(node >> i) & 0xff:02x}' for i in range(0, 48, 8))
     except Exception:
         mac = 'unknown'
-    new_id = hashlib.sha256(f'{hostname}:{mac}'.encode()).hexdigest()[:16]
+    seed = mac if mac not in ('random', 'unknown') else f'{hostname}:{mac}'
+    new_id = hashlib.sha256(seed.encode()).hexdigest()[:16]
     try:
         id_file.parent.mkdir(parents=True, exist_ok=True)
         id_file.write_text(new_id)
