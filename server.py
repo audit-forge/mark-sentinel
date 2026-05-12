@@ -1906,8 +1906,17 @@ async function runDiscovery() {{
     if (svcs.length === 0) {{
       panel.innerHTML = '<div class="empty" style="padding:12px">No AI services detected (network, processes, or environment).</div>';
     }} else {{
-      const modelBadges = (models) => {{
-        if (!models || !models.length) return '<span style="color:#484f58">—</span>';
+      const modelBadges = (models, service) => {{
+        if (!models || !models.length) {{
+          const svc = (service || '').toLowerCase();
+          if (svc.includes('sentinel') || svc.includes('hash'))
+            return '<span style="color:#484f58;font-size:11px">n/a — monitoring tool</span>';
+          if (svc.includes('jupyter') || svc.includes('streamlit') || svc.includes('gradio'))
+            return '<span style="color:#484f58;font-size:11px">n/a — notebook/UI server</span>';
+          if (svc.includes('unknown'))
+            return '<span style="color:#e3b341;font-size:11px">⚠ unable to identify — check device</span>';
+          return '<span style="color:#6e7681;font-size:11px;font-style:italic">no models loaded</span>';
+        }}
         const badges = models.slice(0, 6).map(m =>
           `<span style="background:#21262d;border-radius:3px;padding:1px 6px;font-size:11px;font-family:monospace;white-space:nowrap">${{esc(m)}}</span>`
         ).join(' ');
@@ -1948,7 +1957,7 @@ async function runDiscovery() {{
           html += `<tr style="border-top:1px solid #161b22">
             <td style="padding:7px 12px;font-weight:600;color:#e6edf3;white-space:nowrap">${{esc(s.service)}}</td>
             <td style="padding:7px 8px;color:#6e7681;font-family:monospace;font-size:12px">${{s.port}}</td>
-            <td style="padding:7px 8px">${{modelBadges(s.models)}}</td>
+            <td style="padding:7px 8px">${{modelBadges(s.models, s.service)}}</td>
             <td style="padding:7px 8px;font-size:11px"><a href="${{esc(s.url)}}" target="_blank" style="color:#58a6ff;text-decoration:none;font-family:monospace">${{esc(s.url)}}</a>${{httpStatus}}</td>
           </tr>`;
         }}
