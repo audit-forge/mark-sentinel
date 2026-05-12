@@ -1151,9 +1151,10 @@ button:hover{{background:#2ea043}}
             for d in devices:
                 d['_report'] = store.get_latest_report(d['device_id']) or {}
             if profiles:
-                devices = [d for d in devices
-                           if (d.get('profile') or '').lower() in profiles or
-                              (d['_report'].get('profile') or '').lower() in profiles]
+                def _dev_profile(d):
+                    p = (d.get('profile') or d['_report'].get('profile') or '').lower().strip()
+                    return p or 'default'
+                devices = [d for d in devices if _dev_profile(d) in profiles]
 
             if fmt == 'json':
                 payload = [{'device_id': d['device_id'], 'hostname': d['hostname'],
