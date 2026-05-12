@@ -11,13 +11,15 @@
   <key>CFBundleIdentifier</key>
   <string>io.hash.sentinel</string>
   <key>CFBundleVersion</key>
-  <string>1.0</string>
+  <string>1.0.0</string>
   <key>CFBundleShortVersionString</key>
-  <string>1.0</string>
+  <string>1.0.0</string>
   <key>CFBundlePackageType</key>
   <string>APPL</string>
   <key>CFBundleSignature</key>
   <string>????</string>
+  <key>NSHumanReadableCopyright</key>
+  <string>© 2026 M.A.R.K. AI Systems. All rights reserved. Patent Pending.</string>
   <key>LSMinimumSystemVersion</key>
   <string>11.0</string>
   <key>LSUIElement</key>

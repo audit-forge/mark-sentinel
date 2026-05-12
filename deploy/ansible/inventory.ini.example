@@ -1,0 +1,32 @@
+# M.A.R.K. Sentinel — Ansible Inventory Example
+# Copy to inventory.ini and fill in your hosts.
+#
+# Run:
+#   ansible-galaxy collection install -r requirements.yml
+#   ansible-playbook -i inventory.ini sentinel_agent.yml \
+#     -e sentinel_server=http://10.0.1.50:7331 \
+#     -e sentinel_token=your-secret-token
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ── Linux targets ─────────────────────────────────────────────────────────────
+[linux]
+web01   ansible_host=10.0.1.10  ansible_user=ubuntu  ansible_ssh_private_key_file=~/.ssh/id_ed25519
+web02   ansible_host=10.0.1.11  ansible_user=ubuntu  ansible_ssh_private_key_file=~/.ssh/id_ed25519
+db01    ansible_host=10.0.1.20  ansible_user=ec2-user ansible_ssh_private_key_file=~/.ssh/id_ed25519
+
+# ── macOS targets (must have SSH enabled: System Settings → Sharing → Remote Login) ──
+[macos]
+devmac01  ansible_host=10.0.1.30  ansible_user=keith  ansible_ssh_private_key_file=~/.ssh/id_ed25519
+
+# ── Group vars override: macOS needs become_method=sudo with password ─────────
+[macos:vars]
+ansible_become_method=sudo
+ansible_python_interpreter=/opt/homebrew/bin/python3
+
+# ── All hosts group vars ──────────────────────────────────────────────────────
+[all:vars]
+ansible_ssh_common_args='-o StrictHostKeyChecking=no'
+sentinel_server=http://10.0.1.50:7331
+sentinel_token=replace-with-your-secret-token
+sentinel_interval=7200
+sentinel_profile=default

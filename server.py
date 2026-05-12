@@ -91,6 +91,12 @@ def _get_store():
                 _store = AgentStore(ROOT / 'output' / 'agents.db')
     return _store
 
+
+# ── license (loaded once at startup) ─────────────────────────────────────────
+def _load_license() -> None:
+    from license import load_license
+    load_license(ROOT / 'license.json')
+
 def _content_length(headers) -> int:
     """Safely parse Content-Length header; returns 0 on missing or invalid value."""
     try:
@@ -179,7 +185,7 @@ def _rebuild_dashboard(out_dir: Path) -> bool:
         label_map = {
             'config_scan':           'Config Scan',
             'openai':                'ChatGPT (gpt-4o)',
-            'claude':                'Anthropic (claude-opus-4-7)',
+            'claude':                'Anthropic (claude-sonnet-4-6)',
             'ollama___qwen2.5-7b':   'Ollama (qwen2.5-7b)',
             'hash-ai___openclaw':    'Hash-AI (openclaw)',
         }
@@ -557,6 +563,8 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self._api_fleet_update(path[len('/api/fleet/update/'):])
         elif path.startswith('/api/fleet/remove/'):
             self._api_fleet_remove(path[len('/api/fleet/remove/'):])
+        elif path == '/api/admin/license':
+            self._api_admin_license()
         else:
             self._not_found()
 
@@ -936,8 +944,19 @@ button:hover{{background:#2ea043}}
                 return
             _report_last_seen[device_id] = now
 
+        # License seat check — only runs when this is a previously unseen device
+        store = _get_store()
+        license_status = 'ok'
         try:
-            _get_store().upsert_report(
+            from license import check_overage
+            if not store.is_known_device(device_id):
+                current_count = store.device_count() + 1  # +1 for the device being registered
+                license_status = check_overage(device_id, hostname, current_count, store)
+        except Exception as _le:
+            log.error('license check error: %s', _le)
+
+        try:
+            store.upsert_report(
                 device_id=device_id,
                 hostname=hostname,
                 report=report,
@@ -961,7 +980,7 @@ button:hover{{background:#2ea043}}
         except Exception as _ae:
             log.error('alerts error: %s', _ae)
 
-        self._json({'status': 'accepted', 'device_id': device_id})
+        self._json({'status': 'accepted', 'device_id': device_id, 'license_status': license_status})
 
     def _api_agent_commands(self, device_id: str):
         """GET /api/agent/commands/<device_id> — agent polls for pending commands."""
@@ -1021,6 +1040,15 @@ button:hover{{background:#2ea043}}
             return
         found = _get_store().delete_device(device_id)
         self._json({'status': 'removed' if found else 'not_found', 'device_id': device_id})
+
+    def _api_admin_license(self):
+        """GET /api/admin/license — license status + overage audit log."""
+        try:
+            from license import license_summary
+            summary = license_summary(_get_store())
+            self._json(summary)
+        except Exception as e:
+            self._json({'error': str(e)}, 500)
 
     def _api_fleet_report(self):
         """GET /api/fleet/report?tier=executive|ciso|technical&fmt=pdf|html|json"""
@@ -1774,38 +1802,56 @@ async function runDiscovery() {{
   const panel = document.getElementById('discover-panel');
   btn.disabled = true;
   btn.textContent = 'Scanning…';
-  panel.innerHTML = '<div class="empty" style="padding:12px">Probing local subnet — this may take 10–30 seconds…</div>';
+  panel.innerHTML = '<div class="empty" style="padding:12px">Probing local subnet + processes + environment — this may take 10–30 seconds…</div>';
   try {{
     const resp = await fetch('/api/discover');
     const data = await resp.json();
     if (!resp.ok) throw new Error(data.error || 'HTTP ' + resp.status);
     const svcs = data.services || [];
     if (svcs.length === 0) {{
-      panel.innerHTML = '<div class="empty" style="padding:12px">No AI services found on the local network.</div>';
+      panel.innerHTML = '<div class="empty" style="padding:12px">No AI services detected (network, processes, or environment).</div>';
     }} else {{
-      const rows = svcs.map(s => {{
-        const status = s.status ? 'HTTP ' + s.status : 'TCP open';
-        return `<tr>
-          <td style="font-weight:600;color:#e6edf3">${{esc(s.service)}}</td>
-          <td><a href="${{esc(s.url)}}" target="_blank" style="color:#58a6ff;text-decoration:none">${{esc(s.url)}}</a></td>
-          <td style="color:#6e7681;font-family:monospace;font-size:12px">${{esc(s.host)}}</td>
-          <td style="color:#6e7681">${{esc(String(s.port))}}</td>
-          <td style="color:#3fb950;font-size:12px">${{esc(status)}}</td>
-        </tr>`;
-      }}).join('');
-      panel.innerHTML = `<table style="width:100%;border-collapse:collapse">
-        <thead><tr style="font-size:11px;color:#6e7681;text-transform:uppercase;letter-spacing:.5px">
-          <th style="text-align:left;padding:6px 10px;border-bottom:1px solid #30363d">Service</th>
-          <th style="text-align:left;padding:6px 10px;border-bottom:1px solid #30363d">URL</th>
-          <th style="text-align:left;padding:6px 10px;border-bottom:1px solid #30363d">Host</th>
-          <th style="text-align:left;padding:6px 10px;border-bottom:1px solid #30363d">Port</th>
-          <th style="text-align:left;padding:6px 10px;border-bottom:1px solid #30363d">Status</th>
-        </tr></thead>
-        <tbody>${{rows}}</tbody>
-      </table>
-      <div style="font-size:11px;color:#484f58;margin-top:10px;display:flex;align-items:center;gap:12px">
-        <span>${{svcs.length}} service(s) found</span>
-        <button onclick="this.closest('div').parentElement.innerHTML='<div class=\\'empty\\'style=\\'padding:12px\\'>Click Scan Network to probe the local subnet for AI services.</div>'" style="background:none;border:1px solid #30363d;color:#6e7681;border-radius:3px;padding:2px 8px;font-size:11px;cursor:pointer">Clear</button>
+      const sourceLabel = {{network_probe: '🌐 Network', process_scan: '⚙️ Process', env_var: '🔑 API Key'}};
+      const sourceColor = {{network_probe: '#58a6ff', process_scan: '#e3b341', env_var: '#bc8cff'}};
+      const groups = {{}};
+      for (const s of svcs) groups[s.source] = (groups[s.source] || []).concat(s);
+      const ORDER = ['network_probe', 'process_scan', 'env_var'];
+      let html = '';
+      for (const src of ORDER) {{
+        if (!groups[src]) continue;
+        html += `<div style="margin-bottom:16px">
+          <div style="font-size:11px;font-weight:600;color:${{sourceColor[src]}};text-transform:uppercase;letter-spacing:.5px;padding:4px 10px 6px">${{sourceLabel[src] || src}}</div>
+          <table style="width:100%;border-collapse:collapse">
+            <thead><tr style="font-size:10px;color:#6e7681;text-transform:uppercase;letter-spacing:.4px">
+              <th style="text-align:left;padding:4px 10px;border-bottom:1px solid #21262d">Service</th>
+              <th style="text-align:left;padding:4px 10px;border-bottom:1px solid #21262d">Models Detected</th>
+              <th style="text-align:left;padding:4px 10px;border-bottom:1px solid #21262d">Details</th>
+            </tr></thead>
+            <tbody>`;
+        for (const s of groups[src]) {{
+          const modelStr = (s.models && s.models.length)
+            ? s.models.slice(0, 5).map(m => `<span style="background:#21262d;border-radius:3px;padding:1px 5px;font-size:11px;font-family:monospace">${{esc(m)}}</span>`).join(' ') + (s.models.length > 5 ? ` <span style="color:#6e7681">+${{s.models.length - 5}} more</span>` : '')
+            : '<span style="color:#484f58">—</span>';
+          let detail = '';
+          if (src === 'network_probe') {{
+            const httpStatus = s.status ? `HTTP ${{s.status}}` : 'TCP open';
+            detail = `<a href="${{esc(s.url)}}" target="_blank" style="color:#58a6ff;text-decoration:none;font-family:monospace;font-size:11px">${{esc(s.url)}}</a> <span style="color:#484f58;font-size:11px">(${{httpStatus}})</span>`;
+          }} else if (src === 'process_scan') {{
+            detail = `<span style="color:#6e7681;font-size:11px">process: <code style="background:#21262d;padding:1px 4px;border-radius:2px">${{esc(s.process_sig || '')}}</code></span>`;
+          }} else {{
+            detail = `<span style="color:#6e7681;font-size:11px">env: <code style="background:#21262d;padding:1px 4px;border-radius:2px">${{esc(s.env_var || '')}}</code></span>`;
+          }}
+          html += `<tr style="border-bottom:1px solid #161b22">
+            <td style="padding:6px 10px;font-weight:600;color:#e6edf3;white-space:nowrap">${{esc(s.service)}}</td>
+            <td style="padding:6px 10px">${{modelStr}}</td>
+            <td style="padding:6px 10px">${{detail}}</td>
+          </tr>`;
+        }}
+        html += '</tbody></table></div>';
+      }}
+      panel.innerHTML = html + `<div style="font-size:11px;color:#484f58;margin-top:4px;display:flex;align-items:center;gap:12px">
+        <span>${{svcs.length}} AI service(s) detected</span>
+        <button onclick="this.closest('div').parentElement.innerHTML='<div class=\\'empty\\'style=\\'padding:12px\\'>Click Scan Network to detect AI services.</div>'" style="background:none;border:1px solid #30363d;color:#6e7681;border-radius:3px;padding:2px 8px;font-size:11px;cursor:pointer">Clear</button>
       </div>`;
     }}
   }} catch (e) {{
@@ -2216,6 +2262,9 @@ def main():
         ],
     )
 
+    _load_license()
+    from license import start_monitors
+    start_monitors(_get_store())
     server = http.server.ThreadingHTTPServer((args.host, args.port), _Handler)
 
     tls_cert = os.environ.get('SENTINEL_TLS_CERT', '')

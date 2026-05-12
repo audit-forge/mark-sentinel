@@ -73,6 +73,19 @@ class AgentStore:
 
                 CREATE INDEX IF NOT EXISTS idx_commands_device
                     ON commands(device_id, claimed_at);
+
+                CREATE TABLE IF NOT EXISTS license_events (
+                    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                    event_type   TEXT NOT NULL,
+                    device_id    TEXT NOT NULL DEFAULT '',
+                    hostname     TEXT NOT NULL DEFAULT '',
+                    agent_count  INTEGER NOT NULL,
+                    max_agents   INTEGER NOT NULL,
+                    recorded_at  INTEGER NOT NULL
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_license_events_time
+                    ON license_events(recorded_at DESC);
             """)
 
         # Prune old reports per retention policy (env var or default 90 days)
@@ -184,6 +197,54 @@ class AgentStore:
     def device_count(self) -> int:
         with self._lock, self._conn() as conn:
             return conn.execute("SELECT COUNT(*) FROM devices").fetchone()[0]
+
+    def get_stale_devices(self, stale_after_seconds: int) -> list[dict]:
+        """Return devices that have not reported since stale_after_seconds ago."""
+        cutoff = int(time.time()) - stale_after_seconds
+        with self._lock, self._conn() as conn:
+            rows = conn.execute(
+                """SELECT device_id, hostname, platform, agent_version, last_seen
+                   FROM devices WHERE last_seen < ?
+                   ORDER BY last_seen ASC""",
+                (cutoff,),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def get_all_devices_summary(self) -> list[dict]:
+        """Return lightweight device list for telemetry reporting."""
+        with self._lock, self._conn() as conn:
+            rows = conn.execute(
+                """SELECT device_id, hostname, platform, agent_version, last_seen
+                   FROM devices ORDER BY last_seen DESC"""
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def is_known_device(self, device_id: str) -> bool:
+        with self._lock, self._conn() as conn:
+            row = conn.execute(
+                "SELECT 1 FROM devices WHERE device_id = ? LIMIT 1", (device_id,)
+            ).fetchone()
+        return row is not None
+
+    def log_license_event(self, event_type: str, device_id: str, hostname: str,
+                          agent_count: int, max_agents: int) -> None:
+        now = int(time.time())
+        with self._lock, self._conn() as conn:
+            conn.execute(
+                """INSERT INTO license_events
+                   (event_type, device_id, hostname, agent_count, max_agents, recorded_at)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                (event_type, device_id, hostname, agent_count, max_agents, now),
+            )
+
+    def get_license_events(self, limit: int = 50) -> list[dict]:
+        with self._lock, self._conn() as conn:
+            rows = conn.execute(
+                """SELECT event_type, device_id, hostname, agent_count, max_agents, recorded_at
+                   FROM license_events ORDER BY recorded_at DESC LIMIT ?""",
+                (limit,),
+            ).fetchall()
+        return [dict(r) for r in rows]
 
     def enqueue_command(self, device_id: str, command: str = 'scan_now') -> int:
         """Queue a command for a device. Returns the new command id."""

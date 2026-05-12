@@ -9,7 +9,7 @@ to audit.
 
 Usage:
   python3 agent.py --server http://10.0.1.50:7331 --token <tok>
-  python3 agent.py --daemon --interval 3600
+  python3 agent.py --daemon --interval 7200
   python3 agent.py --config /etc/sentinel/agent_config.json --once
   python3 agent.py --scan-only          # local scan, no reporting
 
@@ -19,7 +19,7 @@ Config file (agent_config.json):
     "token":    "your-secret-token",
     "target":   ".",
     "profile":  "default",
-    "interval": 3600
+    "interval": 7200
   }
 
 Environment overrides:
@@ -493,7 +493,7 @@ def main() -> None:
     ap.add_argument('--scan-only', action='store_true', help='Run scan but do not report to server')
     ap.add_argument('--daemon',    action='store_true', help='Run on a repeating schedule')
     ap.add_argument('--interval',  type=int, default=None,
-                    help='Seconds between daemon scans (default: 3600)')
+                    help='Seconds between daemon scans (default: 7200)')
     ap.add_argument('--once',      action='store_true',
                     help='Run one scan and exit (default without --daemon)')
     ap.add_argument('--install-service',   action='store_true',
@@ -524,19 +524,34 @@ def main() -> None:
         _uninstall_service()
         return
 
-    interval = cfg.get('interval', 3600)
+    interval = cfg.get('interval', 7200)
     RETRY_INTERVAL = 300  # retry failed deliveries every 5 minutes
 
     if args.daemon:
-        POLL_INTERVAL = 30  # seconds between command polls
+        import random as _random
+        POLL_INTERVAL = 300   # seconds between command polls
+        POLL_JITTER   = 30    # ±30 s per poll — agents drift apart over time
+        SCAN_JITTER   = 120   # ±2 min per scan — prevents thundering herd on large fleets
+
         device_id = _device_id()
-        log.info('Daemon mode — scan interval %ds, command poll every %ds', interval, POLL_INTERVAL)
+
+        # Startup jitter: spread out agents deployed simultaneously.
+        # Each agent sleeps a different random amount (0 – POLL_INTERVAL) before
+        # entering the loop so a fleet reboot doesn't hit the server all at once.
+        startup_delay = _random.uniform(0, POLL_INTERVAL)
+        log.info(
+            'Daemon mode — scan interval %ds, poll every %ds, startup jitter %.0fs',
+            interval, POLL_INTERVAL, startup_delay,
+        )
+        time.sleep(startup_delay)
+
         last_scan = 0.0
         last_success = 0.0
         while True:
             now = time.time()
-            # Run full scan when interval has elapsed OR retry a failed delivery every 5 min
-            due = (now - last_scan >= interval) or (last_success < last_scan and now - last_scan >= RETRY_INTERVAL)
+            # Apply per-scan jitter so the effective interval drifts ± SCAN_JITTER
+            effective_interval = interval + _random.uniform(-SCAN_JITTER, SCAN_JITTER)
+            due = (now - last_scan >= effective_interval) or (last_success < last_scan and now - last_scan >= RETRY_INTERVAL)
             if due:
                 try:
                     ok = run_cycle(cfg)
@@ -581,7 +596,8 @@ def main() -> None:
                 except Exception as e:
                     log.error('set_config failed: %s', e)
 
-            time.sleep(POLL_INTERVAL)
+            # Per-poll jitter: each sleep varies slightly so agents don't re-sync
+            time.sleep(POLL_INTERVAL + _random.uniform(-POLL_JITTER, POLL_JITTER))
     else:
         ok = run_cycle(cfg)
         sys.exit(0 if ok else 1)

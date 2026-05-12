@@ -5,22 +5,21 @@
   gather_facts: true
 
   vars:
-    sentinel_server:    "http://localhost:7331"
-    sentinel_token:     "replace-with-your-secret-token"
-    sentinel_profile:   "default"
-    sentinel_target:    "."
-    sentinel_interval:  3600
+    sentinel_server:      "http://localhost:7331"
+    sentinel_token:       "replace-with-your-secret-token"
+    sentinel_profile:     "default"
+    sentinel_target:      "."
+    sentinel_interval:    7200
     sentinel_install_dir: "/opt/sentinel"
+    sentinel_venv_dir:    "/opt/sentinel/venv"
     sentinel_config_dir:  "/etc/sentinel"
     sentinel_config_file: "/etc/sentinel/agent_config.json"
     sentinel_service_name: "sentinel-agent"
-    sentinel_user: "sentinel"
-    sentinel_python_min_major: 3
-    sentinel_python_min_minor: 11
+    sentinel_user:        "sentinel"
 
   tasks:
 
-    # ── Python 3.11+ installation ───────────────────────────────────────────
+    # ── Python 3.11+ ──────────────────────────────────────────────────────────
 
     - name: Install Python 3.11+ on Debian/Ubuntu
       apt:
@@ -30,7 +29,7 @@
           - python3-pip
         state: present
         update_cache: true
-      when: ansible_os_family == "Debian"
+      when: ansible_facts['os_family'] == "Debian"
 
     - name: Enable EPEL and install Python 3.11+ on RHEL/CentOS 8+
       block:
@@ -38,14 +37,13 @@
           dnf:
             name: epel-release
             state: present
-
         - name: Install Python 3.11
           dnf:
             name:
               - python3.11
               - python3-pip
             state: present
-      when: ansible_os_family == "RedHat" and ansible_distribution_major_version | int >= 8
+      when: ansible_facts['os_family'] == "RedHat" and ansible_facts['distribution_major_version'] | int >= 8
 
     - name: Install Python 3.11+ on RHEL/CentOS 7
       yum:
@@ -53,31 +51,31 @@
           - python3
           - python3-pip
         state: present
-      when: ansible_os_family == "RedHat" and ansible_distribution_major_version | int < 8
+      when: ansible_facts['os_family'] == "RedHat" and ansible_facts['distribution_major_version'] | int < 8
 
     - name: Install Python 3.11+ on macOS (via Homebrew)
       become: false
       community.general.homebrew:
         name: python@3.11
         state: present
-      when: ansible_os_family == "Darwin"
+      when: ansible_facts['os_family'] == "Darwin"
 
-    - name: Resolve python3 executable path
+    - name: Resolve python3.11+ executable path
       command: >
         bash -c "for p in python3.13 python3.12 python3.11 python3; do
-          command -v $p &>/dev/null &&
+          command -v $p &>/dev/null || continue;
           ver=$($p -c 'import sys; print(\"%d%d\" % sys.version_info[:2])') &&
           [ \"$ver\" -ge 311 ] && echo $p && break;
         done"
       register: python_bin_result
       changed_when: false
-      failed_when: python_bin_result.stdout == ""
+      failed_when: python_bin_result.stdout | trim == ""
 
     - name: Set python executable fact
       set_fact:
         sentinel_python: "{{ python_bin_result.stdout | trim }}"
 
-    # ── System user ─────────────────────────────────────────────────────────
+    # ── System user ───────────────────────────────────────────────────────────
 
     - name: Create sentinel system user (Linux)
       user:
@@ -86,36 +84,34 @@
         shell: /sbin/nologin
         create_home: false
         comment: "M.A.R.K. Sentinel Agent"
-      when: ansible_os_family != "Darwin"
+      when: ansible_facts['os_family'] != "Darwin"
 
-    # ── Install files ────────────────────────────────────────────────────────
+    # ── Install files ─────────────────────────────────────────────────────────
 
     - name: Create install directory
       file:
         path: "{{ sentinel_install_dir }}"
         state: directory
-        owner: "{{ sentinel_user if ansible_os_family != 'Darwin' else 'root' }}"
-        group: "{{ sentinel_user if ansible_os_family != 'Darwin' else 'wheel' }}"
+        owner: "{{ sentinel_user if ansible_facts['os_family'] != 'Darwin' else 'root' }}"
+        group: "{{ sentinel_user if ansible_facts['os_family'] != 'Darwin' else 'wheel' }}"
         mode: "0755"
 
-    - name: Copy agent source files
+    - name: Copy agent entry point (executable)
+      copy:
+        src: "{{ playbook_dir }}/../../agent.py"
+        dest: "{{ sentinel_install_dir }}/agent.py"
+        mode: "0755"
+
+    - name: Copy remaining source files
       copy:
         src: "{{ item }}"
         dest: "{{ sentinel_install_dir }}/{{ item | basename }}"
         mode: "0644"
       loop:
-        - "{{ playbook_dir }}/../../agent.py"
         - "{{ playbook_dir }}/../../audit.py"
-        - "{{ playbook_dir }}/../../audit_safe.py"
         - "{{ playbook_dir }}/../../storage.py"
         - "{{ playbook_dir }}/../../server.py"
         - "{{ playbook_dir }}/../../requirements.txt"
-      ignore_errors: false
-
-    - name: Make agent.py executable
-      file:
-        path: "{{ sentinel_install_dir }}/agent.py"
-        mode: "0755"
 
     - name: Copy checks, connectors, and profiles directories
       copy:
@@ -126,16 +122,24 @@
         - checks
         - connectors
         - profiles
-      ignore_errors: true
 
-    # ── Pip dependencies ─────────────────────────────────────────────────────
+    # ── Virtualenv + pip deps ─────────────────────────────────────────────────
 
-    - name: Install Python dependencies
-      pip:
-        requirements: "{{ sentinel_install_dir }}/requirements.txt"
-        executable: "{{ sentinel_python | replace('python3', 'pip3') }}"
-        extra_args: "--quiet"
-      ignore_errors: true
+    - name: Create virtualenv
+      command: "{{ sentinel_python }} -m venv {{ sentinel_venv_dir }}"
+      args:
+        creates: "{{ sentinel_venv_dir }}/bin/python"
+
+    - name: Upgrade pip inside venv
+      command: "{{ sentinel_venv_dir }}/bin/python -m pip install --quiet --upgrade pip"
+      changed_when: false
+
+    - name: Install requirements into venv
+      command: >
+        {{ sentinel_venv_dir }}/bin/python -m pip install
+        --quiet -r {{ sentinel_install_dir }}/requirements.txt
+      register: pip_result
+      changed_when: "'Successfully installed' in pip_result.stdout"
 
     # ── Configuration ─────────────────────────────────────────────────────────
 
@@ -144,26 +148,14 @@
         path: "{{ sentinel_config_dir }}"
         state: directory
         owner: root
-        group: "{{ sentinel_user if ansible_os_family != 'Darwin' else 'wheel' }}"
+        group: "{{ sentinel_user if ansible_facts['os_family'] != 'Darwin' else 'wheel' }}"
         mode: "0750"
 
     - name: Write agent config
-      template:
-        src: agent_config.json.j2
-        dest: "{{ sentinel_config_file }}"
-        owner: root
-        group: "{{ sentinel_user if ansible_os_family != 'Darwin' else 'wheel' }}"
-        mode: "0640"
-        force: false
-      notify: Restart sentinel service
-
-    # ── Inline config template (written to disk if j2 is missing) ────────────
-
-    - name: Write agent config (inline, no template file)
       copy:
         dest: "{{ sentinel_config_file }}"
         owner: root
-        group: "{{ sentinel_user if ansible_os_family != 'Darwin' else 'wheel' }}"
+        group: "{{ sentinel_user if ansible_facts['os_family'] != 'Darwin' else 'wheel' }}"
         mode: "0640"
         force: false
         content: |
@@ -178,14 +170,40 @@
 
     # ── systemd service (Linux) ───────────────────────────────────────────────
 
-    - name: Install systemd unit file
+    - name: Write systemd unit file with resolved python path
       copy:
-        src: "{{ playbook_dir }}/../sentinel-agent.service"
         dest: /etc/systemd/system/sentinel-agent.service
         owner: root
         group: root
         mode: "0644"
-      when: ansible_os_family != "Darwin" and ansible_service_mgr == "systemd"
+        content: |
+          [Unit]
+          Description=M.A.R.K. Sentinel Agent
+          After=network-online.target
+          Wants=network-online.target
+
+          [Service]
+          Type=simple
+          User={{ sentinel_user }}
+          Group={{ sentinel_user }}
+          ExecStart={{ sentinel_venv_dir }}/bin/python {{ sentinel_install_dir }}/agent.py --config {{ sentinel_config_file }} --daemon
+          Restart=on-failure
+          RestartSec=30
+          TimeoutStopSec=30
+          Environment=PYTHONUNBUFFERED=1
+          EnvironmentFile=-/etc/sentinel/sentinel.env
+          StandardOutput=journal
+          StandardError=journal
+          SyslogIdentifier=sentinel-agent
+          NoNewPrivileges=yes
+          ProtectSystem=strict
+          ProtectHome=yes
+          PrivateTmp=yes
+          ReadWritePaths={{ sentinel_install_dir }} /var/log
+
+          [Install]
+          WantedBy=multi-user.target
+      when: ansible_facts['os_family'] != "Darwin" and ansible_facts['service_mgr'] == "systemd"
       notify:
         - Reload systemd
         - Restart sentinel service
@@ -196,7 +214,7 @@
         enabled: true
         state: started
         daemon_reload: true
-      when: ansible_os_family != "Darwin" and ansible_service_mgr == "systemd"
+      when: ansible_facts['os_family'] != "Darwin" and ansible_facts['service_mgr'] == "systemd"
 
     # ── launchd daemon (macOS) ────────────────────────────────────────────────
 
@@ -207,15 +225,29 @@
         owner: root
         group: wheel
         mode: "0644"
-      when: ansible_os_family == "Darwin"
+      when: ansible_facts['os_family'] == "Darwin"
       notify: Reload launchd daemon
 
     - name: Load launchd daemon (macOS)
       command: launchctl load -w /Library/LaunchDaemons/io.hash.sentinel-agent.plist
-      when: ansible_os_family == "Darwin"
+      when: ansible_facts['os_family'] == "Darwin"
       register: launchctl_load
       changed_when: launchctl_load.rc == 0
       failed_when: false
+
+    # ── Verify agent is running ───────────────────────────────────────────────
+
+    - name: Verify sentinel-agent service is active (Linux)
+      command: systemctl is-active sentinel-agent
+      register: svc_status
+      changed_when: false
+      failed_when: false
+      when: ansible_facts['os_family'] != "Darwin" and ansible_facts['service_mgr'] == "systemd"
+
+    - name: Report service status
+      debug:
+        msg: "sentinel-agent status: {{ svc_status.stdout | default('n/a') }}"
+      when: ansible_facts['os_family'] != "Darwin"
 
   handlers:
 
@@ -227,10 +259,10 @@
       systemd:
         name: sentinel-agent
         state: restarted
-      when: ansible_os_family != "Darwin" and ansible_service_mgr == "systemd"
+      when: ansible_facts['os_family'] != "Darwin" and ansible_facts['service_mgr'] == "systemd"
 
     - name: Reload launchd daemon
       command: >
         bash -c "launchctl unload /Library/LaunchDaemons/io.hash.sentinel-agent.plist 2>/dev/null;
                  launchctl load -w /Library/LaunchDaemons/io.hash.sentinel-agent.plist"
-      when: ansible_os_family == "Darwin"
+      when: ansible_facts['os_family'] == "Darwin"
