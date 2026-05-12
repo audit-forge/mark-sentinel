@@ -464,6 +464,22 @@ class _Handler(http.server.BaseHTTPRequestHandler):
     # ── routing ───────────────────────────────────────────────────────────────
 
     def do_GET(self):
+        try:
+            self._do_GET_inner()
+        except Exception as _e:
+            log.error('Unhandled GET error for %s: %s', self.path, _e, exc_info=True)
+            try:
+                import traceback as _tb
+                body = ('Internal server error:\n' + _tb.format_exc()).encode('utf-8', errors='replace')
+                self.send_response(500)
+                self.send_header('Content-Type', 'text/plain; charset=utf-8')
+                self.send_header('Content-Length', len(body))
+                self.end_headers()
+                self.wfile.write(body)
+            except Exception:
+                pass
+
+    def _do_GET_inner(self):
         path = urlparse(self.path).path
 
         # Auth-exempt: health probe and login UI
@@ -529,6 +545,22 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self._not_found()
 
     def do_POST(self):
+        try:
+            self._do_POST_inner()
+        except Exception as _e:
+            log.error('Unhandled POST error for %s: %s', self.path, _e, exc_info=True)
+            try:
+                import traceback as _tb
+                body = ('Internal server error:\n' + _tb.format_exc()).encode('utf-8', errors='replace')
+                self.send_response(500)
+                self.send_header('Content-Type', 'text/plain; charset=utf-8')
+                self.send_header('Content-Length', len(body))
+                self.end_headers()
+                self.wfile.write(body)
+            except Exception:
+                pass
+
+    def _do_POST_inner(self):
         path = urlparse(self.path).path
 
         # Login form submission — no auth needed
@@ -1392,7 +1424,16 @@ button:hover{{background:#2ea043}}
             devices = _get_store().list_devices()
         except Exception:
             devices = []
-        body = _build_fleet_html(devices).encode()
+        try:
+            body = _build_fleet_html(devices).encode('utf-8')
+        except Exception as _e:
+            log.error('_build_fleet_html failed: %s', _e, exc_info=True)
+            body = (
+                b'<html><body style="font:14px monospace;background:#0d1117;color:#f85149;padding:40px">'
+                b'<h2>Dashboard render error</h2><pre>' +
+                __import__('traceback').format_exc().encode('utf-8', errors='replace') +
+                b'</pre></body></html>'
+            )
         self.send_response(200)
         self.send_header('Content-Type', 'text/html; charset=utf-8')
         self.send_header('Content-Length', len(body))
