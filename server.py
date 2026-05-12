@@ -1112,6 +1112,7 @@ button:hover{{background:#2ea043}}
             services = discover()
             self._json({'services': services, 'count': len(services)})
         except Exception as e:
+            log.error('discovery error: %s', e, exc_info=True)
             self._json({'error': str(e), 'services': []}, 500)
 
     def _api_devices(self):

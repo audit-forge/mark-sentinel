@@ -400,7 +400,18 @@ def discover(
       env_var       — (env scan) environment variable name
     """
     target_hosts = hosts or _local_subnet_hosts()
-    results = asyncio.run(_discover_async(target_hosts))
+
+    # asyncio.run() uses ProactorEventLoop on Windows (Python 3.8+), which fails
+    # when called from a non-main thread (e.g. inside ThreadingHTTPServer handlers).
+    # Explicitly use SelectorEventLoop — works correctly in any thread on all platforms.
+    if sys.platform == 'win32':
+        loop = asyncio.SelectorEventLoop()
+    else:
+        loop = asyncio.new_event_loop()
+    try:
+        results = loop.run_until_complete(_discover_async(target_hosts))
+    finally:
+        loop.close()
 
     if include_processes:
         net_labels = {r['service'].lower() for r in results}
