@@ -905,7 +905,12 @@ function renderScan(){
     </div>`:'';
   document.getElementById('view-scan').innerHTML=`
     <div class="scan-form">
-      <div class="sec-hdr" style="margin-bottom:18px">Run New Scan</div>
+      <div class="sec-hdr" style="margin-bottom:6px">Run New Scan</div>
+      <div style="font-size:11px;color:#6e7681;margin-bottom:16px;padding:8px 10px;background:#0d1117;border-radius:4px;border-left:3px solid #30363d">
+        Scans this server machine locally. To run a scan on a <em>remote</em> device use
+        <strong style="color:#e6edf3">Scan ▾</strong> in the fleet table — that queues a
+        command for the device agent to pick up on its next check-in.
+      </div>
       <div class="form-row">
         <span class="form-label">Mode</span>
         <div class="radio-group">
