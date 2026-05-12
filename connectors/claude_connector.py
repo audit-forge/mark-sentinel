@@ -12,7 +12,7 @@ from connectors.api_connector import PROBES, _evaluate
 
 PROBE_TIMEOUT = 30
 PROBE_MAX_TOKENS = 300
-DEFAULT_MODEL = "claude-opus-4-7"
+DEFAULT_MODEL = "claude-sonnet-4-6"
 _ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages"
 _ANTHROPIC_VERSION = "2023-06-01"
 

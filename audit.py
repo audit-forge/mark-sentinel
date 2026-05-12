@@ -119,7 +119,7 @@ def build_scan_context(args):
         if not api_key:
             print("[ERROR] --gemini-api-key or GEMINI_API_KEY/GOOGLE_API_KEY env var required for --mode gemini", file=sys.stderr)
             sys.exit(1)
-        model = args.model if args.model != "gpt-4o-2024-11-20" else "gemini-1.5-flash"
+        model = args.model
         return gemini_connect(api_key=api_key, model=model, target_dir=str(target))
 
     if mode == "vertex":
@@ -133,7 +133,7 @@ def build_scan_context(args):
         if not project:
             print("[ERROR] --vertex-project or VERTEX_PROJECT env var required for --mode vertex", file=sys.stderr)
             sys.exit(1)
-        model = args.model if args.model != "gpt-4o-2024-11-20" else "gemini-1.5-flash"
+        model = args.model
         region = args.vertex_region
         return vertex_connect(key_file=key_file, project=project, model=model, region=region, target_dir=str(target))
 
@@ -144,7 +144,7 @@ def build_scan_context(args):
         if not api_key:
             print("[ERROR] --anthropic-api-key or ANTHROPIC_API_KEY env var required for --mode anthropic", file=sys.stderr)
             sys.exit(1)
-        model = args.model if args.model != "gpt-4o-2024-11-20" else "claude-opus-4-7"
+        model = args.model if args.model != "gemini-1.5-flash" else "claude-sonnet-4-6"
         return claude_connect(api_key=api_key, model=model, target_dir=str(target))
 
     if mode == "hash":
@@ -169,7 +169,7 @@ examples:
   python audit.py --mode config --target ./my-app --profile default --output json,plain
   python audit.py --mode api --endpoint https://api.openai.com/v1 --api-key sk-... --model gpt-4o
   python audit.py --mode gemini --gemini-api-key AIza... --model gemini-1.5-flash
-  python audit.py --mode anthropic --anthropic-api-key sk-ant-... --model claude-opus-4-7
+  python audit.py --mode anthropic --anthropic-api-key sk-ant-... --model claude-sonnet-4-6
   python audit.py --mode local --ollama-host http://localhost:11434 --model qwen2.5:7b --output plain,sarif
         """,
     )
@@ -228,8 +228,8 @@ examples:
     )
     parser.add_argument(
         '--model',
-        default='gpt-4o-2024-11-20',
-        help='Model name to probe (default: gpt-4o-2024-11-20)',
+        default='gemini-1.5-flash',
+        help='Model name to probe (default: gemini-1.5-flash)',
     )
     # Local/Ollama args
     parser.add_argument(
@@ -381,13 +381,13 @@ examples:
         elif args.mode == "local":
             mode_label = f"local ({args.ollama_host})"
         elif args.mode == "gemini":
-            model_label = args.model if args.model != "gpt-4o-2024-11-20" else "gemini-1.5-flash"
+            model_label = args.model
             mode_label = f"gemini ({model_label})"
         elif args.mode == "vertex":
-            model_label = args.model if args.model != "gpt-4o-2024-11-20" else "gemini-1.5-flash"
+            model_label = args.model
             mode_label = f"vertex ({model_label} / {args.vertex_region})"
         elif args.mode == "anthropic":
-            model_label = args.model if args.model != "gpt-4o-2024-11-20" else "claude-opus-4-7"
+            model_label = args.model if args.model != "gemini-1.5-flash" else "claude-sonnet-4-6"
             mode_label = f"anthropic ({model_label})"
         elif args.mode == "hash":
             mode_label = f"hash ({args.hash_host})"
