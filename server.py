@@ -468,13 +468,15 @@ class _Handler(http.server.BaseHTTPRequestHandler):
     # ── routing ───────────────────────────────────────────────────────────────
 
     def do_GET(self):
-        log.info('GET %s', self.path)
+        print(f'[SENTINEL] GET {self.path}', flush=True)
         try:
             self._do_GET_inner()
+            print(f'[SENTINEL] GET {self.path} done', flush=True)
         except BaseException as _e:
+            import traceback as _tb
+            print(f'[SENTINEL] GET {self.path} EXCEPTION: {_e}\n{_tb.format_exc()}', flush=True)
             log.error('Unhandled GET error for %s: %s', self.path, _e, exc_info=True)
             try:
-                import traceback as _tb
                 body = ('Internal server error:\n' + _tb.format_exc()).encode('utf-8', errors='replace')
                 self.send_response(500)
                 self.send_header('Content-Type', 'text/plain; charset=utf-8')
@@ -1425,17 +1427,19 @@ button:hover{{background:#2ea043}}
             self.wfile.write(content)
 
     def _serve_fleet(self):
-        log.info('_serve_fleet: start')
+        print('[SENTINEL] _serve_fleet: start', flush=True)
         try:
             devices = _get_store().list_devices()
-            log.info('_serve_fleet: got %d devices', len(devices))
+            print(f'[SENTINEL] _serve_fleet: got {len(devices)} devices', flush=True)
         except Exception as _e:
+            print(f'[SENTINEL] _serve_fleet: store error: {_e}', flush=True)
             log.error('_serve_fleet: store error: %s', _e, exc_info=True)
             devices = []
         try:
             body = _build_fleet_html(devices).encode('utf-8')
-            log.info('_serve_fleet: body built %d bytes', len(body))
+            print(f'[SENTINEL] _serve_fleet: body built {len(body)} bytes', flush=True)
         except Exception as _e:
+            print(f'[SENTINEL] _serve_fleet: build error: {_e}', flush=True)
             log.error('_build_fleet_html failed: %s', _e, exc_info=True)
             body = (
                 b'<html><body style="font:14px monospace;background:#0d1117;color:#f85149;padding:40px">'
@@ -1451,8 +1455,9 @@ button:hover{{background:#2ea043}}
             self.send_header('Access-Control-Allow-Origin', '*')
             self.end_headers()
             self.wfile.write(body)
-            log.info('_serve_fleet: response sent OK')
+            print(f'[SENTINEL] _serve_fleet: sent OK', flush=True)
         except Exception as _e:
+            print(f'[SENTINEL] _serve_fleet: send error: {_e}', flush=True)
             log.error('_serve_fleet: send failed: %s', _e, exc_info=True)
 
     def _serve_academy(self):
