@@ -428,6 +428,10 @@ def _run_scan(mode: str, target: str, profile: str, providers: list[str]):
 class _Handler(http.server.BaseHTTPRequestHandler):
     def log_message(self, *_): pass
 
+    def handle_error(self, *_):
+        import traceback as _tb
+        log.error('HTTP handler thread error: %s', _tb.format_exc())
+
     # ── auth helpers ──────────────────────────────────────────────────────────
 
     def _check_dashboard_auth(self) -> bool:
@@ -464,9 +468,10 @@ class _Handler(http.server.BaseHTTPRequestHandler):
     # ── routing ───────────────────────────────────────────────────────────────
 
     def do_GET(self):
+        log.info('GET %s', self.path)
         try:
             self._do_GET_inner()
-        except Exception as _e:
+        except BaseException as _e:
             log.error('Unhandled GET error for %s: %s', self.path, _e, exc_info=True)
             try:
                 import traceback as _tb
@@ -1420,12 +1425,16 @@ button:hover{{background:#2ea043}}
             self.wfile.write(content)
 
     def _serve_fleet(self):
+        log.info('_serve_fleet: start')
         try:
             devices = _get_store().list_devices()
-        except Exception:
+            log.info('_serve_fleet: got %d devices', len(devices))
+        except Exception as _e:
+            log.error('_serve_fleet: store error: %s', _e, exc_info=True)
             devices = []
         try:
             body = _build_fleet_html(devices).encode('utf-8')
+            log.info('_serve_fleet: body built %d bytes', len(body))
         except Exception as _e:
             log.error('_build_fleet_html failed: %s', _e, exc_info=True)
             body = (
@@ -1434,13 +1443,17 @@ button:hover{{background:#2ea043}}
                 __import__('traceback').format_exc().encode('utf-8', errors='replace') +
                 b'</pre></body></html>'
             )
-        self.send_response(200)
-        self.send_header('Content-Type', 'text/html; charset=utf-8')
-        self.send_header('Content-Length', len(body))
-        self.send_header('Cache-Control', 'no-store')
-        self.send_header('Access-Control-Allow-Origin', '*')
-        self.end_headers()
-        self.wfile.write(body)
+        try:
+            self.send_response(200)
+            self.send_header('Content-Type', 'text/html; charset=utf-8')
+            self.send_header('Content-Length', len(body))
+            self.send_header('Cache-Control', 'no-store')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            self.wfile.write(body)
+            log.info('_serve_fleet: response sent OK')
+        except Exception as _e:
+            log.error('_serve_fleet: send failed: %s', _e, exc_info=True)
 
     def _serve_academy(self):
         try:
