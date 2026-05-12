@@ -2254,18 +2254,23 @@ def main():
     _serve_port = args.port
 
     log_file = ROOT / '.sentinel-server.log'
+    _handlers: list[logging.Handler] = [logging.StreamHandler(sys.stderr)]
+    try:
+        _handlers.insert(0, logging.FileHandler(log_file, encoding='utf-8'))
+    except OSError as _e:
+        pass  # service account may not have write access; console-only logging
     logging.basicConfig(
         level=logging.INFO,
         format='%(asctime)s %(levelname)s %(name)s %(message)s',
-        handlers=[
-            logging.FileHandler(log_file, encoding='utf-8'),
-            logging.StreamHandler(sys.stderr),
-        ],
+        handlers=_handlers,
     )
 
-    _load_license()
-    from license import start_monitors
-    start_monitors(_get_store())
+    try:
+        _load_license()
+        from license import start_monitors
+        start_monitors(_get_store())
+    except Exception as _startup_err:
+        log.error('License/monitor startup error (non-fatal): %s', _startup_err, exc_info=True)
     server = http.server.ThreadingHTTPServer((args.host, args.port), _Handler)
 
     tls_cert = os.environ.get('SENTINEL_TLS_CERT', '')

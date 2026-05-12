@@ -26,7 +26,9 @@ class AgentStore:
         self._init_db()
 
     def _conn(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(str(self._path), check_same_thread=False)
+        # timeout=30: on Windows, a previous process may hold the WAL lock briefly
+        # after a service restart; wait up to 30s rather than raising immediately.
+        conn = sqlite3.connect(str(self._path), check_same_thread=False, timeout=30)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("PRAGMA foreign_keys=ON")
