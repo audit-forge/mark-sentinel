@@ -617,6 +617,8 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self._api_system_restart_agent()
         elif path == '/api/system/restart-server':
             self._api_system_restart_server()
+        elif path == '/api/fleet/scan/all':
+            self._api_fleet_scan_all()
         elif path.startswith('/api/fleet/scan/'):
             self._api_fleet_scan(path[len('/api/fleet/scan/'):])
         elif path == '/api/fleet/update/all':
@@ -1090,6 +1092,52 @@ button:hover{{background:#2ea043}}
         else:
             cmd_id = store.enqueue_command(device_id, 'scan_now')
             self._json({'status': 'queued', 'device_id': device_id, 'command_id': cmd_id})
+
+    def _api_fleet_scan_all(self):
+        """POST /api/fleet/scan/all — enqueue scans for every device with optional stagger.
+        Body: {"profiles": ["fedramp"], "stagger": "normal"}
+        stagger: "instant" (all at once), "normal" (25/30s), "slow" (10/60s)
+        """
+        body = {}
+        try:
+            length = _content_length(self.headers)
+            if length:
+                body = json.loads(self.rfile.read(length))
+        except Exception:
+            pass
+
+        _VALID = {'default', 'fedramp', 'cmmc', 'financial', 'smb'}
+        profiles = [p for p in (body.get('profiles') or []) if p in _VALID]
+        stagger  = body.get('stagger', 'normal')
+
+        PRESETS = {
+            'instant': (9999, 0),
+            'normal':  (25,   30),
+            'slow':    (10,   60),
+        }
+        batch_size, sleep_secs = PRESETS.get(stagger, PRESETS['normal'])
+
+        store   = _get_store()
+        devices = store.list_devices()
+        ids     = [d['device_id'] for d in devices if d.get('device_id')]
+        total   = len(ids)
+
+        def _dispatch():
+            for i in range(0, total, batch_size):
+                batch = ids[i:i + batch_size]
+                for did in batch:
+                    if profiles:
+                        for p in profiles:
+                            store.enqueue_command(did, f'scan_profile:{p}')
+                    else:
+                        store.enqueue_command(did, 'scan_now')
+                if sleep_secs and i + batch_size < total:
+                    time.sleep(sleep_secs)
+
+        threading.Thread(target=_dispatch, daemon=True, name='scan-all-dispatch').start()
+        self._json({'status': 'dispatching', 'total': total,
+                    'profiles': profiles or ['default'], 'stagger': stagger,
+                    'batch_size': batch_size, 'sleep_secs': sleep_secs})
 
     def _api_fleet_update(self, device_id: str):
         """POST /api/fleet/update/<device_id> — push update_self command to one device."""
@@ -1689,6 +1737,13 @@ body{{background:#0d1117;color:#c9d1d9;font-family:-apple-system,BlinkMacSystemF
          style="color:#58a6ff;border-color:#30363d;font-size:12px">&#9654; CISO Report</button>
       <button onclick="openReport('technical')" class="scan-btn"
          style="color:#8b949e;border-color:#30363d;font-size:12px">&#9654; Technical Report</button>
+      <select id="scan-all-stagger" class="form-select" style="font-size:12px;padding:3px 6px;height:28px" title="Scan stagger — spread scans over time to avoid network spikes">
+        <option value="normal">Normal (25/30s)</option>
+        <option value="slow">Slow (10/60s)</option>
+        <option value="instant">Instant</option>
+      </select>
+      <button id="btn-scan-all" class="scan-btn" onclick="scanAllDevices(this)"
+              style="color:#f0883e;border-color:#30363d;font-size:12px">&#9654;&#9654; Scan All</button>
       <button class="scan-btn" onclick="updateAllDevices()"
               style="color:#e3b341;border-color:#30363d;font-size:12px">Update All Agents</button>
     </div>
@@ -2172,6 +2227,34 @@ async function updateDevice(id) {{
     }}
   }} catch (e) {{
     if (btn) {{ btn.disabled = false; btn.textContent = 'Update'; }}
+  }}
+}}
+
+async function scanAllDevices(btn) {{
+  const profiles = [...document.querySelectorAll('.rpt-profile:checked')].map(c => c.value);
+  const stagger  = document.getElementById('scan-all-stagger')?.value || 'normal';
+  btn.disabled   = true;
+  btn.textContent = 'Queuing…';
+  try {{
+    const resp = await fetch('/api/fleet/scan/all', {{
+      method: 'POST',
+      headers: {{'Content-Type': 'application/json'}},
+      body: JSON.stringify({{profiles, stagger}})
+    }});
+    const data = await resp.json();
+    if (resp.ok) {{
+      const label = stagger === 'instant' ? 'all at once' :
+                    stagger === 'slow'    ? `10 per 60s` : `25 per 30s`;
+      btn.textContent = `Dispatching ${{data.total}} (${{label}})`;
+      setTimeout(() => {{ btn.disabled = false; btn.textContent = '►► Scan All'; }}, 10000);
+    }} else {{
+      btn.disabled = false;
+      btn.textContent = '►► Scan All';
+      alert(data.error || 'Scan All failed');
+    }}
+  }} catch (e) {{
+    btn.disabled = false;
+    btn.textContent = '►► Scan All';
   }}
 }}
 
