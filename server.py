@@ -1106,10 +1106,14 @@ button:hover{{background:#2ea043}}
             self._json({'error': str(e)}, 500)
 
     def _api_discover(self):
-        """GET /api/discover — scan local subnet for AI services (runs in thread)."""
+        """GET /api/discover[?subnets=10.0.1.0/24,10.0.2.0/24] — scan for AI services."""
         try:
-            from discovery import discover
-            services = discover()
+            from urllib.parse import urlparse, parse_qs
+            from discovery import discover, expand_subnets
+            qs = parse_qs(urlparse(self.path).query)
+            raw = qs.get('subnets', [''])[0].strip()
+            hosts = expand_subnets(raw) if raw else None
+            services = discover(hosts=hosts)
             self._json({'services': services, 'count': len(services)})
         except Exception as e:
             log.error('discovery error: %s', e, exc_info=True)
@@ -1587,6 +1591,13 @@ body{{background:#0d1117;color:#c9d1d9;font-family:-apple-system,BlinkMacSystemF
     AI Service Discovery
     <button id="discover-btn" class="scan-btn" style="margin-left:12px" onclick="runDiscovery()">Scan Network</button>
   </div>
+  <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap">
+    <label style="font-size:12px;color:#6e7681;white-space:nowrap">Subnets to scan:</label>
+    <input id="discover-subnets" type="text" placeholder="auto-detect  (e.g. 10.0.1.0/24, 192.168.2.0/24)"
+      style="flex:1;min-width:260px;max-width:540px;background:#0d1117;border:1px solid #30363d;border-radius:4px;
+             color:#e6edf3;font-size:12px;font-family:monospace;padding:5px 10px;outline:none" />
+    <span style="font-size:11px;color:#484f58">Leave blank to scan the local subnet automatically</span>
+  </div>
   <div id="discover-panel" style="background:#161b22;border:1px solid #21262d;border-radius:8px;padding:18px;min-height:60px;margin-bottom:28px">
     <div class="empty" style="padding:12px">Click Scan Network to probe the local subnet for AI services.</div>
   </div>
@@ -1801,11 +1812,14 @@ async function removeDevice(did, hostname) {{
 async function runDiscovery() {{
   const btn = document.getElementById('discover-btn');
   const panel = document.getElementById('discover-panel');
+  const subnetInput = (document.getElementById('discover-subnets').value || '').trim();
   btn.disabled = true;
   btn.textContent = 'Scanning…';
-  panel.innerHTML = '<div class="empty" style="padding:12px">Probing local subnet + processes + environment — this may take 10–30 seconds…</div>';
+  const subnetHint = subnetInput ? ` (${subnetInput})` : ' (auto-detect)';
+  panel.innerHTML = `<div class="empty" style="padding:12px">Probing subnet${{subnetHint}} for AI services — this may take 10–30 seconds…</div>`;
   try {{
-    const resp = await fetch('/api/discover');
+    const url = subnetInput ? `/api/discover?subnets=${{encodeURIComponent(subnetInput)}}` : '/api/discover';
+    const resp = await fetch(url);
     const data = await resp.json();
     if (!resp.ok) throw new Error(data.error || 'HTTP ' + resp.status);
     const svcs = data.services || [];

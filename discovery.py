@@ -252,6 +252,48 @@ def _local_subnet_hosts(max_hosts: int = 254) -> list[str]:
         return ['127.0.0.1']
 
 
+def expand_subnets(subnets_str: str, max_hosts_per_subnet: int = 254) -> list[str]:
+    """
+    Parse a comma-separated list of CIDRs or bare IPs and return a flat host list.
+    Examples:
+      "10.0.1.0/24"                     → 254 hosts in 10.0.1.x
+      "10.0.1.0/24, 10.0.2.0/24"        → up to 508 hosts across two subnets
+      "192.168.1.50"                     → single host
+      "10.0.1.1-10.0.1.20"              → range (start–end, same /24 only)
+    Duplicates are removed while preserving order.
+    """
+    hosts: list[str] = []
+    seen: set[str] = set()
+
+    def _add(ip: str) -> None:
+        if ip not in seen:
+            seen.add(ip)
+            hosts.append(ip)
+
+    for token in subnets_str.split(','):
+        token = token.strip()
+        if not token:
+            continue
+        try:
+            if '/' in token:
+                net = ipaddress.IPv4Network(token, strict=False)
+                for h in list(net.hosts())[:max_hosts_per_subnet]:
+                    _add(str(h))
+            elif '-' in token:
+                start_s, end_s = token.split('-', 1)
+                start = int(ipaddress.IPv4Address(start_s.strip()))
+                end   = int(ipaddress.IPv4Address(end_s.strip()))
+                for i in range(start, min(end + 1, start + max_hosts_per_subnet)):
+                    _add(str(ipaddress.IPv4Address(i)))
+            else:
+                ipaddress.IPv4Address(token)  # validate
+                _add(token)
+        except ValueError:
+            logger.warning('expand_subnets: skipping invalid entry %r', token)
+
+    return hosts
+
+
 async def _discover_async(hosts: list[str]) -> list[dict]:
     sem = asyncio.Semaphore(_MAX_CONCURRENT)
     loop = asyncio.get_running_loop()
