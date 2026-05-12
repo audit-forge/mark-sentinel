@@ -918,15 +918,26 @@ function renderScan(){
         <input id="scan-target" class="form-input" type="text" value="." placeholder="Path to project (default: current directory)">
       </div>
       ${provRow}
-      <div class="form-row">
-        <span class="form-label">Profile</span>
-        <select id="scan-profile" class="form-select">
-          <option value="default">Default</option>
-          <option value="financial">Financial Services (NIST AI RMF / SR 26-2)</option>
-          <option value="fedramp">FedRAMP / NIST 800-53</option>
-          <option value="cmmc">CMMC</option>
-          <option value="smb">SMB</option>
-        </select>
+      <div class="form-row" style="align-items:flex-start">
+        <span class="form-label" style="padding-top:3px">Profiles</span>
+        <div style="display:flex;flex-direction:column;gap:6px">
+          ${[
+            ['default',   'Default',                      'All AI-STIG checks'],
+            ['fedramp',   'FedRAMP / NIST 800-53',        'FedRAMP Moderate controls'],
+            ['cmmc',      'CMMC 2.0',                     'Cybersecurity Maturity Model'],
+            ['financial', 'Financial Services',           'NIST AI RMF / SR 26-2'],
+            ['smb',       'SMB',                          'Small-medium business baseline'],
+          ].map(([v,l,d])=>`
+            <label style="display:flex;align-items:flex-start;gap:8px;cursor:pointer">
+              <input type="checkbox" class="profile-cb" value="${v}" ${v==='default'?'checked':''}
+                     style="margin-top:3px;accent-color:#58a6ff;cursor:pointer"
+                     onchange="updateRunBtn()">
+              <span>
+                <span style="font-size:12px;font-weight:600;color:#e6edf3">${l}</span>
+                <span style="font-size:11px;color:#6e7681;margin-left:6px">${d}</span>
+              </span>
+            </label>`).join('')}
+        </div>
       </div>
       <div class="form-row" style="justify-content:flex-end;margin-bottom:0">
         <button class="run-btn" id="run-btn" onclick="runScan()" ${_scanRunning?'disabled':''}>
@@ -939,22 +950,69 @@ function renderScan(){
   if(_scanRunning)_attachEventStream();
 }
 
-function runScan(){
+function updateRunBtn(){
+  const btn=document.getElementById('run-btn');
+  if(!btn||_scanRunning)return;
+  const n=document.querySelectorAll('.profile-cb:checked').length;
+  btn.disabled=n===0;
+  btn.textContent=n>0?`▶ Run ${n} Scan${n>1?'s':''}`:' Select at least one profile';
+}
+
+function _runOneProfile(target,profile,provider){
+  return new Promise((resolve,reject)=>{
+    const body={mode:scanMode,target,profile,providers:scanMode==='single'?[provider]:[]};
+    fetch('/api/scan',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
+      .then(r=>r.json())
+      .then(d=>{
+        if(d.error){reject(d.error);return;}
+        const es=new EventSource('/api/events');
+        const term=document.getElementById('scan-term');
+        es.onmessage=e=>{
+          const d=JSON.parse(e.data);
+          if(d.t==='log'&&term){
+            const line=d.line;
+            const cls=line.includes('[✓]')||line.includes(' PASS')?'t-ok':line.includes('[✗]')||line.includes(' FAIL')||line.toLowerCase().includes('error')?'t-err':'';
+            const div=document.createElement('div');
+            if(cls)div.className=cls;
+            div.textContent=line;
+            term.appendChild(div);
+            term.scrollTop=term.scrollHeight;
+          } else if(d.t==='done'){
+            es.close();
+            if(d.status==='done')resolve();
+            else reject(d.status);
+          }
+        };
+        es.onerror=()=>{es.close();reject('Connection to server lost.');};
+      })
+      .catch(reject);
+  });
+}
+
+async function runScan(){
   if(_scanRunning)return;
+  const profiles=[...document.querySelectorAll('.profile-cb:checked')].map(cb=>cb.value);
+  if(!profiles.length)return;
   _scanRunning=true;
   const target=document.getElementById('scan-target')?.value?.trim()||'.';
-  const profile=document.getElementById('scan-profile')?.value||'default';
   const provider=document.getElementById('scan-provider')?.value||'config';
   const term=document.getElementById('scan-term');
   if(term){term.innerHTML='';term.style.display='block';}
   document.getElementById('scan-result').innerHTML='';
-  document.getElementById('run-btn').disabled=true;
-  document.getElementById('run-btn').textContent='⏳ Scanning…';
-  const body={mode:scanMode,target,profile,providers:scanMode==='single'?[provider]:[]};
-  fetch('/api/scan',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
-    .then(r=>r.json())
-    .then(d=>{if(d.error){_scanFinish('error',d.error);}else{_attachEventStream();}})
-    .catch(e=>{_scanFinish('error',String(e));});
+  const btn=document.getElementById('run-btn');
+  for(let i=0;i<profiles.length;i++){
+    const profile=profiles[i];
+    if(btn){btn.disabled=true;btn.textContent=`⏳ Scan ${i+1}/${profiles.length} — ${profile}…`;}
+    if(term){
+      const hdr=document.createElement('div');
+      hdr.style.cssText='color:#58a6ff;font-weight:600;margin-top:'+(i>0?'12px':'0');
+      hdr.textContent=`── ${profile} ──`;
+      term.appendChild(hdr);
+    }
+    try{await _runOneProfile(target,profile,provider);}
+    catch(e){_scanFinish('error',String(e));return;}
+  }
+  _scanFinish('done');
 }
 
 function _attachEventStream(){
