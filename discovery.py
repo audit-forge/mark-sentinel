@@ -108,14 +108,59 @@ def _classify_models(model_ids: list[str]) -> dict[str, list[str]]:
 
 # ── HTTP response fingerprinting ──────────────────────────────────────────────
 
-def _fingerprint(body: bytes, hint: str) -> tuple[str, list[str]]:
+_HEADER_SIGS: list[tuple[str, str]] = [
+    ('ollama',              'Ollama'),
+    ('lm-studio',           'LM Studio'),
+    ('lmstudio',            'LM Studio'),
+    ('localai',             'LocalAI'),
+    ('vllm',                'vLLM'),
+    ('text-generation',     'HuggingFace TGI'),
+    ('fastapi',             'FastAPI (AI app)'),
+    ('uvicorn',             'Python AI service'),
+    ('flask',               'Flask (AI app)'),
+    ('gradio',              'Gradio (AI app)'),
+    ('streamlit',           'Streamlit (AI app)'),
+    ('koboldai',            'KoboldAI'),
+    ('tabby',               'TabbyML'),
+    ('jan',                 'Jan (local AI)'),
+    ('openedai',            'OpenedAI'),
+]
+
+_BODY_SIGS: list[tuple[str, str]] = [
+    ('"ollama"',            'Ollama'),
+    ('"lm studio"',         'LM Studio'),
+    ('"lmstudio"',          'LM Studio'),
+    ('"localai"',           'LocalAI'),
+    ('"vllm"',              'vLLM'),
+    ('gradio',              'Gradio (AI app)'),
+    ('koboldai',            'KoboldAI'),
+    ('tabbyml',             'TabbyML'),
+    ('"openai"',            'OpenAI-compatible server'),
+]
+
+
+def _fingerprint(body: bytes, hint: str, headers: dict | None = None) -> tuple[str, list[str]]:
     """
-    Parse HTTP response body to identify service and extract model names.
+    Parse HTTP response body and headers to identify service and extract model names.
     Returns (service_label, [model_ids]).
     """
+    # Check response headers first — Server header often names the framework
+    if headers:
+        combined = ' '.join(f'{k}:{v}' for k, v in headers.items()).lower()
+        for sig, label in _HEADER_SIGS:
+            if sig in combined:
+                hint = label
+                break
+
+    # Try JSON parsing
     try:
         data = json.loads(body)
     except Exception:
+        # Check raw body text for known signatures
+        body_lower = body[:2048].decode('utf-8', errors='ignore').lower()
+        for sig, label in _BODY_SIGS:
+            if sig in body_lower:
+                return label, []
         return hint, []
 
     # Ollama /api/tags — {"models": [{"name": "llama3:latest", ...}]}
@@ -156,6 +201,16 @@ def _fingerprint(body: bytes, hint: str) -> tuple[str, list[str]]:
     if isinstance(data, dict) and data.get('status') in ('healthy', 'ok', 'OK'):
         return hint, []
 
+    # Hash/Sentinel status endpoint
+    if isinstance(data, dict) and 'server' in data and 'version' in data:
+        return data.get('server', hint), []
+
+    # Generic: scan JSON keys/values for known service identifiers
+    flat = json.dumps(data).lower()
+    for sig, label in _BODY_SIGS:
+        if sig in flat:
+            return label, []
+
     return hint, []
 
 
@@ -173,14 +228,15 @@ async def _tcp_open(host: str, port: int) -> bool:
         return False
 
 
-def _http_probe(host: str, port: int, path: str) -> tuple[int | None, bytes]:
+def _http_probe(host: str, port: int, path: str) -> tuple[int | None, bytes, dict]:
     try:
         url = f'http://{host}:{port}{path}'
         req = _urlreq.Request(url, headers={'User-Agent': 'sentinel-discovery/1.0'})
         with _urlreq.urlopen(req, timeout=_HTTP_TIMEOUT) as resp:
-            return resp.status, resp.read(16384)
+            hdrs = dict(resp.headers)
+            return resp.status, resp.read(16384), hdrs
     except Exception:
-        return None, b''
+        return None, b'', {}
 
 
 def _local_subnet_hosts(max_hosts: int = 254) -> list[str]:
@@ -205,8 +261,9 @@ async def _discover_async(hosts: list[str]) -> list[dict]:
         async with sem:
             if not await _tcp_open(host, port):
                 return
-            status, body = await loop.run_in_executor(None, _http_probe, host, port, path)
-            service, models = _fingerprint(body, hint)
+            status, body, hdrs = await loop.run_in_executor(None, _http_probe, host, port, path)
+            fallback = hint if hint != 'AI service' else f'Unknown service (port {port})'
+            service, models = _fingerprint(body, fallback, hdrs)
             results.append({
                 'host':          host,
                 'port':          port,
