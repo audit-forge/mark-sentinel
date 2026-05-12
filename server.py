@@ -217,7 +217,7 @@ def _risk_score_html(fail, warn, total) -> int:
     return max(0, 100 - round((fail * 3 + warn) / max(total, 1) * 100))
 
 
-def _build_fleet_report_html(devices: list, tier: str) -> str:
+def _build_fleet_report_html(devices: list, tier: str, profile: str = '') -> str:
     from datetime import datetime, timezone
     import html as _html
 
@@ -273,11 +273,20 @@ tr:hover td{{background:#161b22}}
 </style></head><body>
 <div class="toolbar">
   <span style="flex:1;font-size:13px;font-weight:600;color:#c9d1d9">M.A.R.K. Sentinel &mdash; Fleet {esc(tier_label)}</span>
-  <a href="/api/fleet/report?tier={tier}&fmt=pdf" download="sentinel_fleet_{tier}.pdf" style="{btn_style};color:#3fb950;border-color:#238636">&#8659; Download PDF</a>
+  <select onchange="location.href='/api/fleet/report?tier={tier}&fmt=html'+(this.value?'&profile='+this.value:'')"
+          style="background:#21262d;border:1px solid #30363d;color:#c9d1d9;border-radius:4px;padding:3px 8px;font-size:12px;cursor:pointer">
+    <option value="" {'selected' if not profile else ''}>All profiles</option>
+    <option value="default" {'selected' if profile=='default' else ''}>Default</option>
+    <option value="fedramp" {'selected' if profile=='fedramp' else ''}>FedRAMP / NIST 800-53</option>
+    <option value="cmmc" {'selected' if profile=='cmmc' else ''}>CMMC 2.0</option>
+    <option value="financial" {'selected' if profile=='financial' else ''}>Financial Services</option>
+    <option value="smb" {'selected' if profile=='smb' else ''}>SMB</option>
+  </select>
+  <a href="/api/fleet/report?tier={tier}&fmt=pdf{'&profile='+profile if profile else ''}" download="sentinel_fleet_{tier}{'_'+profile if profile else ''}.pdf" style="{btn_style};color:#3fb950;border-color:#238636">&#8659; Download PDF</a>
   <button onclick="window.print()" style="{btn_style}">&#128438; Print</button>
 </div>
 <h1>M.A.R.K. Sentinel &mdash; Fleet {esc(tier_label)}</h1>
-<div class="meta">Generated {esc(now)} &nbsp;&bull;&nbsp; {len(devices)} device(s) &nbsp;&bull;&nbsp; Confidential</div>
+<div class="meta">Generated {esc(now)} &nbsp;&bull;&nbsp; {len(devices)} device(s){' &nbsp;&bull;&nbsp; Profile: <strong>' + esc(profile.upper()) + '</strong>' if profile else ''} &nbsp;&bull;&nbsp; Confidential</div>
 <div class="cards">
   <div class="card"><div class="card-n score">{fleet_score}%</div><div class="card-l">Fleet Score</div></div>
   <div class="card"><div class="card-n fail">{total_fail}</div><div class="card-l">Failing Checks</div></div>
@@ -1111,18 +1120,25 @@ button:hover{{background:#2ea043}}
             self._json({'error': str(e)}, 500)
 
     def _api_fleet_report(self):
-        """GET /api/fleet/report?tier=executive|ciso|technical&fmt=pdf|html|json"""
+        """GET /api/fleet/report?tier=executive|ciso|technical&fmt=pdf|html|json[&profile=fedramp]"""
         from urllib.parse import parse_qs, urlparse as _up
         qs = parse_qs(_up(self.path).query)
-        tier = (qs.get('tier', ['ciso'])[0]).lower()
-        fmt  = (qs.get('fmt',  ['html'])[0]).lower()
+        tier    = (qs.get('tier',    ['ciso'])[0]).lower()
+        fmt     = (qs.get('fmt',     ['html'])[0]).lower()
+        profile = (qs.get('profile', [''])[0]).lower().strip()
         if tier not in ('executive', 'ciso', 'technical'):
             tier = 'ciso'
+        _VALID_PROFILES = {'default', 'fedramp', 'cmmc', 'financial', 'smb'}
+        if profile not in _VALID_PROFILES:
+            profile = ''
         try:
             store = _get_store()
             devices = store.list_devices()
             for d in devices:
                 d['_report'] = store.get_latest_report(d['device_id']) or {}
+            if profile:
+                devices = [d for d in devices if (d.get('profile') or '').lower() == profile or
+                           (d['_report'].get('profile') or '').lower() == profile]
 
             if fmt == 'json':
                 payload = [{'device_id': d['device_id'], 'hostname': d['hostname'],
@@ -1136,8 +1152,8 @@ button:hover{{background:#2ea043}}
             if fmt == 'pdf':
                 try:
                     from output.fleet_report import generate_fleet_pdf
-                    pdf_bytes = generate_fleet_pdf(devices, tier=tier)
-                    fname = f'sentinel_fleet_{tier}.pdf'
+                    pdf_bytes = generate_fleet_pdf(devices, tier=tier, profile=profile or None)
+                    fname = f'sentinel_fleet_{tier}{"_" + profile if profile else ""}.pdf'
                     self.send_response(200)
                     self.send_header('Content-Type', 'application/pdf')
                     self.send_header('Content-Disposition', f'attachment; filename="{fname}"')
@@ -1152,7 +1168,7 @@ button:hover{{background:#2ea043}}
                     self._send(500, f'PDF generation failed: {pdf_err}\n\n{tb}'.encode(), 'text/plain')
                     return
 
-            html = _build_fleet_report_html(devices, tier)
+            html = _build_fleet_report_html(devices, tier, profile=profile)
             data = html.encode('utf-8')
             self.send_response(200)
             self.send_header('Content-Type', 'text/html; charset=utf-8')
@@ -1644,13 +1660,22 @@ body{{background:#0d1117;color:#c9d1d9;font-family:-apple-system,BlinkMacSystemF
 
   <div class="sec-hdr" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
     <span>Connected Devices</span>
-    <div style="display:flex;gap:8px;flex-wrap:wrap">
-      <a href="/api/fleet/report?tier=executive&fmt=html" target="_blank" class="scan-btn"
-         style="text-decoration:none;color:#3fb950;border-color:#30363d;font-size:12px">&#9654; Executive Report</a>
-      <a href="/api/fleet/report?tier=ciso&fmt=html" target="_blank" class="scan-btn"
-         style="text-decoration:none;color:#58a6ff;border-color:#30363d;font-size:12px">&#9654; CISO Report</a>
-      <a href="/api/fleet/report?tier=technical&fmt=html" target="_blank" class="scan-btn"
-         style="text-decoration:none;color:#8b949e;border-color:#30363d;font-size:12px">&#9654; Technical Report</a>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+      <select id="report-profile" class="form-select" style="font-size:12px;padding:3px 8px;height:28px"
+              title="Filter report by compliance profile">
+        <option value="">All profiles</option>
+        <option value="default">Default</option>
+        <option value="fedramp">FedRAMP / NIST 800-53</option>
+        <option value="cmmc">CMMC 2.0</option>
+        <option value="financial">Financial Services</option>
+        <option value="smb">SMB</option>
+      </select>
+      <button onclick="openReport('executive')" class="scan-btn"
+         style="color:#3fb950;border-color:#30363d;font-size:12px">&#9654; Executive Report</button>
+      <button onclick="openReport('ciso')" class="scan-btn"
+         style="color:#58a6ff;border-color:#30363d;font-size:12px">&#9654; CISO Report</button>
+      <button onclick="openReport('technical')" class="scan-btn"
+         style="color:#8b949e;border-color:#30363d;font-size:12px">&#9654; Technical Report</button>
       <button class="scan-btn" onclick="updateAllDevices()"
               style="color:#e3b341;border-color:#30363d;font-size:12px">Update All Agents</button>
     </div>
@@ -2299,6 +2324,12 @@ function _sysLog(msg, color) {{
   el.style.display = 'block';
   el.style.color = color || '#8b949e';
   el.textContent = msg;
+}}
+
+function openReport(tier) {{
+  const profile = document.getElementById('report-profile')?.value || '';
+  const url = '/api/fleet/report?tier=' + tier + '&fmt=html' + (profile ? '&profile=' + profile : '');
+  window.open(url, '_blank');
 }}
 
 async function downloadFleetReport(tier, btn) {{
