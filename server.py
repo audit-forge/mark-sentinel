@@ -1344,10 +1344,22 @@ button:hover{{background:#2ea043}}
         self._json({'status': 'restarting'})
 
     def _api_system_restart_server(self):
-        """POST /api/system/restart-server — restart this server process via os.execv."""
+        """POST /api/system/restart-server — restart this server process."""
         def _do_restart():
             time.sleep(0.5)
-            os.execv(sys.executable, [sys.executable] + sys.argv)
+            if sys.platform == 'win32':
+                # os.execv is unreliable on Windows when called from a thread;
+                # spawn a detached child process then hard-exit the current one.
+                subprocess.Popen(
+                    [sys.executable] + sys.argv,
+                    creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,
+                    stdin=subprocess.DEVNULL,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+                os._exit(0)
+            else:
+                os.execv(sys.executable, [sys.executable] + sys.argv)
         threading.Thread(target=_do_restart, daemon=True).start()
         self._json({'status': 'restarting'})
 
@@ -2011,7 +2023,7 @@ async function runDiscovery() {{
       const totalHosts = hostCount;
       const totalSvcs  = svcs.filter(s => s.source === 'network_probe').length;
       panel.innerHTML = html + `<div style="font-size:11px;color:#484f58;margin-top:2px;display:flex;align-items:center;gap:12px">
-        <span>${{totalHosts}} host${{totalHosts !== 1 ? 's' : ''}} · ${{totalSvcs}} network service${{totalSvcs !== 1 ? 's' : ''}}${{procs.length ? ' · ' + procs.length + ' process' + (procs.length !== 1 ? 'es' : '') : ''}}${{envs.length ? ' · ' + envs.length + ' API key' + (envs.length !== 1 ? 's' : '') : ''}}</span>
+        <span>${{totalHosts}} host${{totalHosts !== 1 ? 's' : ''}} · ${{totalSvcs}} network service${{totalSvcs !== 1 ? 's' : ''}}${{procs.length ? ' · ' + procs.length + ' process' + (procs.length !== 1 ? 'es' : '') : ''}}${{envs.length ? ' · ' + envs.length + ' API key' + (envs.length !== 1 ? 's' : '') : ''}} · <span style="color:#30363d">v2025-c</span></span>
         <button onclick="this.closest('div').parentElement.innerHTML='<div class=\\'empty\\'style=\\'padding:12px\\'>Click Scan Network to detect AI services.</div>'" style="background:none;border:1px solid #30363d;color:#6e7681;border-radius:3px;padding:2px 8px;font-size:11px;cursor:pointer">Clear</button>
       </div>`;
     }}
