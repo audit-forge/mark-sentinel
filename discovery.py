@@ -220,16 +220,20 @@ def _fingerprint(body: bytes, hint: str, headers: dict | None = None) -> tuple[s
         return 'llama.cpp server', [model_name] if model_name else []
 
     # Jupyter /api/kernels — [{"id": "...", "name": "python3", "execution_state": "idle"}]
-    if (isinstance(data, list) and data
-            and isinstance(data[0], dict) and 'execution_state' in data[0]):
-        kernel_names = [k.get('name', 'unknown') for k in data if isinstance(k, dict)]
-        unique = list(dict.fromkeys(kernel_names))
-        return 'Jupyter (kernels active)', unique
+    # Empty list means server is running but no notebooks are open.
+    if isinstance(data, list) and all(isinstance(x, dict) for x in data):
+        active = [k for k in data if isinstance(k, dict) and 'execution_state' in k]
+        if active:
+            kernel_names = list(dict.fromkeys(k.get('name', 'unknown') for k in active))
+            return 'Jupyter (kernels active)', kernel_names
+        if 'jupyter' in hint.lower():
+            return 'Jupyter / AI app', ['0 kernels running']
 
-    # Jupyter /api/status — {"kernels": N, "connections": N} with no active kernels yet
+    # Jupyter /api/status — {"kernels": N, "connections": N}
     if isinstance(data, dict) and 'kernels' in data and 'connections' in data:
         n = data['kernels']
-        return 'Jupyter / AI app', [f'{n} kernel{"s" if n != 1 else ""} running'] if n else []
+        label = f'{n} kernel{"s" if n != 1 else ""} running'
+        return 'Jupyter / AI app', [label]
 
     # Generic single-model field — {"model": "model-name"} used by some custom servers
     if isinstance(data, dict) and isinstance(data.get('model'), str) and data['model']:
