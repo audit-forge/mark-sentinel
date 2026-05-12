@@ -997,7 +997,10 @@ button:hover{{background:#2ea043}}
         self._json({'command': command})
 
     def _api_fleet_scan(self, device_id: str):
-        """POST /api/fleet/scan/<device_id> — enqueue an on-demand scan for a device."""
+        """POST /api/fleet/scan/<device_id> — enqueue one or more profile scans for a device.
+        Body (optional): {"profiles": ["fedramp", "cmmc"]}
+        If profiles is absent or empty, falls back to scan_now (uses agent's saved profile).
+        """
         if not device_id:
             self._json({'error': 'missing device_id'}, 400)
             return
@@ -1005,8 +1008,26 @@ button:hover{{background:#2ea043}}
         if store.get_device(device_id) is None:
             self._json({'error': 'device not found'}, 404)
             return
-        cmd_id = store.enqueue_command(device_id, 'scan_now')
-        self._json({'status': 'queued', 'device_id': device_id, 'command_id': cmd_id})
+
+        body = {}
+        try:
+            length = _content_length(self.headers)
+            if length:
+                body = json.loads(self.rfile.read(length))
+        except Exception:
+            pass
+
+        profiles = [p.strip() for p in (body.get('profiles') or []) if p.strip()]
+        _VALID = {'default', 'fedramp', 'cmmc', 'financial', 'smb'}
+        profiles = [p for p in profiles if p in _VALID]
+
+        if profiles:
+            cmd_ids = [store.enqueue_command(device_id, f'scan_profile:{p}') for p in profiles]
+            self._json({'status': 'queued', 'device_id': device_id,
+                        'profiles': profiles, 'command_ids': cmd_ids})
+        else:
+            cmd_id = store.enqueue_command(device_id, 'scan_now')
+            self._json({'status': 'queued', 'device_id': device_id, 'command_id': cmd_id})
 
     def _api_fleet_update(self, device_id: str):
         """POST /api/fleet/update/<device_id> — push update_self command to one device."""
@@ -1447,7 +1468,7 @@ def _build_fleet_html(devices: list[dict]) -> str:
           <td>{age}</td>
           <td><span class="risk-dot {rc}"></span></td>
           <td onclick="event.stopPropagation()" style="white-space:nowrap">
-            <button class="scan-btn" id="sb-{did}" onclick="scanDevice('{did}')">Scan Now</button>
+            <button class="scan-btn" id="sb-{did}" onclick="openScanModal('{did}',this)">Scan ▾</button>
             <button class="scan-btn" id="ub-{did}" onclick="updateDevice('{did}')"
                     style="margin-left:4px;color:#e3b341;border-color:#30363d">Update</button>
             <a href="/fleet/device/{did}/dashboard" target="_blank"
@@ -1725,7 +1746,7 @@ function renderDevicePage() {{
       <td>${{age}}</td>
       <td><span class="risk-dot ${{rc}}"></span></td>
       <td onclick="event.stopPropagation()" style="white-space:nowrap">
-        <button class="scan-btn" id="sb-${{esc(did)}}" onclick="scanDevice('${{esc(did)}}')" >Scan Now</button>
+        <button class="scan-btn" id="sb-${{esc(did)}}" onclick="openScanModal('${{esc(did)}}',this)">Scan ▾</button>
         <button class="scan-btn" id="ub-${{esc(did)}}" onclick="updateDevice('${{esc(did)}}')"
                 style="margin-left:4px;color:#e3b341;border-color:#30363d">Update</button>
         <a href="/fleet/device/${{esc(did)}}/dashboard" target="_blank"
@@ -1934,22 +1955,88 @@ async function runDiscovery() {{
   }}
 }}
 
-async function scanDevice(id) {{
-  const btn = document.getElementById('sb-' + id);
-  if (btn) {{ btn.disabled = true; btn.textContent = 'Queued…'; }}
-  try {{
-    const resp = await fetch('/api/fleet/scan/' + id, {{method: 'POST'}});
-    const data = await resp.json();
-    if (resp.ok) {{
-      if (btn) btn.textContent = 'Queued ✓';
-      setTimeout(() => {{ if (btn) {{ btn.disabled = false; btn.textContent = 'Scan Now'; }} }}, 5000);
-    }} else {{
-      if (btn) {{ btn.disabled = false; btn.textContent = 'Error'; }}
-      alert(data.error || 'Failed to queue scan');
+const _SCAN_PROFILES = [
+  {{id:'default',   label:'Default',             desc:'All AI-STIG checks'}},
+  {{id:'fedramp',   label:'FedRAMP',             desc:'FedRAMP Moderate controls'}},
+  {{id:'cmmc',      label:'CMMC 2.0',            desc:'Cybersecurity Maturity Model'}},
+  {{id:'financial', label:'Financial Services',  desc:'Financial sector AI controls'}},
+  {{id:'smb',       label:'SMB',                 desc:'Small-medium business baseline'}},
+];
+
+function openScanModal(id, triggerBtn) {{
+  // Remove any existing modal
+  const old = document.getElementById('scan-modal-overlay');
+  if (old) {{ old.remove(); if (old.dataset.deviceId === id) return; }}
+
+  const overlay = document.createElement('div');
+  overlay.id = 'scan-modal-overlay';
+  overlay.dataset.deviceId = id;
+  overlay.style.cssText = 'position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center';
+
+  const modal = document.createElement('div');
+  modal.style.cssText = 'background:#161b22;border:1px solid #30363d;border-radius:8px;padding:20px 24px;min-width:280px;max-width:340px;box-shadow:0 8px 32px rgba(0,0,0,.6)';
+
+  const hostname = triggerBtn.closest('tr')?.querySelector('.dev-host')?.textContent || id.slice(0,12);
+
+  modal.innerHTML = `
+    <div style="font-size:13px;font-weight:600;color:#e6edf3;margin-bottom:4px">Select Profiles to Scan</div>
+    <div style="font-size:11px;color:#6e7681;margin-bottom:14px">${{esc(hostname)}}</div>
+    <div id="smp-list" style="display:flex;flex-direction:column;gap:8px;margin-bottom:16px">
+      ${{_SCAN_PROFILES.map(p => `
+        <label style="display:flex;align-items:flex-start;gap:10px;cursor:pointer;padding:7px 10px;border:1px solid #21262d;border-radius:5px;transition:border-color .15s"
+               onmouseover="this.style.borderColor='#30363d'" onmouseout="this.style.borderColor='#21262d'">
+          <input type="checkbox" value="${{p.id}}" style="margin-top:2px;accent-color:#58a6ff;cursor:pointer">
+          <span>
+            <span style="font-size:12px;font-weight:600;color:#e6edf3;display:block">${{p.label}}</span>
+            <span style="font-size:11px;color:#6e7681">${{p.desc}}</span>
+          </span>
+        </label>`).join('')}}
+    </div>
+    <div style="display:flex;gap:8px;justify-content:flex-end">
+      <button id="smp-cancel" style="background:none;border:1px solid #30363d;color:#6e7681;border-radius:4px;padding:5px 14px;font-size:12px;cursor:pointer">Cancel</button>
+      <button id="smp-run" style="background:#1f6feb;border:1px solid #1f6feb;color:#fff;border-radius:4px;padding:5px 14px;font-size:12px;cursor:pointer;font-weight:600" disabled>Run Scans</button>
+    </div>`;
+
+  overlay.appendChild(modal);
+  document.body.appendChild(overlay);
+
+  const runBtn = modal.querySelector('#smp-run');
+  const cancelBtn = modal.querySelector('#smp-cancel');
+  const checkboxes = modal.querySelectorAll('input[type=checkbox]');
+
+  const updateRunBtn = () => {{
+    const n = [...checkboxes].filter(c => c.checked).length;
+    runBtn.disabled = n === 0;
+    runBtn.textContent = n > 0 ? `Run ${{n}} Scan${{n > 1 ? 's' : ''}}` : 'Run Scans';
+  }};
+  checkboxes.forEach(c => c.addEventListener('change', updateRunBtn));
+
+  cancelBtn.onclick = () => overlay.remove();
+  overlay.addEventListener('click', e => {{ if (e.target === overlay) overlay.remove(); }});
+
+  runBtn.onclick = async () => {{
+    const profiles = [...checkboxes].filter(c => c.checked).map(c => c.value);
+    overlay.remove();
+    const btn = document.getElementById('sb-' + id);
+    if (btn) {{ btn.disabled = true; btn.textContent = 'Queued…'; }}
+    try {{
+      const resp = await fetch('/api/fleet/scan/' + id, {{
+        method: 'POST',
+        headers: {{'Content-Type': 'application/json'}},
+        body: JSON.stringify({{profiles}}),
+      }});
+      const data = await resp.json();
+      if (resp.ok) {{
+        if (btn) btn.textContent = `Queued (${{profiles.length}}) ✓`;
+        setTimeout(() => {{ if (btn) {{ btn.disabled = false; btn.textContent = 'Scan ▾'; }} }}, 6000);
+      }} else {{
+        if (btn) {{ btn.disabled = false; btn.textContent = 'Scan ▾'; }}
+        alert(data.error || 'Failed to queue scan');
+      }}
+    }} catch (e) {{
+      if (btn) {{ btn.disabled = false; btn.textContent = 'Scan ▾'; }}
     }}
-  }} catch (e) {{
-    if (btn) {{ btn.disabled = false; btn.textContent = 'Scan Now'; }}
-  }}
+  }};
 }}
 
 async function updateDevice(id) {{

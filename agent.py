@@ -574,6 +574,21 @@ def main() -> None:
                 last_scan = time.time()
                 if ok:
                     last_success = last_scan
+            elif cmd and cmd.startswith('scan_profile:'):
+                profile_override = cmd[len('scan_profile:'):]
+                log.info('On-demand scan with profile override: %s', profile_override)
+                saved_profile = cfg.get('profile', 'default')
+                cfg['profile'] = profile_override
+                try:
+                    ok = run_cycle(cfg)
+                except Exception as e:
+                    log.error('Profile scan failed: %s', e)
+                    ok = False
+                finally:
+                    cfg['profile'] = saved_profile
+                last_scan = time.time()
+                if ok:
+                    last_success = last_scan
             elif cmd == 'update_self':
                 log.info('Remote update triggered by server')
                 self_update(cfg)
