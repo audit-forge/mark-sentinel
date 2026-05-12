@@ -1836,7 +1836,7 @@ async function runDiscovery() {{
   const subnetInput = (document.getElementById('discover-subnets').value || '').trim();
   btn.disabled = true;
   btn.textContent = 'Scanning…';
-  const subnetHint = subnetInput ? ` (${subnetInput})` : ' (auto-detect)';
+  const subnetHint = subnetInput ? ` (${{subnetInput}})` : ' (auto-detect)';
   panel.innerHTML = `<div class="empty" style="padding:12px">Probing subnet${{subnetHint}} for AI services — this may take 10–30 seconds…</div>`;
   try {{
     const url = subnetInput ? `/api/discover?subnets=${{encodeURIComponent(subnetInput)}}` : '/api/discover';
