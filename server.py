@@ -1812,46 +1812,103 @@ async function runDiscovery() {{
     if (svcs.length === 0) {{
       panel.innerHTML = '<div class="empty" style="padding:12px">No AI services detected (network, processes, or environment).</div>';
     }} else {{
-      const sourceLabel = {{network_probe: '🌐 Network', process_scan: '⚙️ Process', env_var: '🔑 API Key'}};
-      const sourceColor = {{network_probe: '#58a6ff', process_scan: '#e3b341', env_var: '#bc8cff'}};
-      const groups = {{}};
-      for (const s of svcs) groups[s.source] = (groups[s.source] || []).concat(s);
-      const ORDER = ['network_probe', 'process_scan', 'env_var'];
+      const modelBadges = (models) => {{
+        if (!models || !models.length) return '<span style="color:#484f58">—</span>';
+        const badges = models.slice(0, 6).map(m =>
+          `<span style="background:#21262d;border-radius:3px;padding:1px 6px;font-size:11px;font-family:monospace;white-space:nowrap">${{esc(m)}}</span>`
+        ).join(' ');
+        return badges + (models.length > 6 ? ` <span style="color:#6e7681;font-size:11px">+${{models.length - 6}} more</span>` : '');
+      }};
+
+      // Group network probes by host IP
+      const byHost = {{}};
+      for (const s of svcs) {{
+        if (s.source === 'network_probe') {{
+          byHost[s.host] = (byHost[s.host] || []).concat(s);
+        }}
+      }}
+      const procs = svcs.filter(s => s.source === 'process_scan');
+      const envs  = svcs.filter(s => s.source === 'env_var');
+
       let html = '';
-      for (const src of ORDER) {{
-        if (!groups[src]) continue;
-        html += `<div style="margin-bottom:16px">
-          <div style="font-size:11px;font-weight:600;color:${{sourceColor[src]}};text-transform:uppercase;letter-spacing:.5px;padding:4px 10px 6px">${{sourceLabel[src] || src}}</div>
+      const hostCount = Object.keys(byHost).length;
+
+      // ── Per-host cards ────────────────────────────────────────────────────
+      for (const host of Object.keys(byHost).sort()) {{
+        const hostSvcs = byHost[host];
+        html += `<div style="margin-bottom:14px;border:1px solid #21262d;border-radius:6px;overflow:hidden">
+          <div style="background:#161b22;padding:7px 12px;display:flex;align-items:center;gap:10px;border-bottom:1px solid #21262d">
+            <span style="font-family:monospace;font-size:13px;font-weight:600;color:#e6edf3">${{esc(host)}}</span>
+            <span style="font-size:11px;color:#6e7681">${{hostSvcs.length}} service${{hostSvcs.length !== 1 ? 's' : ''}} found</span>
+          </div>
           <table style="width:100%;border-collapse:collapse">
-            <thead><tr style="font-size:10px;color:#6e7681;text-transform:uppercase;letter-spacing:.4px">
-              <th style="text-align:left;padding:4px 10px;border-bottom:1px solid #21262d">Service</th>
-              <th style="text-align:left;padding:4px 10px;border-bottom:1px solid #21262d">Models Detected</th>
-              <th style="text-align:left;padding:4px 10px;border-bottom:1px solid #21262d">Details</th>
+            <thead><tr style="font-size:10px;color:#6e7681;text-transform:uppercase;letter-spacing:.4px;background:#0d1117">
+              <th style="text-align:left;padding:5px 12px;width:22%">Service</th>
+              <th style="text-align:left;padding:5px 8px;width:6%">Port</th>
+              <th style="text-align:left;padding:5px 8px">Models Detected</th>
+              <th style="text-align:left;padding:5px 8px;width:22%">URL</th>
             </tr></thead>
             <tbody>`;
-        for (const s of groups[src]) {{
-          const modelStr = (s.models && s.models.length)
-            ? s.models.slice(0, 5).map(m => `<span style="background:#21262d;border-radius:3px;padding:1px 5px;font-size:11px;font-family:monospace">${{esc(m)}}</span>`).join(' ') + (s.models.length > 5 ? ` <span style="color:#6e7681">+${{s.models.length - 5}} more</span>` : '')
-            : '<span style="color:#484f58">—</span>';
-          let detail = '';
-          if (src === 'network_probe') {{
-            const httpStatus = s.status ? `HTTP ${{s.status}}` : 'TCP open';
-            detail = `<a href="${{esc(s.url)}}" target="_blank" style="color:#58a6ff;text-decoration:none;font-family:monospace;font-size:11px">${{esc(s.url)}}</a> <span style="color:#484f58;font-size:11px">(${{httpStatus}})</span>`;
-          }} else if (src === 'process_scan') {{
-            detail = `<span style="color:#6e7681;font-size:11px">process: <code style="background:#21262d;padding:1px 4px;border-radius:2px">${{esc(s.process_sig || '')}}</code></span>`;
-          }} else {{
-            detail = `<span style="color:#6e7681;font-size:11px">env: <code style="background:#21262d;padding:1px 4px;border-radius:2px">${{esc(s.env_var || '')}}</code></span>`;
-          }}
-          html += `<tr style="border-bottom:1px solid #161b22">
-            <td style="padding:6px 10px;font-weight:600;color:#e6edf3;white-space:nowrap">${{esc(s.service)}}</td>
-            <td style="padding:6px 10px">${{modelStr}}</td>
-            <td style="padding:6px 10px">${{detail}}</td>
+        for (const s of hostSvcs) {{
+          const httpStatus = s.status ? ` <span style="color:#484f58;font-size:10px">(HTTP ${{s.status}})</span>` : '';
+          html += `<tr style="border-top:1px solid #161b22">
+            <td style="padding:7px 12px;font-weight:600;color:#e6edf3;white-space:nowrap">${{esc(s.service)}}</td>
+            <td style="padding:7px 8px;color:#6e7681;font-family:monospace;font-size:12px">${{s.port}}</td>
+            <td style="padding:7px 8px">${{modelBadges(s.models)}}</td>
+            <td style="padding:7px 8px;font-size:11px"><a href="${{esc(s.url)}}" target="_blank" style="color:#58a6ff;text-decoration:none;font-family:monospace">${{esc(s.url)}}</a>${{httpStatus}}</td>
           </tr>`;
         }}
         html += '</tbody></table></div>';
       }}
-      panel.innerHTML = html + `<div style="font-size:11px;color:#484f58;margin-top:4px;display:flex;align-items:center;gap:12px">
-        <span>${{svcs.length}} AI service(s) detected</span>
+
+      // ── Local machine: running processes ──────────────────────────────────
+      if (procs.length) {{
+        html += `<div style="margin-bottom:14px;border:1px solid #21262d;border-radius:6px;overflow:hidden">
+          <div style="background:#161b22;padding:7px 12px;display:flex;align-items:center;gap:10px;border-bottom:1px solid #21262d">
+            <span style="font-size:12px;font-weight:600;color:#e3b341">⚙ Running Processes</span>
+            <span style="font-size:11px;color:#6e7681">detected on this machine</span>
+          </div>
+          <table style="width:100%;border-collapse:collapse">
+            <thead><tr style="font-size:10px;color:#6e7681;text-transform:uppercase;letter-spacing:.4px;background:#0d1117">
+              <th style="text-align:left;padding:5px 12px">Service</th>
+              <th style="text-align:left;padding:5px 8px">Process Signature</th>
+            </tr></thead>
+            <tbody>`;
+        for (const p of procs) {{
+          html += `<tr style="border-top:1px solid #161b22">
+            <td style="padding:7px 12px;font-weight:600;color:#e6edf3">${{esc(p.service)}}</td>
+            <td style="padding:7px 8px;font-family:monospace;font-size:11px;color:#6e7681"><code style="background:#21262d;padding:1px 5px;border-radius:2px">${{esc(p.process_sig || '')}}</code></td>
+          </tr>`;
+        }}
+        html += '</tbody></table></div>';
+      }}
+
+      // ── Local machine: API keys in environment ────────────────────────────
+      if (envs.length) {{
+        html += `<div style="margin-bottom:14px;border:1px solid #21262d;border-radius:6px;overflow:hidden">
+          <div style="background:#161b22;padding:7px 12px;display:flex;align-items:center;gap:10px;border-bottom:1px solid #21262d">
+            <span style="font-size:12px;font-weight:600;color:#bc8cff">🔑 Cloud API Keys</span>
+            <span style="font-size:11px;color:#6e7681">found in environment on this machine</span>
+          </div>
+          <table style="width:100%;border-collapse:collapse">
+            <thead><tr style="font-size:10px;color:#6e7681;text-transform:uppercase;letter-spacing:.4px;background:#0d1117">
+              <th style="text-align:left;padding:5px 12px">Provider</th>
+              <th style="text-align:left;padding:5px 8px">Environment Variable</th>
+            </tr></thead>
+            <tbody>`;
+        for (const e of envs) {{
+          html += `<tr style="border-top:1px solid #161b22">
+            <td style="padding:7px 12px;font-weight:600;color:#e6edf3">${{esc(e.service)}}</td>
+            <td style="padding:7px 8px;font-family:monospace;font-size:11px;color:#6e7681"><code style="background:#21262d;padding:1px 5px;border-radius:2px">${{esc(e.env_var || '')}}</code></td>
+          </tr>`;
+        }}
+        html += '</tbody></table></div>';
+      }}
+
+      const totalHosts = hostCount;
+      const totalSvcs  = svcs.filter(s => s.source === 'network_probe').length;
+      panel.innerHTML = html + `<div style="font-size:11px;color:#484f58;margin-top:2px;display:flex;align-items:center;gap:12px">
+        <span>${{totalHosts}} host${{totalHosts !== 1 ? 's' : ''}} · ${{totalSvcs}} network service${{totalSvcs !== 1 ? 's' : ''}}${{procs.length ? ' · ' + procs.length + ' process' + (procs.length !== 1 ? 'es' : '') : ''}}${{envs.length ? ' · ' + envs.length + ' API key' + (envs.length !== 1 ? 's' : '') : ''}}</span>
         <button onclick="this.closest('div').parentElement.innerHTML='<div class=\\'empty\\'style=\\'padding:12px\\'>Click Scan Network to detect AI services.</div>'" style="background:none;border:1px solid #30363d;color:#6e7681;border-radius:3px;padding:2px 8px;font-size:11px;cursor:pointer">Clear</button>
       </div>`;
     }}
