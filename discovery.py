@@ -42,6 +42,17 @@ _TCP_TIMEOUT    = 0.8
 _HTTP_TIMEOUT   = 2.0
 _MAX_CONCURRENT = 64
 
+# Paths tried in order when the primary probe path doesn't identify the service.
+# Covers Ollama, OpenAI-compat, HuggingFace TGI, Jan/LocalAI, and generic roots.
+_EXTRA_PATHS: list[str] = [
+    '/api/tags',     # Ollama
+    '/v1/models',    # OpenAI-compat (LM Studio, llama.cpp, vLLM, LocalAI, etc.)
+    '/info',         # HuggingFace TGI
+    '/api/version',  # Jan, LocalAI, others
+    '/api/ps',       # Ollama — running-model list
+    '/',             # root — Server header often names the framework
+]
+
 # ── Model name → vendor mapping ───────────────────────────────────────────────
 _VENDOR_PREFIXES: list[tuple[str, str]] = [
     ('gpt-',           'OpenAI'),
@@ -239,6 +250,27 @@ def _http_probe(host: str, port: int, path: str) -> tuple[int | None, bytes, dic
         return None, b'', {}
 
 
+def _multi_probe(host: str, port: int, primary_path: str,
+                 fallback_label: str) -> tuple[str, list[str], int | None]:
+    """Try primary path then fallback paths until the service is identified.
+
+    Returns (service_label, model_ids, http_status).  Falls back to
+    (fallback_label, [], None) if no path yields useful information.
+    """
+    paths = [primary_path] + [p for p in _EXTRA_PATHS if p != primary_path]
+    last_status: int | None = None
+    for path in paths:
+        status, body, hdrs = _http_probe(host, port, path)
+        if status is not None:
+            last_status = status
+        if not body and not hdrs:
+            continue
+        service, models = _fingerprint(body, fallback_label, hdrs)
+        if service != fallback_label or models:
+            return service, models, status
+    return fallback_label, [], last_status
+
+
 def _local_subnet_hosts(max_hosts: int = 254) -> list[str]:
     try:
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
@@ -303,9 +335,10 @@ async def _discover_async(hosts: list[str]) -> list[dict]:
         async with sem:
             if not await _tcp_open(host, port):
                 return
-            status, body, hdrs = await loop.run_in_executor(None, _http_probe, host, port, path)
             fallback = hint if hint != 'AI service' else f'Unknown service (port {port})'
-            service, models = _fingerprint(body, fallback, hdrs)
+            service, models, status = await loop.run_in_executor(
+                None, _multi_probe, host, port, path, fallback
+            )
             results.append({
                 'host':          host,
                 'port':          port,
