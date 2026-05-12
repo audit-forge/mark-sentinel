@@ -217,7 +217,7 @@ def _risk_score_html(fail, warn, total) -> int:
     return max(0, 100 - round((fail * 3 + warn) / max(total, 1) * 100))
 
 
-def _build_fleet_report_html(devices: list, tier: str, profile: str = '') -> str:
+def _build_fleet_report_html(devices: list, tier: str, profile: str = '', profiles: list | None = None) -> str:
     from datetime import datetime, timezone
     import html as _html
 
@@ -240,6 +240,18 @@ def _build_fleet_report_html(devices: list, tier: str, profile: str = '') -> str
     fleet_score = _risk_score_html(total_fail, total_warn, total_checks)
     score_color = '#3fb950' if fleet_score >= 80 else '#d29922' if fleet_score >= 60 else '#f85149'
     now = datetime.now(tz=timezone.utc).strftime('%Y-%m-%d %H:%M UTC')
+    active_profiles = profiles or ([profile] if profile else [])
+
+    _rpt_profiles = [('default', 'Default'), ('fedramp', 'FedRAMP'), ('cmmc', 'CMMC 2.0'),
+                     ('financial', 'Financial'), ('smb', 'SMB')]
+    _toolbar_cbs = ' '.join(
+        f'<label style="font-size:12px;color:#c9d1d9;white-space:nowrap;cursor:pointer">'
+        f'<input type="checkbox" class="rpt-cb" value="{v}"{" checked" if v in active_profiles else ""}> {lbl}</label>'
+        for v, lbl in _rpt_profiles
+    )
+    _pdf_profile_param = ('&profile=' + ','.join(active_profiles)) if active_profiles else ''
+    _pdf_fname_suffix  = ('_' + '_'.join(active_profiles)) if active_profiles else ''
+    _profile_label     = ', '.join(p.upper() for p in active_profiles) if active_profiles else ''
 
     btn_style = 'display:inline-block;padding:6px 14px;border-radius:6px;font-size:12px;font-weight:600;text-decoration:none;cursor:pointer;border:1px solid #30363d;background:#21262d;color:#c9d1d9'
     parts = [f'''<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
@@ -268,25 +280,27 @@ tr:hover td{{background:#161b22}}
 .rem{{color:#3fb950;font-size:12px;margin-top:3px;font-style:italic}}
 .det{{color:#8b949e;font-size:12px;margin-top:3px}}
 .toolbar{{position:sticky;top:0;z-index:100;background:#161b22;border-bottom:1px solid #21262d;
-          margin:-32px -32px 28px;padding:10px 32px;display:flex;align-items:center;gap:10px}}
+          margin:-32px -32px 28px;padding:10px 32px;display:flex;align-items:center;gap:10px;flex-wrap:wrap}}
 @media print{{.toolbar{{display:none}}body{{background:#fff;color:#000;padding:16px}}h1,h2,h3,.card-l{{color:#000}}.card{{border:1px solid #ccc}}.fail{{color:#c00}}.pass{{color:#090}}.warn{{color:#850}}}}
-</style></head><body>
+</style>
+<script>
+function applyProfiles(){{
+  var checked=[...document.querySelectorAll('.rpt-cb:checked')].map(function(c){{return c.value;}});
+  var p=checked.length?'&profile='+checked.join(','):'';
+  location.href='/api/fleet/report?tier={tier}&fmt=html'+p;
+}}
+</script>
+</head><body>
 <div class="toolbar">
-  <span style="flex:1;font-size:13px;font-weight:600;color:#c9d1d9">M.A.R.K. Sentinel &mdash; Fleet {esc(tier_label)}</span>
-  <select onchange="location.href='/api/fleet/report?tier={tier}&fmt=html'+(this.value?'&profile='+this.value:'')"
-          style="background:#21262d;border:1px solid #30363d;color:#c9d1d9;border-radius:4px;padding:3px 8px;font-size:12px;cursor:pointer">
-    <option value="" {'selected' if not profile else ''}>All profiles</option>
-    <option value="default" {'selected' if profile=='default' else ''}>Default</option>
-    <option value="fedramp" {'selected' if profile=='fedramp' else ''}>FedRAMP / NIST 800-53</option>
-    <option value="cmmc" {'selected' if profile=='cmmc' else ''}>CMMC 2.0</option>
-    <option value="financial" {'selected' if profile=='financial' else ''}>Financial Services</option>
-    <option value="smb" {'selected' if profile=='smb' else ''}>SMB</option>
-  </select>
-  <a href="/api/fleet/report?tier={tier}&fmt=pdf{'&profile='+profile if profile else ''}" download="sentinel_fleet_{tier}{'_'+profile if profile else ''}.pdf" style="{btn_style};color:#3fb950;border-color:#238636">&#8659; Download PDF</a>
+  <span style="font-size:13px;font-weight:600;color:#c9d1d9;margin-right:6px">M.A.R.K. Sentinel &mdash; Fleet {esc(tier_label)}</span>
+  <span style="font-size:11px;color:#8b949e;white-space:nowrap">Profiles:</span>
+  {_toolbar_cbs}
+  <button onclick="applyProfiles()" style="{btn_style};color:#58a6ff;border-color:#1f6feb">Apply</button>
+  <a href="/api/fleet/report?tier={tier}&fmt=pdf{_pdf_profile_param}" download="sentinel_fleet_{tier}{_pdf_fname_suffix}.pdf" style="{btn_style};color:#3fb950;border-color:#238636">&#8659; Download PDF</a>
   <button onclick="window.print()" style="{btn_style}">&#128438; Print</button>
 </div>
 <h1>M.A.R.K. Sentinel &mdash; Fleet {esc(tier_label)}</h1>
-<div class="meta">Generated {esc(now)} &nbsp;&bull;&nbsp; {len(devices)} device(s){' &nbsp;&bull;&nbsp; Profile: <strong>' + esc(profile.upper()) + '</strong>' if profile else ''} &nbsp;&bull;&nbsp; Confidential</div>
+<div class="meta">Generated {esc(now)} &nbsp;&bull;&nbsp; {len(devices)} device(s){(' &nbsp;&bull;&nbsp; Profiles: <strong>' + esc(_profile_label) + '</strong>') if _profile_label else ''} &nbsp;&bull;&nbsp; Confidential</div>
 <div class="cards">
   <div class="card"><div class="card-n score">{fleet_score}%</div><div class="card-l">Fleet Score</div></div>
   <div class="card"><div class="card-n fail">{total_fail}</div><div class="card-l">Failing Checks</div></div>
@@ -1120,25 +1134,26 @@ button:hover{{background:#2ea043}}
             self._json({'error': str(e)}, 500)
 
     def _api_fleet_report(self):
-        """GET /api/fleet/report?tier=executive|ciso|technical&fmt=pdf|html|json[&profile=fedramp]"""
+        """GET /api/fleet/report?tier=executive|ciso|technical&fmt=pdf|html|json[&profile=fedramp,cmmc]"""
         from urllib.parse import parse_qs, urlparse as _up
         qs = parse_qs(_up(self.path).query)
-        tier    = (qs.get('tier',    ['ciso'])[0]).lower()
-        fmt     = (qs.get('fmt',     ['html'])[0]).lower()
-        profile = (qs.get('profile', [''])[0]).lower().strip()
+        tier        = (qs.get('tier',    ['ciso'])[0]).lower()
+        fmt         = (qs.get('fmt',     ['html'])[0]).lower()
+        profile_raw = (qs.get('profile', [''])[0]).lower().strip()
         if tier not in ('executive', 'ciso', 'technical'):
             tier = 'ciso'
         _VALID_PROFILES = {'default', 'fedramp', 'cmmc', 'financial', 'smb'}
-        if profile not in _VALID_PROFILES:
-            profile = ''
+        profiles = [p for p in profile_raw.split(',') if p in _VALID_PROFILES]
+        profile  = ','.join(profiles)
         try:
             store = _get_store()
             devices = store.list_devices()
             for d in devices:
                 d['_report'] = store.get_latest_report(d['device_id']) or {}
-            if profile:
-                devices = [d for d in devices if (d.get('profile') or '').lower() == profile or
-                           (d['_report'].get('profile') or '').lower() == profile]
+            if profiles:
+                devices = [d for d in devices
+                           if (d.get('profile') or '').lower() in profiles or
+                              (d['_report'].get('profile') or '').lower() in profiles]
 
             if fmt == 'json':
                 payload = [{'device_id': d['device_id'], 'hostname': d['hostname'],
@@ -1153,7 +1168,7 @@ button:hover{{background:#2ea043}}
                 try:
                     from output.fleet_report import generate_fleet_pdf
                     pdf_bytes = generate_fleet_pdf(devices, tier=tier, profile=profile or None)
-                    fname = f'sentinel_fleet_{tier}{"_" + profile if profile else ""}.pdf'
+                    fname = f'sentinel_fleet_{tier}{"_" + profile.replace(",","_") if profile else ""}.pdf'
                     self.send_response(200)
                     self.send_header('Content-Type', 'application/pdf')
                     self.send_header('Content-Disposition', f'attachment; filename="{fname}"')
@@ -1168,7 +1183,7 @@ button:hover{{background:#2ea043}}
                     self._send(500, f'PDF generation failed: {pdf_err}\n\n{tb}'.encode(), 'text/plain')
                     return
 
-            html = _build_fleet_report_html(devices, tier, profile=profile)
+            html = _build_fleet_report_html(devices, tier, profile=profile, profiles=profiles)
             data = html.encode('utf-8')
             self.send_response(200)
             self.send_header('Content-Type', 'text/html; charset=utf-8')
@@ -1661,15 +1676,12 @@ body{{background:#0d1117;color:#c9d1d9;font-family:-apple-system,BlinkMacSystemF
   <div class="sec-hdr" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
     <span>Connected Devices</span>
     <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-      <select id="report-profile" class="form-select" style="font-size:12px;padding:3px 8px;height:28px"
-              title="Filter report by compliance profile">
-        <option value="">All profiles</option>
-        <option value="default">Default</option>
-        <option value="fedramp">FedRAMP / NIST 800-53</option>
-        <option value="cmmc">CMMC 2.0</option>
-        <option value="financial">Financial Services</option>
-        <option value="smb">SMB</option>
-      </select>
+      <span style="font-size:11px;color:#8b949e;white-space:nowrap">Profiles:</span>
+      <label style="font-size:12px;color:#c9d1d9;white-space:nowrap;cursor:pointer"><input type="checkbox" class="rpt-profile" value="default"> Default</label>
+      <label style="font-size:12px;color:#c9d1d9;white-space:nowrap;cursor:pointer"><input type="checkbox" class="rpt-profile" value="fedramp"> FedRAMP</label>
+      <label style="font-size:12px;color:#c9d1d9;white-space:nowrap;cursor:pointer"><input type="checkbox" class="rpt-profile" value="cmmc"> CMMC 2.0</label>
+      <label style="font-size:12px;color:#c9d1d9;white-space:nowrap;cursor:pointer"><input type="checkbox" class="rpt-profile" value="financial"> Financial</label>
+      <label style="font-size:12px;color:#c9d1d9;white-space:nowrap;cursor:pointer"><input type="checkbox" class="rpt-profile" value="smb"> SMB</label>
       <button onclick="openReport('executive')" class="scan-btn"
          style="color:#3fb950;border-color:#30363d;font-size:12px">&#9654; Executive Report</button>
       <button onclick="openReport('ciso')" class="scan-btn"
@@ -2327,9 +2339,9 @@ function _sysLog(msg, color) {{
 }}
 
 function openReport(tier) {{
-  const profile = document.getElementById('report-profile')?.value || '';
-  const url = '/api/fleet/report?tier=' + tier + '&fmt=html' + (profile ? '&profile=' + profile : '');
-  window.open(url, '_blank');
+  const checked = [...document.querySelectorAll('.rpt-profile:checked')].map(c => c.value);
+  const profileParam = checked.length ? '&profile=' + checked.join(',') : '';
+  window.open('/api/fleet/report?tier=' + tier + '&fmt=html' + profileParam, '_blank');
 }}
 
 async function downloadFleetReport(tier, btn) {{
