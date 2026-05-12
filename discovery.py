@@ -43,13 +43,17 @@ _HTTP_TIMEOUT   = 2.0
 _MAX_CONCURRENT = 64
 
 # Paths tried in order when the primary probe path doesn't identify the service.
-# Covers Ollama, OpenAI-compat, HuggingFace TGI, Jan/LocalAI, and generic roots.
+# Covers Ollama, OpenAI-compat, HuggingFace TGI, Jan/LocalAI, llama.cpp, and generic roots.
 _EXTRA_PATHS: list[str] = [
     '/api/tags',     # Ollama
     '/v1/models',    # OpenAI-compat (LM Studio, llama.cpp, vLLM, LocalAI, etc.)
+    '/props',        # llama.cpp server — exposes loaded model path
     '/info',         # HuggingFace TGI
     '/api/version',  # Jan, LocalAI, others
     '/api/ps',       # Ollama — running-model list
+    '/api/kernels',  # Jupyter — active kernel list
+    '/models',       # some custom inference servers
+    '/api/models',   # some custom inference servers
     '/',             # root — Server header often names the framework
 ]
 
@@ -207,6 +211,29 @@ def _fingerprint(body: bytes, hint: str, headers: dict | None = None) -> tuple[s
         model_id = data['model_id']
         vendor = _vendor_from_model(model_id.split('/')[-1])
         return f'HuggingFace TGI ({vendor})', [model_id]
+
+    # llama.cpp /props — {"default_generation_settings": {"model": "/path/to/model.gguf"}}
+    if isinstance(data, dict) and 'default_generation_settings' in data:
+        gen = data['default_generation_settings']
+        model_path = gen.get('model', '') if isinstance(gen, dict) else ''
+        model_name = model_path.replace('\\', '/').split('/')[-1] if model_path else ''
+        return 'llama.cpp server', [model_name] if model_name else []
+
+    # Jupyter /api/kernels — [{"id": "...", "name": "python3", "execution_state": "idle"}]
+    if (isinstance(data, list) and data
+            and isinstance(data[0], dict) and 'execution_state' in data[0]):
+        kernel_names = [k.get('name', 'unknown') for k in data if isinstance(k, dict)]
+        unique = list(dict.fromkeys(kernel_names))
+        return 'Jupyter (kernels active)', unique
+
+    # Jupyter /api/status — {"kernels": N, "connections": N} with no active kernels yet
+    if isinstance(data, dict) and 'kernels' in data and 'connections' in data:
+        n = data['kernels']
+        return 'Jupyter / AI app', [f'{n} kernel{"s" if n != 1 else ""} running'] if n else []
+
+    # Generic single-model field — {"model": "model-name"} used by some custom servers
+    if isinstance(data, dict) and isinstance(data.get('model'), str) and data['model']:
+        return hint, [data['model']]
 
     # vLLM /health or generic {"status": "healthy"}
     if isinstance(data, dict) and data.get('status') in ('healthy', 'ok', 'OK'):
