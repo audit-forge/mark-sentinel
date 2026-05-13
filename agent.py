@@ -99,6 +99,55 @@ log = logging.getLogger('sentinel-agent')
 
 # ── Device identity ────────────────────────────────────────────────────────────
 
+def _hardware_seed() -> str:
+    """Return a stable platform hardware identifier that survives network changes."""
+    # macOS: IOPlatformUUID — motherboard UUID, never changes
+    if sys.platform == 'darwin':
+        try:
+            out = subprocess.run(
+                ['ioreg', '-rd1', '-c', 'IOPlatformExpertDevice'],
+                capture_output=True, text=True, timeout=5,
+            ).stdout
+            for line in out.splitlines():
+                if 'IOPlatformUUID' in line and '=' in line:
+                    val = line.split('=', 1)[1].strip().strip('"')
+                    if val:
+                        return val
+        except Exception:
+            pass
+
+    # Windows: MachineGuid from registry (written at OS install, stable)
+    if sys.platform == 'win32':
+        try:
+            import winreg
+            key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE,
+                                 r'SOFTWARE\Microsoft\Cryptography')
+            guid, _ = winreg.QueryValueEx(key, 'MachineGuid')
+            if guid:
+                return guid
+        except Exception:
+            pass
+
+    # Linux: /etc/machine-id (systemd, written at first boot)
+    for mid_path in ('/etc/machine-id', '/var/lib/dbus/machine-id'):
+        try:
+            val = Path(mid_path).read_text().strip()
+            if val:
+                return val
+        except OSError:
+            pass
+
+    # Fallback: MAC address (may change between interfaces — last resort)
+    try:
+        import uuid as _uuid
+        node = _uuid.getnode()
+        if not (node & (1 << 40)):
+            return ':'.join(f'{(node >> i) & 0xff:02x}' for i in range(0, 48, 8))
+    except Exception:
+        pass
+    return socket.gethostname()
+
+
 def _device_id() -> str:
     """Stable 16-char hex ID. Persisted to disk so containers/VMs get a consistent ID."""
     id_file = ROOT / 'output' / '.device_id'
@@ -109,20 +158,7 @@ def _device_id() -> str:
                 return stored
         except OSError:
             pass
-    hostname = socket.gethostname()
-    try:
-        import uuid as _uuid
-        node = _uuid.getnode()
-        # getnode() returns a random value when MAC is unavailable — detect this
-        # by checking the multicast bit (bit 40), which is set on random values.
-        if node & (1 << 40):
-            mac = 'random'
-        else:
-            mac = ':'.join(f'{(node >> i) & 0xff:02x}' for i in range(0, 48, 8))
-    except Exception:
-        mac = 'unknown'
-    seed = mac if mac not in ('random', 'unknown') else f'{hostname}:{mac}'
-    new_id = hashlib.sha256(seed.encode()).hexdigest()[:16]
+    new_id = hashlib.sha256(_hardware_seed().encode()).hexdigest()[:16]
     try:
         id_file.parent.mkdir(parents=True, exist_ok=True)
         id_file.write_text(new_id)
@@ -237,6 +273,13 @@ def report_to_server(report: dict, config: dict,
             req = _urlreq.Request(url, data=payload, headers=headers, method='POST')
             with _urlreq.urlopen(req, timeout=30) as resp:
                 if 200 <= resp.status < 300:
+                    try:
+                        body = json.loads(resp.read())
+                        warn = body.get('warning')
+                        if warn:
+                            log.warning('SERVER WARNING: %s', warn.get('message', warn))
+                    except Exception:
+                        pass
                     log.info('Report accepted (HTTP %s)', resp.status)
                     return True
                 log.warning('Server returned HTTP %s (attempt %d/3)', resp.status, attempt)
