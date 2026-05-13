@@ -346,13 +346,73 @@ def build(root: pathlib.Path) -> bytes:
                   "<li>For fleet: open the Command Center from the top nav link</li>"
                   "</ol>")
 
-    profiles = ("<p>Sentinel ships with several built-in profiles to tailor checks for different environments.</p>"
-                "<ul>"
-                "<li><b>SMB Basic</b> — lightweight checks suitable for small/medium businesses.</li>"
-                "<li><b>FedRAMP Moderate</b> — controls mapped to NIST 800-53 for cloud deployments.</li>"
-                "<li><b>CMMC Level 2</b> — controlled environment mapping for DoD supply chain.</li>"
-                "<li><b>Financial Services</b> — runs all checks mapped to NIST AI RMF 1.0, SR 11-7, and SR 26-2. Designed for banks and financial institutions.</li>"
-                "</ul>")
+    profiles = (
+        "<p>Sentinel ships with several built-in profiles to tailor checks for different environments.</p>"
+        "<table class=\"sev-table\">"
+        "<tr><th>default</th><td>General-purpose AI security checks. Good starting point for any organization.</td></tr>"
+        "<tr><th>fedramp</th><td>Controls mapped to NIST 800-53 for U.S. federal cloud deployments.</td></tr>"
+        "<tr><th>cmmc</th><td>Controlled environment mapping for DoD supply chain (CMMC Level 2).</td></tr>"
+        "<tr><th>financial</th><td>Full suite mapped to NIST AI RMF 1.0, SR 11-7, and SR 26-2. For banks and financial institutions.</td></tr>"
+        "<tr><th>smb</th><td>Lightweight checks in plain language for small/medium businesses with no compliance team.</td></tr>"
+        "</table>"
+
+        "<h3>Scan All and Profile Checkboxes</h3>"
+        "<p>The profile checkboxes on the Command Center toolbar drive two things at once: "
+        "which devices appear in the executive report <i>and</i> which profile the <b>Scan All</b> button uses.</p>"
+        "<table class=\"sev-table\">"
+        "<tr><th>No boxes checked</th><td>Scan All sends <code>scan_now</code> — each agent uses whatever profile "
+        "it was configured with (its saved default). Most devices will scan with the default profile.</td></tr>"
+        "<tr><th>One box checked (e.g. FedRAMP)</th><td>Scan All sends <code>scan_profile:fedramp</code> to every "
+        "device. All devices run a FedRAMP scan regardless of their saved default.</td></tr>"
+        "<tr><th>Multiple boxes checked</th><td>Each device gets one scan command per checked profile. A device "
+        "receiving FedRAMP + CMMC will run two scans back-to-back as the agent polls (every 5 minutes). "
+        "Both results appear under their respective profiles in the exec report.</td></tr>"
+        "</table>"
+        "<p><b>Stagger options</b> prevent all agents from hitting the network simultaneously:</p>"
+        "<table class=\"sev-table\">"
+        "<tr><th>Normal (25 / 30s)</th><td>Dispatch 25 devices, wait 30 seconds, repeat. Default for most fleets.</td></tr>"
+        "<tr><th>Slow (10 / 60s)</th><td>10 devices per minute. Use for large fleets on shared or constrained networks.</td></tr>"
+        "<tr><th>Instant</th><td>All devices queued at once. Only use for small fleets or lab environments.</td></tr>"
+        "</table>"
+
+        "<h3>Changing an Agent's Default Profile</h3>"
+        "<p>Each agent has a saved default profile in its config file. This is the profile used when "
+        "<b>no override is sent</b> (i.e., when Scan All has no boxes checked, or when the agent runs its "
+        "automatic scheduled scan). To change it permanently, edit the config file on the device and restart the agent.</p>"
+
+        "<h4>Linux</h4>"
+        "<pre><code>sudo nano /etc/sentinel/agent_config.json</code></pre>"
+
+        "<h4>macOS</h4>"
+        "<pre><code>sudo nano /opt/sentinel/agent_config.json</code></pre>"
+
+        "<h4>Windows (PowerShell as Administrator)</h4>"
+        "<pre><code>notepad C:\\ProgramData\\Sentinel\\agent_config.json</code></pre>"
+
+        "<p>The file looks like this — change the <code>\"profile\"</code> value to one of the slugs in the table above:</p>"
+        "<pre><code>{\n"
+        "  \"server\": \"http://SERVER_IP:7331\",\n"
+        "  \"token\": \"YOUR_TOKEN\",\n"
+        "  \"target\": \"/\",\n"
+        "  \"profile\": \"fedramp\",\n"
+        "  \"interval\": 7200\n"
+        "}</code></pre>"
+
+        "<p>Valid values for <code>\"profile\"</code>: "
+        "<code>default</code>, <code>fedramp</code>, <code>cmmc</code>, <code>financial</code>, <code>smb</code></p>"
+
+        "<p>After saving, restart the agent:</p>"
+        "<pre><code># Linux\n"
+        "sudo systemctl restart sentinel-agent\n\n"
+        "# macOS\n"
+        "sudo launchctl stop io.hash.sentinel-agent &amp;&amp; sudo launchctl start io.hash.sentinel-agent\n\n"
+        "# Windows (PowerShell as Administrator)\n"
+        "Restart-Service SentinelAgent</code></pre>"
+
+        "<p><b>Tip:</b> You can also push a profile change to individual devices without editing files — "
+        "use the <b>Scan ▾</b> dropdown on a device row in the Command Center and select a profile. "
+        "That queues a one-time override scan. To make a profile permanent, edit the config file as above.</p>"
+    )
 
     severity = ("<table class=\"sev-table\">"
                 "<tr><th>CRITICAL</th><td>system is actively exposed; fix immediately</td></tr>"
