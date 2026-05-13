@@ -28,7 +28,7 @@ RUN addgroup --system sentinel \
 
 USER sentinel
 
-HEALTHCHECK --interval=60s --timeout=10s --start-period=15s --retries=3 \
-    CMD python agent.py --once --target /app 2>&1 | grep -q "scan" || exit 1
+HEALTHCHECK --interval=120s --timeout=5s --start-period=60s --retries=3 \
+    CMD test -f /app/output/.device_id
 
 CMD ["python", "agent.py", "--daemon", "--target", "/app"]
