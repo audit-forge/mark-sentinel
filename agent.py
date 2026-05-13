@@ -272,8 +272,18 @@ def poll_for_command(config: dict, device_id: str) -> str | None:
         req = _urlreq.Request(url, headers=headers)
         with _urlreq.urlopen(req, timeout=10) as resp:
             data = json.loads(resp.read())
-            return data.get('command')
-    except Exception:
+            cmd = data.get('command')
+            if cmd:
+                log.info('Command received from server: %s', cmd)
+            return cmd
+    except _urlerr.HTTPError as e:
+        log.warning('Command poll HTTP %s from %s', e.code, server)
+        return None
+    except _urlerr.URLError as e:
+        log.warning('Command poll connection error: %s', e.reason)
+        return None
+    except Exception as e:
+        log.warning('Command poll error: %s', e)
         return None
 
 
