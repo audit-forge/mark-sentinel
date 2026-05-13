@@ -295,6 +295,10 @@ def report_to_server(report: dict, config: dict,
                     return True
                 log.warning('Server returned HTTP %s (attempt %d/3)', resp.status, attempt)
         except _urlerr.HTTPError as e:
+            if e.code == 429:
+                log.warning('Rate limited by server — waiting 65s before retry')
+                time.sleep(65)
+                continue
             log.warning('HTTP %s from server (attempt %d/3)', e.code, attempt)
         except _urlerr.URLError as e:
             log.warning('Connection error (attempt %d/3): %s', attempt, e.reason)
