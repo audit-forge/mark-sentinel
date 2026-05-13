@@ -129,7 +129,15 @@ spec:
                   optional: true
             - name: PYTHONUNBUFFERED
               value: "1"
+            # NODE_NAME is injected by the downward API — stable across pod restarts.
+            # SENTINEL_HOSTNAME uses it so the device ID is derived from the node
+            # name rather than the ephemeral pod hostname, preventing duplicates when
+            # the DaemonSet pod is rescheduled.
             - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+            - name: SENTINEL_HOSTNAME
               valueFrom:
                 fieldRef:
                   fieldPath: spec.nodeName

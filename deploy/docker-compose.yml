@@ -1,0 +1,134 @@
+# M.A.R.K. Sentinel — Local Docker fleet demo
+#
+# Spins up three agent containers and one Ollama instance.
+# Each agent reports to your central Sentinel server.
+#
+# Usage:
+#   1. Copy .env.example to .env and fill in SENTINEL_SERVER and SENTINEL_TOKEN
+#   2. docker compose up -d
+#   3. Pull a small model into Ollama:
+#        docker exec sentinel-ollama ollama pull tinyllama
+#   4. Watch Connected Devices on your dashboard — three new entries appear.
+#
+# Environment variables (set in .env or export before running):
+#   SENTINEL_SERVER   — full URL of your Sentinel server, e.g. http://192.168.1.146:7331
+#   SENTINEL_TOKEN    — agent token from agent_token.txt on the server
+#   SENTINEL_PROFILE  — scan profile (default, fedramp, cmmc, financial, smb)
+
+services:
+
+  # ── Ollama: local LLM endpoint ──────────────────────────────────────────────
+  ollama:
+    image: ollama/ollama:latest
+    container_name: sentinel-ollama
+    hostname: sentinel-ollama
+    restart: unless-stopped
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama-data:/root/.ollama
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
+
+  # ── Agent 1: scans the Ollama AI endpoint ───────────────────────────────────
+  agent-ollama:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.agent
+    container_name: sentinel-agent-ollama
+    hostname: sentinel-agent-ollama
+    restart: unless-stopped
+    depends_on:
+      ollama:
+        condition: service_healthy
+    environment:
+      SENTINEL_SERVER:    "${SENTINEL_SERVER}"
+      SENTINEL_AGENT_TOKEN: "${SENTINEL_TOKEN}"
+      SENTINEL_DEVICE_ID: "agent-ollama"
+      PYTHONUNBUFFERED:   "1"
+    volumes:
+      - agent-ollama-state:/app/output
+    command:
+      - python
+      - agent.py
+      - --daemon
+      - --server
+      - "${SENTINEL_SERVER}"
+      - --token
+      - "${SENTINEL_TOKEN}"
+      - --target
+      - /app
+      - --profile
+      - "${SENTINEL_PROFILE:-default}"
+      - --interval
+      - "3600"
+
+  # ── Agent 2: general config scan, fedramp profile ───────────────────────────
+  agent-fedramp:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.agent
+    container_name: sentinel-agent-fedramp
+    hostname: sentinel-agent-fedramp
+    restart: unless-stopped
+    environment:
+      SENTINEL_SERVER:      "${SENTINEL_SERVER}"
+      SENTINEL_AGENT_TOKEN: "${SENTINEL_TOKEN}"
+      SENTINEL_DEVICE_ID:   "agent-fedramp"
+      PYTHONUNBUFFERED:     "1"
+    volumes:
+      - agent-fedramp-state:/app/output
+    command:
+      - python
+      - agent.py
+      - --daemon
+      - --server
+      - "${SENTINEL_SERVER}"
+      - --token
+      - "${SENTINEL_TOKEN}"
+      - --target
+      - /app
+      - --profile
+      - "fedramp"
+      - --interval
+      - "3600"
+
+  # ── Agent 3: general config scan, cmmc profile ──────────────────────────────
+  agent-cmmc:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.agent
+    container_name: sentinel-agent-cmmc
+    hostname: sentinel-agent-cmmc
+    restart: unless-stopped
+    environment:
+      SENTINEL_SERVER:      "${SENTINEL_SERVER}"
+      SENTINEL_AGENT_TOKEN: "${SENTINEL_TOKEN}"
+      SENTINEL_DEVICE_ID:   "agent-cmmc"
+      PYTHONUNBUFFERED:     "1"
+    volumes:
+      - agent-cmmc-state:/app/output
+    command:
+      - python
+      - agent.py
+      - --daemon
+      - --server
+      - "${SENTINEL_SERVER}"
+      - --token
+      - "${SENTINEL_TOKEN}"
+      - --target
+      - /app
+      - --profile
+      - "cmmc"
+      - --interval
+      - "3600"
+
+volumes:
+  ollama-data:
+  agent-ollama-state:
+  agent-fedramp-state:
+  agent-cmmc-state:
