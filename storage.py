@@ -148,6 +148,55 @@ class AgentStore:
             """).fetchall()
         return [dict(r) for r in rows]
 
+    def list_devices_by_profile(self, profiles: list[str]) -> list[dict]:
+        """Return devices with their latest scan matching any of the given profile slugs.
+
+        Each device row includes '_report' (full parsed report JSON) keyed to
+        the most recent scan that matched the requested profiles — not the
+        overall latest scan, which may be a different profile.
+        """
+        _SLUG_TO_DISPLAY = {
+            'default':   'default (full suite)',
+            'fedramp':   'fedramp moderate',
+            'cmmc':      'cmmc level 2',
+            'financial': 'financial services',
+            'smb':       'smb basic',
+        }
+        terms = set()
+        for p in profiles:
+            p = p.lower()
+            terms.add(p)
+            if p in _SLUG_TO_DISPLAY:
+                terms.add(_SLUG_TO_DISPLAY[p])
+        term_list = list(terms)
+        ph = ','.join('?' * len(term_list))
+        with self._lock, self._conn() as conn:
+            rows = conn.execute(f"""
+                SELECT
+                    d.device_id, d.hostname, d.platform, d.agent_version,
+                    d.first_seen, d.last_seen,
+                    r.scan_date, r.profile, r.mode, r.target,
+                    r.fail_count, r.warn_count, r.pass_count,
+                    r.received_at AS report_time,
+                    r.report_json
+                FROM devices d
+                JOIN reports r
+                    ON r.device_id = d.device_id
+                    AND r.received_at = (
+                        SELECT MAX(r2.received_at) FROM reports r2
+                        WHERE r2.device_id = d.device_id
+                        AND LOWER(r2.profile) IN ({ph})
+                    )
+                WHERE LOWER(r.profile) IN ({ph})
+                ORDER BY d.last_seen DESC
+            """, term_list + term_list).fetchall()
+        result = []
+        for row in rows:
+            d = dict(row)
+            d['_report'] = json.loads(d.pop('report_json'))
+            result.append(d)
+        return result
+
     def prune_old_reports(self, retention_days: int = 90) -> int:
         """Delete reports older than retention_days. Returns count deleted."""
         cutoff = int(time.time()) - (retention_days * 86400)
