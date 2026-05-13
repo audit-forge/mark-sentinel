@@ -1,0 +1,21 @@
+# Copy to terraform.tfvars and fill in your values.
+# NEVER commit terraform.tfvars — it contains your agent token.
+#
+# Usage:
+#   cp terraform.tfvars.example terraform.tfvars
+#   terraform init
+#   terraform plan
+#   terraform apply
+#   terraform apply -parallelism=5    # limit to 5 concurrent SSH connections
+
+hosts = {
+  web01 = "10.0.1.10"
+  web02 = "10.0.1.11"
+  db01  = "10.0.1.20"
+  db02  = "10.0.1.21"
+}
+
+ssh_user        = "ubuntu"
+ssh_key         = "~/.ssh/id_ed25519"
+sentinel_server = "http://10.0.1.50:7331"
+sentinel_token  = "replace-with-your-secret-token"
