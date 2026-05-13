@@ -372,6 +372,7 @@ examples:
         args.mode = 'config'
 
     profile = load_profile(args.profile)
+    profile['_slug'] = args.profile
     target = Path(args.target).resolve()
 
     if not args.quiet:

@@ -27,7 +27,7 @@ def format_json(results: list, profile: dict, target: str, mode: str) -> str:
         "scan_date": str(date.today()),
         "target": target,
         "mode": mode,
-        "profile": profile.get("name", "default"),
+        "profile": profile.get("_slug") or profile.get("name", "default"),
         "profile_framework": profile.get("framework_emphasis"),
         "profile_description": profile.get("description"),
         "summary": summary,
