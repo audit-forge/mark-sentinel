@@ -14,6 +14,50 @@
 #   SENTINEL_SERVER   — full URL of your Sentinel server, e.g. http://192.168.1.146:7331
 #   SENTINEL_TOKEN    — agent token from agent_token.txt on the server
 #   SENTINEL_PROFILE  — scan profile (default, fedramp, cmmc, financial, smb)
+#
+# ── Sidecar pattern (for scanning an existing customer service) ─────────────
+#
+# If a customer already has containers running and cannot modify them, add the
+# Sentinel agent as a sidecar: a separate container that mounts the host
+# filesystem read-only and scans from outside.  Nothing about the existing
+# containers changes — just append the sidecar service to their compose file.
+#
+# Example — drop this into the customer's existing docker-compose.yml:
+#
+#   sentinel-agent:
+#     image: ghcr.io/hash-ai/sentinel-agent:latest
+#     container_name: sentinel-agent
+#     hostname: <customer-env-name>        # shows as device name on dashboard
+#     restart: unless-stopped
+#     environment:
+#       SENTINEL_SERVER:      "http://<server-ip>:7331"
+#       SENTINEL_AGENT_TOKEN: "<token>"
+#       SENTINEL_DEVICE_ID:   "<customer-env-name>"   # stable ID across restarts
+#     volumes:
+#       - sentinel-state:/app/output       # persists device ID across restarts
+#       - /:/host:ro                       # host filesystem, read-only
+#     command:
+#       - python
+#       - agent.py
+#       - --daemon
+#       - --server
+#       - "http://<server-ip>:7331"
+#       - --token
+#       - "<token>"
+#       - --target
+#       - /host                            # scan the mounted host root
+#       - --profile
+#       - "default"
+#       - --interval
+#       - "3600"
+#
+#   volumes:
+#     sentinel-state:
+#
+# The agent scans /host (the real host filesystem) instead of /app, so it
+# audits the actual server running the customer's containers — OS config,
+# open ports, Docker daemon settings, etc.  One sidecar covers the whole host
+# regardless of how many other containers are running on it.
 
 services:
 
