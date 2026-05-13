@@ -28,11 +28,11 @@ services:
     volumes:
       - ollama-data:/root/.ollama
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
+      test: ["CMD-SHELL", "wget -qO- http://localhost:11434/api/tags || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 5
-      start_period: 20s
+      start_period: 60s
 
   # ── Agent 1: scans the Ollama AI endpoint ───────────────────────────────────
   agent-ollama:
@@ -44,7 +44,7 @@ services:
     restart: unless-stopped
     depends_on:
       ollama:
-        condition: service_healthy
+        condition: service_started
     environment:
       SENTINEL_SERVER:    "${SENTINEL_SERVER}"
       SENTINEL_AGENT_TOKEN: "${SENTINEL_TOKEN}"
