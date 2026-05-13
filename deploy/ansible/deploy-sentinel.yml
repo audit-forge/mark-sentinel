@@ -1,0 +1,143 @@
+---
+# M.A.R.K. Sentinel — Ansible deployment playbook
+#
+# Deploys the Sentinel agent to Docker hosts and/or Kubernetes clusters.
+#
+# Usage:
+#   ansible-playbook -i inventory.example.yml deploy-sentinel.yml
+#
+# Target specific groups:
+#   ansible-playbook -i inventory.example.yml deploy-sentinel.yml --limit docker_hosts
+#   ansible-playbook -i inventory.example.yml deploy-sentinel.yml --limit k8s_hosts
+#
+# Required variables (set in inventory or pass with -e):
+#   sentinel_server   — full URL of the Sentinel server, e.g. http://192.168.1.146:7331
+#   sentinel_token    — agent token from agent_token.txt on the server
+#   sentinel_profile  — scan profile: default, fedramp, cmmc, financial, smb
+
+
+# ── Play 1: Docker hosts ────────────────────────────────────────────────────
+- name: Deploy Sentinel Agent (Docker)
+  hosts: docker_hosts
+  become: true
+
+  vars:
+    sentinel_install_dir: /opt/sentinel
+    sentinel_image: ghcr.io/hash-ai/sentinel-agent:latest
+
+  tasks:
+
+    - name: Create install directory
+      file:
+        path: "{{ sentinel_install_dir }}"
+        state: directory
+        mode: "0755"
+
+    - name: Copy docker-compose file
+      copy:
+        src: ../docker-compose.yml
+        dest: "{{ sentinel_install_dir }}/docker-compose.yml"
+        mode: "0644"
+
+    - name: Write .env file
+      copy:
+        dest: "{{ sentinel_install_dir }}/.env"
+        mode: "0600"
+        content: |
+          SENTINEL_SERVER={{ sentinel_server }}
+          SENTINEL_TOKEN={{ sentinel_token }}
+          SENTINEL_PROFILE={{ sentinel_profile | default('default') }}
+
+    - name: Pull latest agent image
+      community.docker.docker_image:
+        name: "{{ sentinel_image }}"
+        source: pull
+        force_source: true
+
+    - name: Start sentinel containers
+      community.docker.docker_compose_v2:
+        project_src: "{{ sentinel_install_dir }}"
+        state: present
+        pull: always
+
+    - name: Show running containers
+      community.docker.docker_compose_v2:
+        project_src: "{{ sentinel_install_dir }}"
+        state: present
+      register: compose_result
+
+    - name: Report container status
+      debug:
+        msg: "{{ item.key }} — {{ item.value.state.status }}"
+      loop: "{{ compose_result.containers | default([]) }}"
+      loop_control:
+        label: "{{ item.key }}"
+
+
+# ── Play 2: Kubernetes clusters ─────────────────────────────────────────────
+- name: Deploy Sentinel Agent (Kubernetes)
+  hosts: k8s_hosts
+
+  vars:
+    sentinel_namespace: sentinel
+    k8s_daemonset_manifest: "{{ playbook_dir }}/../k8s/base/sentinel-agent-daemonset.yaml"
+
+  tasks:
+
+    - name: Create sentinel namespace
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: v1
+          kind: Namespace
+          metadata:
+            name: "{{ sentinel_namespace }}"
+            labels:
+              app.kubernetes.io/name: sentinel-agent
+              app.kubernetes.io/managed-by: ansible
+
+    - name: Create agent secret
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: v1
+          kind: Secret
+          metadata:
+            name: sentinel-agent-secret
+            namespace: "{{ sentinel_namespace }}"
+          stringData:
+            server: "{{ sentinel_server }}"
+            token:  "{{ sentinel_token }}"
+
+    - name: Apply DaemonSet manifest
+      kubernetes.core.k8s:
+        state: present
+        src: "{{ k8s_daemonset_manifest }}"
+
+    - name: Wait for DaemonSet pods to be ready
+      kubernetes.core.k8s_info:
+        kind: DaemonSet
+        name: sentinel-agent
+        namespace: "{{ sentinel_namespace }}"
+      register: ds_info
+      until: >
+        ds_info.resources | length > 0 and
+        (ds_info.resources[0].status.numberReady | default(0)) ==
+        (ds_info.resources[0].status.desiredNumberScheduled | default(1))
+      retries: 20
+      delay: 10
+
+    - name: Report pod status
+      kubernetes.core.k8s_info:
+        kind: Pod
+        namespace: "{{ sentinel_namespace }}"
+        label_selectors:
+          - app.kubernetes.io/name=sentinel-agent
+      register: pod_info
+
+    - name: Show pod names and phase
+      debug:
+        msg: "{{ item.metadata.name }} — {{ item.status.phase }}"
+      loop: "{{ pod_info.resources }}"
+      loop_control:
+        label: "{{ item.metadata.name }}"

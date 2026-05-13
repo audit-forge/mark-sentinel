@@ -1,0 +1,21 @@
+all:
+  vars:
+    sentinel_server:  "http://192.168.1.146:7331"
+    sentinel_token:   "your-agent-token"
+    sentinel_profile: "default"
+
+  children:
+
+    # Linux/Windows hosts running Docker
+    docker_hosts:
+      hosts:
+        # docker-server-01:
+        #   ansible_host: 192.168.1.50
+        #   ansible_user: ubuntu
+
+    # Hosts with kubectl access to a cluster (can be localhost)
+    k8s_hosts:
+      hosts:
+        localhost:
+          ansible_connection: local
+          # kubeconfig: ~/.kube/config   # override if needed
