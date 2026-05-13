@@ -1195,22 +1195,12 @@ button:hover{{background:#2ea043}}
         profile  = ','.join(profiles)
         try:
             store = _get_store()
-            devices = store.list_devices()
-            for d in devices:
-                d['_report'] = store.get_latest_report(d['device_id']) or {}
             if profiles:
-                _DISPLAY_TO_SLUG = {
-                    'default (full suite)': 'default',
-                    'fedramp moderate':     'fedramp',
-                    'cmmc level 2':         'cmmc',
-                    'financial services':   'financial',
-                    'smb basic':            'smb',
-                }
-                def _dev_profile(d):
-                    p = (d.get('profile') or d['_report'].get('profile') or '').lower().strip()
-                    p = _DISPLAY_TO_SLUG.get(p, p)
-                    return p or 'default'
-                devices = [d for d in devices if _dev_profile(d) in profiles]
+                devices = store.list_devices_by_profile(profiles)
+            else:
+                devices = store.list_devices()
+                for d in devices:
+                    d['_report'] = store.get_latest_report(d['device_id']) or {}
 
             if fmt == 'json':
                 payload = [{'device_id': d['device_id'], 'hostname': d['hostname'],
