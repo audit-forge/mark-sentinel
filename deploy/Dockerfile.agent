@@ -17,9 +17,10 @@ RUN pip install --no-cache-dir --upgrade pip \
  && pip install --no-cache-dir -r requirements.txt
 
 COPY agent.py audit.py audit_history.py alerts.py storage.py license.py tokens.py discovery.py server.py ./
-COPY checks/    checks/
+COPY checks/     checks/
 COPY connectors/ connectors/
-COPY profiles/  profiles/
+COPY profiles/   profiles/
+COPY output/     output/
 
 RUN addgroup --system sentinel \
  && adduser  --system --no-create-home --ingroup sentinel sentinel \
