@@ -150,6 +150,12 @@ def _hardware_seed() -> str:
 
 def _device_id() -> str:
     """Stable 16-char hex ID. Persisted to disk so containers/VMs get a consistent ID."""
+    # Explicit override for containers and K8s — set SENTINEL_DEVICE_ID to a stable
+    # value (e.g. derived from pod name or container name) to avoid ID churn on restart.
+    explicit = os.environ.get('SENTINEL_DEVICE_ID', '').strip()
+    if explicit:
+        return hashlib.sha256(explicit.encode()).hexdigest()[:16]
+
     id_file = ROOT / 'output' / '.device_id'
     if id_file.exists():
         try:
@@ -158,7 +164,12 @@ def _device_id() -> str:
                 return stored
         except OSError:
             pass
-    new_id = hashlib.sha256(_hardware_seed().encode()).hexdigest()[:16]
+    # SENTINEL_HOSTNAME lets K8s/containers pass a stable name (e.g. NODE_NAME)
+    # into the hardware seed so the generated ID is deterministic even without a
+    # persistent volume.
+    seed_hint = os.environ.get('SENTINEL_HOSTNAME', '').strip()
+    seed = f'{seed_hint}:{_hardware_seed()}' if seed_hint else _hardware_seed()
+    new_id = hashlib.sha256(seed.encode()).hexdigest()[:16]
     try:
         id_file.parent.mkdir(parents=True, exist_ok=True)
         id_file.write_text(new_id)
