@@ -16,7 +16,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir --upgrade pip \
  && pip install --no-cache-dir -r requirements.txt
 
-COPY agent.py audit.py audit_safe.py storage.py server.py ./
+COPY agent.py audit.py audit_history.py alerts.py storage.py license.py tokens.py discovery.py server.py ./
 COPY checks/    checks/
 COPY connectors/ connectors/
 COPY profiles/  profiles/
