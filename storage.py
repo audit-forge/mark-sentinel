@@ -277,6 +277,15 @@ class AgentStore:
             ).fetchone()
         return row is not None
 
+    def find_devices_by_hostname(self, hostname: str) -> list[dict]:
+        """Return all device_ids that share a hostname (used for duplicate detection)."""
+        with self._lock, self._conn() as conn:
+            rows = conn.execute(
+                "SELECT device_id, hostname, platform, last_seen FROM devices WHERE hostname = ?",
+                (hostname,),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
     def log_license_event(self, event_type: str, device_id: str, hostname: str,
                           agent_count: int, max_agents: int) -> None:
         now = int(time.time())

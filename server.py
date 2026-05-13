@@ -1008,12 +1008,34 @@ button:hover{{background:#2ea043}}
                 return
             _report_last_seen[device_id] = now
 
-        # License seat check — only runs when this is a previously unseen device
         store = _get_store()
+        is_new = not store.is_known_device(device_id)
+
+        # Duplicate hostname detection — warn when a new device_id uses an existing hostname
+        duplicate_warning = None
+        if is_new:
+            try:
+                existing = [d for d in store.find_devices_by_hostname(hostname)
+                            if d['device_id'] != device_id]
+                if existing:
+                    ids = [d['device_id'] for d in existing]
+                    log.warning(
+                        'DUPLICATE HOSTNAME: new device %s (%s) shares hostname "%s" '
+                        'with existing device(s) %s — possible agent reinstall or ID change',
+                        device_id, body.get('platform', ''), hostname, ids,
+                    )
+                    duplicate_warning = {
+                        'message': f'Hostname "{hostname}" already registered under different device ID(s): {ids}',
+                        'existing_ids': ids,
+                    }
+            except Exception as _de:
+                log.error('duplicate check error: %s', _de)
+
+        # License seat check — only runs when this is a previously unseen device
         license_status = 'ok'
         try:
             from license import check_overage
-            if not store.is_known_device(device_id):
+            if is_new:
                 current_count = store.device_count() + 1  # +1 for the device being registered
                 license_status = check_overage(device_id, hostname, current_count, store)
         except Exception as _le:
@@ -1044,7 +1066,10 @@ button:hover{{background:#2ea043}}
         except Exception as _ae:
             log.error('alerts error: %s', _ae)
 
-        self._json({'status': 'accepted', 'device_id': device_id, 'license_status': license_status})
+        resp = {'status': 'accepted', 'device_id': device_id, 'license_status': license_status}
+        if duplicate_warning:
+            resp['warning'] = duplicate_warning
+        self._json(resp)
 
     def _api_agent_commands(self, device_id: str):
         """GET /api/agent/commands/<device_id> — agent polls for pending commands."""
