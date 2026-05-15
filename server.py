@@ -1604,8 +1604,12 @@ button:hover{{background:#2ea043}}
         try:
             sys.path.insert(0, str(ROOT))
             from dataclasses import asdict
-            from checks.input_safety  import run_all as inp_checks
-            from checks.output_safety import run_all as out_checks
+            from checks.input_safety import (
+                check_inp_001, check_inp_002, check_inp_003, check_inp_004,
+            )
+            from checks.output_safety import (
+                check_out_001, check_out_002, check_out_003, check_out_004,
+            )
 
             if provider == 'openai':
                 from connectors.api_connector import connect
@@ -1621,14 +1625,21 @@ button:hover{{background:#2ea043}}
                 mdl = model or 'gemini-1.5-flash'
                 ctx = connect(api_key=api_key, model=mdl, target_dir=str(ROOT))
 
-            results = inp_checks(ctx) + out_checks(ctx)
+            live_error = getattr(ctx, 'live_error', '')
+            results = [
+                check_inp_001(ctx), check_inp_002(ctx),
+                check_inp_003(ctx), check_inp_004(ctx),
+                check_out_001(ctx), check_out_002(ctx),
+                check_out_003(ctx), check_out_004(ctx),
+            ]
             summary = {'pass': 0, 'fail': 0, 'warn': 0, 'skip': 0}
             serialized = []
             for r in results:
                 summary[r.status.lower()] = summary.get(r.status.lower(), 0) + 1
                 serialized.append(asdict(r))
 
-            self._json({'summary': summary, 'results': serialized})
+            self._json({'summary': summary, 'results': serialized,
+                        'live_error': live_error, 'model': mdl})
         except Exception as exc:
             log.error('probe-scan error: %s', exc, exc_info=True)
             self._json({'error': str(exc)}, 500)
@@ -1644,13 +1655,13 @@ button:hover{{background:#2ea043}}
 *{box-sizing:border-box;margin:0;padding:0}
 body{background:#0d1117;color:#e6edf3;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;font-size:14px;min-height:100vh}
 a{color:#58a6ff}
-.wrap{max-width:860px;margin:0 auto;padding:32px 20px 64px}
+.wrap{max-width:900px;margin:0 auto;padding:32px 20px 64px}
 .brand-bar{display:flex;align-items:center;gap:10px;margin-bottom:32px;padding-bottom:20px;border-bottom:1px solid #21262d}
 .brand-mark{font-size:18px;font-weight:800;letter-spacing:2px;color:#58a6ff}
 .brand-name{font-size:16px;font-weight:700;letter-spacing:1px}
 .brand-sub{font-size:12px;color:#8b949e;margin-left:4px}
 h1{font-size:20px;font-weight:700;margin-bottom:6px}
-.subtitle{color:#8b949e;font-size:13px;margin-bottom:28px}
+.subtitle{color:#8b949e;font-size:13px;margin-bottom:28px;line-height:1.6}
 .card{background:#161b22;border:1px solid #21262d;border-radius:8px;padding:24px;margin-bottom:16px}
 label{display:block;font-size:12px;font-weight:600;color:#8b949e;margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px}
 select,input[type=text],input[type=password]{width:100%;background:#0d1117;border:1px solid #30363d;border-radius:6px;color:#e6edf3;font-size:14px;padding:9px 12px;outline:none;transition:border-color .15s}
@@ -1664,48 +1675,47 @@ select:focus,input:focus{border-color:#58a6ff}
 .btn:disabled{background:#21262d;color:#6e7681;cursor:not-allowed}
 .spinner{width:14px;height:14px;border:2px solid rgba(255,255,255,.3);border-top-color:#fff;border-radius:50%;animation:spin .7s linear infinite;display:none}
 @keyframes spin{to{transform:rotate(360deg)}}
-#run-btn.loading .spinner{display:inline-block}
-#run-btn.loading .btn-label{display:none}
-#run-btn.loading .idle-label{display:none}
 .summary-strip{display:flex;gap:12px;margin-bottom:20px;flex-wrap:wrap}
 .scard{flex:1;min-width:80px;background:#161b22;border:1px solid #21262d;border-radius:8px;padding:14px 12px;text-align:center}
 .scard-n{font-size:28px;font-weight:800;line-height:1}
 .scard-l{font-size:11px;color:#8b949e;margin-top:4px;text-transform:uppercase;letter-spacing:.5px}
-.c-green{color:#3fb950}
-.c-red{color:#f85149}
-.c-yellow{color:#d29922}
-.c-gray{color:#6e7681}
-.c-blue{color:#58a6ff}
-.check-card{background:#161b22;border:1px solid #21262d;border-radius:8px;margin-bottom:10px;overflow:hidden}
-.check-head{display:flex;align-items:center;gap:10px;padding:14px 16px;cursor:pointer;user-select:none}
-.check-head:hover{background:#1c2128}
-.status-badge{font-size:11px;font-weight:700;padding:2px 8px;border-radius:4px;min-width:42px;text-align:center}
+.c-green{color:#3fb950}.c-red{color:#f85149}.c-yellow{color:#d29922}.c-gray{color:#6e7681}.c-blue{color:#58a6ff}
+.check-card{background:#161b22;border:1px solid #21262d;border-left:3px solid transparent;border-radius:8px;margin-bottom:10px;overflow:hidden}
+.check-card.fail{border-left-color:#f85149}
+.check-card.warn{border-left-color:#d29922}
+.check-card.pass{border-left-color:#3fb950}
+.check-card.skip{border-left-color:#30363d}
+.check-head{display:flex;align-items:flex-start;gap:10px;padding:14px 16px}
+.status-badge{font-size:11px;font-weight:700;padding:3px 8px;border-radius:4px;min-width:44px;text-align:center;flex-shrink:0;margin-top:1px}
 .badge-PASS{background:#0d4a1a;color:#3fb950}
 .badge-FAIL{background:#4a0d0d;color:#f85149}
 .badge-WARN{background:#4a3b0d;color:#d29922}
 .badge-SKIP{background:#1c2128;color:#6e7681}
-.sev-badge{font-size:10px;font-weight:600;padding:2px 7px;border-radius:4px;border:1px solid}
+.sev-badge{font-size:10px;font-weight:600;padding:3px 7px;border-radius:4px;border:1px solid;flex-shrink:0;margin-top:1px}
 .sev-CRITICAL{color:#f85149;border-color:#4a0d0d}
 .sev-HIGH{color:#d29922;border-color:#4a3b0d}
 .sev-MEDIUM{color:#58a6ff;border-color:#1d3250}
 .sev-LOW{color:#8b949e;border-color:#30363d}
-.check-title{flex:1;font-size:13px;font-weight:600}
-.check-id{font-size:11px;color:#6e7681;margin-left:auto;white-space:nowrap}
-.chevron{color:#6e7681;font-size:12px;transition:transform .2s}
-.check-body{display:none;padding:0 16px 16px;border-top:1px solid #21262d}
-.check-body.open{display:block}
+.check-meta{flex:1;min-width:0}
+.check-title{font-size:13px;font-weight:600;margin-bottom:4px}
+.check-detail-inline{font-size:12px;color:#8b949e;line-height:1.5}
+.check-id{font-size:11px;color:#6e7681;flex-shrink:0;padding-top:2px}
+.check-body{padding:0 16px 16px;border-top:1px solid #21262d}
 .check-section{margin-top:14px}
 .check-section-label{font-size:11px;font-weight:700;color:#8b949e;text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px}
-.check-detail{font-size:13px;color:#c9d1d9;line-height:1.6}
+.check-detail-full{font-size:13px;color:#c9d1d9;line-height:1.6}
 .evidence-list{list-style:none;padding:0}
-.evidence-list li{font-size:12px;color:#8b949e;font-family:monospace;background:#0d1117;border:1px solid #21262d;border-radius:4px;padding:6px 10px;margin-bottom:4px;word-break:break-all}
+.evidence-list li{font-size:12px;color:#8b949e;font-family:ui-monospace,monospace;background:#0d1117;border:1px solid #21262d;border-radius:4px;padding:6px 10px;margin-bottom:4px;word-break:break-all}
 .remediation{font-size:13px;color:#c9d1d9;line-height:1.8;white-space:pre-wrap}
-.fw-pills{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+.fw-pills{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
 .fw-pill{font-size:10px;background:#1d3250;color:#58a6ff;border-radius:4px;padding:2px 8px}
 .err-box{background:#4a0d0d;border:1px solid #f85149;border-radius:6px;color:#f85149;font-size:13px;padding:14px 16px;margin-bottom:16px}
+.warn-banner{background:#4a3b0d;border:1px solid #d29922;border-radius:6px;color:#d29922;font-size:13px;padding:14px 16px;margin-bottom:16px}
+.ok-banner{background:#0d4a1a;border:1px solid #3fb950;border-radius:6px;color:#3fb950;font-size:13px;padding:14px 16px;margin-bottom:16px}
 .cat-header{font-size:12px;font-weight:700;color:#8b949e;text-transform:uppercase;letter-spacing:1px;margin:20px 0 8px;padding-bottom:6px;border-bottom:1px solid #21262d}
 #results{display:none}
-#loading-msg{display:none;color:#8b949e;font-size:13px;padding:20px 0;text-align:center}
+#loading-msg{display:none;color:#8b949e;font-size:13px;padding:20px 0;text-align:center;line-height:2}
+.model-tag{font-size:11px;color:#6e7681;margin-bottom:16px}
 </style>
 </head>
 <body>
@@ -1717,13 +1727,17 @@ select:focus,input:focus{border-color:#58a6ff}
   </div>
 
   <h1>AI API Security Tester</h1>
-  <p class="subtitle">Enter your API key to run live adversarial probes against your AI endpoint &mdash; prompt injection, jailbreaks, PII leakage, system prompt disclosure, and more.</p>
+  <p class="subtitle">
+    Enter your API credentials to run live adversarial probes against your AI endpoint.<br>
+    Tests include: prompt injection, jailbreaks, PII leakage, system prompt disclosure, harmful content refusals, and training data extraction.<br>
+    Your API key is sent only to your chosen endpoint and is never stored by Sentinel.
+  </p>
 
   <div class="card">
     <div class="field">
       <label>Provider</label>
       <select id="provider" onchange="onProviderChange()">
-        <option value="openai">OpenAI-compatible (OpenAI, Azure, local, etc.)</option>
+        <option value="openai">OpenAI-compatible (OpenAI, Azure, local Ollama, etc.)</option>
         <option value="anthropic">Anthropic (Claude)</option>
         <option value="gemini">Google Gemini</option>
       </select>
@@ -1732,17 +1746,17 @@ select:focus,input:focus{border-color:#58a6ff}
     <div class="field" id="endpoint-field">
       <label>API Endpoint</label>
       <input type="text" id="endpoint" placeholder="https://api.openai.com/v1" value="https://api.openai.com/v1">
-      <div class="hint">Use the base URL without trailing slash. For Azure: https://&lt;resource&gt;.openai.azure.com/openai/deployments/&lt;name&gt;</div>
+      <div class="hint">Base URL, no trailing slash. Azure example: https://&lt;resource&gt;.openai.azure.com/openai/deployments/&lt;name&gt;</div>
     </div>
 
     <div class="row">
       <div class="field">
         <label>API Key</label>
         <input type="password" id="api-key" placeholder="sk-..." autocomplete="off">
-        <div class="hint">Key is sent only to your endpoint and never stored.</div>
+        <div class="hint">Never stored &mdash; used only for this scan session.</div>
       </div>
       <div class="field">
-        <label>Model</label>
+        <label>Model <span style="font-weight:400;text-transform:none;letter-spacing:0">(optional)</span></label>
         <input type="text" id="model" placeholder="gpt-4o">
         <div class="hint">Leave blank to use the provider default.</div>
       </div>
@@ -1750,40 +1764,39 @@ select:focus,input:focus{border-color:#58a6ff}
 
     <button class="btn" id="run-btn" onclick="runScan()">
       <div class="spinner" id="spinner"></div>
-      <span class="idle-label">&#128272; Run Security Tests</span>
-      <span class="btn-label" style="display:none">Running\xe2\x80\xa6</span>
+      <span id="btn-text">&#128272; Run Security Tests</span>
     </button>
   </div>
 
   <div id="error-box" class="err-box" style="display:none"></div>
-  <div id="loading-msg">Running adversarial probes &mdash; this takes 20&ndash;60 seconds&hellip;</div>
+  <div id="loading-msg">
+    Running adversarial probes against your endpoint&hellip;<br>
+    <span style="font-size:11px">This typically takes 30&ndash;90 seconds depending on the provider.</span>
+  </div>
   <div id="results"></div>
 </div>
 
 <script>
 const PROVIDER_DEFAULTS = {
-  openai:    {model: 'gpt-4o',               endpoint: 'https://api.openai.com/v1', showEp: true},
-  anthropic: {model: 'claude-sonnet-4-6',    endpoint: '',                           showEp: false},
-  gemini:    {model: 'gemini-1.5-flash',     endpoint: '',                           showEp: false},
+  openai:    {model: 'gpt-4o',            showEp: true},
+  anthropic: {model: 'claude-sonnet-4-6', showEp: false},
+  gemini:    {model: 'gemini-1.5-flash',  showEp: false},
 };
 
 function onProviderChange() {
   const p = document.getElementById('provider').value;
-  const d = PROVIDER_DEFAULTS[p];
+  const d = PROVIDER_DEFAULTS[p] || {};
   document.getElementById('endpoint-field').style.display = d.showEp ? '' : 'none';
-  document.getElementById('model').placeholder = d.model;
-  if (d.showEp) document.getElementById('endpoint').value = d.endpoint;
+  document.getElementById('model').placeholder = d.model || '';
 }
 
 function setLoading(on) {
   const btn = document.getElementById('run-btn');
   const sp  = document.getElementById('spinner');
-  const il  = document.querySelector('.idle-label');
-  const bl  = document.querySelector('.btn-label');
+  const bt  = document.getElementById('btn-text');
   btn.disabled = on;
-  sp.style.display  = on ? 'inline-block' : 'none';
-  il.style.display  = on ? 'none' : '';
-  bl.style.display  = on ? '' : 'none';
+  sp.style.display = on ? 'inline-block' : 'none';
+  bt.textContent   = on ? 'Running...' : '\xf0\x9f\x94\x92 Run Security Tests';
   document.getElementById('loading-msg').style.display = on ? 'block' : 'none';
 }
 
@@ -1797,7 +1810,11 @@ async function runScan() {
   errBox.style.display = 'none';
   document.getElementById('results').style.display = 'none';
 
-  if (!apiKey) { errBox.textContent = 'Please enter an API key.'; errBox.style.display = ''; return; }
+  if (!apiKey) {
+    errBox.textContent = 'Please enter an API key before running.';
+    errBox.style.display = '';
+    return;
+  }
 
   setLoading(true);
   try {
@@ -1808,7 +1825,7 @@ async function runScan() {
     });
     const data = await resp.json();
     if (!resp.ok || data.error) {
-      errBox.textContent = data.error || 'Scan failed (HTTP ' + resp.status + ')';
+      errBox.textContent = data.error || ('Scan failed - HTTP ' + resp.status);
       errBox.style.display = '';
     } else {
       renderResults(data);
@@ -1821,77 +1838,104 @@ async function runScan() {
   }
 }
 
-function toggle(id) {
-  const body = document.getElementById(id);
-  const ch   = document.getElementById('ch-' + id);
-  const open = body.classList.toggle('open');
-  if (ch) ch.textContent = open ? '\\u25b2' : '\\u25bc';
+function esc(s) {
+  return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
 function renderResults(data) {
-  const s = data.summary;
+  const s = data.summary || {};
   const results = data.results || [];
   const el = document.getElementById('results');
 
-  let html = `<div class="summary-strip">
-    <div class="scard"><div class="scard-n c-red">${s.fail}</div><div class="scard-l">Failed</div></div>
-    <div class="scard"><div class="scard-n c-yellow">${s.warn}</div><div class="scard-l">Warnings</div></div>
-    <div class="scard"><div class="scard-n c-green">${s.pass}</div><div class="scard-l">Passed</div></div>
-    <div class="scard"><div class="scard-n c-gray">${s.skip}</div><div class="scard-l">Skipped</div></div>
-  </div>`;
+  try {
+    const allSkip  = results.length > 0 && results.every(r => r.status === 'SKIP');
+    const allGood  = !allSkip && s.fail === 0 && s.warn === 0;
+    const hasIssue = s.fail > 0 || s.warn > 0;
 
-  const cats = {};
-  for (const r of results) {
-    (cats[r.category] = cats[r.category] || []).push(r);
-  }
-  const statusOrder = {FAIL:0,WARN:1,PASS:2,SKIP:3};
-  for (const cat of Object.keys(cats)) {
-    cats[cat].sort((a,b)=>(statusOrder[a.status]??9)-(statusOrder[b.status]??9));
-    html += `<div class="cat-header">${esc(cat)}</div>`;
-    for (const r of cats[cat]) {
-      const bodyId = 'body-' + r.check_id;
-      const autoOpen = (r.status === 'FAIL' || r.status === 'WARN') ? ' open' : '';
-      const chevron  = autoOpen ? '\\u25b2' : '\\u25bc';
-      html += `<div class="check-card">
-        <div class="check-head" onclick="toggle('${bodyId}')">
-          <span class="status-badge badge-${r.status}">${r.status}</span>
-          <span class="sev-badge sev-${r.severity}">${r.severity}</span>
-          <span class="check-title">${esc(r.title)}</span>
-          <span class="check-id">${esc(r.check_id)}</span>
-          <span class="chevron" id="ch-${bodyId}">${chevron}</span>
-        </div>
-        <div class="check-body${autoOpen}" id="${bodyId}">`;
+    let html = '';
 
-      html += `<div class="check-section"><div class="check-section-label">Details</div><div class="check-detail">${esc(r.details)}</div></div>`;
-
-      if (r.evidence && r.evidence.length) {
-        html += `<div class="check-section"><div class="check-section-label">Evidence</div><ul class="evidence-list">`;
-        for (const e of r.evidence) html += `<li>${esc(e)}</li>`;
-        html += `</ul></div>`;
-      }
-
-      if (r.remediation) {
-        html += `<div class="check-section"><div class="check-section-label">How to Fix</div><div class="remediation">${esc(r.remediation)}</div></div>`;
-      }
-
-      if (r.frameworks && Object.keys(r.frameworks).length) {
-        html += `<div class="check-section"><div class="check-section-label">Frameworks</div><div class="fw-pills">`;
-        for (const [fw, ctrl] of Object.entries(r.frameworks)) {
-          html += `<span class="fw-pill">${esc(fw)}: ${esc(ctrl)}</span>`;
-        }
-        html += `</div></div>`;
-      }
-
-      html += `</div></div>`;
+    if (data.model) {
+      html += `<div class="model-tag">Model tested: <strong>${esc(data.model)}</strong></div>`;
     }
+
+    html += `<div class="summary-strip">
+      <div class="scard"><div class="scard-n c-red">${s.fail || 0}</div><div class="scard-l">Failed</div></div>
+      <div class="scard"><div class="scard-n c-yellow">${s.warn || 0}</div><div class="scard-l">Warnings</div></div>
+      <div class="scard"><div class="scard-n c-green">${s.pass || 0}</div><div class="scard-l">Passed</div></div>
+      <div class="scard"><div class="scard-n c-gray">${s.skip || 0}</div><div class="scard-l">Skipped</div></div>
+    </div>`;
+
+    if (allSkip) {
+      const reason = data.live_error || 'the endpoint did not respond to probe requests';
+      html += `<div class="warn-banner">
+        <strong>Could not connect to endpoint.</strong><br>
+        All probes were skipped because ${esc(reason)}.<br>
+        Check that your API key is correct, the endpoint URL is reachable, and the model name is valid.
+      </div>`;
+    } else if (allGood) {
+      html += `<div class="ok-banner">
+        <strong>All active checks passed.</strong> No prompt injection, jailbreak, PII leakage, or disclosure issues detected with this endpoint and model.
+      </div>`;
+    }
+
+    const cats = {};
+    for (const r of results) {
+      (cats[r.category] = cats[r.category] || []).push(r);
+    }
+    const statusOrder = {FAIL:0, WARN:1, PASS:2, SKIP:3};
+    for (const cat of Object.keys(cats).sort()) {
+      cats[cat].sort((a, b) => (statusOrder[a.status] ?? 9) - (statusOrder[b.status] ?? 9));
+      html += `<div class="cat-header">${esc(cat)}</div>`;
+
+      for (const r of cats[cat]) {
+        const cls = r.status.toLowerCase();
+        html += `<div class="check-card ${cls}">
+          <div class="check-head">
+            <span class="status-badge badge-${r.status}">${r.status}</span>
+            <span class="sev-badge sev-${r.severity}">${r.severity}</span>
+            <div class="check-meta">
+              <div class="check-title">${esc(r.title)}</div>
+              <div class="check-detail-inline">${esc(r.details)}</div>
+            </div>
+            <span class="check-id">${esc(r.check_id)}</span>
+          </div>`;
+
+        const showBody = r.status === 'FAIL' || r.status === 'WARN' ||
+                         (r.evidence && r.evidence.length) || r.remediation;
+        if (showBody) {
+          html += `<div class="check-body">`;
+
+          if (r.evidence && r.evidence.length) {
+            html += `<div class="check-section"><div class="check-section-label">Evidence</div><ul class="evidence-list">`;
+            for (const e of r.evidence) html += `<li>${esc(e)}</li>`;
+            html += `</ul></div>`;
+          }
+
+          if (r.remediation) {
+            html += `<div class="check-section"><div class="check-section-label">How to Fix</div><div class="remediation">${esc(r.remediation)}</div></div>`;
+          }
+
+          if (r.frameworks && Object.keys(r.frameworks).length) {
+            html += `<div class="check-section"><div class="check-section-label">Frameworks</div><div class="fw-pills">`;
+            for (const [fw, ctrl] of Object.entries(r.frameworks)) {
+              html += `<span class="fw-pill">${esc(fw)}: ${esc(ctrl)}</span>`;
+            }
+            html += `</div></div>`;
+          }
+
+          html += `</div>`;
+        }
+
+        html += `</div>`;
+      }
+    }
+
+    el.innerHTML = html;
+    el.style.display = '';
+  } catch (jsErr) {
+    el.innerHTML = `<div class="err-box">Display error: ${jsErr.message}<br>Raw result count: ${results.length}</div>`;
+    el.style.display = '';
   }
-
-  el.innerHTML = html;
-  el.style.display = '';
-}
-
-function esc(s) {
-  return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 </script>
 </body>
