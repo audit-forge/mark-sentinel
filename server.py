@@ -1817,21 +1817,33 @@ async function runScan() {
   }
 
   setLoading(true);
+  let rawText = '';
   try {
     const resp = await fetch('/api/probe-scan', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({provider, api_key: apiKey, model, endpoint}),
     });
-    const data = await resp.json();
+    rawText = await resp.text();
+    let data;
+    try { data = JSON.parse(rawText); }
+    catch (_) {
+      errBox.textContent = 'Server returned an unexpected response. Check the Sentinel terminal window for errors.';
+      errBox.style.display = '';
+      setLoading(false);
+      return;
+    }
     if (!resp.ok || data.error) {
       errBox.textContent = data.error || ('Scan failed - HTTP ' + resp.status);
+      errBox.style.display = '';
+    } else if (!data.results || data.results.length === 0) {
+      errBox.textContent = 'Scan completed but returned no results. Check the Sentinel terminal window for errors.';
       errBox.style.display = '';
     } else {
       renderResults(data);
     }
   } catch (e) {
-    errBox.textContent = 'Network error: ' + e.message;
+    errBox.textContent = 'Connection error: ' + e.message + (rawText ? ' -- raw: ' + rawText.slice(0, 120) : '');
     errBox.style.display = '';
   } finally {
     setLoading(false);
