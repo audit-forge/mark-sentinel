@@ -1601,6 +1601,7 @@ button:hover{{background:#2ea043}}
             self._json({'error': 'unknown provider'}, 400)
             return
 
+        log.info('probe-scan start: provider=%s endpoint=%s', provider, endpoint or '(default)')
         try:
             sys.path.insert(0, str(ROOT))
             from dataclasses import asdict
@@ -1615,6 +1616,7 @@ button:hover{{background:#2ea043}}
                 from connectors.api_connector import connect
                 ep = endpoint or 'https://api.openai.com/v1'
                 mdl = model or 'gpt-4o'
+                log.info('probe-scan connecting to %s model=%s', ep, mdl)
                 ctx = connect(ep, api_key, mdl, str(ROOT))
             elif provider == 'anthropic':
                 from connectors.claude_connector import connect
@@ -1626,6 +1628,8 @@ button:hover{{background:#2ea043}}
                 ctx = connect(api_key=api_key, model=mdl, target_dir=str(ROOT))
 
             live_error = getattr(ctx, 'live_error', '')
+            probe_count = len(ctx.probe_results)
+            log.info('probe-scan probes completed: %d  live_error=%r', probe_count, live_error)
             results = [
                 check_inp_001(ctx), check_inp_002(ctx),
                 check_inp_003(ctx), check_inp_004(ctx),
@@ -1638,6 +1642,7 @@ button:hover{{background:#2ea043}}
                 summary[r.status.lower()] = summary.get(r.status.lower(), 0) + 1
                 serialized.append(asdict(r))
 
+            log.info('probe-scan done: %s', summary)
             self._json({'summary': summary, 'results': serialized,
                         'live_error': live_error, 'model': mdl})
         except Exception as exc:
