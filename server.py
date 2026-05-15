@@ -208,7 +208,7 @@ def _rebuild_dashboard(out_dir: Path) -> bool:
 
 _SEV_ORDER_REPORT = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW', 'INFO']
 _SEV_COLOR_HTML = {'CRITICAL': '#f85149', 'HIGH': '#d29922', 'MEDIUM': '#58a6ff', 'LOW': '#3fb950', 'INFO': '#6e7681'}
-_STATUS_COLOR_HTML = {'FAIL': '#f85149', 'WARN': '#d29922', 'PASS': '#3fb950', 'SKIP': '#6e7681'}
+_STATUS_COLOR_HTML = {'FAIL': '#f85149', 'WARN': '#d29922', 'PASS': '#3fb950', 'SKIP': '#6e7681', 'N/A': '#444c56'}
 
 
 def _risk_score_html(fail, warn, total) -> int:
@@ -1669,6 +1669,8 @@ button:hover{{background:#2ea043}}
         api_key  = fields.get('api_key', '').strip()
         model    = fields.get('model', '').strip()
         endpoint = fields.get('endpoint', '').strip()
+        rag_val  = fields.get('uses_rag', '')
+        uses_rag = True if rag_val == 'yes' else (False if rag_val == 'no' else None)
 
         if not api_key:
             self._serve_probe_tester(error='Please enter an API key.')
@@ -1702,6 +1704,7 @@ button:hover{{background:#2ea043}}
                 mdl = model or 'gemini-1.5-flash'
                 ctx = connect(api_key=api_key, model=mdl, target_dir=str(ROOT))
 
+            ctx.uses_rag = uses_rag
             live_error = getattr(ctx, 'live_error', '')
             results = [
                 check_inp_001(ctx), check_inp_002(ctx),
@@ -1709,9 +1712,10 @@ button:hover{{background:#2ea043}}
                 check_out_001(ctx), check_out_002(ctx),
                 check_out_003(ctx), check_out_004(ctx),
             ]
-            summary = {'pass': 0, 'fail': 0, 'warn': 0, 'skip': 0}
+            summary = {'pass': 0, 'fail': 0, 'warn': 0, 'skip': 0, 'n/a': 0}
             for r in results:
-                summary[r.status.lower()] += 1
+                key = r.status.lower()
+                summary[key] = summary.get(key, 0) + 1
             log.info('probe-run done: %s', summary)
             html = self._build_probe_results(mdl, summary, results, live_error)
             self._send(200, html, 'text/html; charset=utf-8')
@@ -1720,22 +1724,22 @@ button:hover{{background:#2ea043}}
             self._serve_probe_tester(error=f'Scan error: {exc}')
 
     def _build_probe_results(self, model, summary, results, live_error):
-        STATUS_COLOR = {'PASS': '#3fb950', 'FAIL': '#f85149', 'WARN': '#d29922', 'SKIP': '#6e7681'}
-        STATUS_BG    = {'PASS': '#0d4a1a', 'FAIL': '#4a0d0d', 'WARN': '#4a3b0d', 'SKIP': '#1c2128'}
+        STATUS_COLOR = {'PASS': '#3fb950', 'FAIL': '#f85149', 'WARN': '#d29922', 'SKIP': '#6e7681', 'N/A': '#444c56'}
+        STATUS_BG    = {'PASS': '#0d4a1a', 'FAIL': '#4a0d0d', 'WARN': '#4a3b0d', 'SKIP': '#1c2128', 'N/A': '#161b22'}
         SEV_COLOR    = {'CRITICAL': '#f85149', 'HIGH': '#d29922', 'MEDIUM': '#58a6ff', 'LOW': '#8b949e'}
         SEV_BG       = {'CRITICAL': '#4a0d0d', 'HIGH': '#4a3b0d', 'MEDIUM': '#1d3250', 'LOW': '#21262d'}
-        BORDER       = {'PASS': '#3fb950', 'FAIL': '#f85149', 'WARN': '#d29922', 'SKIP': '#30363d'}
+        BORDER       = {'PASS': '#3fb950', 'FAIL': '#f85149', 'WARN': '#d29922', 'SKIP': '#30363d', 'N/A': '#21262d'}
 
         def e(s):
             return str(s or '').replace('&','&amp;').replace('<','&lt;').replace('>','&gt;').replace('"','&quot;')
 
-        all_skip = all(r.status == 'SKIP' for r in results)
+        all_skip = all(r.status in ('SKIP', 'N/A') for r in results)
         all_good = not all_skip and summary['fail'] == 0 and summary['warn'] == 0
 
         cats = {}
         for r in results:
             cats.setdefault(r.category, []).append(r)
-        order = {'FAIL': 0, 'WARN': 1, 'PASS': 2, 'SKIP': 3}
+        order = {'FAIL': 0, 'WARN': 1, 'PASS': 2, 'SKIP': 3, 'N/A': 4}
         for lst in cats.values():
             lst.sort(key=lambda r: order.get(r.status, 9))
 
@@ -1819,6 +1823,7 @@ body{{background:#0d1117;color:#e6edf3;font-family:-apple-system,BlinkMacSystemF
   <div class="sc"><div class="sc-n" style="color:#d29922">{summary["warn"]}</div><div class="sc-l">Warnings</div></div>
   <div class="sc"><div class="sc-n" style="color:#3fb950">{summary["pass"]}</div><div class="sc-l">Passed</div></div>
   <div class="sc"><div class="sc-n" style="color:#6e7681">{summary["skip"]}</div><div class="sc-l">Skipped</div></div>
+  <div class="sc"><div class="sc-n" style="color:#444c56">{summary.get("n/a", 0)}</div><div class="sc-l">N/A</div></div>
 </div>'''
 
         if all_skip:
@@ -1846,10 +1851,13 @@ body{{background:#0d1117;color:#e6edf3;font-family:-apple-system,BlinkMacSystemF
     <span class="cid">{e(r.check_id)}</span>
   </div>'''
                 is_skip = r.status == 'SKIP'
-                has_body = bool(r.evidence or r.remediation or is_skip)
+                is_na   = r.status == 'N/A'
+                has_body = bool(r.evidence or r.remediation or is_skip or is_na)
                 if has_body:
                     body += '<div class="body">'
-                    if is_skip:
+                    if is_na:
+                        body += f'<div class="sec"><div class="sec-lbl">Why Not Applicable</div><div class="skip-reason">{e(r.details)}</div></div>'
+                    elif is_skip:
                         body += f'<div class="sec"><div class="sec-lbl">Why Skipped</div><div class="skip-reason">{e(r.details)}</div></div>'
                     if r.evidence:
                         body += '<div class="sec"><div class="sec-lbl">Evidence</div><ul class="ev-list">'
@@ -1857,7 +1865,8 @@ body{{background:#0d1117;color:#e6edf3;font-family:-apple-system,BlinkMacSystemF
                             body += f'<li>{e(ev)}</li>'
                         body += '</ul></div>'
                     if r.remediation:
-                        body += f'<div class="sec"><div class="sec-lbl">{"How to Enable" if is_skip else "How to Fix"}</div><div class="fix">{e(r.remediation)}</div></div>'
+                        lbl = 'How to Enable' if is_skip else 'How to Fix'
+                        body += f'<div class="sec"><div class="sec-lbl">{lbl}</div><div class="fix">{e(r.remediation)}</div></div>'
                     if r.frameworks:
                         body += '<div class="sec"><div class="sec-lbl">Frameworks</div><div class="fw">'
                         for fw, ctrl in r.frameworks.items():
@@ -1928,6 +1937,13 @@ body{{background:#0d1117;color:#e6edf3;font-family:-apple-system,BlinkMacSystemF
             b'<input type="text" name="model" placeholder="gpt-4o">'
             b'<div class="hint">Leave blank for provider default.</div></div>'
             b'</div>'
+            b'<div class="field"><label>Does your AI system use document retrieval (RAG)?</label>'
+            b'<select name="uses_rag">'
+            b'<option value="">I\'m not sure</option>'
+            b'<option value="no">No - it answers from its training data only</option>'
+            b'<option value="yes">Yes - it retrieves documents, files, or a knowledge base</option>'
+            b'</select>'
+            b'<div class="hint">RAG = Retrieval-Augmented Generation. Used in chatbots that search a document library before responding.</div></div>'
             b'<button class="btn" type="submit">Run Security Tests</button>'
             b'<div id="wait">Running probes... this takes 30-90 seconds. Please wait.</div>'
             b'</form></div></div></body></html>'

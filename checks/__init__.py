@@ -4,9 +4,10 @@ PASS = "PASS"
 FAIL = "FAIL"
 WARN = "WARN"
 SKIP = "SKIP"
+NA   = "N/A"
 
 SEVERITY_RANK = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3}
-STATUS_RANK = {FAIL: 0, WARN: 1, PASS: 2, SKIP: 3}
+STATUS_RANK = {FAIL: 0, WARN: 1, PASS: 2, SKIP: 3, NA: 4}
 
 
 @dataclass

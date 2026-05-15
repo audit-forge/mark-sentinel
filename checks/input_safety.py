@@ -7,7 +7,7 @@ AI-INP-003 (RAG/indirect) is deferred to Phase 3 (requires target RAG pipeline c
 AI-INP-005 is evaluable from config files in all modes.
 """
 import re
-from . import CheckResult, PASS, FAIL, WARN, SKIP
+from . import CheckResult, PASS, FAIL, WARN, SKIP, NA
 from connectors.config_connector import ScanContext
 
 CATEGORY = "AI-INP"
@@ -160,6 +160,23 @@ def check_inp_002(ctx: ScanContext) -> CheckResult:
 
 
 def check_inp_003(ctx: ScanContext) -> CheckResult:
+    _fw = {"OWASP LLM": "LLM05", "OWASP Agentic": "OAGNT-03", "FedRAMP": "SI-10", "NIST AI RMF": "MEASURE 2.6"}
+
+    if ctx.uses_rag is False:
+        return CheckResult(
+            check_id="AI-INP-003",
+            title="Indirect Prompt Injection Resistance (RAG)",
+            status=NA,
+            severity="HIGH",
+            category=CATEGORY,
+            details=(
+                "Not applicable — your system does not use document retrieval (RAG). "
+                "This test only applies to AI systems that retrieve external documents, "
+                "knowledge bases, or data sources before responding."
+            ),
+            frameworks=_fw,
+        )
+
     return CheckResult(
         check_id="AI-INP-003",
         title="Indirect Prompt Injection Resistance (RAG)",
@@ -177,7 +194,7 @@ def check_inp_003(ctx: ScanContext) -> CheckResult:
             "2. Use a guard model to classify retrieved content for injection payloads.\n"
             "3. Limit what retrieved content can instruct the model to do (e.g., it cannot modify system behavior)."
         ),
-        frameworks={"OWASP LLM": "LLM05", "OWASP Agentic": "OAGNT-03", "FedRAMP": "SI-10", "NIST AI RMF": "MEASURE 2.6"},
+        frameworks=_fw,
     )
 
 

@@ -92,6 +92,9 @@ class ScanContext:
     live_model: str = ""
     live_error: str = ""
 
+    # Set by the caller to indicate whether the target system uses RAG
+    uses_rag: bool | None = None   # None = unknown, True = yes, False = no
+
 
 def scan_directory(target_dir: str, mode: str = "config", max_files: int | None = None) -> ScanContext:
     ctx = ScanContext(target_dir=str(Path(target_dir).resolve()), mode=mode)
