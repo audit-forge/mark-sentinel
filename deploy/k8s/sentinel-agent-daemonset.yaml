@@ -1,0 +1,193 @@
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: sentinel
+  labels:
+    app.kubernetes.io/name: sentinel-agent
+    app.kubernetes.io/managed-by: hash-ai
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: sentinel-agent-config
+  namespace: sentinel
+  labels:
+    app.kubernetes.io/name: sentinel-agent
+    app.kubernetes.io/component: config
+data:
+  agent_config.json: |
+    {
+      "server":   "http://sentinel-server.sentinel.svc.cluster.local:7331",
+      "token":    "replace-with-your-secret-token",
+      "target":   ".",
+      "profile":  "default",
+      "interval": 3600
+    }
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: sentinel-agent
+  namespace: sentinel
+  labels:
+    app.kubernetes.io/name: sentinel-agent
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: sentinel-agent
+  labels:
+    app.kubernetes.io/name: sentinel-agent
+rules:
+  - apiGroups: [""]
+    resources: ["nodes", "pods", "namespaces"]
+    verbs: ["get", "list"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: sentinel-agent
+  labels:
+    app.kubernetes.io/name: sentinel-agent
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: sentinel-agent
+subjects:
+  - kind: ServiceAccount
+    name: sentinel-agent
+    namespace: sentinel
+
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: sentinel-agent
+  namespace: sentinel
+  labels:
+    app.kubernetes.io/name: sentinel-agent
+    app.kubernetes.io/version: "1.0.0"
+    app.kubernetes.io/component: agent
+    app.kubernetes.io/part-of: mark-sentinel
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: sentinel-agent
+  updateStrategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: sentinel-agent
+        app.kubernetes.io/version: "1.0.0"
+      annotations:
+        prometheus.io/scrape: "false"
+    spec:
+      serviceAccountName: sentinel-agent
+      hostPID: false
+      hostNetwork: false
+
+      tolerations:
+        - key: node-role.kubernetes.io/control-plane
+          operator: Exists
+          effect: NoSchedule
+        - key: node-role.kubernetes.io/master
+          operator: Exists
+          effect: NoSchedule
+
+      containers:
+        - name: sentinel-agent
+          image: ghcr.io/hash-ai/sentinel-agent:1.0.0
+          imagePullPolicy: Always
+
+          command:
+            - python
+            - agent.py
+            - --daemon
+            - --config
+            - /etc/sentinel/agent_config.json
+
+          env:
+            - name: SENTINEL_SERVER
+              valueFrom:
+                secretKeyRef:
+                  name: sentinel-agent-secret
+                  key: server
+                  optional: true
+            - name: SENTINEL_AGENT_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: sentinel-agent-secret
+                  key: token
+                  optional: true
+            - name: PYTHONUNBUFFERED
+              value: "1"
+            # NODE_NAME is injected by the downward API — stable across pod restarts.
+            # SENTINEL_HOSTNAME uses it so the device ID is derived from the node
+            # name rather than the ephemeral pod hostname, preventing duplicates when
+            # the DaemonSet pod is rescheduled.
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+            - name: SENTINEL_HOSTNAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "256Mi"
+
+          volumeMounts:
+            - name: agent-config
+              mountPath: /etc/sentinel
+              readOnly: true
+            - name: docker-sock
+              mountPath: /var/run/docker.sock
+              readOnly: true
+
+          livenessProbe:
+            exec:
+              command:
+                - python
+                - -c
+                - "import sys; sys.exit(0)"
+            initialDelaySeconds: 30
+            periodSeconds: 60
+            timeoutSeconds: 10
+            failureThreshold: 3
+
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: false
+            runAsNonRoot: true
+            runAsUser: 1000
+            capabilities:
+              drop:
+                - ALL
+
+      volumes:
+        - name: agent-config
+          configMap:
+            name: sentinel-agent-config
+            items:
+              - key: agent_config.json
+                path: agent_config.json
+        - name: docker-sock
+          hostPath:
+            path: /var/run/docker.sock
+            type: FileOrCreate
+
+      terminationGracePeriodSeconds: 30
