@@ -1780,6 +1780,31 @@ body{{background:#0d1117;color:#e6edf3;font-family:-apple-system,BlinkMacSystemF
 .fw span{{font-size:10px;background:#1d3250;color:#58a6ff;border-radius:4px;padding:2px 7px}}
 .run-again{{display:inline-block;margin-top:28px;background:#238636;color:#fff;border-radius:6px;padding:10px 22px;font-size:14px;font-weight:600;text-decoration:none}}
 .run-again:hover{{background:#2ea043}}
+.export-btn{{display:inline-block;margin-top:28px;margin-left:12px;background:#161b22;color:#58a6ff;border:1px solid #30363d;border-radius:6px;padding:10px 22px;font-size:14px;font-weight:600;cursor:pointer;text-decoration:none}}
+.export-btn:hover{{background:#1d3250;border-color:#58a6ff}}
+.skip-reason{{font-size:12px;color:#8b949e;background:#0d1117;border:1px solid #30363d;border-radius:4px;padding:10px 12px;line-height:1.6}}
+.print-date{{display:none;font-size:11px;color:#666;margin-bottom:12px}}
+@media print{{
+  body{{background:#fff;color:#000}}
+  .wrap{{padding:16px}}
+  .brand-bar{{border-bottom:1px solid #ccc}}
+  .brand-mark,.brand-name{{color:#000}}
+  .brand-sub,.model-tag{{color:#555}}
+  .back,.run-again,.export-btn{{display:none!important}}
+  .strip .sc{{background:#f5f5f5;border:1px solid #ccc}}
+  .sc-l{{color:#555}}
+  .banner-ok{{background:#e6f4ea;border-color:#34a853;color:#1e7e34}}
+  .banner-warn{{background:#fef9e7;border-color:#fbbc04;color:#7a5c00}}
+  .cat-hdr{{color:#555;border-color:#ccc}}
+  .check{{border:1px solid #ccc;break-inside:avoid;page-break-inside:avoid}}
+  .detail,.sec-lbl,.cid{{color:#333}}
+  .body{{border-top:1px solid #ccc}}
+  .ev-list li{{background:#f5f5f5;border-color:#ccc;color:#333}}
+  .fix{{color:#333}}
+  .fw span{{background:#e8f0fe;color:#1a56db}}
+  .skip-reason{{background:#f5f5f5;border-color:#ccc;color:#333}}
+  .print-date{{display:block}}
+}}
 </style></head><body><div class="wrap">
 <div class="brand-bar">
   <span class="brand-mark">M.A.R.K.</span>
@@ -1787,6 +1812,7 @@ body{{background:#0d1117;color:#e6edf3;font-family:-apple-system,BlinkMacSystemF
   <span class="brand-sub">Probe Results</span>
   <a class="back" href="/probe">Run Another Test</a>
 </div>
+<div class="print-date">M.A.R.K. Sentinel &#8212; AI API Security Report &nbsp;|&nbsp; {__import__('datetime').datetime.now().strftime('%Y-%m-%d %H:%M')}</div>
 <div class="model-tag">Model tested: <strong>{e(model)}</strong></div>
 <div class="strip">
   <div class="sc"><div class="sc-n" style="color:#f85149">{summary["fail"]}</div><div class="sc-l">Failed</div></div>
@@ -1819,16 +1845,19 @@ body{{background:#0d1117;color:#e6edf3;font-family:-apple-system,BlinkMacSystemF
     </div>
     <span class="cid">{e(r.check_id)}</span>
   </div>'''
-                has_body = (r.evidence or r.remediation)
+                is_skip = r.status == 'SKIP'
+                has_body = bool(r.evidence or r.remediation or is_skip)
                 if has_body:
                     body += '<div class="body">'
+                    if is_skip:
+                        body += f'<div class="sec"><div class="sec-lbl">Why Skipped</div><div class="skip-reason">{e(r.details)}</div></div>'
                     if r.evidence:
                         body += '<div class="sec"><div class="sec-lbl">Evidence</div><ul class="ev-list">'
                         for ev in r.evidence:
                             body += f'<li>{e(ev)}</li>'
                         body += '</ul></div>'
                     if r.remediation:
-                        body += f'<div class="sec"><div class="sec-lbl">How to Fix</div><div class="fix">{e(r.remediation)}</div></div>'
+                        body += f'<div class="sec"><div class="sec-lbl">{"How to Enable" if is_skip else "How to Fix"}</div><div class="fix">{e(r.remediation)}</div></div>'
                     if r.frameworks:
                         body += '<div class="sec"><div class="sec-lbl">Frameworks</div><div class="fw">'
                         for fw, ctrl in r.frameworks.items():
@@ -1838,6 +1867,7 @@ body{{background:#0d1117;color:#e6edf3;font-family:-apple-system,BlinkMacSystemF
                 body += '</div>'
 
         body += '<a class="run-again" href="/probe">Run Another Test</a>'
+        body += '<button class="export-btn" onclick="window.print()">Export to PDF</button>'
         body += '</div></body></html>'
         return body.encode('utf-8')
 
