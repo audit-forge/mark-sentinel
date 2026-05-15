@@ -65,3 +65,12 @@ DEVIN.md
 *.db-shm
 *.db-wal
 sentinel_report.pdf
+
+# Secrets and runtime files — never commit
+dashboard_token.txt
+sentinel.crt
+*.crt
+*.key
+stdout.txt
+stderr.txt
+output/.device_id
