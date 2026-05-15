@@ -632,6 +632,8 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self._api_admin_license()
         elif path == '/api/probe-scan':
             self._api_probe_scan()
+        elif path == '/probe':
+            self._probe_run()
         else:
             self._not_found()
 
@@ -1649,315 +1651,259 @@ button:hover{{background:#2ea043}}
             log.error('probe-scan error: %s', exc, exc_info=True)
             self._json({'error': str(exc)}, 500)
 
-    def _serve_probe_tester(self):
-        html = b'''<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
+    def _probe_run(self):
+        """POST /probe — run scan and return a fully server-rendered results page."""
+        length = _content_length(self.headers)
+        if length > 16_384:
+            self._send(413, b'Payload too large', 'text/plain')
+            return
+        try:
+            from urllib.parse import parse_qs
+            raw = self.rfile.read(length).decode('utf-8', errors='replace') if length else ''
+            fields = {k: v[0] for k, v in parse_qs(raw).items()}
+        except Exception:
+            self._send(400, b'Bad request', 'text/plain')
+            return
+
+        provider = fields.get('provider', 'openai')
+        api_key  = fields.get('api_key', '').strip()
+        model    = fields.get('model', '').strip()
+        endpoint = fields.get('endpoint', '').strip()
+
+        if not api_key:
+            self._serve_probe_tester(error='Please enter an API key.')
+            return
+        if provider not in ('openai', 'anthropic', 'gemini'):
+            self._serve_probe_tester(error='Unknown provider.')
+            return
+
+        log.info('probe-run start: provider=%s endpoint=%s', provider, endpoint or '(default)')
+        try:
+            sys.path.insert(0, str(ROOT))
+            from dataclasses import asdict
+            from checks.input_safety import (
+                check_inp_001, check_inp_002, check_inp_003, check_inp_004,
+            )
+            from checks.output_safety import (
+                check_out_001, check_out_002, check_out_003, check_out_004,
+            )
+
+            if provider == 'openai':
+                from connectors.api_connector import connect
+                ep  = endpoint or 'https://api.openai.com/v1'
+                mdl = model or 'gpt-4o'
+                ctx = connect(ep, api_key, mdl, str(ROOT))
+            elif provider == 'anthropic':
+                from connectors.claude_connector import connect
+                mdl = model or 'claude-sonnet-4-6'
+                ctx = connect(api_key=api_key, model=mdl, target_dir=str(ROOT))
+            else:
+                from connectors.gemini_connector import connect
+                mdl = model or 'gemini-1.5-flash'
+                ctx = connect(api_key=api_key, model=mdl, target_dir=str(ROOT))
+
+            live_error = getattr(ctx, 'live_error', '')
+            results = [
+                check_inp_001(ctx), check_inp_002(ctx),
+                check_inp_003(ctx), check_inp_004(ctx),
+                check_out_001(ctx), check_out_002(ctx),
+                check_out_003(ctx), check_out_004(ctx),
+            ]
+            summary = {'pass': 0, 'fail': 0, 'warn': 0, 'skip': 0}
+            for r in results:
+                summary[r.status.lower()] += 1
+            log.info('probe-run done: %s', summary)
+            html = self._build_probe_results(mdl, summary, results, live_error)
+            self._send(200, html, 'text/html; charset=utf-8')
+        except Exception as exc:
+            log.error('probe-run error: %s', exc, exc_info=True)
+            self._serve_probe_tester(error=f'Scan error: {exc}')
+
+    def _build_probe_results(self, model, summary, results, live_error):
+        STATUS_COLOR = {'PASS': '#3fb950', 'FAIL': '#f85149', 'WARN': '#d29922', 'SKIP': '#6e7681'}
+        STATUS_BG    = {'PASS': '#0d4a1a', 'FAIL': '#4a0d0d', 'WARN': '#4a3b0d', 'SKIP': '#1c2128'}
+        SEV_COLOR    = {'CRITICAL': '#f85149', 'HIGH': '#d29922', 'MEDIUM': '#58a6ff', 'LOW': '#8b949e'}
+        SEV_BG       = {'CRITICAL': '#4a0d0d', 'HIGH': '#4a3b0d', 'MEDIUM': '#1d3250', 'LOW': '#21262d'}
+        BORDER       = {'PASS': '#3fb950', 'FAIL': '#f85149', 'WARN': '#d29922', 'SKIP': '#30363d'}
+
+        def e(s):
+            return str(s or '').replace('&','&amp;').replace('<','&lt;').replace('>','&gt;').replace('"','&quot;')
+
+        all_skip = all(r.status == 'SKIP' for r in results)
+        all_good = not all_skip and summary['fail'] == 0 and summary['warn'] == 0
+
+        cats = {}
+        for r in results:
+            cats.setdefault(r.category, []).append(r)
+        order = {'FAIL': 0, 'WARN': 1, 'PASS': 2, 'SKIP': 3}
+        for lst in cats.values():
+            lst.sort(key=lambda r: order.get(r.status, 9))
+
+        body = f'''<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>M.A.R.K. Sentinel \xe2\x80\x94 API Security Tester</title>
+<title>M.A.R.K. Sentinel - Probe Results</title>
 <style>
-*{box-sizing:border-box;margin:0;padding:0}
-body{background:#0d1117;color:#e6edf3;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;font-size:14px;min-height:100vh}
-a{color:#58a6ff}
-.wrap{max-width:900px;margin:0 auto;padding:32px 20px 64px}
-.brand-bar{display:flex;align-items:center;gap:10px;margin-bottom:32px;padding-bottom:20px;border-bottom:1px solid #21262d}
-.brand-mark{font-size:18px;font-weight:800;letter-spacing:2px;color:#58a6ff}
-.brand-name{font-size:16px;font-weight:700;letter-spacing:1px}
-.brand-sub{font-size:12px;color:#8b949e;margin-left:4px}
-h1{font-size:20px;font-weight:700;margin-bottom:6px}
-.subtitle{color:#8b949e;font-size:13px;margin-bottom:28px;line-height:1.6}
-.card{background:#161b22;border:1px solid #21262d;border-radius:8px;padding:24px;margin-bottom:16px}
-label{display:block;font-size:12px;font-weight:600;color:#8b949e;margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px}
-select,input[type=text],input[type=password]{width:100%;background:#0d1117;border:1px solid #30363d;border-radius:6px;color:#e6edf3;font-size:14px;padding:9px 12px;outline:none;transition:border-color .15s}
-select:focus,input:focus{border-color:#58a6ff}
-.field{margin-bottom:18px}
-.row{display:grid;grid-template-columns:1fr 1fr;gap:16px}
-@media(max-width:600px){.row{grid-template-columns:1fr}}
-.hint{font-size:11px;color:#6e7681;margin-top:4px}
-.btn{display:inline-flex;align-items:center;gap:8px;background:#238636;border:none;border-radius:6px;color:#fff;cursor:pointer;font-size:14px;font-weight:600;padding:10px 22px;transition:background .15s}
-.btn:hover{background:#2ea043}
-.btn:disabled{background:#21262d;color:#6e7681;cursor:not-allowed}
-.spinner{width:14px;height:14px;border:2px solid rgba(255,255,255,.3);border-top-color:#fff;border-radius:50%;animation:spin .7s linear infinite;display:none}
-@keyframes spin{to{transform:rotate(360deg)}}
-.summary-strip{display:flex;gap:12px;margin-bottom:20px;flex-wrap:wrap}
-.scard{flex:1;min-width:80px;background:#161b22;border:1px solid #21262d;border-radius:8px;padding:14px 12px;text-align:center}
-.scard-n{font-size:28px;font-weight:800;line-height:1}
-.scard-l{font-size:11px;color:#8b949e;margin-top:4px;text-transform:uppercase;letter-spacing:.5px}
-.c-green{color:#3fb950}.c-red{color:#f85149}.c-yellow{color:#d29922}.c-gray{color:#6e7681}.c-blue{color:#58a6ff}
-.check-card{background:#161b22;border:1px solid #21262d;border-left:3px solid transparent;border-radius:8px;margin-bottom:10px;overflow:hidden}
-.check-card.fail{border-left-color:#f85149}
-.check-card.warn{border-left-color:#d29922}
-.check-card.pass{border-left-color:#3fb950}
-.check-card.skip{border-left-color:#30363d}
-.check-head{display:flex;align-items:flex-start;gap:10px;padding:14px 16px}
-.status-badge{font-size:11px;font-weight:700;padding:3px 8px;border-radius:4px;min-width:44px;text-align:center;flex-shrink:0;margin-top:1px}
-.badge-PASS{background:#0d4a1a;color:#3fb950}
-.badge-FAIL{background:#4a0d0d;color:#f85149}
-.badge-WARN{background:#4a3b0d;color:#d29922}
-.badge-SKIP{background:#1c2128;color:#6e7681}
-.sev-badge{font-size:10px;font-weight:600;padding:3px 7px;border-radius:4px;border:1px solid;flex-shrink:0;margin-top:1px}
-.sev-CRITICAL{color:#f85149;border-color:#4a0d0d}
-.sev-HIGH{color:#d29922;border-color:#4a3b0d}
-.sev-MEDIUM{color:#58a6ff;border-color:#1d3250}
-.sev-LOW{color:#8b949e;border-color:#30363d}
-.check-meta{flex:1;min-width:0}
-.check-title{font-size:13px;font-weight:600;margin-bottom:4px}
-.check-detail-inline{font-size:12px;color:#8b949e;line-height:1.5}
-.check-id{font-size:11px;color:#6e7681;flex-shrink:0;padding-top:2px}
-.check-body{padding:0 16px 16px;border-top:1px solid #21262d}
-.check-section{margin-top:14px}
-.check-section-label{font-size:11px;font-weight:700;color:#8b949e;text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px}
-.check-detail-full{font-size:13px;color:#c9d1d9;line-height:1.6}
-.evidence-list{list-style:none;padding:0}
-.evidence-list li{font-size:12px;color:#8b949e;font-family:ui-monospace,monospace;background:#0d1117;border:1px solid #21262d;border-radius:4px;padding:6px 10px;margin-bottom:4px;word-break:break-all}
-.remediation{font-size:13px;color:#c9d1d9;line-height:1.8;white-space:pre-wrap}
-.fw-pills{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
-.fw-pill{font-size:10px;background:#1d3250;color:#58a6ff;border-radius:4px;padding:2px 8px}
-.err-box{background:#4a0d0d;border:1px solid #f85149;border-radius:6px;color:#f85149;font-size:13px;padding:14px 16px;margin-bottom:16px}
-.warn-banner{background:#4a3b0d;border:1px solid #d29922;border-radius:6px;color:#d29922;font-size:13px;padding:14px 16px;margin-bottom:16px}
-.ok-banner{background:#0d4a1a;border:1px solid #3fb950;border-radius:6px;color:#3fb950;font-size:13px;padding:14px 16px;margin-bottom:16px}
-.cat-header{font-size:12px;font-weight:700;color:#8b949e;text-transform:uppercase;letter-spacing:1px;margin:20px 0 8px;padding-bottom:6px;border-bottom:1px solid #21262d}
-#results{display:none}
-#loading-msg{display:none;color:#8b949e;font-size:13px;padding:20px 0;text-align:center;line-height:2}
-.model-tag{font-size:11px;color:#6e7681;margin-bottom:16px}
-</style>
-</head>
-<body>
-<div class="wrap">
-  <div class="brand-bar">
-    <span class="brand-mark">M.A.R.K.</span>
-    <span class="brand-name">SENTINEL</span>
-    <span class="brand-sub">API Security Tester</span>
-  </div>
-
-  <h1>AI API Security Tester</h1>
-  <p class="subtitle">
-    Enter your API credentials to run live adversarial probes against your AI endpoint.<br>
-    Tests include: prompt injection, jailbreaks, PII leakage, system prompt disclosure, harmful content refusals, and training data extraction.<br>
-    Your API key is sent only to your chosen endpoint and is never stored by Sentinel.
-  </p>
-
-  <div class="card">
-    <div class="field">
-      <label>Provider</label>
-      <select id="provider" onchange="onProviderChange()">
-        <option value="openai">OpenAI-compatible (OpenAI, Azure, local Ollama, etc.)</option>
-        <option value="anthropic">Anthropic (Claude)</option>
-        <option value="gemini">Google Gemini</option>
-      </select>
-    </div>
-
-    <div class="field" id="endpoint-field">
-      <label>API Endpoint</label>
-      <input type="text" id="endpoint" placeholder="https://api.openai.com/v1" value="https://api.openai.com/v1">
-      <div class="hint">Base URL, no trailing slash. Azure example: https://&lt;resource&gt;.openai.azure.com/openai/deployments/&lt;name&gt;</div>
-    </div>
-
-    <div class="row">
-      <div class="field">
-        <label>API Key</label>
-        <input type="password" id="api-key" placeholder="sk-..." autocomplete="off">
-        <div class="hint">Never stored &mdash; used only for this scan session.</div>
-      </div>
-      <div class="field">
-        <label>Model <span style="font-weight:400;text-transform:none;letter-spacing:0">(optional)</span></label>
-        <input type="text" id="model" placeholder="gpt-4o">
-        <div class="hint">Leave blank to use the provider default.</div>
-      </div>
-    </div>
-
-    <button class="btn" id="run-btn" onclick="runScan()">
-      <div class="spinner" id="spinner"></div>
-      <span id="btn-text">&#128272; Run Security Tests</span>
-    </button>
-  </div>
-
-  <div id="error-box" class="err-box" style="display:none"></div>
-  <div id="loading-msg">
-    Running adversarial probes against your endpoint&hellip;<br>
-    <span style="font-size:11px">This typically takes 30&ndash;90 seconds depending on the provider.</span>
-  </div>
-  <div id="results"></div>
+*{{box-sizing:border-box;margin:0;padding:0}}
+body{{background:#0d1117;color:#e6edf3;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;font-size:14px}}
+.wrap{{max-width:900px;margin:0 auto;padding:32px 20px 64px}}
+.brand-bar{{display:flex;align-items:center;gap:10px;margin-bottom:28px;padding-bottom:16px;border-bottom:1px solid #21262d}}
+.brand-mark{{font-size:18px;font-weight:800;letter-spacing:2px;color:#58a6ff}}
+.brand-name{{font-size:16px;font-weight:700;letter-spacing:1px}}
+.brand-sub{{font-size:12px;color:#8b949e;margin-left:4px}}
+.back{{margin-left:auto;font-size:12px;color:#58a6ff;text-decoration:none}}
+.back:hover{{text-decoration:underline}}
+.model-tag{{font-size:12px;color:#6e7681;margin-bottom:20px}}
+.strip{{display:flex;gap:12px;margin-bottom:20px;flex-wrap:wrap}}
+.sc{{flex:1;min-width:80px;background:#161b22;border:1px solid #21262d;border-radius:8px;padding:14px 12px;text-align:center}}
+.sc-n{{font-size:28px;font-weight:800;line-height:1}}
+.sc-l{{font-size:11px;color:#8b949e;margin-top:4px;text-transform:uppercase;letter-spacing:.5px}}
+.banner{{border-radius:6px;font-size:13px;padding:14px 16px;margin-bottom:18px;line-height:1.6}}
+.banner-ok{{background:#0d4a1a;border:1px solid #3fb950;color:#3fb950}}
+.banner-warn{{background:#4a3b0d;border:1px solid #d29922;color:#d29922}}
+.cat-hdr{{font-size:12px;font-weight:700;color:#8b949e;text-transform:uppercase;letter-spacing:1px;margin:22px 0 8px;padding-bottom:6px;border-bottom:1px solid #21262d}}
+.check{{border-radius:8px;margin-bottom:10px;overflow:hidden;border:1px solid #21262d}}
+.check-head{{display:flex;align-items:flex-start;gap:10px;padding:14px 16px}}
+.sb{{font-size:11px;font-weight:700;padding:3px 9px;border-radius:4px;min-width:44px;text-align:center;flex-shrink:0;margin-top:1px}}
+.sv{{font-size:10px;font-weight:600;padding:3px 7px;border-radius:4px;border:1px solid;flex-shrink:0;margin-top:1px}}
+.meta{{flex:1;min-width:0}}
+.title{{font-size:13px;font-weight:600;margin-bottom:3px}}
+.detail{{font-size:12px;color:#8b949e;line-height:1.5}}
+.cid{{font-size:11px;color:#6e7681;flex-shrink:0;padding-top:2px}}
+.body{{padding:0 16px 16px;border-top:1px solid #21262d}}
+.sec{{margin-top:12px}}
+.sec-lbl{{font-size:11px;font-weight:700;color:#8b949e;text-transform:uppercase;letter-spacing:.5px;margin-bottom:5px}}
+.ev-list{{list-style:none;padding:0}}
+.ev-list li{{font-size:12px;color:#8b949e;font-family:ui-monospace,monospace;background:#0d1117;border:1px solid #21262d;border-radius:4px;padding:5px 10px;margin-bottom:4px;word-break:break-all}}
+.fix{{font-size:13px;color:#c9d1d9;line-height:1.8;white-space:pre-wrap}}
+.fw{{display:flex;flex-wrap:wrap;gap:5px;margin-top:6px}}
+.fw span{{font-size:10px;background:#1d3250;color:#58a6ff;border-radius:4px;padding:2px 7px}}
+.run-again{{display:inline-block;margin-top:28px;background:#238636;color:#fff;border-radius:6px;padding:10px 22px;font-size:14px;font-weight:600;text-decoration:none}}
+.run-again:hover{{background:#2ea043}}
+</style></head><body><div class="wrap">
+<div class="brand-bar">
+  <span class="brand-mark">M.A.R.K.</span>
+  <span class="brand-name">SENTINEL</span>
+  <span class="brand-sub">Probe Results</span>
+  <a class="back" href="/probe">Run Another Test</a>
 </div>
+<div class="model-tag">Model tested: <strong>{e(model)}</strong></div>
+<div class="strip">
+  <div class="sc"><div class="sc-n" style="color:#f85149">{summary["fail"]}</div><div class="sc-l">Failed</div></div>
+  <div class="sc"><div class="sc-n" style="color:#d29922">{summary["warn"]}</div><div class="sc-l">Warnings</div></div>
+  <div class="sc"><div class="sc-n" style="color:#3fb950">{summary["pass"]}</div><div class="sc-l">Passed</div></div>
+  <div class="sc"><div class="sc-n" style="color:#6e7681">{summary["skip"]}</div><div class="sc-l">Skipped</div></div>
+</div>'''
 
-<script>
-const PROVIDER_DEFAULTS = {
-  openai:    {model: 'gpt-4o',            showEp: true},
-  anthropic: {model: 'claude-sonnet-4-6', showEp: false},
-  gemini:    {model: 'gemini-1.5-flash',  showEp: false},
-};
+        if all_skip:
+            reason = live_error or 'the endpoint did not respond to probe requests'
+            body += f'<div class="banner banner-warn"><strong>Could not connect to endpoint.</strong> {e(reason)}<br>Check your API key, endpoint URL, and model name.</div>'
+        elif all_good:
+            body += '<div class="banner banner-ok"><strong>All active checks passed.</strong> No prompt injection, jailbreak, PII leakage, or system prompt disclosure issues detected.</div>'
 
-function onProviderChange() {
-  const p = document.getElementById('provider').value;
-  const d = PROVIDER_DEFAULTS[p] || {};
-  document.getElementById('endpoint-field').style.display = d.showEp ? '' : 'none';
-  document.getElementById('model').placeholder = d.model || '';
-}
+        for cat in sorted(cats):
+            body += f'<div class="cat-hdr">{e(cat)}</div>'
+            for r in cats[cat]:
+                sc = STATUS_COLOR.get(r.status, '#8b949e')
+                sb = STATUS_BG.get(r.status, '#1c2128')
+                vc = SEV_COLOR.get(r.severity, '#8b949e')
+                vb = SEV_BG.get(r.severity, '#21262d')
+                bc = BORDER.get(r.status, '#30363d')
+                body += f'''<div class="check" style="border-left:3px solid {bc}">
+  <div class="check-head">
+    <span class="sb" style="background:{sb};color:{sc}">{e(r.status)}</span>
+    <span class="sv" style="background:{vb};color:{vc};border-color:{vb}">{e(r.severity)}</span>
+    <div class="meta">
+      <div class="title">{e(r.title)}</div>
+      <div class="detail">{e(r.details)}</div>
+    </div>
+    <span class="cid">{e(r.check_id)}</span>
+  </div>'''
+                has_body = (r.evidence or r.remediation)
+                if has_body:
+                    body += '<div class="body">'
+                    if r.evidence:
+                        body += '<div class="sec"><div class="sec-lbl">Evidence</div><ul class="ev-list">'
+                        for ev in r.evidence:
+                            body += f'<li>{e(ev)}</li>'
+                        body += '</ul></div>'
+                    if r.remediation:
+                        body += f'<div class="sec"><div class="sec-lbl">How to Fix</div><div class="fix">{e(r.remediation)}</div></div>'
+                    if r.frameworks:
+                        body += '<div class="sec"><div class="sec-lbl">Frameworks</div><div class="fw">'
+                        for fw, ctrl in r.frameworks.items():
+                            body += f'<span>{e(fw)}: {e(ctrl)}</span>'
+                        body += '</div></div>'
+                    body += '</div>'
+                body += '</div>'
 
-function setLoading(on) {
-  const btn = document.getElementById('run-btn');
-  const sp  = document.getElementById('spinner');
-  const bt  = document.getElementById('btn-text');
-  btn.disabled = on;
-  sp.style.display = on ? 'inline-block' : 'none';
-  bt.textContent   = on ? 'Running...' : '\xf0\x9f\x94\x92 Run Security Tests';
-  document.getElementById('loading-msg').style.display = on ? 'block' : 'none';
-}
+        body += '<a class="run-again" href="/probe">Run Another Test</a>'
+        body += '</div></body></html>'
+        return body.encode('utf-8')
 
-async function runScan() {
-  const provider = document.getElementById('provider').value;
-  const apiKey   = document.getElementById('api-key').value.trim();
-  const model    = document.getElementById('model').value.trim();
-  const endpoint = document.getElementById('endpoint').value.trim();
-  const errBox   = document.getElementById('error-box');
+    def _serve_probe_tester(self, error=''):
+        err_html = ('<div style="background:#4a0d0d;border:1px solid #f85149;border-radius:6px;'
+                    'color:#f85149;font-size:13px;padding:14px 16px;margin-bottom:16px">'
+                    + error + '</div>') if error else ''
+        page = (
+            b'<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">'
+            b'<meta name="viewport" content="width=device-width,initial-scale=1">'
+            b'<title>M.A.R.K. Sentinel - API Security Tester</title>'
+            b'<style>'
+            b'*{box-sizing:border-box;margin:0;padding:0}'
+            b'body{background:#0d1117;color:#e6edf3;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;font-size:14px;min-height:100vh}'
+            b'.wrap{max-width:860px;margin:0 auto;padding:32px 20px 64px}'
+            b'.bar{display:flex;align-items:center;gap:10px;margin-bottom:32px;padding-bottom:20px;border-bottom:1px solid #21262d}'
+            b'.bm{font-size:18px;font-weight:800;letter-spacing:2px;color:#58a6ff}'
+            b'.bn{font-size:16px;font-weight:700;letter-spacing:1px}'
+            b'.bs{font-size:12px;color:#8b949e;margin-left:4px}'
+            b'h1{font-size:20px;font-weight:700;margin-bottom:6px}'
+            b'.sub{color:#8b949e;font-size:13px;margin-bottom:28px;line-height:1.6}'
+            b'.card{background:#161b22;border:1px solid #21262d;border-radius:8px;padding:24px;margin-bottom:16px}'
+            b'label{display:block;font-size:12px;font-weight:600;color:#8b949e;margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px}'
+            b'select,input{width:100%;background:#0d1117;border:1px solid #30363d;border-radius:6px;color:#e6edf3;font-size:14px;padding:9px 12px;outline:none}'
+            b'select:focus,input:focus{border-color:#58a6ff}'
+            b'.field{margin-bottom:18px}'
+            b'.row{display:grid;grid-template-columns:1fr 1fr;gap:16px}'
+            b'.hint{font-size:11px;color:#6e7681;margin-top:4px}'
+            b'.btn{background:#238636;border:none;border-radius:6px;color:#fff;cursor:pointer;font-size:14px;font-weight:600;padding:10px 22px}'
+            b'.btn:hover{background:#2ea043}'
+            b'#ep-field{display:block}'
+            b'#wait{display:none;color:#8b949e;font-size:13px;margin-top:16px}'
+            b'</style></head><body>'
+            b'<div class="wrap">'
+            b'<div class="bar"><span class="bm">M.A.R.K.</span><span class="bn">SENTINEL</span>'
+            b'<span class="bs">API Security Tester</span></div>'
+            b'<h1>AI API Security Tester</h1>'
+            b'<p class="sub">Enter your API credentials to run live adversarial probes against your AI endpoint.<br>'
+            b'Tests: prompt injection, jailbreaks, PII leakage, system prompt disclosure, harmful content refusals.<br>'
+            b'Your key is sent only to your endpoint and never stored by Sentinel.</p>'
+        ) + err_html.encode() + (
+            b'<div class="card">'
+            b'<form method="POST" action="/probe" onsubmit="document.getElementById(\'wait\').style.display=\'block\';document.querySelector(\'.btn\').disabled=true;">'
+            b'<div class="field"><label>Provider</label>'
+            b'<select name="provider" onchange="var s=this.value;document.getElementById(\'ep-field\').style.display=s===\'openai\'?\'block\':\'none\'">'
+            b'<option value="openai">OpenAI-compatible (OpenAI, Azure, local, etc.)</option>'
+            b'<option value="anthropic">Anthropic (Claude)</option>'
+            b'<option value="gemini">Google Gemini</option>'
+            b'</select></div>'
+            b'<div class="field" id="ep-field"><label>API Endpoint</label>'
+            b'<input type="text" name="endpoint" value="https://api.openai.com/v1">'
+            b'<div class="hint">Base URL, no trailing slash.</div></div>'
+            b'<div class="row">'
+            b'<div class="field"><label>API Key</label>'
+            b'<input type="password" name="api_key" placeholder="sk-..." autocomplete="off" required>'
+            b'<div class="hint">Never stored - used only for this scan.</div></div>'
+            b'<div class="field"><label>Model (optional)</label>'
+            b'<input type="text" name="model" placeholder="gpt-4o">'
+            b'<div class="hint">Leave blank for provider default.</div></div>'
+            b'</div>'
+            b'<button class="btn" type="submit">Run Security Tests</button>'
+            b'<div id="wait">Running probes... this takes 30-90 seconds. Please wait.</div>'
+            b'</form></div></div></body></html>'
+        )
+        self._send(200, page, 'text/html; charset=utf-8')
 
-  errBox.style.display = 'none';
-  document.getElementById('results').style.display = 'none';
-
-  if (!apiKey) {
-    errBox.textContent = 'Please enter an API key before running.';
-    errBox.style.display = '';
-    return;
-  }
-
-  setLoading(true);
-  let rawText = '';
-  try {
-    const resp = await fetch('/api/probe-scan', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({provider, api_key: apiKey, model, endpoint}),
-    });
-    rawText = await resp.text();
-    let data;
-    try { data = JSON.parse(rawText); }
-    catch (_) {
-      errBox.textContent = 'Server returned an unexpected response. Check the Sentinel terminal window for errors.';
-      errBox.style.display = '';
-      setLoading(false);
-      return;
-    }
-    if (!resp.ok || data.error) {
-      errBox.textContent = data.error || ('Scan failed - HTTP ' + resp.status);
-      errBox.style.display = '';
-    } else if (!data.results || data.results.length === 0) {
-      errBox.textContent = 'Scan completed but returned no results. Check the Sentinel terminal window for errors.';
-      errBox.style.display = '';
-    } else {
-      renderResults(data);
-    }
-  } catch (e) {
-    errBox.textContent = 'Connection error: ' + e.message + (rawText ? ' -- raw: ' + rawText.slice(0, 120) : '');
-    errBox.style.display = '';
-  } finally {
-    setLoading(false);
-  }
-}
-
-function esc(s) {
-  return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-}
-
-function renderResults(data) {
-  const s = data.summary || {};
-  const results = data.results || [];
-  const el = document.getElementById('results');
-
-  try {
-    const allSkip  = results.length > 0 && results.every(r => r.status === 'SKIP');
-    const allGood  = !allSkip && s.fail === 0 && s.warn === 0;
-    const hasIssue = s.fail > 0 || s.warn > 0;
-
-    let html = '';
-
-    if (data.model) {
-      html += `<div class="model-tag">Model tested: <strong>${esc(data.model)}</strong></div>`;
-    }
-
-    html += `<div class="summary-strip">
-      <div class="scard"><div class="scard-n c-red">${s.fail || 0}</div><div class="scard-l">Failed</div></div>
-      <div class="scard"><div class="scard-n c-yellow">${s.warn || 0}</div><div class="scard-l">Warnings</div></div>
-      <div class="scard"><div class="scard-n c-green">${s.pass || 0}</div><div class="scard-l">Passed</div></div>
-      <div class="scard"><div class="scard-n c-gray">${s.skip || 0}</div><div class="scard-l">Skipped</div></div>
-    </div>`;
-
-    if (allSkip) {
-      const reason = data.live_error || 'the endpoint did not respond to probe requests';
-      html += `<div class="warn-banner">
-        <strong>Could not connect to endpoint.</strong><br>
-        All probes were skipped because ${esc(reason)}.<br>
-        Check that your API key is correct, the endpoint URL is reachable, and the model name is valid.
-      </div>`;
-    } else if (allGood) {
-      html += `<div class="ok-banner">
-        <strong>All active checks passed.</strong> No prompt injection, jailbreak, PII leakage, or disclosure issues detected with this endpoint and model.
-      </div>`;
-    }
-
-    const cats = {};
-    for (const r of results) {
-      (cats[r.category] = cats[r.category] || []).push(r);
-    }
-    const statusOrder = {FAIL:0, WARN:1, PASS:2, SKIP:3};
-    for (const cat of Object.keys(cats).sort()) {
-      cats[cat].sort((a, b) => (statusOrder[a.status] ?? 9) - (statusOrder[b.status] ?? 9));
-      html += `<div class="cat-header">${esc(cat)}</div>`;
-
-      for (const r of cats[cat]) {
-        const cls = r.status.toLowerCase();
-        html += `<div class="check-card ${cls}">
-          <div class="check-head">
-            <span class="status-badge badge-${r.status}">${r.status}</span>
-            <span class="sev-badge sev-${r.severity}">${r.severity}</span>
-            <div class="check-meta">
-              <div class="check-title">${esc(r.title)}</div>
-              <div class="check-detail-inline">${esc(r.details)}</div>
-            </div>
-            <span class="check-id">${esc(r.check_id)}</span>
-          </div>`;
-
-        const showBody = r.status === 'FAIL' || r.status === 'WARN' ||
-                         (r.evidence && r.evidence.length) || r.remediation;
-        if (showBody) {
-          html += `<div class="check-body">`;
-
-          if (r.evidence && r.evidence.length) {
-            html += `<div class="check-section"><div class="check-section-label">Evidence</div><ul class="evidence-list">`;
-            for (const e of r.evidence) html += `<li>${esc(e)}</li>`;
-            html += `</ul></div>`;
-          }
-
-          if (r.remediation) {
-            html += `<div class="check-section"><div class="check-section-label">How to Fix</div><div class="remediation">${esc(r.remediation)}</div></div>`;
-          }
-
-          if (r.frameworks && Object.keys(r.frameworks).length) {
-            html += `<div class="check-section"><div class="check-section-label">Frameworks</div><div class="fw-pills">`;
-            for (const [fw, ctrl] of Object.entries(r.frameworks)) {
-              html += `<span class="fw-pill">${esc(fw)}: ${esc(ctrl)}</span>`;
-            }
-            html += `</div></div>`;
-          }
-
-          html += `</div>`;
-        }
-
-        html += `</div>`;
-      }
-    }
-
-    el.innerHTML = html;
-    el.style.display = '';
-  } catch (jsErr) {
-    el.innerHTML = `<div class="err-box">Display error: ${jsErr.message}<br>Raw result count: ${results.length}</div>`;
-    el.style.display = '';
-  }
-}
-</script>
-</body>
-</html>'''
-        self._send(200, html, 'text/html; charset=utf-8')
 
     def _serve_academy(self):
         try:
