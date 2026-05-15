@@ -1,7 +1,3 @@
-# Never bake a host's device ID into the image — containers and K8s pods
-# must generate their own ID from SENTINEL_DEVICE_ID or hardware seed.
-output/.device_id
-
 # Ignore agent/dev files
 CLAUDE.md
 .claude/
