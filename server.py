@@ -1734,8 +1734,7 @@ body{{background:#0d1117;color:#c9d1d9;font-family:-apple-system,BlinkMacSystemF
     <span class="brand-mark">M.A.R.K.</span>
     <span class="brand-name">SENTINEL</span>
     <span class="brand-sub">Command Center</span>
-    <a class="hlink" href="/academy" target="_blank" style="margin-right:16px">Academy</a>
-    <a class="hlink" href="/">← Single-device dashboard</a>
+    <a class="hlink" href="/academy" target="_blank">Academy</a>
   </div>
 
   <div class="stat-row">
