@@ -544,16 +544,17 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             return
 
         static = {
-            '/':               self._serve_dashboard,
+            '/':               self._serve_fleet,
+            '/dashboard':      self._serve_dashboard,
             '/dashboard.html': self._serve_dashboard,
             '/api/status':     self._api_status,
             '/api/events':     self._api_events,
             '/api/devices':    self._api_devices,
             '/api/discover':   self._api_discover,
-            '/fleet':          self._serve_fleet,
+            '/fleet':          lambda: self._redirect('/'),
             '/academy':        self._serve_academy,
             '/probe':          self._serve_probe_tester,
-            '/command':        self._serve_fleet,
+            '/command':        lambda: self._redirect('/'),
             '/api/config':     self._api_get_config,
             '/download/shortcut': self._serve_shortcut,
         }
@@ -725,7 +726,7 @@ button:hover{{background:#2ea043}}
                         link = (
                             '\n<div style="position:fixed;left:50%;top:14px;'
                             'transform:translateX(-50%);z-index:999;'>
-                            '<a href="/fleet" style="background:#161b22;color:#58a6ff;'
+                            '<a href="/" style="background:#161b22;color:#58a6ff;'
                             'padding:6px 10px;border-radius:6px;border:1px solid #21262d;'
                             'text-decoration:none;font-size:13px">Command Center</a> '
                             '<a href="/academy" target="_blank" style="background:#161b22;color:#58a6ff;'
@@ -1961,6 +1962,12 @@ body{{background:#0d1117;color:#e6edf3;font-family:-apple-system,BlinkMacSystemF
             self._send(500, f'Academy build failed: {e}'.encode(), 'text/plain')
 
     # ── helpers ───────────────────────────────────────────────────────────────
+
+    def _redirect(self, location: str):
+        self.send_response(302)
+        self.send_header('Location', location)
+        self.send_header('Content-Length', '0')
+        self.end_headers()
 
     def _not_found(self):
         self._send(404, b'Not found', 'text/plain')
