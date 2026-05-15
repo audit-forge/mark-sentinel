@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>M.A.R.K. Sentinel — Architecture</title>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Segoe UI', Arial, sans-serif;
+      background: #0d1117;
+      color: #e6edf3;
+      padding: 40px 32px 60px;
+    }
+    .header {
+      text-align: center;
+      margin-bottom: 36px;
+    }
+    .header h1 {
+      font-size: 26px;
+      font-weight: 700;
+      letter-spacing: 0.5px;
+      color: #58a6ff;
+    }
+    .header p {
+      font-size: 13px;
+      color: #8b949e;
+      margin-top: 6px;
+    }
+    .badge {
+      display: inline-block;
+      background: #1f2937;
+      border: 1px solid #30363d;
+      border-radius: 4px;
+      font-size: 11px;
+      padding: 2px 8px;
+      margin: 4px 4px 0;
+      color: #a5d6ff;
+    }
+    .diagram-wrap {
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 10px;
+      padding: 32px 24px;
+      overflow-x: auto;
+    }
+    .footer {
+      text-align: center;
+      margin-top: 28px;
+      font-size: 11px;
+      color: #6e7681;
+    }
+  </style>
+</head>
+<body>
+
+<div class="header">
+  <h1>M.A.R.K. Sentinel — AI Security Audit Tool</h1>
+  <p>Architecture Overview &nbsp;·&nbsp; Patent Pending &nbsp;·&nbsp; © 2026 M.A.R.K. AI Systems</p>
+  <div style="margin-top:10px">
+    <span class="badge">46 Static Checks</span>
+    <span class="badge">11 Live Adversarial Probes</span>
+    <span class="badge">8 Security Domains</span>
+    <span class="badge">5 Compliance Profiles</span>
+    <span class="badge">NIST AI RMF 1.0</span>
+    <span class="badge">OWASP LLM Top 10</span>
+    <span class="badge">SR 26-2</span>
+    <span class="badge">FedRAMP</span>
+    <span class="badge">CMMC 2.0</span>
+  </div>
+</div>
+
+<div class="diagram-wrap">
+  <div class="mermaid">
+%%{init: {'theme': 'dark', 'themeVariables': {'primaryColor':'#1f6feb','primaryTextColor':'#e6edf3','primaryBorderColor':'#388bfd','lineColor':'#58a6ff','secondaryColor':'#161b22','tertiaryColor':'#0d1117','edgeLabelBackground':'#161b22','fontFamily':'Segoe UI, Arial, sans-serif'}}}%%
+flowchart TB
+
+    subgraph ENTRY["⬛  Entry Points"]
+        direction LR
+        CLI["🖥️  CLI\naudit.py"]
+        WEB["🌐  Web UI / REST API\nserver.py"]
+        APP["🍎  macOS App\nSentinel.app"]
+    end
+
+    subgraph PROFILES["📋  Scan Profiles"]
+        direction LR
+        P1["SMB"]
+        P2["FedRAMP"]
+        P3["CMMC 2.0"]
+        P4["Financial"]
+        P5["Default"]
+    end
+
+    subgraph CONNECTORS["🔌  AI Model Connectors"]
+        direction LR
+        C1["☁️  Anthropic Claude\nclaude-sonnet-4-6"]
+        C2["🤖  OpenAI\n& Compatible APIs"]
+        C3["✦  Google Gemini"]
+        C4["🔷  Vertex AI"]
+        C5["🦙  Ollama\n(Local / Air-gapped)"]
+    end
+
+    subgraph INFRA["🛠️  Infrastructure Connectors"]
+        direction LR
+        I1["📁  Config Scanner\n(files, env, YAML)"]
+        I2["🐳  Docker"]
+        I3["☸️  Kubernetes"]
+        I4["🔍  Presidio PII\nScanner"]
+        I5["🐛  DefectDojo\nIntegration"]
+    end
+
+    subgraph CHECKS["🔐  8 Security Check Domains — 46 Static Checks"]
+        direction LR
+        D1["AI-DEPLOY\nDeployment\nSecurity"]
+        D2["AI-INP\nInput\nSafety"]
+        D3["AI-OUT\nOutput\nSafety"]
+        D4["AI-AGENT\nAgentic\nControls"]
+        D5["AI-SUPPLY\nSupply\nChain"]
+        D6["AI-GOV\nGovernance\n& Policy"]
+        D7["AI-TOOL\nTool Use\nControls"]
+        D8["AI-RUNTIME\nRuntime\nSecurity"]
+    end
+
+    subgraph PROBES["🧪  Live Adversarial Probes — 11 Probes"]
+        direction LR
+        PR1["Prompt\nInjection"]
+        PR2["System Prompt\nOverride"]
+        PR3["Jailbreak\nAttempts"]
+        PR4["System Prompt\nExtraction"]
+        PR5["PII\nExtraction"]
+    end
+
+    subgraph OUTPUT["📤  Output Formats"]
+        direction LR
+        O1["Plain\nEnglish"]
+        O2["JSON"]
+        O3["SARIF"]
+        O4["PDF\nReport"]
+        O5["Rego / OPA"]
+        O6["Kyverno"]
+        O7["Fleet\nReport"]
+    end
+
+    subgraph DEPLOY["🚀  Deployment Targets"]
+        direction LR
+        DEP1["Docker /\nDocker Compose"]
+        DEP2["Kubernetes\n+ Helm"]
+        DEP3["Ansible\nPlaybooks"]
+        DEP4["Terraform"]
+        DEP5["Intune / MDM"]
+    end
+
+    ENTRY --> PROFILES
+    PROFILES --> CONNECTORS
+    PROFILES --> INFRA
+    CONNECTORS --> PROBES
+    INFRA --> CHECKS
+    PROBES --> CHECKS
+    CHECKS --> OUTPUT
+    OUTPUT --> DEPLOY
+  </div>
+</div>
+
+<div class="footer">
+  M.A.R.K. Sentinel &nbsp;|&nbsp; © 2026 M.A.R.K. AI Systems. All rights reserved. Patent Pending.
+</div>
+
+<script>
+  mermaid.initialize({ startOnLoad: true });
+</script>
+</body>
+</html>
