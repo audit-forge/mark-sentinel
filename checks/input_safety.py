@@ -167,10 +167,12 @@ def check_inp_003(ctx: ScanContext) -> CheckResult:
         severity="HIGH",
         category=CATEGORY,
         details=(
-            "Indirect/RAG injection testing requires knowledge of the target retrieval pipeline. "
-            "This check is deferred to Phase 3 — supply a RAG fixture or document corpus to enable it."
+            "Coming soon — Indirect injection testing via RAG (Retrieval-Augmented Generation) "
+            "requires a document retrieval endpoint to probe. This check will be available once you "
+            "connect a RAG pipeline in the tester."
         ),
         remediation=(
+            "While this check is pending, apply these controls manually:\n"
             "1. Sanitize all retrieved documents before injecting them into the model context.\n"
             "2. Use a guard model to classify retrieved content for injection payloads.\n"
             "3. Limit what retrieved content can instruct the model to do (e.g., it cannot modify system behavior)."
