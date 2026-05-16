@@ -632,9 +632,15 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self._handle_login_post()
             return
 
-        # Agent report — uses its own agent-token auth
+        # Agent endpoints — use agent-token auth, not dashboard session
         if path == '/api/agent/report':
             self._api_agent_report()
+            return
+        if path == '/api/agent/discovery':
+            if not self._check_agent_bearer():
+                self._send(401, b'Unauthorized', 'text/plain')
+                return
+            self._api_agent_discovery()
             return
 
         # All other POST endpoints require dashboard auth
@@ -667,8 +673,6 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self._api_probe_scan()
         elif path == '/probe':
             self._probe_run()
-        elif path == '/api/agent/discovery':
-            self._api_agent_discovery()
         elif path == '/api/fleet/discover/all':
             self._api_fleet_discover_all()
         elif path.startswith('/api/fleet/discover/'):
