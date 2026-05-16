@@ -2118,6 +2118,7 @@ def _build_shadow_section(shadow: list[dict], ts_now: int) -> str:
         'network':   ('&#127760;', '#a371f7', 'Network',   'AI service running on an unmanaged device'),
         'cloud_api': ('&#9729;',   '#58a6ff', 'Cloud API', 'Cloud AI API key found on a managed device'),
         'process':   ('&#9881;',   '#f0883e', 'Process',   'AI process running locally on a managed device'),
+        'docker':    ('&#128051;', '#3fb950', 'Container', 'AI running inside a Docker container'),
     }
 
     def _age(ts: int | None) -> str:
@@ -2207,7 +2208,7 @@ def _build_shadow_section(shadow: list[dict], ts_now: int) -> str:
             f'<div class="sec-hdr" style="display:flex;align-items:center;justify-content:space-between">'
             f'<span>Shadow AI — Detected AI Usage{badge}</span>'
             f'<span style="font-size:11px;color:#6e7681;font-weight:400;text-transform:none;letter-spacing:0">'
-            f'&#127760; Unmanaged device &nbsp;|&nbsp; &#9729; Cloud API key &nbsp;|&nbsp; &#9881; Running process'
+            f'&#127760; Unmanaged device &nbsp;|&nbsp; &#9729; Cloud API key &nbsp;|&nbsp; &#9881; Running process &nbsp;|&nbsp; &#128051; Container'
             f'</span></div>'
             f'<div id="shadow-cards" style="margin-bottom:28px">{cards}</div>'
             f'</div>')
@@ -3026,6 +3027,7 @@ const _SHADOW_SRC = {{
   network:   {{icon:'&#127760;', color:'#a371f7', label:'Network'}},
   cloud_api: {{icon:'&#9729;',   color:'#58a6ff', label:'Cloud API'}},
   process:   {{icon:'&#9881;',   color:'#f0883e', label:'Process'}},
+  docker:    {{icon:'&#128051;', color:'#3fb950', label:'Container'}},
 }};
 
 async function refreshShadow() {{

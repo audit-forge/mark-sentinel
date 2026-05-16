@@ -392,6 +392,102 @@ async def _discover_async(hosts: list[str]) -> list[dict]:
     return results
 
 
+# ── Docker container detection ───────────────────────────────────────────────
+
+_DOCKER_AI_IMAGES: list[tuple[str, str]] = [
+    ('ollama/ollama',                                'Ollama'),
+    ('ghcr.io/ggerganov/llama.cpp',                  'llama.cpp server'),
+    ('vllm/vllm-openai',                             'vLLM'),
+    ('huggingface/text-generation-inference',        'HuggingFace TGI'),
+    ('ghcr.io/huggingface/text-generation-inference','HuggingFace TGI'),
+    ('localai/localai',                              'LocalAI'),
+    ('quay.io/go-skynet/local-ai',                   'LocalAI'),
+    ('koboldai/koboldcpp',                           'KoboldCPP'),
+    ('ghcr.io/open-webui/open-webui',                'Open WebUI'),
+    ('tabbyml/tabby',                                'TabbyML'),
+    ('nvcr.io/nvidia/tritonserver',                  'Triton Inference Server'),
+    ('jupyter/base-notebook',                        'Jupyter'),
+    ('jupyter/scipy-notebook',                       'Jupyter'),
+    ('jupyter/tensorflow-notebook',                  'TensorFlow/Jupyter'),
+    ('jupyter/pytorch-notebook',                     'PyTorch/Jupyter'),
+    ('tensorflow/tensorflow',                        'TensorFlow'),
+    ('pytorch/pytorch',                              'PyTorch'),
+    ('nvidia/cuda',                                  'CUDA/GPU environment'),
+    ('deepjavalibrary/djl-serving',                  'DJL Serving'),
+]
+
+_DOCKER_AI_KEYWORDS = ('llm', 'ollama', 'gpt', 'inference', 'model-server', 'vllm',
+                       'langchain', 'llamacpp', 'whisper', 'diffusion', 'comfyui')
+
+
+def _match_ai_image(image: str) -> str:
+    base = image.lower().split(':')[0]
+    for pattern, label in _DOCKER_AI_IMAGES:
+        if pattern.lower() in base:
+            return label
+    name_part = base.split('/')[-1]
+    for kw in _DOCKER_AI_KEYWORDS:
+        if kw in name_part:
+            return f'AI container ({name_part})'
+    return ''
+
+
+def _scan_docker_containers() -> tuple[list[dict], list[str]]:
+    """
+    Query Docker for running containers in ~10ms per container.
+    Returns (ai_image_findings, all_container_ips).
+    No exceptions bubble out — Docker absence is silently ignored.
+    """
+    ai_findings: list[dict] = []
+    container_ips: list[str] = []
+
+    try:
+        ps = subprocess.run(
+            ['docker', 'ps', '--no-trunc',
+             '--format', '{{.ID}}\t{{.Image}}\t{{.Names}}'],
+            capture_output=True, text=True, timeout=10,
+        )
+        if ps.returncode != 0 or not ps.stdout.strip():
+            return ai_findings, container_ips
+    except (FileNotFoundError, PermissionError):
+        return ai_findings, container_ips
+    except Exception:
+        return ai_findings, container_ips
+
+    for line in ps.stdout.strip().splitlines():
+        parts = line.split('\t')
+        if len(parts) < 3:
+            continue
+        cid, image, name = parts[0][:12], parts[1], parts[2]
+
+        ips: list[str] = []
+        try:
+            insp = subprocess.run(
+                ['docker', 'inspect', '--format',
+                 '{{range .NetworkSettings.Networks}}{{.IPAddress}} {{end}}', cid],
+                capture_output=True, text=True, timeout=5,
+            )
+            if insp.returncode == 0:
+                ips = [ip for ip in insp.stdout.split() if ip]
+                container_ips.extend(ips)
+        except Exception:
+            pass
+
+        service_label = _match_ai_image(image)
+        if service_label:
+            ai_findings.append({
+                'service':         service_label,
+                'models':          [],
+                'model_vendors':   {},
+                'container_name':  name,
+                'container_image': image,
+                'container_ips':   ips,
+                'source':          'docker_container',
+            })
+
+    return ai_findings, container_ips
+
+
 # ── Local process detection ───────────────────────────────────────────────────
 
 _PROCESS_SIGS: list[tuple[str, str]] = [
@@ -524,6 +620,7 @@ def discover(
     hosts: list[str] | None = None,
     include_processes: bool = True,
     include_env: bool = True,
+    include_docker: bool = True,
 ) -> list[dict]:
     """
     Multi-layer AI service discovery.
@@ -532,14 +629,27 @@ def discover(
       service       — identified service name (e.g. "Ollama", "OpenAI API proxy")
       models        — list of model IDs loaded on that service
       model_vendors — {vendor: [model_ids]} grouping
-      source        — "network_probe" | "process_scan" | "env_var"
+      source        — "network_probe" | "process_scan" | "env_var" | "docker_container"
       url           — (network probes) base URL
       host/port     — (network probes)
       status        — (network probes) HTTP status code
       process_sig   — (process scan) matching process string
       env_var       — (env scan) environment variable name
+      container_name/container_image — (docker) container metadata
     """
-    target_hosts = hosts or _local_subnet_hosts()
+    target_hosts = list(hosts) if hosts else _local_subnet_hosts()
+
+    # Docker: get container IPs and AI-image findings before the probe so
+    # container IPs are included in the same async scan pass (no extra scan loop).
+    docker_ai_findings: list[dict] = []
+    docker_ip_set: set[str] = set()
+    if include_docker and sys.platform != 'win32':
+        docker_ai_findings, docker_ips = _scan_docker_containers()
+        for ip in docker_ips:
+            if ip and ip not in set(target_hosts):
+                target_hosts.append(ip)
+                docker_ip_set.add(ip)
+        docker_ip_set.update(docker_ips)
 
     # asyncio.run() uses ProactorEventLoop on Windows (Python 3.8+), which fails
     # when called from a non-main thread (e.g. inside ThreadingHTTPServer handlers).
@@ -553,6 +663,20 @@ def discover(
     finally:
         loop.close()
 
+    # Re-tag any network probe result whose host is a known container IP.
+    probed_container_hosts: set[str] = set()
+    for r in results:
+        if r.get('host') in docker_ip_set:
+            r['source'] = 'docker_container'
+            probed_container_hosts.add(r['host'])
+
+    # Add image-matched container findings that had no open/reachable port.
+    already_probed_ips: set[str] = {r.get('host') for r in results if r.get('source') == 'docker_container'}
+    for df in docker_ai_findings:
+        c_ips = set(df.get('container_ips', []))
+        if not c_ips or not c_ips.intersection(already_probed_ips):
+            results.append(df)
+
     if include_processes:
         net_labels = {r['service'].lower() for r in results}
         for p in _scan_processes():
@@ -563,9 +687,10 @@ def discover(
     if include_env:
         results.extend(_scan_env_vars())
 
-    net = sum(1 for r in results if r.get('source') == 'network_probe')
-    proc = sum(1 for r in results if r.get('source') == 'process_scan')
-    env = sum(1 for r in results if r.get('source') == 'env_var')
-    logger.info('Discovery: %d total (%d network, %d process, %d env)',
-                len(results), net, proc, env)
+    net    = sum(1 for r in results if r.get('source') == 'network_probe')
+    proc   = sum(1 for r in results if r.get('source') == 'process_scan')
+    env    = sum(1 for r in results if r.get('source') == 'env_var')
+    docker = sum(1 for r in results if r.get('source') == 'docker_container')
+    logger.info('Discovery: %d total (%d network, %d process, %d env, %d docker)',
+                len(results), net, proc, env, docker)
     return results
