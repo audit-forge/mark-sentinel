@@ -217,7 +217,7 @@ def _risk_score_html(fail, warn, total) -> int:
     return max(0, 100 - round((fail * 3 + warn) / max(total, 1) * 100))
 
 
-def _build_fleet_report_html(devices: list, tier: str, profile: str = '', profiles: list | None = None) -> str:
+def _build_fleet_report_html(devices: list, tier: str, profile: str = '', profiles: list | None = None, status_filter: str = '') -> str:
     from datetime import datetime, timezone
     import html as _html
 
@@ -232,7 +232,9 @@ def _build_fleet_report_html(devices: list, tier: str, profile: str = '', profil
         except Exception:
             return str(epoch)
 
-    tier_label = {'executive': 'Executive Summary', 'ciso': 'CISO Report', 'technical': 'Technical Findings'}.get(tier, 'Fleet Report')
+    _status_label = {'fail': 'Failed Items', 'warn': 'Warnings', 'pass': 'Passing Checks'}.get(status_filter, '')
+    _tier_base    = {'executive': 'Executive Summary', 'ciso': 'CISO Report', 'technical': 'Technical Findings'}.get(tier, 'Fleet Report')
+    tier_label    = f'{_tier_base} — {_status_label}' if _status_label else _tier_base
     total_fail = sum(d.get('fail_count', 0) or 0 for d in devices)
     total_warn = sum(d.get('warn_count', 0) or 0 for d in devices)
     total_pass = sum(d.get('pass_count', 0) or 0 for d in devices)
@@ -284,21 +286,34 @@ tr:hover td{{background:#161b22}}
 @media print{{.toolbar{{display:none}}body{{background:#fff;color:#000;padding:16px}}h1,h2,h3,.card-l{{color:#000}}.card{{border:1px solid #ccc}}.fail{{color:#c00}}.pass{{color:#090}}.warn{{color:#850}}}}
 </style>
 <script>
+var _sf='{status_filter}';
 function applyProfiles(){{
   var checked=[...document.querySelectorAll('.rpt-cb:checked')].map(function(c){{return c.value;}});
   var p=checked.length?'&profile='+checked.join(','):'';
-  location.href='/api/fleet/report?tier={tier}&fmt=html'+p;
+  var sf=_sf?'&status='+_sf:'';
+  location.href='/api/fleet/report?tier={tier}&fmt=html'+p+sf;
+}}
+function switchTier(t){{
+  var checked=[...document.querySelectorAll('.rpt-cb:checked')].map(function(c){{return c.value;}});
+  var p=checked.length?'&profile='+checked.join(','):'';
+  var sf=_sf?'&status='+_sf:'';
+  location.href='/api/fleet/report?tier='+t+'&fmt=html'+p+sf;
 }}
 </script>
 </head><body>
 <div class="toolbar">
-  <span style="font-size:13px;font-weight:600;color:#c9d1d9;margin-right:6px">M.A.R.K. Sentinel &mdash; Fleet {esc(tier_label)}</span>
-  <span style="font-size:11px;color:#8b949e;white-space:nowrap">Profiles:</span>
+  <span style="font-size:13px;font-weight:600;color:#c9d1d9;margin-right:6px">M.A.R.K. Sentinel</span>
+  <button onclick="switchTier('executive')" style="{btn_style}{'color:#58a6ff;border-color:#1f6feb' if tier=='executive' else ''}">Executive</button>
+  <button onclick="switchTier('ciso')"      style="{btn_style}{'color:#58a6ff;border-color:#1f6feb' if tier=='ciso' else ''}">CISO</button>
+  <button onclick="switchTier('technical')" style="{btn_style}{'color:#58a6ff;border-color:#1f6feb' if tier=='technical' else ''}">Technical</button>
+  <span style="font-size:11px;color:#8b949e;white-space:nowrap;margin-left:6px">Profiles:</span>
   {_toolbar_cbs}
   <button onclick="applyProfiles()" style="{btn_style};color:#58a6ff;border-color:#1f6feb">Apply</button>
-  <a href="/api/fleet/report?tier={tier}&fmt=pdf{_pdf_profile_param}" download="sentinel_fleet_{tier}{_pdf_fname_suffix}.pdf" style="{btn_style};color:#3fb950;border-color:#238636">&#8659; Download PDF</a>
+  <a href="/api/fleet/report?tier={tier}&fmt=pdf{_pdf_profile_param}{'&status=' + status_filter if status_filter else ''}" download="sentinel_fleet_{tier}{_pdf_fname_suffix}.pdf" style="{btn_style};color:#3fb950;border-color:#238636">&#8659; Download PDF</a>
   <button onclick="window.print()" style="{btn_style}">&#128438; Print</button>
+  {'<a href="/api/fleet/report?tier=' + tier + '&fmt=html' + _pdf_profile_param + '" style="' + btn_style + ';color:#f85149;border-color:#30363d">&#10005; Clear filter</a>' if status_filter else ''}
 </div>
+{'<div style="background:#1c2128;border:1px solid #30363d;border-radius:6px;padding:10px 18px;margin-bottom:20px;display:flex;align-items:center;justify-content:space-between"><span style="font-size:13px;font-weight:600;color:' + ('#f85149' if status_filter=='fail' else '#d29922' if status_filter=='warn' else '#3fb950') + '">Showing: ' + esc(_status_label) + ' only — across all devices</span></div>' if status_filter else ''}
 <h1>M.A.R.K. Sentinel &mdash; Fleet {esc(tier_label)}</h1>
 <div class="meta">Generated {esc(now)} &nbsp;&bull;&nbsp; {len(devices)} device(s){(' &nbsp;&bull;&nbsp; Profiles: <strong>' + esc(_profile_label) + '</strong>') if _profile_label else ''} &nbsp;&bull;&nbsp; Confidential</div>
 <div class="cards">
@@ -324,19 +339,29 @@ function applyProfiles(){{
                      f'<td style="color:#6e7681;font-size:12px">{esc(ts(d.get("last_seen")))}</td></tr>')
     parts.append('</tbody></table>')
 
-    # Critical/High findings across fleet
+    # Findings across fleet — filtered by status_filter when set
     all_findings = []
     for d in devices:
         rep = d.get('_report') or {}
         for r in rep.get('findings', rep.get('results', [])):
             r2 = dict(r); r2['_hostname'] = d.get('hostname') or d.get('device_id') or '?'
             all_findings.append(r2)
-    crit_high = [f for f in all_findings if f.get('status') == 'FAIL' and f.get('severity') in ('CRITICAL', 'HIGH')]
-    crit_high.sort(key=lambda x: _SEV_ORDER_REPORT.index(x.get('severity', 'INFO')) if x.get('severity') in _SEV_ORDER_REPORT else 99)
 
-    parts.append(f'<h2>Critical &amp; High Findings ({len(crit_high)})</h2>')
+    if status_filter:
+        _target_status = {'fail': 'FAIL', 'warn': 'WARN', 'pass': 'PASS'}.get(status_filter, '')
+        all_findings = [f for f in all_findings if f.get('status', '').upper() == _target_status]
+
+    _section_label = {'fail': 'Failed', 'warn': 'Warning', 'pass': 'Passing'}.get(status_filter, 'Critical &amp; High')
+    if status_filter:
+        crit_high = sorted(all_findings, key=lambda x: _SEV_ORDER_REPORT.index(x.get('severity','INFO')) if x.get('severity') in _SEV_ORDER_REPORT else 99)
+    else:
+        crit_high = [f for f in all_findings if f.get('status') == 'FAIL' and f.get('severity') in ('CRITICAL', 'HIGH')]
+        crit_high.sort(key=lambda x: _SEV_ORDER_REPORT.index(x.get('severity', 'INFO')) if x.get('severity') in _SEV_ORDER_REPORT else 99)
+
+    parts.append(f'<h2>{_section_label} Findings ({len(crit_high)})</h2>')
     if not crit_high:
-        parts.append('<p style="color:#3fb950;padding:12px 0">No critical or high severity failures found across the fleet.</p>')
+        _empty_msg = f'No {_status_label.lower()} found across the fleet.' if status_filter else 'No critical or high severity failures found across the fleet.'
+        parts.append(f'<p style="color:#3fb950;padding:12px 0">{esc(_empty_msg)}</p>')
     else:
         limit = 20 if tier == 'executive' else len(crit_high)
         parts.append('<table><thead><tr><th>Severity</th><th>Device</th><th>Check</th><th>Finding</th></tr></thead><tbody>')
@@ -374,7 +399,13 @@ function applyProfiles(){{
                      f'<span style="color:{sc_color}">{sc}%</span> &nbsp;'
                      f'<span style="color:#6e7681;font-size:11px">{esc(d.get("platform",""))} &bull; '
                      f'{esc(ts(d.get("last_seen")))}</span></h3>')
-        show = results if tier == 'technical' else [r for r in results if r.get('status') in ('FAIL', 'WARN')]
+        if status_filter:
+            _target_st = {'fail': 'FAIL', 'warn': 'WARN', 'pass': 'PASS'}.get(status_filter, '')
+            show = [r for r in results if r.get('status', '').upper() == _target_st]
+        elif tier == 'technical':
+            show = results
+        else:
+            show = [r for r in results if r.get('status') in ('FAIL', 'WARN')]
         show.sort(key=lambda x: _SEV_ORDER_REPORT.index(x.get('severity', 'INFO')) if x.get('severity') in _SEV_ORDER_REPORT else 99)
         if not show:
             parts.append('<p style="color:#3fb950;font-size:13px;padding:8px 0">No failures on this device.</p>')
@@ -1213,14 +1244,17 @@ button:hover{{background:#2ea043}}
             self._json({'error': str(e)}, 500)
 
     def _api_fleet_report(self):
-        """GET /api/fleet/report?tier=executive|ciso|technical&fmt=pdf|html|json[&profile=fedramp,cmmc]"""
+        """GET /api/fleet/report?tier=executive|ciso|technical&fmt=pdf|html|json[&profile=fedramp,cmmc][&status=fail|warn|pass]"""
         from urllib.parse import parse_qs, urlparse as _up
         qs = parse_qs(_up(self.path).query)
-        tier        = (qs.get('tier',    ['ciso'])[0]).lower()
-        fmt         = (qs.get('fmt',     ['html'])[0]).lower()
-        profile_raw = (qs.get('profile', [''])[0]).lower().strip()
+        tier          = (qs.get('tier',    ['ciso'])[0]).lower()
+        fmt           = (qs.get('fmt',     ['html'])[0]).lower()
+        profile_raw   = (qs.get('profile', [''])[0]).lower().strip()
+        status_filter = (qs.get('status',  [''])[0]).lower().strip()
         if tier not in ('executive', 'ciso', 'technical'):
             tier = 'ciso'
+        if status_filter not in ('fail', 'warn', 'pass', ''):
+            status_filter = ''
         _VALID_PROFILES = {'default', 'fedramp', 'cmmc', 'financial', 'smb'}
         profiles = [p for p in profile_raw.split(',') if p in _VALID_PROFILES]
         profile  = ','.join(profiles)
@@ -1261,7 +1295,7 @@ button:hover{{background:#2ea043}}
                     self._send(500, f'PDF generation failed: {pdf_err}\n\n{tb}'.encode(), 'text/plain')
                     return
 
-            html = _build_fleet_report_html(devices, tier, profile=profile, profiles=profiles)
+            html = _build_fleet_report_html(devices, tier, profile=profile, profiles=profiles, status_filter=status_filter)
             data = html.encode('utf-8')
             self.send_response(200)
             self.send_header('Content-Type', 'text/html; charset=utf-8')
@@ -2129,11 +2163,11 @@ body{{background:#0d1117;color:#c9d1d9;font-family:-apple-system,BlinkMacSystemF
   <div class="stat-row">
     <div class="scard" id="sf-all" onclick="window.open('/','_blank')" title="Open all devices in new tab">
       <div class="scard-n c-blue" id="sc-count">{len(devices)}</div><div class="scard-l">Devices</div></div>
-    <div class="scard" id="sf-fail" onclick="window.open('/?filter=fail','_blank')" title="Open failed devices in new tab">
+    <div class="scard" id="sf-fail" onclick="window.open('/api/fleet/report?tier=technical&amp;status=fail&amp;fmt=html','_blank')" title="View all failed items across all devices">
       <div class="scard-n c-red" id="sc-fail">{total_fail}</div><div class="scard-l">Total Fails</div></div>
-    <div class="scard" id="sf-warn" onclick="window.open('/?filter=warn','_blank')" title="Open devices with warnings in new tab">
+    <div class="scard" id="sf-warn" onclick="window.open('/api/fleet/report?tier=technical&amp;status=warn&amp;fmt=html','_blank')" title="View all warnings across all devices">
       <div class="scard-n c-yellow" id="sc-warn">{total_warn}</div><div class="scard-l">Total Warns</div></div>
-    <div class="scard" id="sf-pass" onclick="window.open('/?filter=pass','_blank')" title="Open clean devices in new tab">
+    <div class="scard" id="sf-pass" onclick="window.open('/api/fleet/report?tier=technical&amp;status=pass&amp;fmt=html','_blank')" title="View all passing checks across all devices">
       <div class="scard-n c-green" id="sc-pass">{total_pass}</div><div class="scard-l">Total Passes</div></div>
   </div>
   <div id="filter-banner" style="display:none;background:#161b22;border:1px solid #30363d;border-radius:6px;padding:10px 18px;margin-bottom:18px;align-items:center;justify-content:space-between;gap:12px">
