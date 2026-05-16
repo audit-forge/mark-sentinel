@@ -614,6 +614,122 @@ def _scan_env_vars() -> list[dict]:
     return found
 
 
+# ── DNS cache inspection ──────────────────────────────────────────────────────
+
+_AI_DNS_HOSTNAMES: list[tuple[str, str, str]] = [
+    ('api.anthropic.com',                    'Anthropic Claude',     'Anthropic'),
+    ('api.openai.com',                       'OpenAI / ChatGPT',     'OpenAI'),
+    ('chat.openai.com',                      'ChatGPT (browser)',     'OpenAI'),
+    ('generativelanguage.googleapis.com',    'Google Gemini API',    'Google'),
+    ('gemini.google.com',                    'Google Gemini',        'Google'),
+    ('api.mistral.ai',                       'Mistral AI',           'Mistral AI'),
+    ('api.groq.com',                         'Groq',                 'Groq'),
+    ('api.together.xyz',                     'Together AI',          'Together AI'),
+    ('api.cohere.com',                       'Cohere',               'Cohere'),
+    ('api.replicate.com',                    'Replicate',            'Replicate'),
+    ('huggingface.co',                       'HuggingFace',          'HuggingFace'),
+    ('api-inference.huggingface.co',         'HuggingFace Inference','HuggingFace'),
+    ('api.perplexity.ai',                    'Perplexity AI',        'Perplexity'),
+    ('api.fireworks.ai',                     'Fireworks AI',         'Fireworks AI'),
+    ('api.deepseek.com',                     'DeepSeek API',         'DeepSeek'),
+    ('api.x.ai',                             'xAI Grok',             'xAI'),
+    ('bedrock-runtime.amazonaws.com',        'AWS Bedrock',          'AWS'),
+    ('aiplatform.googleapis.com',            'Google Vertex AI',     'Google'),
+    ('openrouter.ai',                        'OpenRouter',           'OpenRouter'),
+    ('api.azure.com',                        'Azure OpenAI',         'Microsoft'),
+    ('cognitiveservices.azure.com',          'Azure OpenAI',         'Microsoft'),
+    ('claude.ai',                            'Anthropic Claude (web)','Anthropic'),
+    ('copilot.microsoft.com',                'Microsoft Copilot',    'Microsoft'),
+    ('github.com',                           'GitHub Copilot',       'GitHub'),
+    ('api.githubcopilot.com',               'GitHub Copilot API',   'GitHub'),
+]
+
+_DNS_PROBE_TIMEOUT = 1.0
+
+
+def _scan_dns_cache() -> list[dict]:
+    """
+    Check the local DNS cache for recent lookups to known AI API hostnames.
+    Uses the OS DNS cache (platform-specific) plus a fast socket probe.
+    Returns findings in env_var format so they flow through existing pipeline.
+    """
+    found: list[dict] = []
+
+    # ── Platform-native cache dump ────────────────────────────────────────────
+    cached_hosts: set[str] = set()
+
+    if sys.platform == 'win32':
+        try:
+            r = subprocess.run(
+                ['ipconfig', '/displaydns'],
+                capture_output=True, text=True, timeout=10,
+            )
+            text = r.stdout.lower()
+            for hostname, _, _ in _AI_DNS_HOSTNAMES:
+                if hostname.lower() in text:
+                    cached_hosts.add(hostname)
+        except Exception:
+            pass
+
+    elif sys.platform == 'darwin':
+        try:
+            r = subprocess.run(
+                ['dscacheutil', '-cachedump', '-entries', 'Host'],
+                capture_output=True, text=True, timeout=10,
+            )
+            text = r.stdout.lower()
+            for hostname, _, _ in _AI_DNS_HOSTNAMES:
+                if hostname.lower() in text:
+                    cached_hosts.add(hostname)
+        except Exception:
+            pass
+
+    else:
+        # Linux — query systemd-resolved cache if available
+        try:
+            r = subprocess.run(
+                ['resolvectl', 'statistics'],
+                capture_output=True, text=True, timeout=5,
+            )
+            # resolvectl doesn't expose full cache contents, so we fall through
+            # to the socket timing probe below for Linux.
+        except Exception:
+            pass
+
+    # ── Socket timing probe ───────────────────────────────────────────────────
+    # A cached DNS response resolves in <5ms. Uncached takes 50-300ms.
+    # We probe each hostname with a tight timeout and treat a fast response
+    # as evidence the hostname is in cache (i.e., was recently accessed).
+    # This works on all platforms without elevated permissions.
+    for hostname, service_label, vendor in _AI_DNS_HOSTNAMES:
+        if hostname in cached_hosts:
+            continue
+        try:
+            t0 = __import__('time').monotonic()
+            socket.getaddrinfo(hostname, None, socket.AF_INET,
+                               socket.SOCK_STREAM, 0, socket.AI_ADDRCONFIG)
+            elapsed = __import__('time').monotonic() - t0
+            if elapsed < 0.05:
+                cached_hosts.add(hostname)
+        except Exception:
+            pass
+
+    # ── Build findings ────────────────────────────────────────────────────────
+    seen_labels: set[str] = set()
+    for hostname, service_label, vendor in _AI_DNS_HOSTNAMES:
+        if hostname in cached_hosts and service_label not in seen_labels:
+            seen_labels.add(service_label)
+            found.append({
+                'service':       service_label,
+                'models':        [],
+                'model_vendors': {vendor: []},
+                'env_var':       f'dns: {hostname}',
+                'source':        'env_var',
+            })
+
+    return found
+
+
 # ── Public API ────────────────────────────────────────────────────────────────
 
 def discover(
@@ -686,6 +802,7 @@ def discover(
 
     if include_env:
         results.extend(_scan_env_vars())
+        results.extend(_scan_dns_cache())
 
     net    = sum(1 for r in results if r.get('source') == 'network_probe')
     proc   = sum(1 for r in results if r.get('source') == 'process_scan')
