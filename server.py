@@ -245,7 +245,7 @@ def _build_fleet_report_html(devices: list, tier: str, profile: str = '', profil
     active_profiles = profiles or ([profile] if profile else [])
 
     _rpt_profiles = [('default', 'Default'), ('fedramp', 'FedRAMP'), ('cmmc', 'CMMC 2.0'),
-                     ('financial', 'Financial'), ('smb', 'SMB')]
+                     ('financial', 'Financial'), ('smb', 'SMB'), ('lifesciences', 'Life Sciences')]
     _toolbar_cbs = ' '.join(
         f'<label style="font-size:12px;color:#c9d1d9;white-space:nowrap;cursor:pointer">'
         f'<input type="checkbox" class="rpt-cb" value="{v}"{" checked" if v in active_profiles else ""}> {lbl}</label>'
@@ -2185,6 +2185,7 @@ body{{background:#0d1117;color:#c9d1d9;font-family:-apple-system,BlinkMacSystemF
       <label style="font-size:12px;color:#c9d1d9;white-space:nowrap;cursor:pointer"><input type="checkbox" class="rpt-profile" value="cmmc"> CMMC 2.0</label>
       <label style="font-size:12px;color:#c9d1d9;white-space:nowrap;cursor:pointer"><input type="checkbox" class="rpt-profile" value="financial"> Financial</label>
       <label style="font-size:12px;color:#c9d1d9;white-space:nowrap;cursor:pointer"><input type="checkbox" class="rpt-profile" value="smb"> SMB</label>
+      <label style="font-size:12px;color:#c9d1d9;white-space:nowrap;cursor:pointer"><input type="checkbox" class="rpt-profile" value="lifesciences"> Life Sciences</label>
       <button onclick="openReport('executive')" class="scan-btn"
          style="color:#3fb950;border-color:#30363d;font-size:12px">&#9654; Executive Report</button>
       <button onclick="openReport('ciso')" class="scan-btn"
@@ -2264,6 +2265,7 @@ body{{background:#0d1117;color:#c9d1d9;font-family:-apple-system,BlinkMacSystemF
         <option value="fedramp">FedRAMP / NIST 800-53</option>
         <option value="cmmc">CMMC</option>
         <option value="smb">SMB</option>
+        <option value="lifesciences">Life Sciences (FDA / HIPAA / GxP)</option>
       </select>
       <label style="font-size:13px;color:#8b949e">Scan Interval</label>
       <div style="display:flex;align-items:center;gap:8px">
@@ -2639,6 +2641,7 @@ const _SCAN_PROFILES = [
   {{id:'cmmc',      label:'CMMC 2.0',            desc:'Cybersecurity Maturity Model'}},
   {{id:'financial', label:'Financial Services',  desc:'Financial sector AI controls'}},
   {{id:'smb',       label:'SMB',                 desc:'Small-medium business baseline'}},
+  {{id:'lifesciences', label:'Life Sciences',    desc:'FDA 21 CFR Part 11, HIPAA, ICH E6(R2), GxP'}},
 ];
 
 function openScanModal(id, triggerBtn) {{
