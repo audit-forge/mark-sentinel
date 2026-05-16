@@ -38,7 +38,7 @@ Thumbs.db
 .sentinel.pid
 .sentinel-server.log
 agent_token.txt
-agent_config.json
+/agent_config.json
 *.db
 
 # Scan output directories (generated, not source)
