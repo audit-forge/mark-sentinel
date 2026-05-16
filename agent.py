@@ -728,6 +728,18 @@ def main() -> None:
                                 'models':  r.get('models', []),
                                 'detail':  r.get('process_sig', ''),
                             })
+                        elif src == 'docker_container':
+                            c_ips = r.get('container_ips', [])
+                            host = c_ips[0] if c_ips else device_id
+                            port = r.get('port', 0)
+                            send_results.append({
+                                'source':  'docker',
+                                'host':    host,
+                                'port':    port,
+                                'service': r.get('service', ''),
+                                'models':  r.get('models', []),
+                                'detail':  f"{r.get('container_name','')} ({r.get('container_image','')})",
+                            })
                     report_discovery(send_results, cfg, device_id, hostname)
                 except Exception as e:
                     log.error('Network discovery error: %s', e)
