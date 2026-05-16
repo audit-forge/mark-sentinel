@@ -88,6 +88,25 @@ class AgentStore:
 
                 CREATE INDEX IF NOT EXISTS idx_license_events_time
                     ON license_events(recorded_at DESC);
+
+                CREATE TABLE IF NOT EXISTS shadow_devices (
+                    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+                    reporter_device_id  TEXT NOT NULL,
+                    reporter_hostname   TEXT NOT NULL DEFAULT '',
+                    host                TEXT NOT NULL,
+                    port                INTEGER NOT NULL DEFAULT 0,
+                    service             TEXT NOT NULL DEFAULT '',
+                    models_json         TEXT NOT NULL DEFAULT '[]',
+                    source              TEXT NOT NULL DEFAULT 'network',
+                    detail              TEXT NOT NULL DEFAULT '',
+                    first_seen          INTEGER NOT NULL,
+                    last_seen           INTEGER NOT NULL,
+                    dismissed           INTEGER NOT NULL DEFAULT 0,
+                    UNIQUE(source, reporter_device_id, host, port)
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_shadow_last_seen
+                    ON shadow_devices(last_seen DESC);
             """)
 
         # Prune old reports per retention policy (env var or default 90 days)
@@ -349,6 +368,55 @@ class AgentStore:
             conn.execute("DELETE FROM commands WHERE device_id = ?", (device_id,))
             conn.execute("DELETE FROM devices WHERE device_id = ?", (device_id,))
             return cur.rowcount > 0
+
+    def upsert_shadow_device(self, reporter_device_id: str, reporter_hostname: str,
+                             host: str, port: int, service: str, models: list,
+                             source: str = 'network', detail: str = '') -> None:
+        now = int(time.time())
+        with self._lock, self._conn() as conn:
+            conn.execute("""
+                INSERT INTO shadow_devices
+                    (reporter_device_id, reporter_hostname, host, port, service,
+                     models_json, source, detail, first_seen, last_seen, dismissed)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+                ON CONFLICT(source, reporter_device_id, host, port) DO UPDATE SET
+                    reporter_hostname  = excluded.reporter_hostname,
+                    service            = excluded.service,
+                    models_json        = excluded.models_json,
+                    detail             = excluded.detail,
+                    last_seen          = excluded.last_seen,
+                    dismissed          = 0
+            """, (reporter_device_id, reporter_hostname, host, port, service,
+                  json.dumps(models), source, detail, now, now))
+
+    def list_shadow_devices(self) -> list[dict]:
+        with self._lock, self._conn() as conn:
+            rows = conn.execute("""
+                SELECT id, reporter_device_id, reporter_hostname, host, port,
+                       service, models_json, source, detail, first_seen, last_seen
+                FROM shadow_devices
+                WHERE dismissed = 0
+                ORDER BY source ASC, last_seen DESC
+            """).fetchall()
+        result = []
+        for row in rows:
+            d = dict(row)
+            d['models'] = json.loads(d.pop('models_json', '[]'))
+            result.append(d)
+        return result
+
+    def dismiss_shadow_device(self, shadow_id: int) -> bool:
+        with self._lock, self._conn() as conn:
+            cur = conn.execute(
+                "UPDATE shadow_devices SET dismissed = 1 WHERE id = ?", (shadow_id,)
+            )
+            return cur.rowcount > 0
+
+    def shadow_device_count(self) -> int:
+        with self._lock, self._conn() as conn:
+            return conn.execute(
+                "SELECT COUNT(*) FROM shadow_devices WHERE dismissed = 0"
+            ).fetchone()[0]
 
     def get_device_timeseries(self, device_id: str) -> list[dict]:
         """Return ordered list of {t, fail, warn, pass} scan history points for a device."""
