@@ -2995,25 +2995,25 @@ async function updateAllDevices() {{
 
 async function discoverAll(btn) {{
   btn.disabled = true;
-  btn.textContent = 'Queuing…';
+  btn.innerHTML = 'Queuing…';
   try {{
     const resp = await fetch('/api/fleet/discover/all', {{method: 'POST'}});
     const data = await resp.json();
     if (resp.ok) {{
-      btn.textContent = `Queued (${{data.count}}) — agents scanning…`;
+      btn.innerHTML = `Queued (${{data.count}}) — agents scanning…`;
       setTimeout(() => {{
         btn.disabled = false;
-        btn.textContent = '&#128270; Find Shadow AI';
+        btn.innerHTML = '&#128270; Find Shadow AI';
         refreshShadow();
       }}, 15000);
     }} else {{
       btn.disabled = false;
-      btn.textContent = '&#128270; Find Shadow AI';
+      btn.innerHTML = '&#128270; Find Shadow AI';
       alert(data.error || 'Failed to queue discovery');
     }}
   }} catch (e) {{
     btn.disabled = false;
-    btn.textContent = '&#128270; Find Shadow AI';
+    btn.innerHTML = '&#128270; Find Shadow AI';
   }}
 }}
 
