@@ -41,5 +41,8 @@
   "AI-LS-003":     ["FDA AI/ML SaMD Action Plan", "MEASURE 2.9", "ICH E6(R2) §4.8", "EU MDR Annex I §17"],
   "AI-LS-004":     ["GxP ALCOA+ EU Annex 11", "FDA 21 CFR Part 11 §11.10", "ICH Q10 §3.2", "MANAGE 2.2"],
   "AI-LS-005":     ["FDA AI/ML SaMD Action Plan", "ICH E6(R2) §5.0", "GOVERN 2.2", "EU MDR Annex I §17"],
-  "AI-LS-006":     ["FDA 21 CFR Part 11 §11.10", "ICH Q10 §4.0", "FDA AI/ML SaMD Action Plan", "MEASURE 2.5"]
+  "AI-LS-006":     ["FDA 21 CFR Part 11 §11.10", "ICH Q10 §4.0", "FDA AI/ML SaMD Action Plan", "MEASURE 2.5"],
+  "AI-LS-007":     ["FDA 21 CFR 211.22(c)", "FD&C Act 501(a)(2)(B)", "FDA AI/ML SaMD Action Plan", "GOVERN 2.2"],
+  "AI-LS-008":     ["FDA 21 CFR 211.100", "FDA 21 CFR 211.22(c)", "FD&C Act 501(a)(2)(B)", "MEASURE 2.9"],
+  "AI-LS-009":     ["FDA 21 CFR 211.100(a)", "FDA AI/ML SaMD Action Plan", "GOVERN 1.1", "ICH Q10 §3.2"]
 }
