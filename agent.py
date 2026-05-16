@@ -631,8 +631,8 @@ def main() -> None:
 
     if args.daemon:
         import random as _random
-        POLL_INTERVAL = 300   # seconds between command polls
-        POLL_JITTER   = 30    # ±30 s per poll — agents drift apart over time
+        POLL_INTERVAL = 15    # seconds between command polls
+        POLL_JITTER   = 5     # ±5 s per poll — agents drift apart over time
         SCAN_JITTER   = 120   # ±2 min per scan — prevents thundering herd on large fleets
 
         device_id = _device_id()
@@ -640,12 +640,7 @@ def main() -> None:
         # Startup jitter: spread out agents deployed simultaneously.
         # Each agent sleeps a different random amount (0 – POLL_INTERVAL) before
         # entering the loop so a fleet reboot doesn't hit the server all at once.
-        startup_delay = _random.uniform(0, POLL_INTERVAL)
-        log.info(
-            'Daemon mode — scan interval %ds, poll every %ds, startup jitter %.0fs',
-            interval, POLL_INTERVAL, startup_delay,
-        )
-        time.sleep(startup_delay)
+        log.info('Daemon mode — scan interval %ds, poll every %ds', interval, POLL_INTERVAL)
 
         last_scan = 0.0
         last_success = 0.0
