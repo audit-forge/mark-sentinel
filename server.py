@@ -2063,7 +2063,12 @@ body{{background:#0d1117;color:#c9d1d9;font-family:-apple-system,BlinkMacSystemF
 .hlink{{margin-left:auto;font-size:12px;color:#58a6ff;text-decoration:none}}
 .hlink:hover{{text-decoration:underline}}
 .stat-row{{display:flex;gap:12px;margin-bottom:24px;flex-wrap:wrap}}
-.scard{{background:#161b22;border:1px solid #21262d;border-radius:8px;padding:16px 22px;min-width:120px;text-align:center}}
+.scard{{background:#161b22;border:1px solid #21262d;border-radius:8px;padding:16px 22px;min-width:120px;text-align:center;cursor:pointer;transition:border-color .15s,background .15s;user-select:none}}
+.scard:hover{{background:#1c2128}}
+.scard.sf-active{{border-color:#58a6ff;background:#1a2332}}
+.scard.sf-active-red{{border-color:#f85149;background:#2a1010}}
+.scard.sf-active-yellow{{border-color:#d29922;background:#2a2010}}
+.scard.sf-active-green{{border-color:#3fb950;background:#102a18}}
 .scard-n{{font-size:36px;font-weight:800;line-height:1}}
 .scard-l{{font-size:11px;color:#8b949e;margin-top:5px;text-transform:uppercase;letter-spacing:.5px}}
 .c-red{{color:#f85149}}.c-yellow{{color:#d29922}}.c-green{{color:#3fb950}}.c-blue{{color:#58a6ff}}.c-gray{{color:#6e7681}}
@@ -2122,14 +2127,19 @@ body{{background:#0d1117;color:#c9d1d9;font-family:-apple-system,BlinkMacSystemF
   </div>
 
   <div class="stat-row">
-    <div class="scard"><div class="scard-n c-blue" id="sc-count">{len(devices)}</div><div class="scard-l">Devices</div></div>
-    <div class="scard"><div class="scard-n c-red" id="sc-fail">{total_fail}</div><div class="scard-l">Total Fails</div></div>
-    <div class="scard"><div class="scard-n c-yellow" id="sc-warn">{total_warn}</div><div class="scard-l">Total Warns</div></div>
-    <div class="scard"><div class="scard-n c-green" id="sc-pass">{total_pass}</div><div class="scard-l">Total Passes</div></div>
+    <div class="scard" id="sf-all" onclick="filterBy(null)" title="Show all devices">
+      <div class="scard-n c-blue" id="sc-count">{len(devices)}</div><div class="scard-l">Devices</div></div>
+    <div class="scard" id="sf-fail" onclick="filterBy('fail')" title="Show only devices with failures">
+      <div class="scard-n c-red" id="sc-fail">{total_fail}</div><div class="scard-l">Total Fails</div></div>
+    <div class="scard" id="sf-warn" onclick="filterBy('warn')" title="Show only devices with warnings">
+      <div class="scard-n c-yellow" id="sc-warn">{total_warn}</div><div class="scard-l">Total Warns</div></div>
+    <div class="scard" id="sf-pass" onclick="filterBy('pass')" title="Show only clean devices">
+      <div class="scard-n c-green" id="sc-pass">{total_pass}</div><div class="scard-l">Total Passes</div></div>
   </div>
 
   <div class="sec-hdr" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
     <span>Connected Devices</span>
+    <span id="filter-badge" style="display:none;font-size:11px;background:#1a2332;color:#58a6ff;border:1px solid #30363d;border-radius:10px;padding:2px 10px;cursor:pointer" onclick="filterBy(null)" title="Clear filter">&#10005; clear filter</span>
     <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
       <span style="font-size:11px;color:#8b949e;white-space:nowrap">Profiles:</span>
       <label style="font-size:12px;color:#c9d1d9;white-space:nowrap;cursor:pointer"><input type="checkbox" class="rpt-profile" value="default"> Default</label>
@@ -2247,6 +2257,7 @@ body{{background:#0d1117;color:#c9d1d9;font-family:-apple-system,BlinkMacSystemF
 <script>
 let _countdown = 60;
 let _allDevices = [];
+let _activeFilter = null;
 let _pageSize = 10;
 let _currentPage = 1;
 const _note = document.getElementById('refresh-note');
@@ -2270,6 +2281,39 @@ function _riskCls(fail, warn) {{
   return fail > 0 ? 'r-fail' : warn > 0 ? 'r-warn' : 'r-pass';
 }}
 
+function _visibleDevices() {{
+  if (!_activeFilter) return _allDevices;
+  if (_activeFilter === 'fail') return _allDevices.filter(d => (d.fail_count||0) > 0);
+  if (_activeFilter === 'warn') return _allDevices.filter(d => (d.warn_count||0) > 0);
+  if (_activeFilter === 'pass') return _allDevices.filter(d => (d.fail_count||0) === 0 && (d.warn_count||0) === 0);
+  return _allDevices;
+}}
+
+function filterBy(type) {{
+  _activeFilter = (_activeFilter === type) ? null : type;
+  _currentPage = 1;
+  const colorMap = {{fail:'sf-active-red', warn:'sf-active-yellow', pass:'sf-active-green'}};
+  ['fail','warn','pass'].forEach(t => {{
+    const el = document.getElementById('sf-' + t);
+    if (!el) return;
+    el.className = 'scard';
+    if (_activeFilter === t) el.classList.add(colorMap[t]);
+  }});
+  const allEl = document.getElementById('sf-all');
+  if (allEl) allEl.className = _activeFilter ? 'scard' : 'scard sf-active';
+  const badge = document.getElementById('filter-badge');
+  if (badge) {{
+    if (_activeFilter) {{
+      const labels = {{fail:'Fails only', warn:'Warnings only', pass:'Clean only'}};
+      badge.textContent = '✕ ' + (labels[_activeFilter] || _activeFilter);
+      badge.style.display = 'inline';
+    }} else {{
+      badge.style.display = 'none';
+    }}
+  }}
+  renderDevicePage();
+}}
+
 async function refreshDevices() {{
   try {{
     const resp = await fetch('/api/devices');
@@ -2288,15 +2332,22 @@ async function refreshDevices() {{
 }}
 
 function renderDevicePage() {{
-  const tbody = document.getElementById('device-tbody');
-  const pgEl  = document.getElementById('device-pagination');
+  const tbody   = document.getElementById('device-tbody');
+  const pgEl    = document.getElementById('device-pagination');
+  const visible = _visibleDevices();
   if (!_allDevices.length) {{
     tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:32px;color:#484f58">No agents have reported yet.</td></tr>';
     pgEl.style.display = 'none';
     return;
   }}
+  if (!visible.length) {{
+    const msg = _activeFilter === 'fail' ? 'No devices with failures.' : _activeFilter === 'warn' ? 'No devices with warnings.' : 'No clean devices.';
+    tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:32px;color:#484f58">' + msg + '</td></tr>';
+    pgEl.style.display = 'none';
+    return;
+  }}
   const start = (_currentPage - 1) * _pageSize;
-  const page  = _allDevices.slice(start, start + _pageSize);
+  const page  = visible.slice(start, start + _pageSize);
   tbody.innerHTML = page.map(d => {{
     const did  = d.device_id || '';
     const fail = d.fail_count || 0;
@@ -2331,13 +2382,15 @@ function renderDevicePage() {{
 }}
 
 function renderPagination() {{
-  const total = _allDevices.length;
+  const visible = _visibleDevices();
+  const total = visible.length;
   const pages = Math.max(1, Math.ceil(total / _pageSize));
   const pgEl  = document.getElementById('device-pagination');
-  pgEl.style.display = 'flex';
+  pgEl.style.display = total > _pageSize ? 'flex' : 'none';
   const start = (_currentPage - 1) * _pageSize + 1;
   const end   = Math.min(_currentPage * _pageSize, total);
-  document.getElementById('page-info').textContent = start + '–' + end + ' of ' + total + ' device' + (total !== 1 ? 's' : '');
+  const suffix = _activeFilter ? ' (filtered)' : '';
+  document.getElementById('page-info').textContent = start + '–' + end + ' of ' + total + ' device' + (total !== 1 ? 's' : '') + suffix;
   const btns = document.getElementById('page-btns');
   const btnStyle = 'font-size:12px;padding:2px 8px;min-width:28px;';
   let html = `<button class="scan-btn" onclick="goToPage(${{_currentPage-1}})" ${{_currentPage===1?'disabled':''}} style="${{btnStyle}}">&#8249;</button>`;
@@ -2370,7 +2423,7 @@ function changePageSize(size) {{
 }}
 
 function goToPage(p) {{
-  const pages = Math.ceil(_allDevices.length / _pageSize);
+  const pages = Math.ceil(_visibleDevices().length / _pageSize);
   if (p < 1 || p > pages) return;
   _currentPage = p;
   renderDevicePage();
