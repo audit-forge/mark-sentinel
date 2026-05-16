@@ -410,6 +410,13 @@ _PROCESS_SIGS: list[tuple[str, str]] = [
     ('tabby',                     'TabbyML (code completion)'),
     ('jan ',                      'Jan (local AI)'),
     ('lmstudio',                  'LM Studio'),
+    ('claude ',                   'Anthropic Claude CLI'),
+    ('claude.exe',                'Anthropic Claude CLI'),
+    ('cursor ',                   'Cursor (AI code editor)'),
+    ('copilot',                   'GitHub Copilot'),
+    ('continue ',                 'Continue (AI code assistant)'),
+    ('codeium',                   'Codeium (AI code assistant)'),
+    ('aider',                     'Aider (AI coding)'),
 ]
 
 
@@ -467,6 +474,18 @@ _ENV_SIGNALS: list[tuple[str, str, str]] = [
 ]
 
 
+_CONFIG_FILE_SIGNALS: list[tuple[str, str, str]] = [
+    ('~/.claude/config.json',              'Anthropic Claude CLI',    'Anthropic'),
+    ('~/.claude/.credentials.json',        'Anthropic Claude CLI',    'Anthropic'),
+    ('~/AppData/Roaming/Claude/config.json', 'Anthropic Claude (Desktop)', 'Anthropic'),
+    ('~/.config/claude/config.json',       'Anthropic Claude CLI',    'Anthropic'),
+    ('~/.cursor/config.json',              'Cursor (AI code editor)', 'Cursor'),
+    ('~/AppData/Roaming/Cursor/config.json', 'Cursor (AI code editor)', 'Cursor'),
+    ('~/.continue/config.json',            'Continue (AI assistant)', 'Continue'),
+    ('~/.config/aider/aider.conf.yml',     'Aider (AI coding)',       'Aider'),
+]
+
+
 def _scan_env_vars() -> list[dict]:
     found = []
     seen: set[str] = set()
@@ -481,6 +500,21 @@ def _scan_env_vars() -> list[dict]:
                 'env_var':       env_key,
                 'source':        'env_var',
             })
+    for path_str, service_label, vendor in _CONFIG_FILE_SIGNALS:
+        if service_label in seen:
+            continue
+        try:
+            if Path(path_str).expanduser().exists():
+                seen.add(service_label)
+                found.append({
+                    'service':       service_label,
+                    'models':        [],
+                    'model_vendors': {vendor: []},
+                    'env_var':       f'config: {path_str}',
+                    'source':        'env_var',
+                })
+        except Exception:
+            pass
     return found
 
 
