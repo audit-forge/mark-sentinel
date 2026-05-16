@@ -2127,14 +2127,18 @@ body{{background:#0d1117;color:#c9d1d9;font-family:-apple-system,BlinkMacSystemF
   </div>
 
   <div class="stat-row">
-    <div class="scard" id="sf-all" onclick="filterBy(null)" title="Show all devices">
+    <div class="scard" id="sf-all" onclick="window.open('/','_blank')" title="Open all devices in new tab">
       <div class="scard-n c-blue" id="sc-count">{len(devices)}</div><div class="scard-l">Devices</div></div>
-    <div class="scard" id="sf-fail" onclick="filterBy('fail')" title="Show only devices with failures">
+    <div class="scard" id="sf-fail" onclick="window.open('/?filter=fail','_blank')" title="Open failed devices in new tab">
       <div class="scard-n c-red" id="sc-fail">{total_fail}</div><div class="scard-l">Total Fails</div></div>
-    <div class="scard" id="sf-warn" onclick="filterBy('warn')" title="Show only devices with warnings">
+    <div class="scard" id="sf-warn" onclick="window.open('/?filter=warn','_blank')" title="Open devices with warnings in new tab">
       <div class="scard-n c-yellow" id="sc-warn">{total_warn}</div><div class="scard-l">Total Warns</div></div>
-    <div class="scard" id="sf-pass" onclick="filterBy('pass')" title="Show only clean devices">
+    <div class="scard" id="sf-pass" onclick="window.open('/?filter=pass','_blank')" title="Open clean devices in new tab">
       <div class="scard-n c-green" id="sc-pass">{total_pass}</div><div class="scard-l">Total Passes</div></div>
+  </div>
+  <div id="filter-banner" style="display:none;background:#161b22;border:1px solid #30363d;border-radius:6px;padding:10px 18px;margin-bottom:18px;align-items:center;justify-content:space-between;gap:12px">
+    <span id="filter-banner-text" style="font-size:13px;font-weight:600"></span>
+    <a href="/" style="font-size:12px;color:#8b949e;text-decoration:none;white-space:nowrap;flex-shrink:0">&#8592; All devices</a>
   </div>
 
   <div class="sec-hdr" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
@@ -2257,7 +2261,7 @@ body{{background:#0d1117;color:#c9d1d9;font-family:-apple-system,BlinkMacSystemF
 <script>
 let _countdown = 60;
 let _allDevices = [];
-let _activeFilter = null;
+let _activeFilter = new URLSearchParams(location.search).get('filter') || null;
 let _pageSize = 10;
 let _currentPage = 1;
 const _note = document.getElementById('refresh-note');
@@ -2289,10 +2293,9 @@ function _visibleDevices() {{
   return _allDevices;
 }}
 
-function filterBy(type) {{
-  _activeFilter = (_activeFilter === type) ? null : type;
-  _currentPage = 1;
+function _syncFilterUI() {{
   const colorMap = {{fail:'sf-active-red', warn:'sf-active-yellow', pass:'sf-active-green'}};
+  const labelMap = {{fail:'Failed Devices', warn:'Devices with Warnings', pass:'Clean Devices'}};
   ['fail','warn','pass'].forEach(t => {{
     const el = document.getElementById('sf-' + t);
     if (!el) return;
@@ -2301,16 +2304,26 @@ function filterBy(type) {{
   }});
   const allEl = document.getElementById('sf-all');
   if (allEl) allEl.className = _activeFilter ? 'scard' : 'scard sf-active';
-  const badge = document.getElementById('filter-badge');
-  if (badge) {{
+  const banner = document.getElementById('filter-banner');
+  const bannerText = document.getElementById('filter-banner-text');
+  if (banner) {{
     if (_activeFilter) {{
-      const labels = {{fail:'Fails only', warn:'Warnings only', pass:'Clean only'}};
-      badge.textContent = '✕ ' + (labels[_activeFilter] || _activeFilter);
-      badge.style.display = 'inline';
+      bannerText.textContent = 'Showing: ' + (labelMap[_activeFilter] || _activeFilter);
+      bannerText.style.color = _activeFilter === 'fail' ? '#f85149' : _activeFilter === 'warn' ? '#d29922' : '#3fb950';
+      banner.style.display = 'flex';
+      document.title = 'Sentinel — ' + (labelMap[_activeFilter] || _activeFilter);
     }} else {{
-      badge.style.display = 'none';
+      banner.style.display = 'none';
     }}
   }}
+  const badge = document.getElementById('filter-badge');
+  if (badge) badge.style.display = 'none';
+}}
+
+function filterBy(type) {{
+  _activeFilter = type;
+  _currentPage = 1;
+  _syncFilterUI();
   renderDevicePage();
 }}
 
@@ -2325,7 +2338,8 @@ async function refreshDevices() {{
     document.getElementById('sc-warn').textContent  = devs.reduce((s,d)=>s+(d.warn_count||0),0);
     document.getElementById('sc-pass').textContent  = devs.reduce((s,d)=>s+(d.pass_count||0),0);
     _allDevices = devs;
-    const maxPage = Math.max(1, Math.ceil(devs.length / _pageSize));
+    _syncFilterUI();
+    const maxPage = Math.max(1, Math.ceil(_visibleDevices().length / _pageSize));
     if (_currentPage > maxPage) _currentPage = maxPage;
     renderDevicePage();
   }} catch (_) {{ /* silently ignore refresh errors */ }}
