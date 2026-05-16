@@ -431,9 +431,10 @@ def self_update(config: dict) -> bool:
 # ── Main scan cycle ────────────────────────────────────────────────────────────
 
 def run_cycle(config: dict) -> bool:
-    target    = config.get('target', '.')
-    profile   = config.get('profile', 'default')
-    device_id = _device_id()
+    target      = config.get('target', '.')
+    profile_raw = config.get('profile', 'default')
+    profile     = profile_raw.split(',')[0].strip() or 'default'
+    device_id   = _device_id()
     hostname  = socket.gethostname()
 
     log.info('Device: %s  Hostname: %s  Target: %s  Profile: %s',
