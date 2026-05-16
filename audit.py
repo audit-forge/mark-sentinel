@@ -35,6 +35,7 @@ from checks.supply_chain import run_all as supply_checks
 from checks.governance import run_all as gov_checks
 from checks.ai_tools import run_all as tool_checks
 from checks.runtime import run_all as runtime_checks
+from checks.lifesciences import run_all as ls_checks
 from checks import FAIL
 from output.plain_english import format_report
 from output.json_report import format_json
@@ -422,6 +423,7 @@ examples:
     results.extend(gov_checks(ctx))
     results.extend(tool_checks(ctx))
     results.extend(runtime_checks(ctx))
+    results.extend(ls_checks(ctx))
 
     # Apply profile filter
     results = filter_results(results, profile)
