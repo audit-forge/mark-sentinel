@@ -2463,15 +2463,15 @@ body{{background:#0d1117;color:#c9d1d9;font-family:-apple-system,BlinkMacSystemF
     <div style="font-size:12px;color:#8b949e;font-weight:600;text-transform:uppercase;letter-spacing:.06em;margin-bottom:14px">Configuration</div>
     <div id="cfg-saved" style="display:none;color:#3fb950;font-size:12px;margin-bottom:10px">&#10003; Saved — takes effect on next scan</div>
     <div style="display:grid;grid-template-columns:160px 1fr;gap:10px 16px;align-items:center;max-width:640px">
-      <label style="font-size:13px;color:#8b949e">Compliance Profile</label>
-      <select id="cfg-profile" class="form-select">
-        <option value="default">Default</option>
-        <option value="financial">Financial Services (NIST AI RMF / SR 26-2)</option>
-        <option value="fedramp">FedRAMP / NIST 800-53</option>
-        <option value="cmmc">CMMC</option>
-        <option value="smb">SMB</option>
-        <option value="lifesciences">Life Sciences (FDA / HIPAA / GxP)</option>
-      </select>
+      <label style="font-size:13px;color:#8b949e;align-self:start;padding-top:4px">Compliance Profile</label>
+      <div id="cfg-profile-group" style="display:flex;flex-wrap:wrap;gap:8px 24px">
+        <label style="font-size:13px;color:#e6edf3;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="cfg-profile-cb" value="default"> Default</label>
+        <label style="font-size:13px;color:#e6edf3;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="cfg-profile-cb" value="financial"> Financial Services</label>
+        <label style="font-size:13px;color:#e6edf3;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="cfg-profile-cb" value="fedramp"> FedRAMP / NIST 800-53</label>
+        <label style="font-size:13px;color:#e6edf3;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="cfg-profile-cb" value="cmmc"> CMMC 2.0</label>
+        <label style="font-size:13px;color:#e6edf3;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="cfg-profile-cb" value="smb"> SMB</label>
+        <label style="font-size:13px;color:#e6edf3;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="cfg-profile-cb" value="lifesciences"> Life Sciences (FDA / HIPAA / GxP)</label>
+      </div>
       <label style="font-size:13px;color:#8b949e">Scan Interval</label>
       <div style="display:flex;align-items:center;gap:8px">
         <input id="cfg-interval" class="form-input" type="number" min="60" placeholder="3600" style="width:120px">
@@ -3329,8 +3329,10 @@ async function loadConfig() {{
     const r = await fetch('/api/config');
     if (!r.ok) return;
     const c = await r.json();
-    const prof = document.getElementById('cfg-profile');
-    if (prof && c.profile) prof.value = c.profile;
+    const profs = (c.profile || '').split(',').map(p => p.trim()).filter(Boolean);
+    document.querySelectorAll('.cfg-profile-cb').forEach(cb => {{
+      cb.checked = profs.includes(cb.value);
+    }});
     const intvl = document.getElementById('cfg-interval');
     if (intvl && c.interval) intvl.value = c.interval;
   }} catch (_) {{}}
@@ -3338,9 +3340,9 @@ async function loadConfig() {{
 
 async function saveConfig() {{
   const body = {{}};
-  const prof  = document.getElementById('cfg-profile')?.value;
+  const checked = [...document.querySelectorAll('.cfg-profile-cb:checked')].map(cb => cb.value);
+  if (checked.length) body.profile = checked.join(',');
   const intvl = document.getElementById('cfg-interval')?.value?.trim();
-  if (prof)  body.profile  = prof;
   if (intvl) body.interval = parseInt(intvl, 10);
   try {{
     const r = await fetch('/api/config', {{
