@@ -3005,7 +3005,7 @@ async function discoverAll(btn) {{
         btn.disabled = false;
         btn.innerHTML = '&#128270; Find Shadow AI';
         refreshShadow();
-      }}, 15000);
+      }}, 45000);
     }} else {{
       btn.disabled = false;
       btn.innerHTML = '&#128270; Find Shadow AI';
