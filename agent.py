@@ -253,6 +253,39 @@ def run_scan(target: str, profile: str) -> dict | None:
 
 # ── Reporting ──────────────────────────────────────────────────────────────────
 
+def report_discovery(results: list, config: dict, device_id: str, hostname: str) -> bool:
+    """POST subnet discovery results to the central server."""
+    server = config.get('server', '').rstrip('/')
+    if not server:
+        return True
+    token = config.get('token', '')
+    payload = json.dumps({
+        'device_id': device_id,
+        'hostname':  hostname,
+        'results':   results,
+    }).encode()
+    headers: dict[str, str] = {
+        'Content-Type':   'application/json',
+        'Content-Length': str(len(payload)),
+        'User-Agent':     f'sentinel-agent/{VERSION}',
+    }
+    if token:
+        headers['Authorization'] = f'Bearer {token}'
+    url = f'{server}/api/agent/discovery'
+    try:
+        req = _urlreq.Request(url, data=payload, headers=headers, method='POST')
+        with _urlreq.urlopen(req, timeout=30) as resp:
+            if 200 <= resp.status < 300:
+                log.info('Discovery report accepted (%d results)', len(results))
+                return True
+            log.warning('Discovery report: server returned HTTP %s', resp.status)
+    except _urlerr.URLError as e:
+        log.warning('Discovery report connection error: %s', e.reason)
+    except Exception as e:
+        log.warning('Discovery report error: %s', e)
+    return False
+
+
 def report_to_server(report: dict, config: dict,
                      device_id: str, hostname: str) -> bool:
     """POST the scan report to the central Sentinel server."""
@@ -657,6 +690,47 @@ def main() -> None:
                 last_scan = time.time()
                 if ok:
                     last_success = last_scan
+            elif cmd == 'discover_network':
+                log.info('Network discovery triggered by server')
+                try:
+                    sys.path.insert(0, str(ROOT))
+                    from discovery import discover
+                    found = discover()
+                    send_results = []
+                    for r in found:
+                        src = r.get('source', '')
+                        if src == 'network_probe':
+                            send_results.append({
+                                'source':  'network',
+                                'host':    r.get('host', ''),
+                                'port':    r.get('port', 0),
+                                'service': r.get('service', ''),
+                                'models':  r.get('models', []),
+                                'detail':  '',
+                            })
+                        elif src == 'env_var':
+                            vendor_list = list(r.get('model_vendors', {}).keys())
+                            vendor = vendor_list[0] if vendor_list else ''
+                            send_results.append({
+                                'source':  'cloud_api',
+                                'host':    device_id,
+                                'port':    0,
+                                'service': r.get('service', ''),
+                                'models':  r.get('models', []),
+                                'detail':  f"{r.get('env_var','')}{' (' + vendor + ')' if vendor else ''}",
+                            })
+                        elif src == 'process_scan':
+                            send_results.append({
+                                'source':  'process',
+                                'host':    device_id,
+                                'port':    0,
+                                'service': r.get('service', ''),
+                                'models':  r.get('models', []),
+                                'detail':  r.get('process_sig', ''),
+                            })
+                    report_discovery(send_results, cfg, device_id, hostname)
+                except Exception as e:
+                    log.error('Network discovery error: %s', e)
             elif cmd == 'update_self':
                 log.info('Remote update triggered by server')
                 self_update(cfg)

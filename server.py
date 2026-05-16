@@ -586,7 +586,8 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             '/academy':        self._serve_academy,
             '/probe':          self._serve_probe_tester,
             '/command':        lambda: self._redirect('/'),
-            '/api/config':     self._api_get_config,
+            '/api/config':        self._api_get_config,
+            '/api/fleet/shadow':  self._api_fleet_shadow,
             '/download/shortcut': self._serve_shortcut,
         }
         if path in static:
@@ -666,6 +667,14 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self._api_probe_scan()
         elif path == '/probe':
             self._probe_run()
+        elif path == '/api/agent/discovery':
+            self._api_agent_discovery()
+        elif path == '/api/fleet/discover/all':
+            self._api_fleet_discover_all()
+        elif path.startswith('/api/fleet/discover/'):
+            self._api_fleet_discover(path[len('/api/fleet/discover/'):])
+        elif path.startswith('/api/fleet/shadow/dismiss/'):
+            self._api_fleet_shadow_dismiss(path[len('/api/fleet/shadow/dismiss/'):])
         else:
             self._not_found()
 
@@ -1234,6 +1243,89 @@ button:hover{{background:#2ea043}}
         found = _get_store().delete_device(device_id)
         self._json({'status': 'removed' if found else 'not_found', 'device_id': device_id})
 
+    def _api_agent_discovery(self):
+        """POST /api/agent/discovery — agent reports subnet scan results (unmanaged devices)."""
+        length = _content_length(self.headers)
+        if not length or length > 2_097_152:
+            self._send(400, b'Bad request', 'text/plain')
+            return
+        try:
+            body = json.loads(self.rfile.read(length))
+        except json.JSONDecodeError:
+            self._send(400, b'Invalid JSON', 'text/plain')
+            return
+
+        device_id       = body.get('device_id', '')
+        reporter_host   = body.get('hostname', 'unknown')
+        results         = body.get('results', [])
+        if not device_id or not isinstance(results, list):
+            self._send(400, b'Missing device_id or results', 'text/plain')
+            return
+
+        store = _get_store()
+        stored = 0
+        for r in results:
+            host    = r.get('host', '')
+            port    = r.get('port', 0)
+            source  = r.get('source', 'network')
+            service = r.get('service', 'Unknown AI service')
+            detail  = r.get('detail', '')
+            models  = r.get('models', [])
+            if not host:
+                continue
+            if not isinstance(models, list):
+                models = []
+            store.upsert_shadow_device(
+                device_id, reporter_host, host, int(port), service, models, source, detail
+            )
+            stored += 1
+
+        log.info('agent discovery: %s reported %d unmanaged AI services', device_id, stored)
+        self._json({'status': 'accepted', 'stored': stored})
+
+    def _api_fleet_discover_all(self):
+        """POST /api/fleet/discover/all — push discover_network command to every agent."""
+        store = _get_store()
+        devices = store.list_devices()
+        queued = []
+        for d in devices:
+            did = d.get('device_id', '')
+            if did:
+                store.enqueue_command(did, 'discover_network')
+                queued.append(did)
+        self._json({'status': 'queued', 'count': len(queued), 'devices': queued})
+
+    def _api_fleet_discover(self, device_id: str):
+        """POST /api/fleet/discover/<device_id> — push discover_network to one agent."""
+        device_id = device_id.strip()
+        if not device_id:
+            self._json({'error': 'missing device_id'}, 400)
+            return
+        store = _get_store()
+        if store.get_device(device_id) is None:
+            self._json({'error': 'device not found'}, 404)
+            return
+        store.enqueue_command(device_id, 'discover_network')
+        self._json({'status': 'queued', 'device_id': device_id})
+
+    def _api_fleet_shadow(self):
+        """GET /api/fleet/shadow — list discovered unmanaged AI devices."""
+        try:
+            shadow = _get_store().list_shadow_devices()
+            self._json({'devices': shadow, 'count': len(shadow)})
+        except Exception as e:
+            self._json({'error': str(e)}, 500)
+
+    def _api_fleet_shadow_dismiss(self, shadow_id_str: str):
+        """POST /api/fleet/shadow/dismiss/<id> — dismiss a shadow device by row ID."""
+        try:
+            shadow_id = int(shadow_id_str.strip())
+        except ValueError:
+            self._json({'error': 'invalid id'}, 400)
+            return
+        found = _get_store().dismiss_shadow_device(shadow_id)
+        self._json({'status': 'dismissed' if found else 'not_found'})
+
     def _api_admin_license(self):
         """GET /api/admin/license — license status + overage audit log."""
         try:
@@ -1584,14 +1676,17 @@ button:hover{{background:#2ea043}}
     def _serve_fleet(self):
         print('[SENTINEL] _serve_fleet: start', flush=True)
         try:
-            devices = _get_store().list_devices()
-            print(f'[SENTINEL] _serve_fleet: got {len(devices)} devices', flush=True)
+            store = _get_store()
+            devices = store.list_devices()
+            shadow  = store.list_shadow_devices()
+            print(f'[SENTINEL] _serve_fleet: got {len(devices)} devices, {len(shadow)} shadow', flush=True)
         except Exception as _e:
             print(f'[SENTINEL] _serve_fleet: store error: {_e}', flush=True)
             log.error('_serve_fleet: store error: %s', _e, exc_info=True)
             devices = []
+            shadow  = []
         try:
-            body = _build_fleet_html(devices).encode('utf-8')
+            body = _build_fleet_html(devices, shadow).encode('utf-8')
             print(f'[SENTINEL] _serve_fleet: body built {len(body)} bytes', flush=True)
         except Exception as _e:
             print(f'[SENTINEL] _serve_fleet: build error: {_e}', flush=True)
@@ -2018,7 +2113,108 @@ body{{background:#0d1117;color:#e6edf3;font-family:-apple-system,BlinkMacSystemF
         self._send(code, json.dumps(data).encode(), 'application/json')
 
 
-def _build_fleet_html(devices: list[dict]) -> str:
+def _build_shadow_section(shadow: list[dict], ts_now: int) -> str:
+    _SOURCE_META = {
+        'network':   ('&#127760;', '#a371f7', 'Network',   'AI service running on an unmanaged device'),
+        'cloud_api': ('&#9729;',   '#58a6ff', 'Cloud API', 'Cloud AI API key found on a managed device'),
+        'process':   ('&#9881;',   '#f0883e', 'Process',   'AI process running locally on a managed device'),
+    }
+
+    def _age(ts: int | None) -> str:
+        if not ts:
+            return 'never'
+        secs = ts_now - ts
+        if secs < 120:
+            return f'{secs}s ago'
+        if secs < 3600:
+            return f'{secs // 60}m ago'
+        if secs < 86400:
+            return f'{secs // 3600}h ago'
+        return f'{secs // 86400}d ago'
+
+    def _model_tags(models: list) -> str:
+        shown = models[:5]
+        extra = len(models) - 5
+        tags = ' '.join(
+            f'<span style="background:#0d1117;border:1px solid #30363d;border-radius:3px;'
+            f'padding:1px 8px;font-size:11px;font-family:monospace;color:#c9d1d9">{m}</span>'
+            for m in shown
+        )
+        if extra > 0:
+            tags += f' <span style="font-size:11px;color:#6e7681">+{extra} more</span>'
+        return tags
+
+    if not shadow:
+        cards = ('<div class="empty" style="padding:20px;text-align:center;color:#484f58">'
+                 'No Shadow AI detected yet. Click <strong style="color:#a371f7">Find Shadow AI</strong> '
+                 'above to scan your network through all installed agents.</div>')
+    else:
+        card_parts = []
+        for d in shadow:
+            src   = d.get('source', 'network')
+            icon, color, src_label, src_desc = _SOURCE_META.get(src, _SOURCE_META['network'])
+            sid   = d.get('id', 0)
+            host  = d.get('host', '')
+            port  = d.get('port', 0)
+            svc   = d.get('service', 'Unknown AI service')
+            detail = d.get('detail', '')
+            reporter = d.get('reporter_hostname', 'unknown')
+            models = d.get('models') or []
+            age   = _age(d.get('last_seen'))
+
+            if src == 'network':
+                location_html = (f'<span style="font-weight:700;color:#e6edf3;font-size:14px">'
+                                 f'{host}:{port}</span>')
+                sub_html = f'<span style="font-size:12px;color:{color}">{svc}</span>'
+            else:
+                location_html = (f'<span style="font-weight:700;color:#e6edf3;font-size:14px">'
+                                 f'{svc}</span>')
+                sub_html = (f'<span style="font-size:12px;color:#6e7681">{detail}</span>'
+                            if detail else '')
+
+            model_html = _model_tags(models) if models else (
+                f'<span style="font-size:11px;color:#484f58">No model details available</span>'
+            )
+
+            card_parts.append(
+                f'<div class="shadow-card" style="border-left-color:{color}">'
+                f'<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px">'
+                f'<div style="flex:1;min-width:0">'
+                f'<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">'
+                f'<span style="font-size:16px">{icon}</span>'
+                f'{location_html}'
+                f'<span style="font-size:10px;font-weight:700;padding:1px 7px;border-radius:3px;'
+                f'background:#1a1f2e;color:{color};border:1px solid {color};text-transform:uppercase">'
+                f'{src_label}</span>'
+                f'</div>'
+                f'<div style="margin-bottom:8px">{sub_html}</div>'
+                f'<div style="display:flex;flex-wrap:wrap;gap:5px;align-items:center">{model_html}</div>'
+                f'</div>'
+                f'<div style="text-align:right;flex-shrink:0">'
+                f'<div style="font-size:11px;color:#484f58;margin-bottom:3px">Detected {age}</div>'
+                f'<div style="font-size:11px;color:#6e7681;margin-bottom:8px">via {reporter}</div>'
+                f'<button class="scan-btn" onclick="dismissShadow({sid})" '
+                f'style="font-size:11px;color:#6e7681;border-color:#30363d">Dismiss</button>'
+                f'</div></div></div>'
+            )
+        cards = '\n'.join(card_parts)
+
+    badge = (f'<span style="background:#2d1f47;color:#a371f7;border:1px solid #6e40c9;'
+             f'border-radius:10px;font-size:11px;padding:1px 9px;font-weight:700;margin-left:8px">'
+             f'{len(shadow)}</span>') if shadow else ''
+
+    return (f'<div id="shadow-section" style="margin-top:32px">'
+            f'<div class="sec-hdr" style="display:flex;align-items:center;justify-content:space-between">'
+            f'<span>Shadow AI — Detected AI Usage{badge}</span>'
+            f'<span style="font-size:11px;color:#6e7681;font-weight:400;text-transform:none;letter-spacing:0">'
+            f'&#127760; Unmanaged device &nbsp;|&nbsp; &#9729; Cloud API key &nbsp;|&nbsp; &#9881; Running process'
+            f'</span></div>'
+            f'<div id="shadow-cards" style="margin-bottom:28px">{cards}</div>'
+            f'</div>')
+
+
+def _build_fleet_html(devices: list[dict], shadow: list[dict] | None = None) -> str:
+    shadow = shadow or []
     ts_now = int(time.time())
 
     def _age(ts: int | None) -> str:
@@ -2146,6 +2342,8 @@ body{{background:#0d1117;color:#c9d1d9;font-family:-apple-system,BlinkMacSystemF
 .finding.open .fbody{{display:block}}
 .empty{{text-align:center;padding:48px;color:#484f58}}
 .refresh-note{{font-size:11px;color:#484f58;text-align:right;margin-bottom:8px}}
+.shadow-card{{background:#161b22;border:1px solid #30363d;border-left:3px solid #a371f7;border-radius:6px;padding:14px 16px;margin-bottom:8px}}
+.shadow-card:hover{{background:#1a1f2e}}
 ::-webkit-scrollbar{{width:6px}}::-webkit-scrollbar-track{{background:#0d1117}}
 ::-webkit-scrollbar-thumb{{background:#30363d;border-radius:3px}}
 </style>
@@ -2169,6 +2367,8 @@ body{{background:#0d1117;color:#c9d1d9;font-family:-apple-system,BlinkMacSystemF
       <div class="scard-n c-yellow" id="sc-warn">{total_warn}</div><div class="scard-l">Total Warns</div></div>
     <div class="scard" id="sf-pass" onclick="window.open('/api/fleet/report?tier=technical&amp;status=pass&amp;fmt=html','_blank')" title="View all passing checks across all devices">
       <div class="scard-n c-green" id="sc-pass">{total_pass}</div><div class="scard-l">Total Passes</div></div>
+    <div class="scard" id="sf-shadow" onclick="document.getElementById('shadow-section').scrollIntoView({{behavior:'smooth'}})" title="Unmanaged AI devices discovered on your network — click to view">
+      <div class="scard-n" id="sc-shadow" style="color:#a371f7">{len(shadow)}</div><div class="scard-l">Shadow AI</div></div>
   </div>
   <div id="filter-banner" style="display:none;background:#161b22;border:1px solid #30363d;border-radius:6px;padding:10px 18px;margin-bottom:18px;align-items:center;justify-content:space-between;gap:12px">
     <span id="filter-banner-text" style="font-size:13px;font-weight:600"></span>
@@ -2201,6 +2401,8 @@ body{{background:#0d1117;color:#c9d1d9;font-family:-apple-system,BlinkMacSystemF
               style="color:#f0883e;border-color:#30363d;font-size:12px">&#9654;&#9654; Scan All</button>
       <button class="scan-btn" onclick="updateAllDevices()"
               style="color:#e3b341;border-color:#30363d;font-size:12px">Update All Agents</button>
+      <button id="btn-discover-all" class="scan-btn" onclick="discoverAll(this)"
+              style="color:#a371f7;border-color:#30363d;font-size:12px">&#128270; Find Shadow AI</button>
     </div>
   </div>
   <div class="refresh-note" id="refresh-note">Auto-refreshes every 60s</div>
@@ -2226,6 +2428,8 @@ body{{background:#0d1117;color:#c9d1d9;font-family:-apple-system,BlinkMacSystemF
     </div>
     <div id="page-btns" style="display:flex;gap:4px;align-items:center;flex-wrap:wrap"></div>
   </div>
+
+  {_build_shadow_section(shadow, ts_now)}
 
   <div class="sec-hdr" style="margin-top:32px">
     AI Service Discovery
@@ -2303,10 +2507,11 @@ let _currentPage = 1;
 const _note = document.getElementById('refresh-note');
 setInterval(() => {{
   _countdown--;
-  if (_countdown <= 0) {{ _countdown = 60; refreshDevices(); }}
+  if (_countdown <= 0) {{ _countdown = 60; refreshDevices(); refreshShadow(); }}
   _note.textContent = 'Devices refresh in ' + _countdown + 's';
 }}, 1000);
 refreshDevices();
+refreshShadow();
 
 function _age(ts) {{
   if (!ts) return 'never';
@@ -2785,6 +2990,93 @@ async function updateAllDevices() {{
     btn.disabled = false;
     btn.textContent = 'Update All Agents';
   }}
+}}
+
+async function discoverAll(btn) {{
+  btn.disabled = true;
+  btn.textContent = 'Queuing…';
+  try {{
+    const resp = await fetch('/api/fleet/discover/all', {{method: 'POST'}});
+    const data = await resp.json();
+    if (resp.ok) {{
+      btn.textContent = `Queued (${{data.count}}) — agents scanning…`;
+      setTimeout(() => {{
+        btn.disabled = false;
+        btn.textContent = '&#128270; Find Shadow AI';
+        refreshShadow();
+      }}, 15000);
+    }} else {{
+      btn.disabled = false;
+      btn.textContent = '&#128270; Find Shadow AI';
+      alert(data.error || 'Failed to queue discovery');
+    }}
+  }} catch (e) {{
+    btn.disabled = false;
+    btn.textContent = '&#128270; Find Shadow AI';
+  }}
+}}
+
+async function dismissShadow(id) {{
+  if (!confirm('Dismiss this finding? It will reappear if rediscovered.')) return;
+  const resp = await fetch('/api/fleet/shadow/dismiss/' + id, {{method: 'POST'}});
+  if (resp.ok) {{ refreshShadow(); }}
+}}
+
+const _SHADOW_SRC = {{
+  network:   {{icon:'&#127760;', color:'#a371f7', label:'Network'}},
+  cloud_api: {{icon:'&#9729;',   color:'#58a6ff', label:'Cloud API'}},
+  process:   {{icon:'&#9881;',   color:'#f0883e', label:'Process'}},
+}};
+
+async function refreshShadow() {{
+  try {{
+    const resp = await fetch('/api/fleet/shadow');
+    if (!resp.ok) return;
+    const data = await resp.json();
+    const sc = document.getElementById('sc-shadow');
+    if (sc) sc.textContent = data.count || 0;
+    const container = document.getElementById('shadow-cards');
+    if (!container) return;
+    const devs = data.devices || [];
+    if (!devs.length) {{
+      container.innerHTML = '<div class="empty" style="padding:20px;text-align:center;color:#484f58">No Shadow AI detected yet. Click <strong style="color:#a371f7">Find Shadow AI</strong> above to scan your network through all installed agents.</div>';
+      return;
+    }}
+    container.innerHTML = devs.map(d => {{
+      const src = _SHADOW_SRC[d.source] || _SHADOW_SRC.network;
+      const models = (d.models || []).slice(0, 5);
+      const modelTags = models.map(m => `<span style="background:#0d1117;border:1px solid #30363d;border-radius:3px;padding:1px 8px;font-size:11px;font-family:monospace;color:#c9d1d9">${{esc(m)}}</span>`).join(' ');
+      const extra = (d.models||[]).length > 5 ? `<span style="font-size:11px;color:#6e7681">+${{(d.models||[]).length-5}} more</span>` : '';
+      const age = _age(d.last_seen);
+      const locationHtml = d.source === 'network'
+        ? `<span style="font-weight:700;color:#e6edf3;font-size:14px">${{esc(d.host)}}:${{d.port}}</span>`
+        : `<span style="font-weight:700;color:#e6edf3;font-size:14px">${{esc(d.service)}}</span>`;
+      const subHtml = d.source === 'network'
+        ? `<div style="font-size:12px;color:${{src.color}};margin-bottom:8px">${{esc(d.service)}}</div>`
+        : d.detail ? `<div style="font-size:12px;color:#6e7681;margin-bottom:8px">${{esc(d.detail)}}</div>` : '';
+      const modelSection = (d.models||[]).length
+        ? `<div style="display:flex;flex-wrap:wrap;gap:5px;align-items:center">${{modelTags}}${{extra}}</div>`
+        : `<div style="font-size:11px;color:#484f58">No model details available</div>`;
+      return `<div class="shadow-card" style="border-left-color:${{src.color}}">
+        <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px">
+          <div style="flex:1;min-width:0">
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
+              <span style="font-size:16px">${{src.icon}}</span>
+              ${{locationHtml}}
+              <span style="font-size:10px;font-weight:700;padding:1px 7px;border-radius:3px;background:#1a1f2e;color:${{src.color}};border:1px solid ${{src.color}};text-transform:uppercase">${{src.label}}</span>
+            </div>
+            ${{subHtml}}
+            ${{modelSection}}
+          </div>
+          <div style="text-align:right;flex-shrink:0">
+            <div style="font-size:11px;color:#484f58;margin-bottom:3px">Detected ${{age}}</div>
+            <div style="font-size:11px;color:#6e7681;margin-bottom:8px">via ${{esc(d.reporter_hostname)}}</div>
+            <button class="scan-btn" onclick="dismissShadow(${{d.id}})" style="font-size:11px;color:#6e7681;border-color:#30363d">Dismiss</button>
+          </div>
+        </div>
+      </div>`;
+    }}).join('');
+  }} catch (_) {{ /* ignore */ }}
 }}
 
 async function selectDevice(id) {{
