@@ -302,15 +302,58 @@ def _multi_probe(host: str, port: int, primary_path: str,
     return fallback_label, [], last_status
 
 
-def _local_subnet_hosts(max_hosts: int = 254) -> list[str]:
+def _detect_prefix_length(local_ip: str) -> int:
+    """Return the actual prefix length for local_ip by querying the OS. Falls back to /24."""
+    try:
+        if sys.platform == 'win32':
+            out = subprocess.run(['ipconfig'], capture_output=True, text=True, timeout=5).stdout
+            found = False
+            for line in out.splitlines():
+                if local_ip in line:
+                    found = True
+                if found and 'Subnet Mask' in line:
+                    mask = line.split(':', 1)[-1].strip()
+                    return ipaddress.IPv4Network(f'0.0.0.0/{mask}').prefixlen
+        else:
+            for cmd in (['ip', 'addr'], ['ifconfig']):
+                try:
+                    out = subprocess.run(cmd, capture_output=True, text=True, timeout=5).stdout
+                    m = re.search(rf'inet\s+{re.escape(local_ip)}/(\d+)', out)
+                    if m:
+                        return int(m.group(1))
+                    for i, line in enumerate(out.splitlines()):
+                        if local_ip in line:
+                            context = '\n'.join(out.splitlines()[max(0, i-1):i+4])
+                            nm = re.search(r'netmask\s+(0x[0-9a-f]+|\d+\.\d+\.\d+\.\d+)',
+                                           context, re.IGNORECASE)
+                            if nm:
+                                val = nm.group(1)
+                                if val.startswith('0x'):
+                                    return bin(int(val, 16)).count('1')
+                                return ipaddress.IPv4Network(f'0.0.0.0/{val}').prefixlen
+                except FileNotFoundError:
+                    continue
+    except Exception:
+        pass
+    return 24
+
+
+def _local_subnet_hosts(max_hosts: int = 1024) -> list[str]:
     try:
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
             s.connect(('8.8.8.8', 80))
             local_ip = s.getsockname()[0]
         if local_ip.startswith('127.'):
             raise ValueError('loopback')
-        net = ipaddress.IPv4Network(f'{local_ip}/24', strict=False)
-        return [str(h) for h in list(net.hosts())[:max_hosts]]
+        prefix = _detect_prefix_length(local_ip)
+        net    = ipaddress.IPv4Network(f'{local_ip}/{prefix}', strict=False)
+        hosts  = list(net.hosts())
+        if len(hosts) > max_hosts:
+            logger.warning('Subnet /%d has %d hosts — capping scan at %d. '
+                           'Deploy agents per segment for full coverage.',
+                           prefix, len(hosts), max_hosts)
+            hosts = hosts[:max_hosts]
+        return [str(h) for h in hosts]
     except Exception:
         return ['127.0.0.1']
 
