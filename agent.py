@@ -481,9 +481,55 @@ def _install_service(args: argparse.Namespace, cfg: dict) -> None:
         _install_launchd(cmd)
     elif system == 'Linux':
         _install_systemd(cmd)
+    elif system == 'Windows':
+        _install_windows_task(cmd)
     else:
         log.error('Service install not supported on %s — run with --daemon manually.', system)
         sys.exit(1)
+
+
+def _install_windows_task(cmd: list[str]) -> None:
+    """Register the agent as a Windows Task Scheduler task that starts at logon."""
+    task_name = 'SentinelAgent'
+    log_dir   = ROOT / 'logs'
+    log_dir.mkdir(parents=True, exist_ok=True)
+    log_file  = log_dir / 'agent.log'
+
+    # Write a .bat launcher that redirects stdout+stderr to the log file
+    bat_path = ROOT / 'start_agent.bat'
+    bat_lines = [
+        '@echo off',
+        f'cd /d "{ROOT}"',
+        ' '.join(f'"{c}"' if ' ' in c else c for c in cmd) + f' >> "{log_file}" 2>&1',
+    ]
+    bat_path.write_text('\r\n'.join(bat_lines) + '\r\n', encoding='utf-8')
+
+    # Delete any existing task with this name before creating
+    subprocess.run(['schtasks', '/delete', '/f', '/tn', task_name],
+                   capture_output=True)
+
+    result = subprocess.run([
+        'schtasks', '/create', '/f',
+        '/tn', task_name,
+        '/tr', str(bat_path),
+        '/sc', 'onlogon',
+        '/rl', 'highest',
+        '/delay', '0000:30',
+    ], capture_output=True, text=True)
+
+    if result.returncode != 0:
+        log.error('Task Scheduler registration failed:\n%s',
+                  result.stderr.strip() or result.stdout.strip())
+        sys.exit(1)
+
+    subprocess.run(['schtasks', '/run', '/tn', task_name], capture_output=True)
+
+    log.info('Service installed and started.')
+    log.info('  Task  : %s (Task Scheduler)', task_name)
+    log.info('  Logs  : %s', log_file)
+    log.info('  Watch : Get-Content "%s" -Wait', log_file)
+    log.info('  Stop  : schtasks /end /tn %s', task_name)
+    log.info('  Remove: python agent.py --uninstall-service')
 
 
 def _install_launchd(cmd: list[str]) -> None:
@@ -575,6 +621,17 @@ def _uninstall_service() -> None:
             unit_path.unlink()
         subprocess.run(['systemctl', '--user', 'daemon-reload'], capture_output=True)
         log.info('Service removed.')
+    elif system == 'Windows':
+        subprocess.run(['schtasks', '/end',   '/tn', 'SentinelAgent'], capture_output=True)
+        result = subprocess.run(['schtasks', '/delete', '/f', '/tn', 'SentinelAgent'],
+                                capture_output=True, text=True)
+        if result.returncode == 0:
+            log.info('Task Scheduler task removed.')
+        else:
+            log.warning('Could not remove task (may not exist): %s', result.stderr.strip())
+        bat_path = ROOT / 'start_agent.bat'
+        if bat_path.exists():
+            bat_path.unlink()
     else:
         log.error('Service uninstall not supported on %s', system)
         sys.exit(1)
