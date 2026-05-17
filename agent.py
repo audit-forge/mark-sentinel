@@ -495,7 +495,7 @@ def _install_windows_task(cmd: list[str]) -> None:
     log_dir.mkdir(parents=True, exist_ok=True)
     log_file  = log_dir / 'agent.log'
 
-    # Write a .bat launcher that redirects stdout+stderr to the log file
+    # .bat launcher — redirects stdout+stderr to the log file
     bat_path = ROOT / 'start_agent.bat'
     bat_lines = [
         '@echo off',
@@ -504,14 +504,22 @@ def _install_windows_task(cmd: list[str]) -> None:
     ]
     bat_path.write_text('\r\n'.join(bat_lines) + '\r\n', encoding='utf-8')
 
-    # Delete any existing task with this name before creating
+    # VBScript wrapper — runs the bat with window style 0 (completely hidden)
+    vbs_path = ROOT / 'run_agent_hidden.vbs'
+    vbs_path.write_text(
+        f'Set sh = CreateObject("WScript.Shell")\r\n'
+        f'sh.Run """{ bat_path }""", 0, False\r\n',
+        encoding='utf-8',
+    )
+
+    # Delete any existing task before recreating
     subprocess.run(['schtasks', '/delete', '/f', '/tn', task_name],
                    capture_output=True)
 
     result = subprocess.run([
         'schtasks', '/create', '/f',
         '/tn', task_name,
-        '/tr', str(bat_path),
+        '/tr', f'wscript.exe "{vbs_path}"',
         '/sc', 'onlogon',
         '/rl', 'highest',
         '/delay', '0000:30',
@@ -524,7 +532,7 @@ def _install_windows_task(cmd: list[str]) -> None:
 
     subprocess.run(['schtasks', '/run', '/tn', task_name], capture_output=True)
 
-    log.info('Service installed and started.')
+    log.info('Service installed and started (hidden).')
     log.info('  Task  : %s (Task Scheduler)', task_name)
     log.info('  Logs  : %s', log_file)
     log.info('  Watch : Get-Content "%s" -Wait', log_file)
@@ -629,9 +637,10 @@ def _uninstall_service() -> None:
             log.info('Task Scheduler task removed.')
         else:
             log.warning('Could not remove task (may not exist): %s', result.stderr.strip())
-        bat_path = ROOT / 'start_agent.bat'
-        if bat_path.exists():
-            bat_path.unlink()
+        for f in ('start_agent.bat', 'run_agent_hidden.vbs'):
+            p = ROOT / f
+            if p.exists():
+                p.unlink()
     else:
         log.error('Service uninstall not supported on %s', system)
         sys.exit(1)
