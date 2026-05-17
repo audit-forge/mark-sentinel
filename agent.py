@@ -636,10 +636,8 @@ def main() -> None:
         SCAN_JITTER   = 120   # ±2 min per scan — prevents thundering herd on large fleets
 
         device_id = _device_id()
+        hostname  = socket.gethostname()
 
-        # Startup jitter: spread out agents deployed simultaneously.
-        # Each agent sleeps a different random amount (0 – POLL_INTERVAL) before
-        # entering the loop so a fleet reboot doesn't hit the server all at once.
         log.info('Daemon mode — scan interval %ds, poll every %ds', interval, POLL_INTERVAL)
 
         last_scan = 0.0
