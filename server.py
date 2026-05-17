@@ -1643,12 +1643,13 @@ button:hover{{background:#2ea043}}
             self._json({'error': str(e)}, 500)
             return
 
-        # Push profile/interval changes to all connected remote agents
+        # Push config changes to all connected remote agents
+        _push_keys = ('profile', 'interval', 'extra_subnets')
         pushed = 0
-        if 'profile' in clean or 'interval' in clean:
+        if any(k in clean for k in _push_keys):
             try:
                 store = _get_store()
-                cmd_payload = json.dumps({k: clean[k] for k in ('profile', 'interval') if k in clean})
+                cmd_payload = json.dumps({k: clean[k] for k in _push_keys if k in clean})
                 for d in store.list_devices():
                     did = d.get('device_id', '')
                     if did:

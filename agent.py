@@ -821,10 +821,12 @@ def main() -> None:
                     updates = json.loads(cmd[len('set_config:'):])
                     config_path = DEFAULT_CONFIG
                     existing = json.loads(config_path.read_text(encoding='utf-8')) if config_path.exists() else {}
-                    existing.update({k: v for k, v in updates.items() if k in ('profile', 'interval')})
+                    existing.update({k: v for k, v in updates.items() if k in ('profile', 'interval', 'extra_subnets')})
                     config_path.write_text(json.dumps(existing, indent=2), encoding='utf-8')
                     if 'profile' in updates:
                         cfg['profile'] = updates['profile']
+                    if 'extra_subnets' in updates:
+                        cfg['extra_subnets'] = updates['extra_subnets']
                     if 'interval' in updates:
                         new_interval = int(updates['interval'])
                         if new_interval < 60:
