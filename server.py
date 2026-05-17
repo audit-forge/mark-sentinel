@@ -1098,6 +1098,7 @@ button:hover{{background:#2ea043}}
                 report=report,
                 platform=body.get('platform', ''),
                 agent_version=body.get('agent_version', ''),
+                ip_address=self.client_address[0],
             )
         except Exception as e:
             log.error('agent store error: %s', e)
@@ -1267,6 +1268,7 @@ button:hover{{background:#2ea043}}
             return
 
         store = _get_store()
+        agent_ips = store.list_agent_ips()
         stored = 0
         for r in results:
             host    = r.get('host', '')
@@ -1276,6 +1278,9 @@ button:hover{{background:#2ea043}}
             detail  = r.get('detail', '')
             models  = r.get('models', [])
             if not host:
+                continue
+            # Skip network probe findings for IPs belonging to managed agents
+            if source == 'network' and host in agent_ips:
                 continue
             if not isinstance(models, list):
                 models = []
