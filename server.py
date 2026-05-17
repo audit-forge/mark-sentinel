@@ -1579,8 +1579,9 @@ button:hover{{background:#2ea043}}
             time.sleep(0.3)
             try:
                 if sys.platform == 'win32':
-                    subprocess.run(['net', 'stop', 'SentinelAgent'], capture_output=True)
-                    subprocess.run(['net', 'start', 'SentinelAgent'], capture_output=True)
+                    subprocess.run(['schtasks', '/end', '/tn', 'SentinelAgent'], capture_output=True)
+                    time.sleep(2)
+                    subprocess.run(['schtasks', '/run', '/tn', 'SentinelAgent'], capture_output=True)
                 elif sys.platform == 'darwin':
                     subprocess.run(['launchctl', 'stop', 'com.mark.sentinel.agent'], capture_output=True)
                     subprocess.run(['launchctl', 'start', 'com.mark.sentinel.agent'], capture_output=True)
@@ -3331,8 +3332,26 @@ async function restartAgent() {{
   _sysLog('Restarting agent service…', '#8b949e');
   try {{
     await fetch('/api/system/restart-agent', {{method:'POST'}});
-    _sysLog('Agent restart queued. It will check back in within 30 seconds.', '#3fb950');
-    setTimeout(() => {{ btn.disabled = false; btn.innerHTML = '&#8635; Restart Agent'; }}, 5000);
+    _sysLog('Agent restart queued — waiting for check-in…', '#e3b341');
+    let waited = 0;
+    const poll = setInterval(async () => {{
+      waited += 5;
+      try {{
+        const r = await fetch('/api/fleet/devices');
+        if (r.ok) {{
+          _sysLog('Agent back online ✓', '#3fb950');
+          clearInterval(poll);
+          btn.disabled = false; btn.innerHTML = '&#8635; Restart Agent';
+          refreshDevices();
+          return;
+        }}
+      }} catch (_) {{}}
+      if (waited >= 60) {{
+        clearInterval(poll);
+        _sysLog('Agent did not check in within 60s — check logs.', '#f85149');
+        btn.disabled = false; btn.innerHTML = '&#8635; Restart Agent';
+      }}
+    }}, 5000);
   }} catch(e) {{
     _sysLog('Error: ' + e, '#f85149');
     btn.disabled = false; btn.innerHTML = '&#8635; Restart Agent';
