@@ -1326,7 +1326,11 @@ button:hover{{background:#2ea043}}
             self._json({'error': str(e)}, 500)
 
     def _api_fleet_shadow_dismiss(self, shadow_id_str: str):
-        """POST /api/fleet/shadow/dismiss/<id> — dismiss a shadow device by row ID."""
+        """POST /api/fleet/shadow/dismiss/<id|all> — dismiss one or all shadow findings."""
+        if shadow_id_str.strip() == 'all':
+            count = _get_store().dismiss_all_shadow_devices()
+            self._json({'status': 'dismissed', 'count': count})
+            return
         try:
             shadow_id = int(shadow_id_str.strip())
         except ValueError:
@@ -2213,9 +2217,15 @@ def _build_shadow_section(shadow: list[dict], ts_now: int) -> str:
              f'border-radius:10px;font-size:11px;padding:1px 9px;font-weight:700;margin-left:8px">'
              f'{len(shadow)}</span>') if shadow else ''
 
+    dismiss_all_btn = (
+        f'<button class="scan-btn" onclick="dismissAllShadow()" '
+        f'style="font-size:11px;color:#6e7681;border-color:#30363d;margin-left:8px">'
+        f'Dismiss All</button>'
+    ) if shadow else ''
+
     return (f'<div id="shadow-section" style="margin-top:32px">'
             f'<div class="sec-hdr" style="display:flex;align-items:center;justify-content:space-between">'
-            f'<span>Shadow AI — Detected AI Usage{badge}</span>'
+            f'<span style="display:flex;align-items:center">Shadow AI — Detected AI Usage{badge}{dismiss_all_btn}</span>'
             f'<span style="font-size:11px;color:#6e7681;font-weight:400;text-transform:none;letter-spacing:0">'
             f'&#127760; Unmanaged device &nbsp;|&nbsp; &#9729; Cloud API key &nbsp;|&nbsp; &#9881; Running process &nbsp;|&nbsp; &#128051; Container'
             f'</span></div>'
@@ -3029,6 +3039,12 @@ async function discoverAll(btn) {{
 async function dismissShadow(id) {{
   if (!confirm('Dismiss this finding? It will reappear if rediscovered.')) return;
   const resp = await fetch('/api/fleet/shadow/dismiss/' + id, {{method: 'POST'}});
+  if (resp.ok) {{ refreshShadow(); }}
+}}
+
+async function dismissAllShadow() {{
+  if (!confirm('Dismiss all Shadow AI findings? They will reappear if rediscovered on the next scan.')) return;
+  const resp = await fetch('/api/fleet/shadow/dismiss/all', {{method: 'POST'}});
   if (resp.ok) {{ refreshShadow(); }}
 }}
 

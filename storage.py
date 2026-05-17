@@ -427,6 +427,11 @@ class AgentStore:
             )
             return cur.rowcount > 0
 
+    def dismiss_all_shadow_devices(self) -> int:
+        with self._lock, self._conn() as conn:
+            cur = conn.execute("UPDATE shadow_devices SET dismissed = 1 WHERE dismissed = 0")
+            return cur.rowcount
+
     def shadow_device_count(self) -> int:
         with self._lock, self._conn() as conn:
             return conn.execute(
