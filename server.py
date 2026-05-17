@@ -1632,7 +1632,7 @@ button:hover{{background:#2ea043}}
         except json.JSONDecodeError:
             self._send(400, b'Invalid JSON', 'text/plain')
             return
-        allowed = {'server', 'token', 'target', 'profile', 'interval'}
+        allowed = {'server', 'token', 'target', 'profile', 'interval', 'extra_subnets'}
         clean = {k: v for k, v in body.items() if k in allowed}
         config_path = ROOT / 'agent_config.json'
         try:
@@ -2496,6 +2496,11 @@ body{{background:#0d1117;color:#c9d1d9;font-family:-apple-system,BlinkMacSystemF
       <div style="display:flex;align-items:center;gap:8px">
         <input id="cfg-interval" class="form-input" type="number" min="60" placeholder="3600" style="width:120px">
         <span style="font-size:12px;color:#484f58">seconds &nbsp;(3600 = hourly · 86400 = daily)</span>
+      </div>
+      <label style="font-size:13px;color:#8b949e">Extra Subnets</label>
+      <div style="display:flex;align-items:center;gap:8px">
+        <input id="cfg-subnets" class="form-input" type="text" placeholder="192.168.50.0/24, 10.0.2.0/24" style="width:320px">
+        <span style="font-size:12px;color:#484f58">additional ranges for Shadow AI scans</span>
       </div>
     </div>
     <div style="margin-top:16px">
@@ -3379,6 +3384,8 @@ async function loadConfig() {{
     }});
     const intvl = document.getElementById('cfg-interval');
     if (intvl && c.interval) intvl.value = c.interval;
+    const subnets = document.getElementById('cfg-subnets');
+    if (subnets && c.extra_subnets) subnets.value = c.extra_subnets;
   }} catch (_) {{}}
 }}
 
@@ -3388,6 +3395,8 @@ async function saveConfig() {{
   if (checked.length) body.profile = checked.join(',');
   const intvl = document.getElementById('cfg-interval')?.value?.trim();
   if (intvl) body.interval = parseInt(intvl, 10);
+  const subnets = document.getElementById('cfg-subnets')?.value?.trim();
+  if (subnets !== undefined) body.extra_subnets = subnets;
   try {{
     const r = await fetch('/api/config', {{
       method: 'POST',
