@@ -754,8 +754,18 @@ def main() -> None:
                 log.info('Network discovery triggered by server')
                 try:
                     sys.path.insert(0, str(ROOT))
-                    from discovery import discover
-                    found = discover()
+                    from discovery import discover, expand_subnets, _local_subnet_hosts
+                    extra = cfg.get('extra_subnets', '').strip()
+                    if extra:
+                        seen: set[str] = set()
+                        merged: list[str] = []
+                        for h in _local_subnet_hosts() + expand_subnets(extra):
+                            if h not in seen:
+                                seen.add(h)
+                                merged.append(h)
+                        found = discover(hosts=merged)
+                    else:
+                        found = discover()
                     send_results = []
                     for r in found:
                         src = r.get('source', '')
