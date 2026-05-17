@@ -42,6 +42,7 @@ class AgentStore:
                     hostname     TEXT NOT NULL,
                     platform     TEXT NOT NULL DEFAULT '',
                     agent_version TEXT NOT NULL DEFAULT '',
+                    ip_address   TEXT NOT NULL DEFAULT '',
                     first_seen   INTEGER NOT NULL,
                     last_seen    INTEGER NOT NULL
                 );
@@ -108,26 +109,32 @@ class AgentStore:
                 CREATE INDEX IF NOT EXISTS idx_shadow_last_seen
                     ON shadow_devices(last_seen DESC);
             """)
+            # Migration: add ip_address column to existing databases
+            cols = {r[1] for r in conn.execute("PRAGMA table_info(devices)")}
+            if 'ip_address' not in cols:
+                conn.execute("ALTER TABLE devices ADD COLUMN ip_address TEXT NOT NULL DEFAULT ''")
 
         # Prune old reports per retention policy (env var or default 90 days)
         self.prune_old_reports(int(os.environ.get('SENTINEL_RETAIN_DAYS', '90')))
 
     def upsert_report(self, device_id: str, hostname: str, report: dict,
-                      platform: str = '', agent_version: str = '') -> None:
+                      platform: str = '', agent_version: str = '',
+                      ip_address: str = '') -> None:
         """Store a new report for a device, upserting device metadata."""
         now = int(time.time())
         summary = report.get('summary', {})
         with self._lock, self._conn() as conn:
             conn.execute("""
                 INSERT INTO devices
-                    (device_id, hostname, platform, agent_version, first_seen, last_seen)
-                VALUES (?, ?, ?, ?, ?, ?)
+                    (device_id, hostname, platform, agent_version, ip_address, first_seen, last_seen)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(device_id) DO UPDATE SET
                     hostname      = excluded.hostname,
                     platform      = excluded.platform,
                     agent_version = excluded.agent_version,
+                    ip_address    = CASE WHEN excluded.ip_address != '' THEN excluded.ip_address ELSE ip_address END,
                     last_seen     = excluded.last_seen
-            """, (device_id, hostname, platform, agent_version, now, now))
+            """, (device_id, hostname, platform, agent_version, ip_address, now, now))
 
             conn.execute("""
                 INSERT INTO reports
@@ -166,6 +173,14 @@ class AgentStore:
                 ORDER BY d.last_seen DESC
             """).fetchall()
         return [dict(r) for r in rows]
+
+    def list_agent_ips(self) -> set[str]:
+        """Return the set of IP addresses for all registered agents."""
+        with self._lock, self._conn() as conn:
+            rows = conn.execute(
+                "SELECT ip_address FROM devices WHERE ip_address != ''"
+            ).fetchall()
+        return {r[0] for r in rows}
 
     def list_devices_by_profile(self, profiles: list[str]) -> list[dict]:
         """Return devices with their latest scan matching any of the given profile slugs.
