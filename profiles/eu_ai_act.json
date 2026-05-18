@@ -1,0 +1,43 @@
+{
+  "name": "EU AI Act Readiness",
+  "description": "Checks mapped to EU AI Act obligations for high-risk AI systems. Covers Article 9 (risk management), Article 10 (data governance), Article 11 (technical documentation), Article 12 (logging), Article 13 (transparency), Article 14 (human oversight), and Article 15 (accuracy and robustness). Logging and human oversight obligations take effect August 2026.",
+  "checks": [
+    "AI-GOV-001",
+    "AI-GOV-002",
+    "AI-GOV-003",
+    "AI-GOV-004",
+    "AI-GOV-005",
+    "AI-DEPLOY-001",
+    "AI-DEPLOY-002",
+    "AI-DEPLOY-003",
+    "AI-DEPLOY-004",
+    "AI-DEPLOY-005",
+    "AI-DEPLOY-006",
+    "AI-RUNTIME-001",
+    "AI-RUNTIME-002",
+    "AI-RUNTIME-003",
+    "AI-RUNTIME-004",
+    "AI-RUNTIME-005",
+    "AI-AGENT-002",
+    "AI-AGENT-004",
+    "AI-AGENT-005",
+    "AI-OUT-005",
+    "AI-SUPPLY-001",
+    "AI-SUPPLY-002",
+    "AI-SUPPLY-003"
+  ],
+  "framework_emphasis": null,
+  "default_output": "plain",
+  "include_remediation": true,
+  "include_frameworks": true,
+  "severity_threshold": "LOW",
+  "eu_ai_act_mapping": {
+    "article_9_risk_management":       ["AI-GOV-001", "AI-GOV-004", "AI-DEPLOY-001"],
+    "article_10_data_governance":      ["AI-DEPLOY-003", "AI-DEPLOY-004", "AI-SUPPLY-001"],
+    "article_11_technical_docs":       ["AI-GOV-002", "AI-GOV-003", "AI-DEPLOY-002"],
+    "article_12_logging":              ["AI-GOV-004", "AI-RUNTIME-002", "AI-AGENT-004"],
+    "article_13_transparency":         ["AI-GOV-003", "AI-OUT-005"],
+    "article_14_human_oversight":      ["AI-AGENT-002", "AI-AGENT-005", "AI-RUNTIME-004"],
+    "article_15_accuracy_robustness":  ["AI-RUNTIME-001", "AI-RUNTIME-003", "AI-RUNTIME-005"]
+  }
+}

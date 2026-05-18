@@ -253,6 +253,39 @@ def run_scan(target: str, profile: str) -> dict | None:
 
 # ── Reporting ──────────────────────────────────────────────────────────────────
 
+def report_mcp(results: list, config: dict, device_id: str, hostname: str) -> bool:
+    """POST MCP server discoveries to the central server."""
+    server = config.get('server', '').rstrip('/')
+    if not server:
+        return True
+    token = config.get('token', '')
+    payload = json.dumps({
+        'device_id': device_id,
+        'hostname':  hostname,
+        'results':   results,
+    }).encode()
+    headers: dict[str, str] = {
+        'Content-Type':   'application/json',
+        'Content-Length': str(len(payload)),
+        'User-Agent':     f'sentinel-agent/{VERSION}',
+    }
+    if token:
+        headers['Authorization'] = f'Bearer {token}'
+    url = f'{server}/api/agent/mcp'
+    try:
+        req = _urlreq.Request(url, data=payload, headers=headers, method='POST')
+        with _urlreq.urlopen(req, timeout=30) as resp:
+            if 200 <= resp.status < 300:
+                log.info('MCP report accepted (%d servers)', len(results))
+                return True
+            log.warning('MCP report: server returned HTTP %s', resp.status)
+    except _urlerr.URLError as e:
+        log.warning('MCP report connection error: %s', e.reason)
+    except Exception as e:
+        log.warning('MCP report error: %s', e)
+    return False
+
+
 def report_discovery(results: list, config: dict, device_id: str, hostname: str) -> bool:
     """POST subnet discovery results to the central server."""
     server = config.get('server', '').rstrip('/')
@@ -813,6 +846,23 @@ def main() -> None:
                     report_discovery(send_results, cfg, device_id, hostname)
                 except Exception as e:
                     log.error('Network discovery error: %s', e)
+            elif cmd == 'discover_mcp':
+                try:
+                    from discovery import discover_mcp_servers, expand_subnets, _local_subnet_hosts
+                    extra = cfg.get('extra_subnets', '').strip()
+                    if extra:
+                        seen_h: set[str] = set()
+                        merged_h: list[str] = []
+                        for h in _local_subnet_hosts() + expand_subnets(extra):
+                            if h not in seen_h:
+                                seen_h.add(h)
+                                merged_h.append(h)
+                        found_mcp = discover_mcp_servers(hosts=merged_h)
+                    else:
+                        found_mcp = discover_mcp_servers()
+                    report_mcp(found_mcp, cfg, device_id, hostname)
+                except Exception as e:
+                    log.error('MCP discovery error: %s', e)
             elif cmd == 'update_self':
                 log.info('Remote update triggered by server')
                 self_update(cfg)

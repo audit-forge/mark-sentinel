@@ -108,6 +108,26 @@ class AgentStore:
 
                 CREATE INDEX IF NOT EXISTS idx_shadow_last_seen
                     ON shadow_devices(last_seen DESC);
+
+                CREATE TABLE IF NOT EXISTS mcp_servers (
+                    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+                    reporter_device_id  TEXT NOT NULL,
+                    reporter_hostname   TEXT NOT NULL DEFAULT '',
+                    host                TEXT NOT NULL,
+                    port                INTEGER NOT NULL DEFAULT 0,
+                    server_name         TEXT NOT NULL DEFAULT '',
+                    tools_json          TEXT NOT NULL DEFAULT '[]',
+                    auth_status         TEXT NOT NULL DEFAULT 'unknown',
+                    source              TEXT NOT NULL DEFAULT 'network',
+                    process_info        TEXT NOT NULL DEFAULT '',
+                    first_seen          INTEGER NOT NULL,
+                    last_seen           INTEGER NOT NULL,
+                    dismissed           INTEGER NOT NULL DEFAULT 0,
+                    UNIQUE(reporter_device_id, host, port, source)
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_mcp_last_seen
+                    ON mcp_servers(last_seen DESC);
             """)
             # Migration: add ip_address column to existing databases
             cols = {r[1] for r in conn.execute("PRAGMA table_info(devices)")}
@@ -436,6 +456,63 @@ class AgentStore:
         with self._lock, self._conn() as conn:
             return conn.execute(
                 "SELECT COUNT(*) FROM shadow_devices WHERE dismissed = 0"
+            ).fetchone()[0]
+
+    def upsert_mcp_server(self, reporter_device_id: str, reporter_hostname: str,
+                          host: str, port: int, server_name: str, tools: list,
+                          auth_status: str = 'unknown', source: str = 'network',
+                          process_info: str = '') -> None:
+        now = int(time.time())
+        with self._lock, self._conn() as conn:
+            conn.execute("""
+                INSERT INTO mcp_servers
+                    (reporter_device_id, reporter_hostname, host, port, server_name,
+                     tools_json, auth_status, source, process_info, first_seen, last_seen, dismissed)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+                ON CONFLICT(reporter_device_id, host, port, source) DO UPDATE SET
+                    reporter_hostname = excluded.reporter_hostname,
+                    server_name  = CASE WHEN excluded.server_name != '' THEN excluded.server_name ELSE server_name END,
+                    tools_json   = excluded.tools_json,
+                    auth_status  = excluded.auth_status,
+                    process_info = excluded.process_info,
+                    last_seen    = excluded.last_seen,
+                    dismissed    = 0
+            """, (reporter_device_id, reporter_hostname, host, port, server_name,
+                  json.dumps(tools), auth_status, source, process_info, now, now))
+
+    def list_mcp_servers(self) -> list[dict]:
+        with self._lock, self._conn() as conn:
+            rows = conn.execute("""
+                SELECT id, reporter_device_id, reporter_hostname, host, port,
+                       server_name, tools_json, auth_status, source, process_info,
+                       first_seen, last_seen
+                FROM mcp_servers
+                WHERE dismissed = 0
+                ORDER BY auth_status ASC, last_seen DESC
+            """).fetchall()
+        result = []
+        for row in rows:
+            d = dict(row)
+            d['tools'] = json.loads(d.pop('tools_json', '[]'))
+            result.append(d)
+        return result
+
+    def dismiss_mcp_server(self, mcp_id: int) -> bool:
+        with self._lock, self._conn() as conn:
+            cur = conn.execute(
+                "UPDATE mcp_servers SET dismissed = 1 WHERE id = ?", (mcp_id,)
+            )
+            return cur.rowcount > 0
+
+    def dismiss_all_mcp_servers(self) -> int:
+        with self._lock, self._conn() as conn:
+            cur = conn.execute("UPDATE mcp_servers SET dismissed = 1 WHERE dismissed = 0")
+            return cur.rowcount
+
+    def mcp_server_count(self) -> int:
+        with self._lock, self._conn() as conn:
+            return conn.execute(
+                "SELECT COUNT(*) FROM mcp_servers WHERE dismissed = 0"
             ).fetchone()[0]
 
     def get_device_timeseries(self, device_id: str) -> list[dict]:
