@@ -1352,9 +1352,12 @@ button:hover{{background:#2ea043}}
 
     def _api_agent_mcp(self):
         """POST /api/agent/mcp — receive MCP server findings from an agent."""
-        body = self._read_body()
+        length = _content_length(self.headers)
+        if not length:
+            self._json({'error': 'empty body'}, 400)
+            return
         try:
-            data = json.loads(body)
+            data = json.loads(self.rfile.read(length))
         except Exception:
             self._json({'error': 'invalid JSON'}, 400)
             return
