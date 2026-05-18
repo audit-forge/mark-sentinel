@@ -2165,10 +2165,13 @@ def _build_shadow_section(shadow: list[dict], ts_now: int) -> str:
                  'No Shadow AI detected yet. Click <strong style="color:#a371f7">Find Shadow AI</strong> '
                  'above to scan your network through all installed agents.</div>')
     else:
-        card_parts = []
-        for d in shadow:
+        docker_items = [d for d in shadow if d.get('source') == 'docker']
+        other_items  = [d for d in shadow if d.get('source') != 'docker']
+        card_parts: list[str] = []
+
+        for d in other_items:
             src   = d.get('source', 'network')
-            icon, color, src_label, src_desc = _SOURCE_META.get(src, _SOURCE_META['network'])
+            icon, color, src_label, _ = _SOURCE_META.get(src, _SOURCE_META['network'])
             sid   = d.get('id', 0)
             host  = d.get('host', '')
             port  = d.get('port', 0)
@@ -2177,7 +2180,6 @@ def _build_shadow_section(shadow: list[dict], ts_now: int) -> str:
             reporter = d.get('reporter_hostname', 'unknown')
             models = d.get('models') or []
             age   = _age(d.get('last_seen'))
-
             if src == 'network':
                 location_html = (f'<span style="font-weight:700;color:#e6edf3;font-size:14px">'
                                  f'{host}:{port}</span>')
@@ -2187,11 +2189,9 @@ def _build_shadow_section(shadow: list[dict], ts_now: int) -> str:
                                  f'{svc}</span>')
                 sub_html = (f'<span style="font-size:12px;color:#6e7681">{detail}</span>'
                             if detail else '')
-
             model_html = _model_tags(models) if models else (
                 f'<span style="font-size:11px;color:#484f58">No model details available</span>'
             )
-
             card_parts.append(
                 f'<div class="shadow-card" style="border-left-color:{color}">'
                 f'<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px">'
@@ -2213,6 +2213,63 @@ def _build_shadow_section(shadow: list[dict], ts_now: int) -> str:
                 f'style="font-size:11px;color:#6e7681;border-color:#30363d">Dismiss</button>'
                 f'</div></div></div>'
             )
+
+        # Docker findings grouped by the host machine that reported them
+        docker_groups: dict[str, list[dict]] = {}
+        for d in docker_items:
+            docker_groups.setdefault(d.get('reporter_hostname', 'unknown'), []).append(d)
+
+        for reporter, items in docker_groups.items():
+            latest_ts = max((i.get('last_seen') or 0) for i in items)
+            cnt_label = f'{len(items)} container{"s" if len(items) != 1 else ""}'
+            row_parts: list[str] = []
+            for d in items:
+                sid    = d.get('id', 0)
+                port   = d.get('port', 0)
+                svc    = d.get('service', 'Unknown AI service')
+                detail = d.get('detail', '')
+                models = d.get('models') or []
+                age    = _age(d.get('last_seen'))
+                model_html = _model_tags(models) if models else (
+                    f'<span style="font-size:11px;color:#484f58">No model details available</span>'
+                )
+                port_html   = (f'<span style="font-size:11px;color:#484f58;font-family:monospace">'
+                               f':{port}</span>') if port else ''
+                detail_html = (f'<span style="font-size:11px;color:#6e7681;font-family:monospace">'
+                               f'{detail}</span>') if detail else ''
+                row_parts.append(
+                    f'<div style="background:#0d1117;border:1px solid #21262d;border-radius:6px;'
+                    f'padding:10px 14px;margin-bottom:8px">'
+                    f'<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px">'
+                    f'<div style="flex:1;min-width:0">'
+                    f'<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:5px">'
+                    f'<span style="font-size:13px;color:#e6edf3;font-weight:600">{svc}</span>'
+                    f'{detail_html}{port_html}'
+                    f'</div>'
+                    f'<div style="display:flex;flex-wrap:wrap;gap:4px;align-items:center">{model_html}</div>'
+                    f'</div>'
+                    f'<div style="text-align:right;flex-shrink:0;min-width:80px">'
+                    f'<div style="font-size:11px;color:#484f58;margin-bottom:6px">{age}</div>'
+                    f'<button class="scan-btn" onclick="dismissShadow({sid})" '
+                    f'style="font-size:11px;color:#6e7681;border-color:#30363d">Dismiss</button>'
+                    f'</div></div></div>'
+                )
+            card_parts.append(
+                f'<div class="shadow-card" style="border-left-color:#3fb950;padding:0;overflow:hidden">'
+                f'<div style="display:flex;align-items:center;gap:8px;padding:12px 14px 10px;'
+                f'background:#0f1f14;border-bottom:1px solid #1a3020;margin-bottom:10px">'
+                f'<span style="font-size:18px">&#128051;</span>'
+                f'<span style="font-weight:700;color:#e6edf3;font-size:14px">{reporter}</span>'
+                f'<span style="font-size:10px;font-weight:700;padding:1px 7px;border-radius:3px;'
+                f'background:#1a3020;color:#3fb950;border:1px solid #3fb950;text-transform:uppercase">'
+                f'Docker Host</span>'
+                f'<span style="font-size:11px;color:#484f58;margin-left:auto">'
+                f'{cnt_label} &nbsp;&middot;&nbsp; last seen {_age(latest_ts)}</span>'
+                f'</div>'
+                f'<div style="padding:0 14px 12px">{"".join(row_parts)}</div>'
+                f'</div>'
+            )
+
         cards = '\n'.join(card_parts)
 
     badge = (f'<span style="background:#2d1f47;color:#a371f7;border:1px solid #6e40c9;'
@@ -3076,11 +3133,17 @@ async function refreshShadow() {{
       container.innerHTML = '<div class="empty" style="padding:20px;text-align:center;color:#484f58">No Shadow AI detected yet. Click <strong style="color:#a371f7">Find Shadow AI</strong> above to scan your network through all installed agents.</div>';
       return;
     }}
-    container.innerHTML = devs.map(d => {{
+    const _modelTags = (models) => {{
+      const shown = (models||[]).slice(0,5);
+      const extra = (models||[]).length > 5 ? ` <span style="font-size:11px;color:#6e7681">+${{(models||[]).length-5}} more</span>` : '';
+      return shown.map(m => `<span style="background:#0d1117;border:1px solid #30363d;border-radius:3px;padding:1px 8px;font-size:11px;font-family:monospace;color:#c9d1d9">${{esc(m)}}</span>`).join(' ') + extra;
+    }};
+
+    const dockerItems = devs.filter(d => d.source === 'docker');
+    const otherItems  = devs.filter(d => d.source !== 'docker');
+
+    const otherHtml = otherItems.map(d => {{
       const src = _SHADOW_SRC[d.source] || _SHADOW_SRC.network;
-      const models = (d.models || []).slice(0, 5);
-      const modelTags = models.map(m => `<span style="background:#0d1117;border:1px solid #30363d;border-radius:3px;padding:1px 8px;font-size:11px;font-family:monospace;color:#c9d1d9">${{esc(m)}}</span>`).join(' ');
-      const extra = (d.models||[]).length > 5 ? `<span style="font-size:11px;color:#6e7681">+${{(d.models||[]).length-5}} more</span>` : '';
       const age = _age(d.last_seen);
       const locationHtml = d.source === 'network'
         ? `<span style="font-weight:700;color:#e6edf3;font-size:14px">${{esc(d.host)}}:${{d.port}}</span>`
@@ -3089,7 +3152,7 @@ async function refreshShadow() {{
         ? `<div style="font-size:12px;color:${{src.color}};margin-bottom:8px">${{esc(d.service)}}</div>`
         : d.detail ? `<div style="font-size:12px;color:#6e7681;margin-bottom:8px">${{esc(d.detail)}}</div>` : '';
       const modelSection = (d.models||[]).length
-        ? `<div style="display:flex;flex-wrap:wrap;gap:5px;align-items:center">${{modelTags}}${{extra}}</div>`
+        ? `<div style="display:flex;flex-wrap:wrap;gap:5px;align-items:center">${{_modelTags(d.models)}}</div>`
         : `<div style="font-size:11px;color:#484f58">No model details available</div>`;
       return `<div class="shadow-card" style="border-left-color:${{src.color}}">
         <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px">
@@ -3110,6 +3173,51 @@ async function refreshShadow() {{
         </div>
       </div>`;
     }}).join('');
+
+    // Group docker items by the host machine that found them
+    const dockerGroups = {{}};
+    for (const d of dockerItems) {{
+      const key = d.reporter_hostname || 'unknown';
+      (dockerGroups[key] = dockerGroups[key] || []).push(d);
+    }}
+
+    const dockerHtml = Object.entries(dockerGroups).map(([reporter, items]) => {{
+      const latestTs = Math.max(...items.map(i => i.last_seen || 0));
+      const cntLabel = `${{items.length}} container${{items.length !== 1 ? 's' : ''}}`;
+      const rowsHtml = items.map(d => {{
+        const portHtml   = d.port   ? `<span style="font-size:11px;color:#484f58;font-family:monospace">:${{d.port}}</span>` : '';
+        const detailHtml = d.detail ? `<span style="font-size:11px;color:#6e7681;font-family:monospace">${{esc(d.detail)}}</span>` : '';
+        const modelSection = (d.models||[]).length
+          ? `<div style="display:flex;flex-wrap:wrap;gap:4px;align-items:center">${{_modelTags(d.models)}}</div>`
+          : `<div style="font-size:11px;color:#484f58">No model details available</div>`;
+        return `<div style="background:#0d1117;border:1px solid #21262d;border-radius:6px;padding:10px 14px;margin-bottom:8px">
+          <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px">
+            <div style="flex:1;min-width:0">
+              <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:5px">
+                <span style="font-size:13px;color:#e6edf3;font-weight:600">${{esc(d.service)}}</span>
+                ${{detailHtml}}${{portHtml}}
+              </div>
+              ${{modelSection}}
+            </div>
+            <div style="text-align:right;flex-shrink:0;min-width:80px">
+              <div style="font-size:11px;color:#484f58;margin-bottom:6px">${{_age(d.last_seen)}}</div>
+              <button class="scan-btn" onclick="dismissShadow(${{d.id}})" style="font-size:11px;color:#6e7681;border-color:#30363d">Dismiss</button>
+            </div>
+          </div>
+        </div>`;
+      }}).join('');
+      return `<div class="shadow-card" style="border-left-color:#3fb950;padding:0;overflow:hidden">
+        <div style="display:flex;align-items:center;gap:8px;padding:12px 14px 10px;background:#0f1f14;border-bottom:1px solid #1a3020;margin-bottom:10px">
+          <span style="font-size:18px">&#128051;</span>
+          <span style="font-weight:700;color:#e6edf3;font-size:14px">${{esc(reporter)}}</span>
+          <span style="font-size:10px;font-weight:700;padding:1px 7px;border-radius:3px;background:#1a3020;color:#3fb950;border:1px solid #3fb950;text-transform:uppercase">Docker Host</span>
+          <span style="font-size:11px;color:#484f58;margin-left:auto">${{cntLabel}} &nbsp;&middot;&nbsp; last seen ${{_age(latestTs)}}</span>
+        </div>
+        <div style="padding:0 14px 12px">${{rowsHtml}}</div>
+      </div>`;
+    }}).join('');
+
+    container.innerHTML = otherHtml + dockerHtml;
   }} catch (_) {{ /* ignore */ }}
 }}
 
