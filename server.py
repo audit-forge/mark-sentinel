@@ -588,6 +588,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             '/command':        lambda: self._redirect('/'),
             '/api/config':        self._api_get_config,
             '/api/fleet/shadow':  self._api_fleet_shadow,
+            '/api/fleet/mcp':     self._api_fleet_mcp,
             '/download/shortcut': self._serve_shortcut,
         }
         if path in static:
@@ -642,6 +643,12 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                 return
             self._api_agent_discovery()
             return
+        if path == '/api/agent/mcp':
+            if not self._check_agent_bearer():
+                self._send(401, b'Unauthorized', 'text/plain')
+                return
+            self._api_agent_mcp()
+            return
 
         # All other POST endpoints require dashboard auth
         if not self._require_dashboard_auth():
@@ -679,6 +686,10 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self._api_fleet_discover(path[len('/api/fleet/discover/'):])
         elif path.startswith('/api/fleet/shadow/dismiss/'):
             self._api_fleet_shadow_dismiss(path[len('/api/fleet/shadow/dismiss/'):])
+        elif path == '/api/fleet/mcp/discover/all':
+            self._api_fleet_mcp_discover_all()
+        elif path.startswith('/api/fleet/mcp/dismiss/'):
+            self._api_fleet_mcp_dismiss(path[len('/api/fleet/mcp/dismiss/'):])
         else:
             self._not_found()
 
@@ -1339,6 +1350,76 @@ button:hover{{background:#2ea043}}
         found = _get_store().dismiss_shadow_device(shadow_id)
         self._json({'status': 'dismissed' if found else 'not_found'})
 
+    def _api_agent_mcp(self):
+        """POST /api/agent/mcp — receive MCP server findings from an agent."""
+        body = self._read_body()
+        try:
+            data = json.loads(body)
+        except Exception:
+            self._json({'error': 'invalid JSON'}, 400)
+            return
+        device_id     = data.get('device_id', '').strip()
+        reporter_host = data.get('hostname',   '').strip()
+        results       = data.get('results',    [])
+        if not device_id or not isinstance(results, list):
+            self._json({'error': 'missing fields'}, 400)
+            return
+        store   = _get_store()
+        stored  = 0
+        for r in results:
+            host         = str(r.get('host', '')).strip()
+            port         = r.get('port', 0)
+            server_name  = str(r.get('server_name', '')).strip()
+            tools        = r.get('tools', [])
+            auth_status  = str(r.get('auth_status', 'unknown')).strip()
+            source       = 'process' if r.get('source') == 'mcp_process' else 'network'
+            process_info = str(r.get('process_info', '')).strip()
+            if not host:
+                continue
+            if not isinstance(tools, list):
+                tools = []
+            store.upsert_mcp_server(
+                device_id, reporter_host, host, int(port), server_name,
+                tools, auth_status, source, process_info,
+            )
+            stored += 1
+        log.info('agent mcp: %s reported %d MCP servers', device_id, stored)
+        self._json({'status': 'accepted', 'stored': stored})
+
+    def _api_fleet_mcp(self):
+        """GET /api/fleet/mcp — list discovered MCP servers."""
+        try:
+            servers = _get_store().list_mcp_servers()
+            self._json({'servers': servers, 'count': len(servers)})
+        except Exception as e:
+            self._json({'error': str(e)}, 500)
+
+    def _api_fleet_mcp_discover_all(self):
+        """POST /api/fleet/mcp/discover/all — push discover_mcp to every agent."""
+        store   = _get_store()
+        devices = store.list_devices()
+        queued  = []
+        for d in devices:
+            did = d.get('device_id', '')
+            if did:
+                store.enqueue_command(did, 'discover_mcp')
+                queued.append(did)
+        self._json({'status': 'queued', 'count': len(queued), 'devices': queued})
+
+    def _api_fleet_mcp_dismiss(self, mcp_id_str: str):
+        """POST /api/fleet/mcp/dismiss/<id|all> — dismiss one or all MCP findings."""
+        if mcp_id_str.strip() == 'all':
+            count = _get_store().dismiss_all_mcp_servers()
+            self._json({'status': 'dismissed', 'count': count})
+            return
+        try:
+            mcp_id = int(mcp_id_str.strip())
+        except ValueError:
+            self._json({'error': 'invalid id'}, 400)
+            return
+        found = _get_store().dismiss_mcp_server(mcp_id)
+        self._json({'status': 'dismissed' if found else 'not_found'})
+
     def _api_admin_license(self):
         """GET /api/admin/license — license status + overage audit log."""
         try:
@@ -1694,14 +1775,16 @@ button:hover{{background:#2ea043}}
             store = _get_store()
             devices = store.list_devices()
             shadow  = store.list_shadow_devices()
-            print(f'[SENTINEL] _serve_fleet: got {len(devices)} devices, {len(shadow)} shadow', flush=True)
+            mcp     = store.list_mcp_servers()
+            print(f'[SENTINEL] _serve_fleet: got {len(devices)} devices, {len(shadow)} shadow, {len(mcp)} mcp', flush=True)
         except Exception as _e:
             print(f'[SENTINEL] _serve_fleet: store error: {_e}', flush=True)
             log.error('_serve_fleet: store error: %s', _e, exc_info=True)
             devices = []
             shadow  = []
+            mcp     = []
         try:
-            body = _build_fleet_html(devices, shadow).encode('utf-8')
+            body = _build_fleet_html(devices, shadow, mcp).encode('utf-8')
             print(f'[SENTINEL] _serve_fleet: body built {len(body)} bytes', flush=True)
         except Exception as _e:
             print(f'[SENTINEL] _serve_fleet: build error: {_e}', flush=True)
@@ -2292,8 +2375,132 @@ def _build_shadow_section(shadow: list[dict], ts_now: int) -> str:
             f'</div>')
 
 
-def _build_fleet_html(devices: list[dict], shadow: list[dict] | None = None) -> str:
+def _build_mcp_section(servers: list[dict], ts_now: int) -> str:
+    _AUTH_META = {
+        'none':     ('#f85149', 'No Auth',  'This MCP server accepts connections with no authentication — high risk'),
+        'unknown':  ('#e3b341', 'Auth?',    'Authentication status could not be determined'),
+        'required': ('#3fb950', 'Auth OK',  'Server requires authentication before accepting connections'),
+        'process':  ('#58a6ff', 'Process',  'MCP server found running as a local process'),
+    }
+
+    def _age(ts: int | None) -> str:
+        if not ts:
+            return 'never'
+        secs = ts_now - ts
+        if secs < 120:   return f'{secs}s ago'
+        if secs < 3600:  return f'{secs // 60}m ago'
+        if secs < 86400: return f'{secs // 3600}h ago'
+        return f'{secs // 86400}d ago'
+
+    def _tool_tags(tools: list) -> str:
+        shown = tools[:6]
+        extra = len(tools) - 6
+        tags = ' '.join(
+            f'<span style="background:#0d1117;border:1px solid #30363d;border-radius:3px;'
+            f'padding:1px 8px;font-size:11px;font-family:monospace;color:#c9d1d9">{t}</span>'
+            for t in shown
+        )
+        if extra > 0:
+            tags += f' <span style="font-size:11px;color:#6e7681">+{extra} more</span>'
+        return tags
+
+    if not servers:
+        cards = ('<div class="empty" style="padding:20px;text-align:center;color:#484f58">'
+                 'No MCP servers detected yet. Click <strong style="color:#58a6ff">Scan MCP Servers</strong> '
+                 'above to scan your network through all installed agents.</div>')
+    else:
+        card_parts: list[str] = []
+        for s in servers:
+            sid          = s.get('id', 0)
+            host         = s.get('host', '')
+            port         = s.get('port', 0)
+            server_name  = s.get('server_name', '')
+            tools        = s.get('tools') or []
+            auth_status  = s.get('auth_status', 'unknown')
+            src          = s.get('source', 'network')
+            process_info = s.get('process_info', '')
+            reporter     = s.get('reporter_hostname', 'unknown')
+            age          = _age(s.get('last_seen'))
+
+            auth_color, auth_label, auth_desc = _AUTH_META.get(auth_status, _AUTH_META['unknown'])
+            is_process = (src == 'process')
+
+            if is_process:
+                location_html = (f'<span style="font-weight:700;color:#e6edf3;font-size:14px">'
+                                 f'MCP Server Process</span>')
+                sub_html = (f'<span style="font-size:11px;color:#6e7681;font-family:monospace">'
+                            f'{process_info[:80]}</span>') if process_info else ''
+            else:
+                display = server_name or f'MCP Server'
+                location_html = (f'<span style="font-weight:700;color:#e6edf3;font-size:14px">'
+                                 f'{host}:{port}</span>')
+                sub_html = (f'<span style="font-size:12px;color:#58a6ff">{display}</span>')
+
+            tool_html = _tool_tags(tools) if tools else (
+                f'<span style="font-size:11px;color:#484f58">No tools enumerated</span>'
+            )
+
+            risk_note = ''
+            if auth_status == 'none':
+                risk_note = (f'<div style="font-size:11px;color:#f85149;margin-top:4px;font-weight:600">'
+                             f'&#9888; Unauthenticated — any AI agent can connect to this server</div>')
+
+            card_parts.append(
+                f'<div class="shadow-card" style="border-left-color:{auth_color}">'
+                f'<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px">'
+                f'<div style="flex:1;min-width:0">'
+                f'<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">'
+                f'<span style="font-size:16px">&#128279;</span>'
+                f'{location_html}'
+                f'<span style="font-size:10px;font-weight:700;padding:1px 7px;border-radius:3px;'
+                f'background:#1a1f2e;color:{auth_color};border:1px solid {auth_color};text-transform:uppercase">'
+                f'{auth_label}</span>'
+                f'<span style="font-size:10px;padding:1px 7px;border-radius:3px;'
+                f'background:#0d1117;color:#6e7681;border:1px solid #30363d;text-transform:uppercase">'
+                f'{"Process" if is_process else "Network"}</span>'
+                f'</div>'
+                f'<div style="margin-bottom:6px">{sub_html}</div>'
+                f'<div style="display:flex;flex-wrap:wrap;gap:5px;align-items:center">{tool_html}</div>'
+                f'{risk_note}'
+                f'</div>'
+                f'<div style="text-align:right;flex-shrink:0">'
+                f'<div style="font-size:11px;color:#484f58;margin-bottom:3px">Found {age}</div>'
+                f'<div style="font-size:11px;color:#6e7681;margin-bottom:8px">via {reporter}</div>'
+                f'<button class="scan-btn" onclick="dismissMcp({sid})" '
+                f'style="font-size:11px;color:#6e7681;border-color:#30363d">Dismiss</button>'
+                f'</div></div></div>'
+            )
+        cards = '\n'.join(card_parts)
+
+    badge = (f'<span style="background:#1a2035;color:#58a6ff;border:1px solid #1f6feb;'
+             f'border-radius:10px;font-size:11px;padding:1px 9px;font-weight:700;margin-left:8px">'
+             f'{len(servers)}</span>') if servers else ''
+
+    no_auth_count = sum(1 for s in servers if s.get('auth_status') == 'none')
+    risk_badge = (f'<span style="background:#3d1a1a;color:#f85149;border:1px solid #da3633;'
+                  f'border-radius:10px;font-size:11px;padding:1px 9px;font-weight:700;margin-left:6px">'
+                  f'&#9888; {no_auth_count} unauthenticated</span>') if no_auth_count else ''
+
+    dismiss_all_btn = (
+        f'<button class="scan-btn" onclick="dismissAllMcp()" '
+        f'style="font-size:11px;color:#6e7681;border-color:#30363d;margin-left:8px">'
+        f'Dismiss All</button>'
+    ) if servers else ''
+
+    return (f'<div id="mcp-section" style="margin-top:32px">'
+            f'<div class="sec-hdr" style="display:flex;align-items:center;justify-content:space-between">'
+            f'<span style="display:flex;align-items:center">MCP &amp; Agent Governance{badge}{risk_badge}{dismiss_all_btn}</span>'
+            f'<span style="font-size:11px;color:#6e7681;font-weight:400;text-transform:none;letter-spacing:0">'
+            f'&#128279; MCP server discovered on network &nbsp;|&nbsp; &#9881; Running as local process'
+            f'</span></div>'
+            f'<div id="mcp-cards" style="margin-bottom:28px">{cards}</div>'
+            f'</div>')
+
+
+def _build_fleet_html(devices: list[dict], shadow: list[dict] | None = None,
+                      mcp: list[dict] | None = None) -> str:
     shadow = shadow or []
+    mcp    = mcp    or []
     ts_now = int(time.time())
 
     def _age(ts: int | None) -> str:
@@ -2448,6 +2655,8 @@ body{{background:#0d1117;color:#c9d1d9;font-family:-apple-system,BlinkMacSystemF
       <div class="scard-n c-green" id="sc-pass">{total_pass}</div><div class="scard-l">Total Passes</div></div>
     <div class="scard" id="sf-shadow" onclick="document.getElementById('shadow-section').scrollIntoView({{behavior:'smooth'}})" title="Unmanaged AI devices discovered on your network — click to view">
       <div class="scard-n" id="sc-shadow" style="color:#a371f7">{len(shadow)}</div><div class="scard-l">Shadow AI</div></div>
+    <div class="scard" id="sf-mcp" onclick="document.getElementById('mcp-section').scrollIntoView({{behavior:'smooth'}})" title="MCP servers and AI agent tool call exposure — click to view">
+      <div class="scard-n" id="sc-mcp" style="color:#58a6ff">{len(mcp)}</div><div class="scard-l">MCP Servers</div></div>
   </div>
   <div id="filter-banner" style="display:none;background:#161b22;border:1px solid #30363d;border-radius:6px;padding:10px 18px;margin-bottom:18px;align-items:center;justify-content:space-between;gap:12px">
     <span id="filter-banner-text" style="font-size:13px;font-weight:600"></span>
@@ -2465,6 +2674,8 @@ body{{background:#0d1117;color:#c9d1d9;font-family:-apple-system,BlinkMacSystemF
       <label style="font-size:12px;color:#c9d1d9;white-space:nowrap;cursor:pointer"><input type="checkbox" class="rpt-profile" value="financial"> Financial</label>
       <label style="font-size:12px;color:#c9d1d9;white-space:nowrap;cursor:pointer"><input type="checkbox" class="rpt-profile" value="smb"> SMB</label>
       <label style="font-size:12px;color:#c9d1d9;white-space:nowrap;cursor:pointer"><input type="checkbox" class="rpt-profile" value="lifesciences"> Life Sciences</label>
+      <label style="font-size:12px;color:#c9d1d9;white-space:nowrap;cursor:pointer"><input type="checkbox" class="rpt-profile" value="owasp_agentic"> OWASP Agentic</label>
+      <label style="font-size:12px;color:#c9d1d9;white-space:nowrap;cursor:pointer"><input type="checkbox" class="rpt-profile" value="eu_ai_act"> EU AI Act</label>
       <button onclick="openReport('executive')" class="scan-btn"
          style="color:#3fb950;border-color:#30363d;font-size:12px">&#9654; Executive Report</button>
       <button onclick="openReport('ciso')" class="scan-btn"
@@ -2482,6 +2693,8 @@ body{{background:#0d1117;color:#c9d1d9;font-family:-apple-system,BlinkMacSystemF
               style="color:#e3b341;border-color:#30363d;font-size:12px">Update All Agents</button>
       <button id="btn-discover-all" class="scan-btn" onclick="discoverAll(this)"
               style="color:#a371f7;border-color:#30363d;font-size:12px">&#128270; Find Shadow AI</button>
+      <button id="btn-discover-mcp" class="scan-btn" onclick="discoverMcp(this)"
+              style="color:#58a6ff;border-color:#30363d;font-size:12px">&#128279; Scan MCP Servers</button>
     </div>
   </div>
   <div class="refresh-note" id="refresh-note">Auto-refreshes every 60s</div>
@@ -2509,6 +2722,8 @@ body{{background:#0d1117;color:#c9d1d9;font-family:-apple-system,BlinkMacSystemF
   </div>
 
   {_build_shadow_section(shadow, ts_now)}
+
+  {_build_mcp_section(mcp, ts_now)}
 
   <div class="sec-hdr" style="margin-top:32px">
     AI Service Discovery
@@ -2549,6 +2764,8 @@ body{{background:#0d1117;color:#c9d1d9;font-family:-apple-system,BlinkMacSystemF
         <label style="font-size:13px;color:#e6edf3;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="cfg-profile-cb" value="cmmc"> CMMC 2.0</label>
         <label style="font-size:13px;color:#e6edf3;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="cfg-profile-cb" value="smb"> SMB</label>
         <label style="font-size:13px;color:#e6edf3;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="cfg-profile-cb" value="lifesciences"> Life Sciences (FDA / HIPAA / GxP)</label>
+        <label style="font-size:13px;color:#e6edf3;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="cfg-profile-cb" value="owasp_agentic"> OWASP Agentic AI Top 10</label>
+        <label style="font-size:13px;color:#e6edf3;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="cfg-profile-cb" value="eu_ai_act"> EU AI Act (High-Risk Systems)</label>
       </div>
       <label style="font-size:13px;color:#8b949e">Scan Interval</label>
       <div style="display:flex;align-items:center;gap:8px">
@@ -2591,11 +2808,12 @@ let _currentPage = 1;
 const _note = document.getElementById('refresh-note');
 setInterval(() => {{
   _countdown--;
-  if (_countdown <= 0) {{ _countdown = 60; refreshDevices(); refreshShadow(); }}
+  if (_countdown <= 0) {{ _countdown = 60; refreshDevices(); refreshShadow(); refreshMcp(); }}
   _note.textContent = 'Devices refresh in ' + _countdown + 's';
 }}, 1000);
 refreshDevices();
 refreshShadow();
+refreshMcp();
 
 function _age(ts) {{
   if (!ts) return 'never';
@@ -3218,6 +3436,95 @@ async function refreshShadow() {{
     }}).join('');
 
     container.innerHTML = otherHtml + dockerHtml;
+  }} catch (_) {{ /* ignore */ }}
+}}
+
+async function discoverMcp(btn) {{
+  btn.innerHTML = '&#8987; Scanning...';
+  btn.disabled = true;
+  try {{
+    const resp = await fetch('/api/fleet/mcp/discover/all', {{method:'POST'}});
+    if (resp.ok) {{
+      const d = await resp.json();
+      btn.innerHTML = `&#128279; Queued ${{d.count || 0}} agent${{d.count !== 1 ? 's' : ''}}`;
+      setTimeout(() => {{ refreshMcp(); btn.innerHTML = '&#128279; Scan MCP Servers'; btn.disabled = false; }}, 45000);
+    }} else {{
+      btn.innerHTML = '&#128279; Scan MCP Servers';
+      btn.disabled = false;
+    }}
+  }} catch(_) {{ btn.innerHTML = '&#128279; Scan MCP Servers'; btn.disabled = false; }}
+}}
+
+async function dismissMcp(id) {{
+  if (!confirm('Dismiss this MCP server? It will reappear if rediscovered.')) return;
+  const resp = await fetch('/api/fleet/mcp/dismiss/' + id, {{method: 'POST'}});
+  if (resp.ok) {{ refreshMcp(); }}
+}}
+
+async function dismissAllMcp() {{
+  if (!confirm('Dismiss all MCP server findings? They will reappear if rediscovered on the next scan.')) return;
+  const resp = await fetch('/api/fleet/mcp/dismiss/all', {{method: 'POST'}});
+  if (resp.ok) {{ refreshMcp(); }}
+}}
+
+const _MCP_AUTH = {{
+  none:     {{color:'#f85149', label:'No Auth',  risk: true}},
+  unknown:  {{color:'#e3b341', label:'Auth?',    risk: false}},
+  required: {{color:'#3fb950', label:'Auth OK',  risk: false}},
+}};
+
+async function refreshMcp() {{
+  try {{
+    const resp = await fetch('/api/fleet/mcp');
+    if (!resp.ok) return;
+    const data = await resp.json();
+    const sc = document.getElementById('sc-mcp');
+    if (sc) sc.textContent = data.count || 0;
+    const container = document.getElementById('mcp-cards');
+    if (!container) return;
+    const servers = data.servers || [];
+    if (!servers.length) {{
+      container.innerHTML = '<div class="empty" style="padding:20px;text-align:center;color:#484f58">No MCP servers detected yet. Click <strong style="color:#58a6ff">Scan MCP Servers</strong> above to scan your network through all installed agents.</div>';
+      return;
+    }}
+    container.innerHTML = servers.map(s => {{
+      const auth = _MCP_AUTH[s.auth_status] || _MCP_AUTH.unknown;
+      const isProcess = s.source === 'process';
+      const locationHtml = isProcess
+        ? `<span style="font-weight:700;color:#e6edf3;font-size:14px">MCP Server Process</span>`
+        : `<span style="font-weight:700;color:#e6edf3;font-size:14px">${{esc(s.host)}}:${{s.port}}</span>`;
+      const subHtml = isProcess
+        ? (s.process_info ? `<div style="font-size:11px;color:#6e7681;font-family:monospace;margin-bottom:6px">${{esc(s.process_info.substring(0,80))}}</div>` : '')
+        : `<div style="font-size:12px;color:#58a6ff;margin-bottom:6px">${{esc(s.server_name || 'MCP Server')}}</div>`;
+      const tools = (s.tools||[]).slice(0,6);
+      const toolTags = tools.map(t => `<span style="background:#0d1117;border:1px solid #30363d;border-radius:3px;padding:1px 8px;font-size:11px;font-family:monospace;color:#c9d1d9">${{esc(t)}}</span>`).join(' ');
+      const toolExtra = (s.tools||[]).length > 6 ? `<span style="font-size:11px;color:#6e7681">+${{(s.tools||[]).length-6}} more</span>` : '';
+      const toolSection = (s.tools||[]).length
+        ? `<div style="display:flex;flex-wrap:wrap;gap:5px;align-items:center">${{toolTags}}${{toolExtra}}</div>`
+        : `<div style="font-size:11px;color:#484f58">No tools enumerated</div>`;
+      const riskNote = auth.risk
+        ? `<div style="font-size:11px;color:#f85149;margin-top:4px;font-weight:600">&#9888; Unauthenticated — any AI agent can connect to this server</div>` : '';
+      return `<div class="shadow-card" style="border-left-color:${{auth.color}}">
+        <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px">
+          <div style="flex:1;min-width:0">
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
+              <span style="font-size:16px">&#128279;</span>
+              ${{locationHtml}}
+              <span style="font-size:10px;font-weight:700;padding:1px 7px;border-radius:3px;background:#1a1f2e;color:${{auth.color}};border:1px solid ${{auth.color}};text-transform:uppercase">${{auth.label}}</span>
+              <span style="font-size:10px;padding:1px 7px;border-radius:3px;background:#0d1117;color:#6e7681;border:1px solid #30363d;text-transform:uppercase">${{isProcess ? 'Process' : 'Network'}}</span>
+            </div>
+            ${{subHtml}}
+            ${{toolSection}}
+            ${{riskNote}}
+          </div>
+          <div style="text-align:right;flex-shrink:0">
+            <div style="font-size:11px;color:#484f58;margin-bottom:3px">Found ${{_age(s.last_seen)}}</div>
+            <div style="font-size:11px;color:#6e7681;margin-bottom:8px">via ${{esc(s.reporter_hostname)}}</div>
+            <button class="scan-btn" onclick="dismissMcp(${{s.id}})" style="font-size:11px;color:#6e7681;border-color:#30363d">Dismiss</button>
+          </div>
+        </div>
+      </div>`;
+    }}).join('');
   }} catch (_) {{ /* ignore */ }}
 }}
 

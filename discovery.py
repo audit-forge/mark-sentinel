@@ -732,6 +732,169 @@ def _scan_dns_cache() -> list[dict]:
 
 # ── Public API ────────────────────────────────────────────────────────────────
 
+# ── MCP (Model Context Protocol) server detection ─────────────────────────────
+
+_MCP_PORTS: list[int] = [3000, 3001, 3333, 4000, 8000, 8080, 9000]
+
+_MCP_INIT_PAYLOAD: bytes = json.dumps({
+    'jsonrpc': '2.0', 'id': 1, 'method': 'initialize',
+    'params': {
+        'protocolVersion': '2024-11-05',
+        'capabilities': {},
+        'clientInfo': {'name': 'sentinel', 'version': '1.0'},
+    },
+}).encode()
+
+_MCP_TOOLS_PAYLOAD: bytes = json.dumps({
+    'jsonrpc': '2.0', 'id': 2, 'method': 'tools/list', 'params': {},
+}).encode()
+
+_MCP_PROCESS_SIGS: list[str] = [
+    'uvx mcp', '@modelcontextprotocol', 'mcp-server', 'fastmcp',
+    'mcp serve', 'python -m mcp', 'mcp run',
+]
+
+
+def _probe_mcp_http(host: str, port: int) -> dict | None:
+    """Send MCP JSON-RPC initialize handshake. Returns server info dict or None."""
+    for path in ('/', '/mcp', '/api/mcp'):
+        try:
+            url = f'http://{host}:{port}{path}'
+            req = _urlreq.Request(
+                url, data=_MCP_INIT_PAYLOAD,
+                headers={'Content-Type': 'application/json',
+                         'User-Agent':   'sentinel-discovery/1.0'},
+                method='POST',
+            )
+            from urllib import error as _urlerr
+            try:
+                with _urlreq.urlopen(req, timeout=3) as resp:
+                    if resp.status == 401:
+                        return {'server_name': '', 'tools': [], 'auth_status': 'required'}
+                    raw  = resp.read(16384)
+                    data = json.loads(raw)
+                    if 'result' not in data:
+                        continue
+                    result = data['result']
+                    if 'protocolVersion' not in result:
+                        continue
+                    info  = result.get('serverInfo', {})
+                    caps  = result.get('capabilities', {})
+                    tools: list[str] = []
+                    if isinstance(caps.get('tools'), dict):
+                        try:
+                            treq = _urlreq.Request(
+                                url, data=_MCP_TOOLS_PAYLOAD,
+                                headers={'Content-Type': 'application/json',
+                                         'User-Agent':   'sentinel-discovery/1.0'},
+                                method='POST',
+                            )
+                            with _urlreq.urlopen(treq, timeout=3) as tr:
+                                tdata = json.loads(tr.read(16384))
+                                tools = [t.get('name', '') for t in
+                                         tdata.get('result', {}).get('tools', [])
+                                         if t.get('name')]
+                        except Exception:
+                            pass
+                    return {
+                        'server_name': info.get('name', ''),
+                        'tools':       tools,
+                        'auth_status': 'none',
+                    }
+            except _urlerr.HTTPError as e:
+                if e.code == 401:
+                    return {'server_name': '', 'tools': [], 'auth_status': 'required'}
+        except Exception:
+            pass
+    return None
+
+
+def _scan_mcp_processes() -> list[dict]:
+    """Scan local process list for running MCP server signatures."""
+    findings: list[dict] = []
+    try:
+        if sys.platform == 'win32':
+            r = subprocess.run(
+                ['wmic', 'process', 'get', 'commandline', '/format:csv'],
+                capture_output=True, text=True, timeout=10,
+            )
+        else:
+            r = subprocess.run(['ps', 'aux'], capture_output=True, text=True, timeout=10)
+        text = r.stdout
+    except Exception:
+        return findings
+    sigs = [re.compile(s, re.IGNORECASE) for s in _MCP_PROCESS_SIGS]
+    seen: set[str] = set()
+    for line in text.splitlines():
+        if any(sig.search(line) for sig in sigs):
+            key = line.strip()[:150]
+            if key not in seen:
+                seen.add(key)
+                findings.append({
+                    'source':       'mcp_process',
+                    'host':         'localhost',
+                    'port':         0,
+                    'server_name':  '',
+                    'tools':        [],
+                    'auth_status':  'unknown',
+                    'process_info': key,
+                })
+    return findings
+
+
+async def _discover_mcp_async(hosts: list[str]) -> list[dict]:
+    sem = asyncio.Semaphore(_MAX_CONCURRENT)
+    loop = asyncio.get_running_loop()
+    results: list[dict] = []
+
+    async def probe(host: str, port: int):
+        async with sem:
+            if not await _tcp_open(host, port):
+                return
+            info = await loop.run_in_executor(None, _probe_mcp_http, host, port)
+            if info:
+                results.append({
+                    'source':       'mcp_network',
+                    'host':         host,
+                    'port':         port,
+                    'server_name':  info.get('server_name', ''),
+                    'tools':        info.get('tools', []),
+                    'auth_status':  info.get('auth_status', 'unknown'),
+                    'process_info': '',
+                })
+
+    await asyncio.gather(*[probe(h, p) for h in hosts for p in _MCP_PORTS])
+    results.sort(key=lambda r: (r['host'], r['port']))
+    return results
+
+
+def discover_mcp_servers(hosts: list[str] | None = None) -> list[dict]:
+    """
+    Scan for MCP (Model Context Protocol) servers via network probe + process scan.
+
+    Returns list of dicts with:
+      source       — 'mcp_network' | 'mcp_process'
+      host / port  — location (host='localhost' for process findings)
+      server_name  — name from initialize handshake
+      tools        — list of tool names the server exposes
+      auth_status  — 'required' | 'none' | 'unknown'
+      process_info — (process scan only) raw cmdline snippet
+    """
+    target_hosts = list(hosts) if hosts else _local_subnet_hosts()
+    loop = asyncio.SelectorEventLoop() if sys.platform == 'win32' else asyncio.new_event_loop()
+    try:
+        net_results = loop.run_until_complete(_discover_mcp_async(target_hosts))
+    finally:
+        loop.close()
+    proc_results = _scan_mcp_processes()
+    results = net_results + proc_results
+    logger.info('MCP discovery: %d servers (%d network, %d process)',
+                len(results),
+                sum(1 for r in results if r['source'] == 'mcp_network'),
+                sum(1 for r in results if r['source'] == 'mcp_process'))
+    return results
+
+
 def discover(
     hosts: list[str] | None = None,
     include_processes: bool = True,
