@@ -217,6 +217,284 @@ def _risk_score_html(fail, warn, total) -> int:
     return max(0, 100 - round((fail * 3 + warn) / max(total, 1) * 100))
 
 
+_MCP_REMEDIATION = {
+    'fastmcp':            'Add `auth=BearerAuth(token=os.environ["MCP_TOKEN"])` to your FastMCP server constructor.',
+    'uvx':                'Pass `--api-key` flag or configure authentication in the MCP server settings file.',
+    'modelcontextprotocol': 'Add OAuth 2.1 or API-key middleware to the MCP server before deploying to a shared network.',
+    'default':            'Configure an API key or OAuth 2.1 bearer token on this MCP server. Restrict allowed origins to trusted hosts only.',
+}
+
+_OWASP_AGENTIC_MAP = {
+    'none':    ['A02 Tool/Plugin Hijacking — unauthenticated server allows arbitrary tool invocation',
+                'A08 Excessive Agency — AI can call any exposed tool without authorization check',
+                'A07 Data Exfiltration — tools like read_file or query_database accessible with no credentials'],
+    'unknown': ['A09 Audit Bypass — authentication status unverified, logging compliance uncertain'],
+    'required': [],
+}
+
+_EU_AI_ACT_MAP = {
+    'none':    'Article 12 (Logging) — unauthenticated MCP servers produce no attributable audit trail; '
+               'Article 14 (Human Oversight) — no gate between AI agent and tool execution.',
+    'unknown': 'Article 12 (Logging) — authentication status unverified; audit trail completeness cannot be confirmed.',
+    'required': 'Compliant with Article 12 and Article 14 access controls.',
+}
+
+
+def _build_mcp_report_html(servers: list, tier: str) -> str:
+    from datetime import datetime, timezone
+    import html as _html
+
+    def esc(s):
+        return _html.escape(str(s or ''))
+
+    def ts(epoch):
+        if not epoch:
+            return 'never'
+        try:
+            return datetime.fromtimestamp(int(epoch), tz=timezone.utc).strftime('%Y-%m-%d %H:%M UTC')
+        except Exception:
+            return str(epoch)
+
+    now          = datetime.now(tz=timezone.utc).strftime('%Y-%m-%d %H:%M UTC')
+    tier_label   = {'executive': 'Executive Summary', 'ciso': 'CISO Report', 'technical': 'Technical Findings'}.get(tier, 'MCP Report')
+    no_auth      = [s for s in servers if s.get('auth_status') == 'none']
+    unknown_auth = [s for s in servers if s.get('auth_status') == 'unknown']
+    auth_ok      = [s for s in servers if s.get('auth_status') == 'required']
+    net_servers  = [s for s in servers if s.get('source') == 'network']
+    proc_servers = [s for s in servers if s.get('source') == 'process']
+    all_tools    = sorted({t for s in servers for t in (s.get('tools') or [])})
+
+    risk_level  = 'CRITICAL' if no_auth else 'MEDIUM' if unknown_auth else 'LOW'
+    risk_color  = '#f85149' if risk_level == 'CRITICAL' else '#d29922' if risk_level == 'MEDIUM' else '#3fb950'
+
+    btn_style = ('display:inline-block;padding:6px 14px;border-radius:6px;font-size:12px;'
+                 'font-weight:600;cursor:pointer;border:1px solid #30363d;background:#21262d;color:#c9d1d9')
+    active_btn = 'color:#58a6ff;border-color:#1f6feb'
+
+    parts = [f'''<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
+<title>M.A.R.K. Sentinel — MCP & Agent Governance {esc(tier_label)}</title>
+<style>
+*{{box-sizing:border-box;margin:0;padding:0}}
+body{{background:#0d1117;color:#c9d1d9;font-family:system-ui,sans-serif;padding:32px;max-width:1100px;margin:0 auto}}
+h1{{color:#58a6ff;font-size:22px;margin-bottom:4px}}
+h2{{color:#58a6ff;font-size:15px;margin:28px 0 10px;border-bottom:1px solid #21262d;padding-bottom:6px}}
+h3{{color:#8b949e;font-size:13px;margin:16px 0 6px}}
+.meta{{color:#6e7681;font-size:12px;margin-bottom:28px}}
+.cards{{display:flex;gap:16px;flex-wrap:wrap;margin:16px 0 24px}}
+.card{{background:#161b22;border:1px solid #21262d;border-radius:8px;padding:16px 24px;min-width:120px}}
+.card-n{{font-size:28px;font-weight:700}}
+.card-l{{font-size:11px;color:#6e7681;margin-top:4px;text-transform:uppercase}}
+table{{width:100%;border-collapse:collapse;font-size:13px;margin-bottom:16px}}
+th{{background:#161b22;color:#6e7681;font-size:11px;text-transform:uppercase;padding:8px 10px;text-align:left;border-bottom:1px solid #21262d}}
+td{{padding:7px 10px;border-bottom:1px solid #161b22;vertical-align:top}}
+tr:hover td{{background:#161b22}}
+.no-auth{{color:#f85149}}.unknown{{color:#d29922}}.auth-ok{{color:#3fb950}}
+.block{{background:#161b22;border:1px solid #21262d;border-radius:8px;padding:20px;margin-bottom:20px}}
+.tag{{display:inline-block;background:#0d1117;border:1px solid #30363d;border-radius:3px;padding:1px 8px;font-size:11px;font-family:monospace;color:#c9d1d9;margin:2px}}
+.rem{{color:#3fb950;font-size:12px;margin-top:6px}}
+.risk-banner{{border-radius:6px;padding:12px 18px;margin-bottom:24px;font-weight:600}}
+.toolbar{{position:sticky;top:0;z-index:100;background:#161b22;border-bottom:1px solid #21262d;
+          margin:-32px -32px 28px;padding:10px 32px;display:flex;align-items:center;gap:10px;flex-wrap:wrap}}
+@media print{{.toolbar{{display:none}}body{{background:#fff;color:#000;padding:16px}}h1,h2,h3,.card-l{{color:#000}}}}
+</style>
+<script>
+function switchTier(t){{location.href='/api/fleet/mcp/report?tier='+t;}}
+</script>
+</head><body>
+<div class="toolbar">
+  <span style="font-size:13px;font-weight:600;color:#c9d1d9;margin-right:6px">M.A.R.K. Sentinel</span>
+  <button onclick="switchTier('executive')" style="{btn_style}{';' + active_btn if tier=='executive' else ''}">Executive</button>
+  <button onclick="switchTier('ciso')"      style="{btn_style}{';' + active_btn if tier=='ciso'      else ''}">CISO</button>
+  <button onclick="switchTier('technical')" style="{btn_style}{';' + active_btn if tier=='technical' else ''}">Technical</button>
+  <button onclick="window.print()" style="{btn_style}">&#128438; Print</button>
+</div>
+<h1>M.A.R.K. Sentinel &mdash; MCP &amp; Agent Governance &mdash; {esc(tier_label)}</h1>
+<div class="meta">Generated {esc(now)} &nbsp;&bull;&nbsp; {len(servers)} MCP server(s) discovered &nbsp;&bull;&nbsp; Confidential</div>''']
+
+    # Risk banner
+    if no_auth:
+        parts.append(f'<div class="risk-banner" style="background:#2d0f0f;border:1px solid #f85149;color:#f85149">'
+                     f'&#9888;&nbsp; HIGH RISK — {len(no_auth)} unauthenticated MCP server{"s" if len(no_auth)>1 else ""} detected. '
+                     f'Any AI agent on the network can invoke exposed tools with no credentials.</div>')
+    elif unknown_auth:
+        parts.append(f'<div class="risk-banner" style="background:#2a1f0a;border:1px solid #d29922;color:#d29922">'
+                     f'&#9888;&nbsp; REVIEW REQUIRED — {len(unknown_auth)} MCP server{"s" if len(unknown_auth)>1 else ""} with unverified authentication.</div>')
+    else:
+        parts.append(f'<div class="risk-banner" style="background:#0f2a1a;border:1px solid #3fb950;color:#3fb950">'
+                     f'&#10003;&nbsp; All MCP servers require authentication.</div>')
+
+    # Summary cards
+    parts.append(f'''<div class="cards">
+  <div class="card"><div class="card-n" style="color:{risk_color}">{esc(risk_level)}</div><div class="card-l">Risk Level</div></div>
+  <div class="card"><div class="card-n" style="color:#58a6ff">{len(servers)}</div><div class="card-l">MCP Servers</div></div>
+  <div class="card"><div class="card-n no-auth">{len(no_auth)}</div><div class="card-l">Unauthenticated</div></div>
+  <div class="card"><div class="card-n unknown">{len(unknown_auth)}</div><div class="card-l">Auth Unknown</div></div>
+  <div class="card"><div class="card-n auth-ok">{len(auth_ok)}</div><div class="card-l">Auth OK</div></div>
+  <div class="card"><div class="card-n" style="color:#c9d1d9">{len(all_tools)}</div><div class="card-l">Unique Tools</div></div>
+</div>''')
+
+    # ── EXECUTIVE ──────────────────────────────────────────────────────────────
+    if tier == 'executive':
+        if not servers:
+            parts.append('<div class="block"><p>No MCP servers have been discovered on the network. Run a scan from the Sentinel dashboard to populate this report.</p></div>')
+        else:
+            business_risk = (
+                'Your organization has AI agent infrastructure running with <strong>no access controls</strong>. '
+                'This means any AI system — or any person with network access — can invoke tools such as '
+                + ', '.join(f'<code>{esc(t)}</code>' for t in all_tools[:4])
+                + (' and others' if len(all_tools) > 4 else '')
+                + ' without any login, token, or approval. This is equivalent to leaving internal APIs '
+                'publicly accessible with no password.'
+            ) if no_auth else (
+                'AI agent infrastructure is present on the network. Authentication controls are in place '
+                'or under review. Continued monitoring is recommended as the number of AI agents deployed '
+                'is expected to grow significantly in 2026.'
+            )
+
+            parts.append(f'<h2>Business Risk</h2><div class="block"><p style="font-size:14px;line-height:1.7">{business_risk}</p></div>')
+
+            if no_auth:
+                parts.append('<h2>What Needs to Happen</h2><div class="block"><ol style="padding-left:20px;line-height:2">')
+                parts.append('<li>Require authentication (API key or OAuth token) on all MCP servers immediately</li>')
+                parts.append('<li>Audit the tools each server exposes — remove any tools that AI agents should not have access to</li>')
+                parts.append('<li>Establish a register of approved MCP servers and the teams responsible for them</li>')
+                parts.append('<li>Set up logging so every tool call an AI agent makes is recorded with a timestamp and identity</li>')
+                parts.append('</ol></div>')
+
+            parts.append('<h2>Regulatory Exposure</h2><div class="block"><p style="font-size:13px;line-height:1.7">')
+            if no_auth:
+                parts.append('Unauthenticated MCP servers create direct exposure under <strong>EU AI Act Article 12 and 14</strong> '
+                             '(logging and human oversight obligations, effective August 2026) and <strong>OWASP Agentic AI A02 and A08</strong> '
+                             '(tool hijacking and excessive agency). Organizations in regulated industries should treat this as a priority remediation item.')
+            else:
+                parts.append('Current MCP server posture is consistent with EU AI Act Article 12 and 14 access control requirements. '
+                             'Continue monitoring as additional MCP servers may be deployed by business units without IT knowledge.')
+            parts.append('</p></div>')
+
+        parts.append('</body></html>')
+        return ''.join(parts)
+
+    # ── CISO ───────────────────────────────────────────────────────────────────
+    if not servers:
+        parts.append('<div class="block"><p>No MCP servers discovered. Run a scan from the dashboard.</p></div>')
+        parts.append('</body></html>')
+        return ''.join(parts)
+
+    parts.append('<h2>MCP Server Inventory</h2>')
+    parts.append('<table><thead><tr>'
+                 '<th>Host / Location</th><th>Server Name</th><th>Auth</th>'
+                 '<th>Tools Exposed</th><th>Source</th><th>Reporter</th><th>Last Seen</th>'
+                 '</tr></thead><tbody>')
+    for s in servers:
+        auth   = s.get('auth_status', 'unknown')
+        ac     = 'no-auth' if auth == 'none' else 'unknown' if auth == 'unknown' else 'auth-ok'
+        al     = 'NO AUTH ⚠' if auth == 'none' else 'Unknown' if auth == 'unknown' else 'Auth OK ✓'
+        loc    = f"{esc(s.get('host',''))}:{s.get('port',0)}" if s.get('source') == 'network' else 'Local process'
+        name   = esc(s.get('server_name') or '—')
+        tools  = s.get('tools') or []
+        src    = 'Network' if s.get('source') == 'network' else 'Process'
+        parts.append(f'<tr><td><strong>{loc}</strong></td><td style="color:#58a6ff">{name}</td>'
+                     f'<td class="{ac}"><strong>{al}</strong></td>'
+                     f'<td>{len(tools)} tool{"s" if len(tools) != 1 else ""}'
+                     f'{": " + ", ".join(esc(t) for t in tools[:3]) + ("…" if len(tools)>3 else "") if tools else ""}</td>'
+                     f'<td style="color:#6e7681">{src}</td>'
+                     f'<td style="color:#6e7681">{esc(s.get("reporter_hostname",""))}</td>'
+                     f'<td style="color:#6e7681;font-size:12px">{esc(ts(s.get("last_seen")))}</td></tr>')
+    parts.append('</tbody></table>')
+
+    if no_auth:
+        parts.append('<h2>OWASP Agentic AI Risk Mapping</h2><div class="block">')
+        parts.append('<p style="font-size:12px;color:#6e7681;margin-bottom:12px">Unauthenticated MCP servers expose the following OWASP Agentic Top 10 (2026) risks:</p>')
+        for risk in _OWASP_AGENTIC_MAP.get('none', []):
+            parts.append(f'<div style="padding:6px 0;border-bottom:1px solid #21262d;font-size:13px">'
+                         f'<span style="color:#f85149;font-weight:700">&#9888;</span> {esc(risk)}</div>')
+        parts.append('</div>')
+
+    parts.append('<h2>EU AI Act Exposure</h2><div class="block">')
+    for s in servers:
+        auth = s.get('auth_status', 'unknown')
+        msg  = _EU_AI_ACT_MAP.get(auth, _EU_AI_ACT_MAP['unknown'])
+        loc  = f"{s.get('host','')}:{s.get('port',0)}" if s.get('source') == 'network' else 'Local process'
+        color = '#f85149' if auth == 'none' else '#d29922' if auth == 'unknown' else '#3fb950'
+        parts.append(f'<div style="padding:8px 0;border-bottom:1px solid #21262d;font-size:13px">'
+                     f'<strong style="color:{color}">{esc(loc)}</strong> — {esc(msg)}</div>')
+    parts.append('</div>')
+
+    if tier == 'ciso':
+        parts.append('<h2>Remediation Priorities</h2><div class="block"><ol style="padding-left:20px;line-height:2;font-size:13px">')
+        if no_auth:
+            parts.append(f'<li><strong style="color:#f85149">IMMEDIATE:</strong> Add authentication to {len(no_auth)} unauthenticated server{"s" if len(no_auth)>1 else ""}: '
+                         + ', '.join(f'{s.get("host","")}:{s.get("port",0)}' for s in no_auth[:5])
+                         + ('…' if len(no_auth) > 5 else '') + '</li>')
+        if unknown_auth:
+            parts.append(f'<li><strong style="color:#d29922">SHORT-TERM:</strong> Manually verify authentication on {len(unknown_auth)} server{"s" if len(unknown_auth)>1 else ""} with unconfirmed status</li>')
+        parts.append('<li>Establish an MCP server registry — assign an owner to each server</li>')
+        parts.append('<li>Enable tool call logging on all MCP servers before the EU AI Act August 2026 deadline</li>')
+        parts.append('<li>Review exposed tools — remove or restrict high-risk capabilities (code execution, email, database writes)</li>')
+        parts.append('</ol></div>')
+        parts.append('</body></html>')
+        return ''.join(parts)
+
+    # ── TECHNICAL ──────────────────────────────────────────────────────────────
+    parts.append('<h2>Per-Server Technical Detail</h2>')
+    for s in servers:
+        auth         = s.get('auth_status', 'unknown')
+        auth_color   = '#f85149' if auth == 'none' else '#d29922' if auth == 'unknown' else '#3fb950'
+        auth_label   = 'NO AUTHENTICATION — HIGH RISK' if auth == 'none' else 'Authentication unverified' if auth == 'unknown' else 'Authentication required — OK'
+        loc          = f"{s.get('host','')}:{s.get('port',0)}" if s.get('source') == 'network' else 'Local process'
+        tools        = s.get('tools') or []
+        server_name  = s.get('server_name') or 'Unknown'
+        process_info = s.get('process_info', '')
+
+        # Pick remediation hint from process_info
+        fix = _MCP_REMEDIATION['default']
+        for key, hint in _MCP_REMEDIATION.items():
+            if key != 'default' and key in (process_info or '').lower():
+                fix = hint
+                break
+
+        parts.append(f'<div class="block">')
+        parts.append(f'<h3>&#128279; {esc(loc)} &mdash; {esc(server_name)}</h3>')
+        parts.append(f'<table style="margin-bottom:12px"><tbody>')
+        parts.append(f'<tr><td style="color:#6e7681;width:160px">Auth Status</td><td><strong style="color:{auth_color}">{esc(auth_label)}</strong></td></tr>')
+        parts.append(f'<tr><td style="color:#6e7681">Source</td><td>{"Network probe" if s.get("source")=="network" else "Process scan"}</td></tr>')
+        parts.append(f'<tr><td style="color:#6e7681">Reporter</td><td>{esc(s.get("reporter_hostname",""))}</td></tr>')
+        parts.append(f'<tr><td style="color:#6e7681">First seen</td><td>{esc(ts(s.get("first_seen")))}</td></tr>')
+        parts.append(f'<tr><td style="color:#6e7681">Last seen</td><td>{esc(ts(s.get("last_seen")))}</td></tr>')
+        if process_info:
+            parts.append(f'<tr><td style="color:#6e7681">Process</td><td style="font-family:monospace;font-size:12px">{esc(process_info[:120])}</td></tr>')
+        parts.append('</tbody></table>')
+
+        if tools:
+            parts.append('<p style="font-size:12px;color:#6e7681;margin-bottom:6px">Tools this server exposes to AI agents:</p>')
+            parts.append('<div style="margin-bottom:12px">' + ''.join(f'<span class="tag">{esc(t)}</span>' for t in tools) + '</div>')
+            high_risk_tools = [t for t in tools if any(kw in t.lower() for kw in ('exec', 'code', 'shell', 'run', 'write', 'delete', 'email', 'send', 'database', 'db', 'sql'))]
+            if high_risk_tools and auth == 'none':
+                parts.append(f'<div style="background:#2d0f0f;border:1px solid #f85149;border-radius:4px;padding:8px 12px;font-size:12px;margin-bottom:10px;color:#f85149">'
+                             f'&#9888; High-risk tools accessible with no auth: '
+                             + ''.join(f'<code style="background:#0d1117;padding:1px 6px;border-radius:3px;margin:0 3px">{esc(t)}</code>' for t in high_risk_tools)
+                             + '</div>')
+        else:
+            parts.append('<p style="font-size:12px;color:#484f58;margin-bottom:12px">Tool list could not be enumerated during scan.</p>')
+
+        owasp_risks = _OWASP_AGENTIC_MAP.get(auth, [])
+        if owasp_risks:
+            parts.append('<p style="font-size:12px;color:#6e7681;margin-bottom:4px">OWASP Agentic AI risks:</p>')
+            for risk in owasp_risks:
+                parts.append(f'<div style="font-size:12px;color:#d29922;padding:2px 0">&#9654; {esc(risk)}</div>')
+            parts.append('<br>')
+
+        if auth != 'required':
+            parts.append(f'<div class="rem"><strong>Remediation:</strong> {esc(fix)}</div>')
+            parts.append(f'<div style="font-size:12px;color:#6e7681;margin-top:4px">'
+                         f'EU AI Act: {esc(_EU_AI_ACT_MAP.get(auth,""))}</div>')
+
+        parts.append('</div>')
+
+    parts.append('</body></html>')
+    return ''.join(parts)
+
+
 def _build_fleet_report_html(devices: list, tier: str, profile: str = '', profiles: list | None = None, status_filter: str = '') -> str:
     from datetime import datetime, timezone
     import html as _html
@@ -588,7 +866,8 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             '/command':        lambda: self._redirect('/'),
             '/api/config':        self._api_get_config,
             '/api/fleet/shadow':  self._api_fleet_shadow,
-            '/api/fleet/mcp':     self._api_fleet_mcp,
+            '/api/fleet/mcp':        self._api_fleet_mcp,
+            '/api/fleet/mcp/report': self._api_fleet_mcp_report,
             '/download/shortcut': self._serve_shortcut,
         }
         if path in static:
@@ -1422,6 +1701,22 @@ button:hover{{background:#2ea043}}
             return
         found = _get_store().dismiss_mcp_server(mcp_id)
         self._json({'status': 'dismissed' if found else 'not_found'})
+
+    def _api_fleet_mcp_report(self):
+        """GET /api/fleet/mcp/report?tier=executive|ciso|technical"""
+        from urllib.parse import parse_qs, urlparse as _up
+        qs   = parse_qs(_up(self.path).query)
+        tier = (qs.get('tier', ['ciso'])[0]).lower()
+        if tier not in ('executive', 'ciso', 'technical'):
+            tier = 'ciso'
+        servers = _get_store().list_mcp_servers()
+        html    = _build_mcp_report_html(servers, tier)
+        body    = html.encode('utf-8')
+        self.send_response(200)
+        self.send_header('Content-Type', 'text/html; charset=utf-8')
+        self.send_header('Content-Length', str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
 
     def _api_admin_license(self):
         """GET /api/admin/license — license status + overage audit log."""
@@ -2658,7 +2953,7 @@ body{{background:#0d1117;color:#c9d1d9;font-family:-apple-system,BlinkMacSystemF
       <div class="scard-n c-green" id="sc-pass">{total_pass}</div><div class="scard-l">Total Passes</div></div>
     <div class="scard" id="sf-shadow" onclick="document.getElementById('shadow-section').scrollIntoView({{behavior:'smooth'}})" title="Unmanaged AI devices discovered on your network — click to view">
       <div class="scard-n" id="sc-shadow" style="color:#a371f7">{len(shadow)}</div><div class="scard-l">Shadow AI</div></div>
-    <div class="scard" id="sf-mcp" onclick="document.getElementById('mcp-section').scrollIntoView({{behavior:'smooth'}})" title="MCP servers and AI agent tool call exposure — click to view">
+    <div class="scard" id="sf-mcp" onclick="window.open('/api/fleet/mcp/report?tier=ciso','_blank')" title="MCP servers and AI agent tool call exposure — click to open report">
       <div class="scard-n" id="sc-mcp" style="color:#58a6ff">{len(mcp)}</div><div class="scard-l">MCP Servers</div></div>
   </div>
   <div id="filter-banner" style="display:none;background:#161b22;border:1px solid #30363d;border-radius:6px;padding:10px 18px;margin-bottom:18px;align-items:center;justify-content:space-between;gap:12px">
