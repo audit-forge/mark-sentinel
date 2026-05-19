@@ -250,7 +250,14 @@ _THEME_TOGGLE_JS = (
     "b.style.background=l?'#f6f8fa':'#21262d';"
     "b.style.color=l?'#24292f':'#8b949e';}"
     "var tb=document.querySelector('.toolbar');"
-    "if(tb)tb.style.background=l?'#f6f8fa':'#161b22';}"
+    "if(tb){"
+    "tb.style.background=l?'#f6f8fa':'#161b22';"
+    "tb.querySelectorAll('button:not(#theme-toggle)').forEach(function(n){"
+    "n.style.background=l?'#eef1f4':'#21262d';"
+    "n.style.color=l?'#24292f':'#c9d1d9';"
+    "n.style.borderColor=l?'#c8ccd0':'#30363d';});"
+    "tb.querySelectorAll('span,label').forEach(function(n){"
+    "n.style.color=l?'#57606a':null;});}}"
     "function toggleTheme(){"
     "var l=!document.documentElement.classList.contains('light');"
     "localStorage.setItem('sentinel_theme',l?'light':'dark');"
@@ -646,9 +653,9 @@ function switchTier(t){{
 </head><body>
 <div class="toolbar">
   <span style="font-size:13px;font-weight:600;color:#c9d1d9;margin-right:6px">M.A.R.K. Sentinel</span>
-  <button onclick="switchTier('executive')" style="{btn_style}{'color:#58a6ff;border-color:#1f6feb' if tier=='executive' else ''}">Executive</button>
-  <button onclick="switchTier('ciso')"      style="{btn_style}{'color:#58a6ff;border-color:#1f6feb' if tier=='ciso' else ''}">CISO</button>
-  <button onclick="switchTier('technical')" style="{btn_style}{'color:#58a6ff;border-color:#1f6feb' if tier=='technical' else ''}">Technical</button>
+  <button onclick="switchTier('executive')" style="{btn_style}{';color:#58a6ff;border-color:#1f6feb' if tier=='executive' else ''}">Executive</button>
+  <button onclick="switchTier('ciso')"      style="{btn_style}{';color:#58a6ff;border-color:#1f6feb' if tier=='ciso' else ''}">CISO</button>
+  <button onclick="switchTier('technical')" style="{btn_style}{';color:#58a6ff;border-color:#1f6feb' if tier=='technical' else ''}">Technical</button>
   <span style="font-size:11px;color:#8b949e;white-space:nowrap;margin-left:6px">Profiles:</span>
   {_toolbar_cbs}
   <button onclick="applyProfiles()" style="{btn_style};color:#58a6ff;border-color:#1f6feb">Apply</button>
@@ -3223,7 +3230,17 @@ function _applyTheme(light) {{
     btn.style.color = light ? '#24292f' : '#8b949e';
   }}
   const tb = document.querySelector('.toolbar');
-  if (tb) tb.style.background = light ? '#f6f8fa' : '#161b22';
+  if (tb) {{
+    tb.style.background = light ? '#f6f8fa' : '#161b22';
+    tb.querySelectorAll('button:not(#theme-toggle)').forEach(n => {{
+      n.style.background   = light ? '#eef1f4' : '#21262d';
+      n.style.color        = light ? '#24292f' : '#c9d1d9';
+      n.style.borderColor  = light ? '#c8ccd0' : '#30363d';
+    }});
+    tb.querySelectorAll('span, label').forEach(n => {{
+      n.style.color = light ? '#57606a' : null;
+    }});
+  }}
 }}
 function toggleTheme() {{
   const light = !document.documentElement.classList.contains('light');
