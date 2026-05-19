@@ -1,6 +1,6 @@
 {
-  "name": "Default (Full Suite)",
-  "description": "Full 32-check suite across all 6 categories. Includes all framework mappings.",
+  "name": "Security Best Practices",
+  "description": "Full AI-STIG check suite covering all 8 categories: Deployment, Input Validation, Output Control, Agent Governance, Tool Call Security, Supply Chain, Governance, and Runtime Monitoring. Includes MCP server discovery, shadow AI identification, and agentic risk checks. Best starting point for any organization — runs every check and shows all framework mappings side by side.",
   "checks": "all",
   "default_output": "plain",
   "include_remediation": true,
