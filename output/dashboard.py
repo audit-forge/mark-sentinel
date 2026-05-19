@@ -927,7 +927,7 @@ function renderScan(){
         <span class="form-label" style="padding-top:3px">Profiles</span>
         <div style="display:flex;flex-direction:column;gap:6px">
           ${[
-            ['default',   'Security Best Practices',       'Essential checks — plain language, highest-impact controls'],
+            ['default',   'Base Scan',                      'Essential checks — plain language, highest-impact controls'],
             ['fedramp',   'FedRAMP / NIST 800-53',        'FedRAMP Moderate controls'],
             ['cmmc',      'CMMC 2.0',                     'Cybersecurity Maturity Model'],
             ['financial', 'Financial Services',           'NIST AI RMF / SR 26-2'],

@@ -1,5 +1,5 @@
 {
-  "name": "Security Best Practices",
+  "name": "Base Scan",
   "description": "Essential AI security checks for any organization — plain language output, highest-impact controls first. Covers deployment security, governance, supply chain, and runtime monitoring. Best starting point before moving to a compliance-specific profile.",
   "checks": [
     "AI-DEPLOY-001",
