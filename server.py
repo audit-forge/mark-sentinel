@@ -603,6 +603,18 @@ def _build_fleet_report_html(devices: list, tier: str, profile: str = '', profil
     _profile_label     = ', '.join(p.upper() for p in active_profiles) if active_profiles else ''
 
     btn_style = 'display:inline-block;padding:6px 14px;border-radius:6px;font-size:12px;font-weight:600;text-decoration:none;cursor:pointer;border:1px solid #30363d;background:#21262d;color:#c9d1d9'
+
+    # Pre-compute severity counts across all devices for stat cards
+    _all_pre = []
+    for _d in devices:
+        _rep = _d.get('_report') or {}
+        for _r in _rep.get('findings', _rep.get('results', [])):
+            if _r.get('status') != 'SKIP':
+                _all_pre.append(_r)
+    _cnt_ch  = sum(1 for f in _all_pre if f.get('severity') in ('CRITICAL', 'HIGH'))
+    _cnt_med = sum(1 for f in _all_pre if f.get('severity') == 'MEDIUM')
+    _cnt_li  = sum(1 for f in _all_pre if f.get('severity') in ('LOW', 'INFO'))
+
     parts = [f'''<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
 <title>M.A.R.K. Sentinel — Fleet {esc(tier_label)}</title>
 <style>
@@ -669,9 +681,9 @@ function switchTier(t){{
 <div class="meta">Generated {esc(now)} &nbsp;&bull;&nbsp; {len(devices)} device(s){(' &nbsp;&bull;&nbsp; Profiles: <strong>' + esc(_profile_label) + '</strong>') if _profile_label else ''} &nbsp;&bull;&nbsp; Confidential</div>
 <div class="cards">
   <div class="card"><div class="card-n score">{fleet_score}%</div><div class="card-l">Fleet Score</div></div>
-  <div class="card"><div class="card-n fail">{total_fail}</div><div class="card-l">High Risk</div></div>
-  <div class="card"><div class="card-n warn">{total_warn}</div><div class="card-l">Medium Risk</div></div>
-  <div class="card"><div class="card-n pass">{total_pass}</div><div class="card-l">Info</div></div>
+  <div class="card"><div class="card-n fail">{_cnt_ch}</div><div class="card-l">Critical / High</div></div>
+  <div class="card"><div class="card-n warn">{_cnt_med}</div><div class="card-l">Medium</div></div>
+  <div class="card"><div class="card-n pass">{_cnt_li}</div><div class="card-l">Low / Info</div></div>
   <div class="card"><div class="card-n" style="color:#58a6ff">{len(devices)}</div><div class="card-l">Devices</div></div>
 </div>''']
 
@@ -702,28 +714,48 @@ function switchTier(t){{
         _target_status = {'fail': 'FAIL', 'warn': 'WARN', 'pass': 'PASS'}.get(status_filter, '')
         all_findings = [f for f in all_findings if f.get('status', '').upper() == _target_status]
 
-    _section_label = {'fail': 'High Risk', 'warn': 'Medium Risk', 'pass': 'Info'}.get(status_filter, 'Critical &amp; High')
-    if status_filter:
-        crit_high = sorted(all_findings, key=lambda x: _SEV_ORDER_REPORT.index(x.get('severity','INFO')) if x.get('severity') in _SEV_ORDER_REPORT else 99)
-    else:
-        crit_high = [f for f in all_findings if f.get('status') == 'FAIL' and f.get('severity') in ('CRITICAL', 'HIGH')]
-        crit_high.sort(key=lambda x: _SEV_ORDER_REPORT.index(x.get('severity', 'INFO')) if x.get('severity') in _SEV_ORDER_REPORT else 99)
+    # Sort: FAIL first, then WARN, then PASS; within that by severity
+    _ST_RANK = {'FAIL': 0, 'WARN': 1, 'PASS': 2, 'SKIP': 3}
+    def _srt(lst):
+        return sorted(lst, key=lambda x: (
+            _ST_RANK.get(x.get('status', 'SKIP'), 99),
+            _SEV_ORDER_REPORT.index(x.get('severity', 'INFO')) if x.get('severity') in _SEV_ORDER_REPORT else 99
+        ))
 
-    parts.append(f'<h2>{_section_label} Findings ({len(crit_high)})</h2>')
-    if not crit_high:
-        _empty_msg = f'No {_status_label.lower()} found across the fleet.' if status_filter else 'No critical or high severity issues found across the fleet.'
-        parts.append(f'<p style="color:#3fb950;padding:12px 0">{esc(_empty_msg)}</p>')
-    else:
-        limit = 20 if tier == 'executive' else len(crit_high)
-        parts.append('<table><thead><tr><th>Severity</th><th>Device</th><th>Check</th><th>Finding</th></tr></thead><tbody>')
-        for f in crit_high[:limit]:
+    _af = all_findings  # may be pre-filtered by status_filter
+    _bkt_ch  = _srt([f for f in _af if f.get('severity') in ('CRITICAL', 'HIGH') and f.get('status') != 'SKIP'])
+    _bkt_med = _srt([f for f in _af if f.get('severity') == 'MEDIUM'             and f.get('status') != 'SKIP'])
+    _bkt_li  = _srt([f for f in _af if f.get('severity') in ('LOW', 'INFO')      and f.get('status') != 'SKIP'])
+
+    def _sev_table(label, findings, limit=None):
+        rows = [f'<h2>{label} ({len(findings)})</h2>']
+        if not findings:
+            rows.append('<p style="color:#3fb950;padding:12px 0">No findings in this category across the fleet.</p>')
+            return ''.join(rows)
+        rows.append('<table><thead><tr><th>Status</th><th>Severity</th><th>Device</th><th>Check</th><th>Finding</th></tr></thead><tbody>')
+        show = findings[:limit] if limit else findings
+        for f in show:
+            st  = f.get('status', '')
             sev = f.get('severity', 'INFO')
-            sc = _SEV_COLOR_HTML.get(sev, '#6e7681')
-            parts.append(f'<tr><td style="color:{sc};font-weight:700">{esc(sev)}</td>'
-                         f'<td style="color:#8b949e">{esc(f.get("_hostname",""))}</td>'
-                         f'<td style="color:#8b949e;font-size:12px">{esc(f.get("check_id",""))}</td>'
-                         f'<td>{esc(f.get("title",""))}</td></tr>')
-        parts.append('</tbody></table>')
+            sc  = _STATUS_COLOR_HTML.get(st, '#c9d1d9')
+            sv  = _SEV_COLOR_HTML.get(sev, '#6e7681')
+            rows.append(
+                f'<tr><td style="color:{sc};font-weight:700;white-space:nowrap">{esc(_STATUS_LABEL_HTML.get(st, st))}</td>'
+                f'<td style="color:{sv};font-weight:600">{esc(sev)}</td>'
+                f'<td style="color:#8b949e">{esc(f.get("_hostname",""))}</td>'
+                f'<td style="color:#8b949e;font-size:12px">{esc(f.get("check_id",""))}</td>'
+                f'<td>{esc(f.get("title",""))}</td></tr>'
+            )
+        rows.append('</tbody></table>')
+        if limit and len(findings) > limit:
+            rows.append(f'<p style="color:#6e7681;font-size:12px;margin-top:4px">Showing top {limit} of {len(findings)}. View Technical report for full list.</p>')
+        return ''.join(rows)
+
+    exec_limit = 15
+    parts.append(_sev_table('Critical &amp; High Severity', _bkt_ch, exec_limit if tier == 'executive' else None))
+    if tier != 'executive':
+        parts.append(_sev_table('Medium Severity', _bkt_med))
+        parts.append(_sev_table('Low / Info', _bkt_li))
 
     if tier == 'executive':
         posture = ('Strong — healthy AI security posture.' if fleet_score >= 90
