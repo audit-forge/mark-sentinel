@@ -343,7 +343,7 @@ def main():
     parser.add_argument('--target', default=_default_target, metavar='PATH',
                         help='Directory to scan (default: demo_target/ — fictional vulnerable deployment)')
     parser.add_argument('--profile', default='default',
-                        help='Audit profile: default, smb, fedramp, cmmc (default: default)')
+                        help='Audit profile: default, fedramp, cmmc, financial, healthcare, biotech, owasp_agentic, eu_ai_act (default: default)')
     parser.add_argument('--openai-model', default='gpt-4o', metavar='MODEL',
                         help='OpenAI model to audit (default: gpt-4o)')
     parser.add_argument('--claude-model', default='claude-opus-4-7', metavar='MODEL',

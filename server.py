@@ -594,7 +594,7 @@ def _build_fleet_report_html(devices: list, tier: str, profile: str = '', profil
     active_profiles = profiles or ([profile] if profile else [])
 
     _rpt_profiles = [('default', 'Security Best Practices'), ('fedramp', 'FedRAMP'), ('cmmc', 'CMMC 2.0'),
-                     ('financial', 'Financial'), ('smb', 'SMB'), ('biotech', 'Biotech'), ('healthcare', 'Healthcare')]
+                     ('financial', 'Financial'), ('biotech', 'Biotech'), ('healthcare', 'Healthcare')]
     _toolbar_cbs = ' '.join(
         f'<label style="font-size:12px;color:#c9d1d9;white-space:nowrap;cursor:pointer">'
         f'<input type="checkbox" class="rpt-cb" value="{v}"{" checked" if v in active_profiles else ""}> {lbl}</label>'
@@ -1562,7 +1562,7 @@ button:hover{{background:#2ea043}}
             pass
 
         profiles = [p.strip() for p in (body.get('profiles') or []) if p.strip()]
-        _VALID = {'default', 'fedramp', 'cmmc', 'financial', 'smb'}
+        _VALID = {'default', 'fedramp', 'cmmc', 'financial'}
         profiles = [p for p in profiles if p in _VALID]
 
         if profiles:
@@ -1586,7 +1586,7 @@ button:hover{{background:#2ea043}}
         except Exception:
             pass
 
-        _VALID = {'default', 'fedramp', 'cmmc', 'financial', 'smb'}
+        _VALID = {'default', 'fedramp', 'cmmc', 'financial'}
         profiles = [p for p in (body.get('profiles') or []) if p in _VALID]
         stagger  = body.get('stagger', 'normal')
 
@@ -1856,7 +1856,7 @@ button:hover{{background:#2ea043}}
             status_filter = ''
         if sev_filter not in ('ch', 'med', 'li', ''):
             sev_filter = ''
-        _VALID_PROFILES = {'default', 'fedramp', 'cmmc', 'financial', 'smb', 'biotech', 'healthcare', 'lifesciences', 'owasp_agentic', 'eu_ai_act'}
+        _VALID_PROFILES = {'default', 'fedramp', 'cmmc', 'financial', 'biotech', 'healthcare', 'lifesciences', 'owasp_agentic', 'eu_ai_act'}
         profiles = [p for p in profile_raw.split(',') if p in _VALID_PROFILES]
         profile  = ','.join(profiles)
         try:
@@ -3149,7 +3149,6 @@ body.light #theme-toggle,html.light #theme-toggle{{background:#f6f8fa;border-col
       <label style="font-size:12px;color:#c9d1d9;white-space:nowrap;cursor:pointer"><input type="checkbox" class="rpt-profile" value="fedramp"> FedRAMP</label>
       <label style="font-size:12px;color:#c9d1d9;white-space:nowrap;cursor:pointer"><input type="checkbox" class="rpt-profile" value="cmmc"> CMMC 2.0</label>
       <label style="font-size:12px;color:#c9d1d9;white-space:nowrap;cursor:pointer"><input type="checkbox" class="rpt-profile" value="financial"> Financial</label>
-      <label style="font-size:12px;color:#c9d1d9;white-space:nowrap;cursor:pointer"><input type="checkbox" class="rpt-profile" value="smb"> SMB</label>
       <label style="font-size:12px;color:#c9d1d9;white-space:nowrap;cursor:pointer"><input type="checkbox" class="rpt-profile" value="biotech"> Biotech</label>
       <label style="font-size:12px;color:#c9d1d9;white-space:nowrap;cursor:pointer"><input type="checkbox" class="rpt-profile" value="healthcare"> Healthcare</label>
       <label style="font-size:12px;color:#c9d1d9;white-space:nowrap;cursor:pointer"><input type="checkbox" class="rpt-profile" value="owasp_agentic"> OWASP Agentic</label>
@@ -3240,7 +3239,6 @@ body.light #theme-toggle,html.light #theme-toggle{{background:#f6f8fa;border-col
         <label style="font-size:13px;color:#e6edf3;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="cfg-profile-cb" value="financial"> Financial Services</label>
         <label style="font-size:13px;color:#e6edf3;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="cfg-profile-cb" value="fedramp"> FedRAMP / NIST 800-53</label>
         <label style="font-size:13px;color:#e6edf3;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="cfg-profile-cb" value="cmmc"> CMMC 2.0</label>
-        <label style="font-size:13px;color:#e6edf3;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="cfg-profile-cb" value="smb"> SMB</label>
         <label style="font-size:13px;color:#e6edf3;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="cfg-profile-cb" value="biotech"> Biotech (FDA 21 CFR Part 11 / HIPAA / GxP)</label>
         <label style="font-size:13px;color:#e6edf3;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="cfg-profile-cb" value="healthcare"> Healthcare (HIPAA / HITECH / FDA SaMD)</label>
         <label style="font-size:13px;color:#e6edf3;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="cfg-profile-cb" value="owasp_agentic"> OWASP Agentic AI Top 10</label>
@@ -3654,11 +3652,10 @@ async function runDiscovery() {{
 }}
 
 const _SCAN_PROFILES = [
-  {{id:'default',       label:'Security Best Practices', desc:'Full AI-STIG suite — all checks across all 8 categories including MCP/agent discovery. Best starting point for any organization.'}},
+  {{id:'default',       label:'Security Best Practices', desc:'Essential AI security checks — plain language, highest-impact controls first. Best starting point for any organization before moving to a compliance-specific profile.'}},
   {{id:'fedramp',       label:'FedRAMP',             desc:'FedRAMP Moderate — NIST 800-53 control mappings. Required for federal cloud systems and agency deployments.'}},
   {{id:'cmmc',          label:'CMMC 2.0',            desc:'Cybersecurity Maturity Model Certification — required for DoD contractors handling CUI.'}},
   {{id:'financial',     label:'Financial Services',  desc:'Financial sector AI controls — SOC 2, FFIEC, SR 11-7 model risk guidance.'}},
-  {{id:'smb',           label:'SMB',                 desc:'Essential controls for small and medium businesses — plain language, highest-impact items only.'}},
   {{id:'biotech',       label:'Biotech',             desc:'FDA 21 CFR Part 11, HIPAA, ICH E6(R2), GxP — for pharma and biotech AI systems.'}},
   {{id:'healthcare',    label:'Healthcare',          desc:'HIPAA, HITECH, FDA SaMD guidance — for clinical AI, EHR systems, and patient data protection.'}},
   {{id:'owasp_agentic', label:'OWASP Agentic',       desc:'OWASP Top 10 for Agentic AI (2026) — tool hijacking, prompt injection, excessive agency, rogue agents.'}},

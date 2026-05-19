@@ -927,11 +927,10 @@ function renderScan(){
         <span class="form-label" style="padding-top:3px">Profiles</span>
         <div style="display:flex;flex-direction:column;gap:6px">
           ${[
-            ['default',   'Default',                      'All AI-STIG checks'],
+            ['default',   'Security Best Practices',       'Essential checks — plain language, highest-impact controls'],
             ['fedramp',   'FedRAMP / NIST 800-53',        'FedRAMP Moderate controls'],
             ['cmmc',      'CMMC 2.0',                     'Cybersecurity Maturity Model'],
             ['financial', 'Financial Services',           'NIST AI RMF / SR 26-2'],
-            ['smb',       'SMB',                          'Small-medium business baseline'],
           ].map(([v,l,d])=>`
             <label style="display:flex;align-items:flex-start;gap:8px;cursor:pointer">
               <input type="checkbox" class="profile-cb" value="${v}" ${v==='default'?'checked':''}

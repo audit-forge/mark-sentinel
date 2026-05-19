@@ -4,7 +4,7 @@ M.A.R.K. Sentinel — AI Security Audit Tool
 Powered by Hash
 
 Usage:
-  python audit.py --mode config --profile smb --output plain
+  python audit.py --mode config --output plain
   python audit.py --mode config --target ./my-app --profile fedramp --output json,plain
   python audit.py --mode api --endpoint https://api.openai.com/v1 --api-key $OPENAI_API_KEY --model gpt-4o
   python audit.py --mode local --ollama-host http://localhost:11434 --model llama3 --output plain,sarif
@@ -166,7 +166,7 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 examples:
-  python audit.py --mode config --profile smb --output plain
+  python audit.py --mode config --output plain
   python audit.py --mode config --target ./my-app --profile default --output json,plain
   python audit.py --mode api --endpoint https://api.openai.com/v1 --api-key sk-... --model gpt-4o
   python audit.py --mode gemini --gemini-api-key AIza... --model gemini-1.5-flash
@@ -189,7 +189,7 @@ examples:
     parser.add_argument(
         '--profile',
         default='default',
-        help='Audit profile: smb, fedramp, cmmc, default (default: default)',
+        help='Audit profile: default, fedramp, cmmc, financial, healthcare, biotech, owasp_agentic, eu_ai_act (default: default)',
     )
     parser.add_argument(
         '--output',

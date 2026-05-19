@@ -214,7 +214,6 @@ class AgentStore:
             'fedramp':   'fedramp moderate',
             'cmmc':      'cmmc level 2',
             'financial': 'financial services',
-            'smb':       'smb basic',
         }
         terms = set()
         for p in profiles:

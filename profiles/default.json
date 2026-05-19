@@ -1,10 +1,29 @@
 {
   "name": "Security Best Practices",
-  "description": "Full AI-STIG check suite covering all 8 categories: Deployment, Input Validation, Output Control, Agent Governance, Tool Call Security, Supply Chain, Governance, and Runtime Monitoring. Includes MCP server discovery, shadow AI identification, and agentic risk checks. Best starting point for any organization — runs every check and shows all framework mappings side by side.",
-  "checks": "all",
+  "description": "Essential AI security checks for any organization — plain language output, highest-impact controls first. Covers deployment security, governance, supply chain, and runtime monitoring. Best starting point before moving to a compliance-specific profile.",
+  "checks": [
+    "AI-DEPLOY-001",
+    "AI-DEPLOY-002",
+    "AI-DEPLOY-003",
+    "AI-DEPLOY-004",
+    "AI-DEPLOY-005",
+    "AI-DEPLOY-006",
+    "AI-INP-005",
+    "AI-SUPPLY-003",
+    "AI-SUPPLY-005",
+    "AI-GOV-001",
+    "AI-GOV-002",
+    "AI-GOV-003",
+    "AI-GOV-005",
+    "AI-RUNTIME-001",
+    "AI-RUNTIME-002",
+    "AI-RUNTIME-003",
+    "AI-RUNTIME-004",
+    "AI-RUNTIME-005"
+  ],
   "default_output": "plain",
   "include_remediation": true,
-  "include_frameworks": true,
-  "severity_threshold": "LOW",
-  "smb_language": false
+  "include_frameworks": false,
+  "severity_threshold": "MEDIUM",
+  "smb_language": true
 }
