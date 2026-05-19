@@ -213,36 +213,41 @@ _STATUS_LABEL_HTML = {'FAIL': 'HIGH RISK', 'WARN': 'MEDIUM RISK', 'PASS': 'INFO'
 
 # ── Shared theme constants injected into every HTML page ──────────────────────
 _LIGHT_MODE_CSS = (
-    'body.light{background:#fff;color:#24292f}'
-    'body.light h1{color:#0969da}'
-    'body.light h2{color:#0969da;border-color:#d0d7de}'
-    'body.light h3{color:#57606a}'
-    'body.light .meta{color:#57606a}'
-    'body.light .toolbar{background:#f6f8fa;border-color:#d0d7de}'
-    'body.light .card{background:#f6f8fa;border-color:#d0d7de}'
-    'body.light .card-l{color:#57606a}'
-    'body.light th{background:#f6f8fa;color:#57606a;border-color:#d0d7de}'
-    'body.light td{border-color:#eaeef2}'
-    'body.light tr:hover td{background:#f6f8fa}'
-    'body.light .block{background:#f6f8fa;border-color:#d0d7de}'
-    'body.light .tag{background:#f6f8fa;border-color:#d0d7de;color:#24292f}'
-    'body.light .device-block{background:#f6f8fa;border-color:#d0d7de}'
-    'body.light .finding{border-color:#d0d7de}'
-    'body.light .det{color:#57606a}'
-    'body.light .rem{color:#1a7f37}'
-    'body.light .no-auth{color:#cf222e}'
-    'body.light .unknown{color:#9a6700}'
-    'body.light .auth-ok{color:#1a7f37}'
+    'html.light body{background:#fff;color:#24292f}'
+    'html.light h1{color:#0969da}'
+    'html.light h2{color:#0969da;border-color:#d0d7de}'
+    'html.light h3{color:#57606a}'
+    'html.light .meta{color:#57606a}'
+    'html.light .toolbar{background:#f6f8fa;border-color:#d0d7de}'
+    'html.light .card{background:#f6f8fa;border-color:#d0d7de}'
+    'html.light .card-l{color:#57606a}'
+    'html.light th{background:#f6f8fa;color:#57606a;border-color:#d0d7de}'
+    'html.light td{border-color:#eaeef2}'
+    'html.light tr:hover td{background:#f6f8fa}'
+    'html.light .block{background:#f6f8fa;border-color:#d0d7de}'
+    'html.light .tag{background:#f6f8fa;border-color:#d0d7de;color:#24292f}'
+    'html.light .device-block{background:#f6f8fa;border-color:#d0d7de}'
+    'html.light .finding{border-color:#d0d7de}'
+    'html.light .det{color:#57606a}'
+    'html.light .rem{color:#1a7f37}'
+    'html.light .no-auth{color:#cf222e}'
+    'html.light .unknown{color:#9a6700}'
+    'html.light .auth-ok{color:#1a7f37}'
 )
 _THEME_EARLY_SCRIPT = (
     "<script>if(localStorage.getItem('sentinel_theme')==='light')"
-    "document.body.classList.add('light');</script>"
+    "document.documentElement.classList.add('light');</script>"
 )
 _THEME_TOGGLE_JS = (
-    "function _applyTheme(l){document.body.classList.toggle('light',l);"
-    "var b=document.getElementById('theme-toggle');if(b)b.textContent=l?'⬛ Dark':'☀ Light';}"
-    "function toggleTheme(){var l=!document.body.classList.contains('light');"
-    "localStorage.setItem('sentinel_theme',l?'light':'dark');_applyTheme(l);}"
+    "function _applyTheme(l){"
+    "document.documentElement.classList.toggle('light',l);"
+    "if(document.body)document.body.classList.toggle('light',l);"
+    "var b=document.getElementById('theme-toggle');"
+    "if(b)b.textContent=l?'⬛ Dark':'☀ Light';}"
+    "function toggleTheme(){"
+    "var l=!document.documentElement.classList.contains('light');"
+    "localStorage.setItem('sentinel_theme',l?'light':'dark');"
+    "_applyTheme(l);}"
     "_applyTheme(localStorage.getItem('sentinel_theme')==='light');"
 )
 _THEME_BTN = (
@@ -2981,51 +2986,51 @@ body{{background:#0d1117;color:#c9d1d9;font-family:-apple-system,BlinkMacSystemF
 ::-webkit-scrollbar{{width:6px}}::-webkit-scrollbar-track{{background:#0d1117}}
 ::-webkit-scrollbar-thumb{{background:#30363d;border-radius:3px}}
 /* ── Light mode ── */
-body.light{{background:#ffffff;color:#24292f}}
-body.light .brand-bar{{border-color:#d0d7de}}
-body.light .brand-name{{color:#1f2328}}
-body.light .brand-sub{{color:#57606a}}
-body.light .brand-mark{{color:#0969da}}
-body.light .hlink{{color:#0969da}}
-body.light .scard{{background:#f6f8fa;border-color:#d0d7de}}
-body.light .scard:hover{{background:#eaeef2}}
-body.light .scard.sf-active{{background:#ddf4ff;border-color:#0969da}}
-body.light .scard.sf-active-red{{background:#ffebe9;border-color:#cf222e}}
-body.light .scard.sf-active-yellow{{background:#fff8c5;border-color:#9a6700}}
-body.light .scard.sf-active-green{{background:#dafbe1;border-color:#1a7f37}}
-body.light .scard-l{{color:#57606a}}
-body.light .sec-hdr{{color:#57606a}}
-body.light .dev-table th{{background:#f6f8fa;color:#57606a;border-color:#d0d7de}}
-body.light .dev-table td{{border-color:#eaeef2}}
-body.light .dev-row:hover{{background:#f6f8fa}}
-body.light .dev-host{{color:#1f2328}}
-body.light .detail-host{{color:#1f2328}}
-body.light .detail-meta{{color:#57606a}}
-body.light #detail-panel{{background:#f6f8fa;border-color:#d0d7de}}
-body.light .finding{{background:#f6f8fa;border-color:#d0d7de}}
-body.light .fhdr:hover{{background:#eaeef2}}
-body.light .fbody{{color:#57606a;border-color:#d0d7de}}
-body.light .find-title{{color:#24292f}}
-body.light .find-id{{color:#57606a}}
-body.light .find-chev{{color:#8c959f}}
-body.light .shadow-card{{background:#f6f8fa;border-color:#d0d7de;border-left-color:#8250df}}
-body.light .shadow-card:hover{{background:#eaeef2}}
-body.light .scan-btn{{background:#f6f8fa;border-color:#d0d7de;color:#0969da}}
-body.light .scan-btn:hover{{background:#eaeef2;border-color:#0969da}}
-body.light .refresh-note{{color:#8c959f}}
-body.light .empty{{color:#8c959f}}
-body.light .c-red{{color:#cf222e}}
-body.light .c-yellow{{color:#9a6700}}
-body.light .c-blue{{color:#0969da}}
-body.light .c-green{{color:#1a7f37}}
-body.light .c-gray{{color:#57606a}}
-body.light ::-webkit-scrollbar-track{{background:#ffffff}}
-body.light ::-webkit-scrollbar-thumb{{background:#d0d7de}}
-body.light #theme-toggle{{background:#f6f8fa;border-color:#d0d7de;color:#24292f}}
+body.light,html.light body{{background:#ffffff;color:#24292f}}
+body.light .brand-bar,html.light .brand-bar{{border-color:#d0d7de}}
+body.light .brand-name,html.light .brand-name{{color:#1f2328}}
+body.light .brand-sub,html.light .brand-sub{{color:#57606a}}
+body.light .brand-mark,html.light .brand-mark{{color:#0969da}}
+body.light .hlink,html.light .hlink{{color:#0969da}}
+body.light .scard,html.light .scard{{background:#f6f8fa;border-color:#d0d7de}}
+body.light .scard:hover,html.light .scard:hover{{background:#eaeef2}}
+body.light .scard.sf-active,html.light .scard.sf-active{{background:#ddf4ff;border-color:#0969da}}
+body.light .scard.sf-active-red,html.light .scard.sf-active-red{{background:#ffebe9;border-color:#cf222e}}
+body.light .scard.sf-active-yellow,html.light .scard.sf-active-yellow{{background:#fff8c5;border-color:#9a6700}}
+body.light .scard.sf-active-green,html.light .scard.sf-active-green{{background:#dafbe1;border-color:#1a7f37}}
+body.light .scard-l,html.light .scard-l{{color:#57606a}}
+body.light .sec-hdr,html.light .sec-hdr{{color:#57606a}}
+body.light .dev-table th,html.light .dev-table th{{background:#f6f8fa;color:#57606a;border-color:#d0d7de}}
+body.light .dev-table td,html.light .dev-table td{{border-color:#eaeef2}}
+body.light .dev-row:hover,html.light .dev-row:hover{{background:#f6f8fa}}
+body.light .dev-host,html.light .dev-host{{color:#1f2328}}
+body.light .detail-host,html.light .detail-host{{color:#1f2328}}
+body.light .detail-meta,html.light .detail-meta{{color:#57606a}}
+body.light #detail-panel,html.light #detail-panel{{background:#f6f8fa;border-color:#d0d7de}}
+body.light .finding,html.light .finding{{background:#f6f8fa;border-color:#d0d7de}}
+body.light .fhdr:hover,html.light .fhdr:hover{{background:#eaeef2}}
+body.light .fbody,html.light .fbody{{color:#57606a;border-color:#d0d7de}}
+body.light .find-title,html.light .find-title{{color:#24292f}}
+body.light .find-id,html.light .find-id{{color:#57606a}}
+body.light .find-chev,html.light .find-chev{{color:#8c959f}}
+body.light .shadow-card,html.light .shadow-card{{background:#f6f8fa;border-color:#d0d7de;border-left-color:#8250df}}
+body.light .shadow-card:hover,html.light .shadow-card:hover{{background:#eaeef2}}
+body.light .scan-btn,html.light .scan-btn{{background:#f6f8fa;border-color:#d0d7de;color:#0969da}}
+body.light .scan-btn:hover,html.light .scan-btn:hover{{background:#eaeef2;border-color:#0969da}}
+body.light .refresh-note,html.light .refresh-note{{color:#8c959f}}
+body.light .empty,html.light .empty{{color:#8c959f}}
+body.light .c-red,html.light .c-red{{color:#cf222e}}
+body.light .c-yellow,html.light .c-yellow{{color:#9a6700}}
+body.light .c-blue,html.light .c-blue{{color:#0969da}}
+body.light .c-green,html.light .c-green{{color:#1a7f37}}
+body.light .c-gray,html.light .c-gray{{color:#57606a}}
+body.light ::-webkit-scrollbar-track,html.light ::-webkit-scrollbar-track{{background:#ffffff}}
+body.light ::-webkit-scrollbar-thumb,html.light ::-webkit-scrollbar-thumb{{background:#d0d7de}}
+body.light #theme-toggle,html.light #theme-toggle{{background:#f6f8fa;border-color:#d0d7de;color:#24292f}}
 </style>
 </head>
 <body>
-<script>if(localStorage.getItem('sentinel_theme')==='light')document.body.classList.add('light');</script>
+<script>if(localStorage.getItem('sentinel_theme')==='light')document.documentElement.classList.add('light');</script>
 <div id="wrap">
   <div class="brand-bar">
     <span class="brand-mark">M.A.R.K.</span>
@@ -3196,12 +3201,13 @@ body.light #theme-toggle{{background:#f6f8fa;border-color:#d0d7de;color:#24292f}
 <script>
 // ── Theme ──
 function _applyTheme(light) {{
+  document.documentElement.classList.toggle('light', light);
   document.body.classList.toggle('light', light);
   const btn = document.getElementById('theme-toggle');
   if (btn) btn.textContent = light ? '⬛ Dark' : '☀ Light';
 }}
 function toggleTheme() {{
-  const light = !document.body.classList.contains('light');
+  const light = !document.documentElement.classList.contains('light');
   localStorage.setItem('sentinel_theme', light ? 'light' : 'dark');
   _applyTheme(light);
 }}
