@@ -523,7 +523,7 @@ def _build_fleet_report_html(devices: list, tier: str, profile: str = '', profil
     now = datetime.now(tz=timezone.utc).strftime('%Y-%m-%d %H:%M UTC')
     active_profiles = profiles or ([profile] if profile else [])
 
-    _rpt_profiles = [('default', 'Default'), ('fedramp', 'FedRAMP'), ('cmmc', 'CMMC 2.0'),
+    _rpt_profiles = [('default', 'Security Best Practices'), ('fedramp', 'FedRAMP'), ('cmmc', 'CMMC 2.0'),
                      ('financial', 'Financial'), ('smb', 'SMB'), ('biotech', 'Biotech'), ('healthcare', 'Healthcare')]
     _toolbar_cbs = ' '.join(
         f'<label style="font-size:12px;color:#c9d1d9;white-space:nowrap;cursor:pointer">'
@@ -2967,7 +2967,7 @@ body{{background:#0d1117;color:#c9d1d9;font-family:-apple-system,BlinkMacSystemF
     <span id="filter-badge" style="display:none;font-size:11px;background:#1a2332;color:#58a6ff;border:1px solid #30363d;border-radius:10px;padding:2px 10px;cursor:pointer" onclick="filterBy(null)" title="Clear filter">&#10005; clear filter</span>
     <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
       <span style="font-size:11px;color:#8b949e;white-space:nowrap">Profiles:</span>
-      <label style="font-size:12px;color:#c9d1d9;white-space:nowrap;cursor:pointer"><input type="checkbox" class="rpt-profile" value="default"> Default</label>
+      <label style="font-size:12px;color:#c9d1d9;white-space:nowrap;cursor:pointer"><input type="checkbox" class="rpt-profile" value="default"> Security Best Practices</label>
       <label style="font-size:12px;color:#c9d1d9;white-space:nowrap;cursor:pointer"><input type="checkbox" class="rpt-profile" value="fedramp"> FedRAMP</label>
       <label style="font-size:12px;color:#c9d1d9;white-space:nowrap;cursor:pointer"><input type="checkbox" class="rpt-profile" value="cmmc"> CMMC 2.0</label>
       <label style="font-size:12px;color:#c9d1d9;white-space:nowrap;cursor:pointer"><input type="checkbox" class="rpt-profile" value="financial"> Financial</label>
@@ -3058,7 +3058,7 @@ body{{background:#0d1117;color:#c9d1d9;font-family:-apple-system,BlinkMacSystemF
     <div style="display:grid;grid-template-columns:160px 1fr;gap:10px 16px;align-items:center;max-width:640px">
       <label style="font-size:13px;color:#8b949e;align-self:start;padding-top:4px">Compliance Profile</label>
       <div id="cfg-profile-group" style="display:flex;flex-wrap:wrap;gap:8px 24px">
-        <label style="font-size:13px;color:#e6edf3;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="cfg-profile-cb" value="default"> Default</label>
+        <label style="font-size:13px;color:#e6edf3;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="cfg-profile-cb" value="default"> Security Best Practices (Full Suite)</label>
         <label style="font-size:13px;color:#e6edf3;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="cfg-profile-cb" value="financial"> Financial Services</label>
         <label style="font-size:13px;color:#e6edf3;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="cfg-profile-cb" value="fedramp"> FedRAMP / NIST 800-53</label>
         <label style="font-size:13px;color:#e6edf3;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="cfg-profile-cb" value="cmmc"> CMMC 2.0</label>
@@ -3444,7 +3444,7 @@ async function runDiscovery() {{
 }}
 
 const _SCAN_PROFILES = [
-  {{id:'default',       label:'Default',             desc:'Full AI-STIG suite — all checks across all 6 risk categories, no framework filter. Best starting point.'}},
+  {{id:'default',       label:'Security Best Practices', desc:'Full AI-STIG suite — all checks across all 8 categories including MCP/agent discovery. Best starting point for any organization.'}},
   {{id:'fedramp',       label:'FedRAMP',             desc:'FedRAMP Moderate — NIST 800-53 control mappings. Required for federal cloud systems and agency deployments.'}},
   {{id:'cmmc',          label:'CMMC 2.0',            desc:'Cybersecurity Maturity Model Certification — required for DoD contractors handling CUI.'}},
   {{id:'financial',     label:'Financial Services',  desc:'Financial sector AI controls — SOC 2, FFIEC, SR 11-7 model risk guidance.'}},

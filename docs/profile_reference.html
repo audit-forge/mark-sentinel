@@ -1,0 +1,449 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>M.A.R.K. Sentinel — Scan Profile Reference</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#0d1117;color:#c9d1d9;padding:32px 24px;line-height:1.5}
+h1{font-size:24px;font-weight:700;color:#e6edf3;margin-bottom:6px}
+.subtitle{font-size:13px;color:#6e7681;margin-bottom:36px}
+h2{font-size:16px;font-weight:600;color:#e6edf3;margin:40px 0 14px}
+h3{font-size:13px;font-weight:600;color:#8b949e;text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px}
+
+/* Profile cards */
+.cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:16px;margin-bottom:8px}
+.card{background:#161b22;border:1px solid #21262d;border-radius:8px;padding:18px 20px}
+.card-name{font-size:15px;font-weight:700;color:#e6edf3;margin-bottom:4px}
+.card-id{font-size:11px;color:#58a6ff;font-family:monospace;margin-bottom:8px}
+.card-desc{font-size:12px;color:#8b949e;margin-bottom:12px;line-height:1.55}
+.card-meta{display:flex;flex-wrap:wrap;gap:6px}
+.tag{font-size:10px;font-weight:600;padding:2px 8px;border-radius:3px;text-transform:uppercase;letter-spacing:.04em}
+.tag-all{background:#1a2d1a;color:#3fb950;border:1px solid #238636}
+.tag-targeted{background:#1a2040;color:#58a6ff;border:1px solid #1f6feb}
+.tag-minimal{background:#2d2a14;color:#d29922;border:1px solid #9e6a03}
+.tag-fed{background:#1a1a2d;color:#a5a5ff;border:1px solid #6e40c9}
+.tag-health{background:#2d1a2d;color:#d2a0ff;border:1px solid #8250df}
+.tag-agent{background:#2d1a1a;color:#ff7b72;border:1px solid #f85149}
+.check-count{font-size:12px;color:#8b949e;margin-top:10px;padding-top:10px;border-top:1px solid #21262d}
+.check-count strong{color:#c9d1d9}
+
+/* Coverage matrix */
+.matrix-wrap{overflow-x:auto;margin-bottom:8px}
+table.matrix{width:100%;border-collapse:collapse;font-size:12px;min-width:900px}
+table.matrix th,table.matrix td{padding:9px 12px;border:1px solid #21262d;text-align:left;vertical-align:middle}
+table.matrix thead th{background:#161b22;color:#8b949e;font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.05em;white-space:nowrap}
+table.matrix thead th:first-child{min-width:160px}
+table.matrix tbody tr:nth-child(even){background:#0f1419}
+table.matrix tbody tr:hover{background:#1c2128}
+table.matrix td:first-child{color:#e6edf3;font-weight:600;font-size:12px}
+table.matrix td.cat-desc{color:#8b949e;font-size:11px;font-weight:400}
+.cov-full{color:#3fb950;font-weight:700}
+.cov-part{color:#d29922;font-weight:600}
+.cov-none{color:#484f58}
+.cov-na{color:#30363d}
+
+/* Framework table */
+table.fw{width:100%;border-collapse:collapse;font-size:12px}
+table.fw th,table.fw td{padding:9px 14px;border:1px solid #21262d;vertical-align:top}
+table.fw thead th{background:#161b22;color:#8b949e;font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.05em}
+table.fw tbody tr:nth-child(even){background:#0f1419}
+table.fw td:first-child{color:#e6edf3;font-weight:600;white-space:nowrap}
+table.fw td.fw-list{color:#8b949e;font-size:11px;line-height:1.7}
+table.fw td.fw-audience{color:#c9d1d9;font-size:12px}
+
+/* Note */
+.note{background:#1c2128;border:1px solid #30363d;border-radius:6px;padding:12px 16px;font-size:12px;color:#8b949e;margin-top:32px}
+.note strong{color:#c9d1d9}
+
+/* Legend */
+.legend{display:flex;gap:20px;flex-wrap:wrap;margin-bottom:16px;font-size:12px}
+.legend-item{display:flex;align-items:center;gap:6px}
+</style>
+</head>
+<body>
+
+<h1>M.A.R.K. Sentinel — Scan Profile Reference</h1>
+<p class="subtitle">Team reference &nbsp;·&nbsp; Generated 2026-05-18 &nbsp;·&nbsp; Internal use only</p>
+
+<!-- ─────────────────────────────────────────── PROFILE CARDS -->
+<h2>All Profiles</h2>
+<div class="cards">
+
+  <div class="card">
+    <div class="card-name">Security Best Practices</div>
+    <div class="card-id">id: default</div>
+    <div class="card-desc">Full AI-STIG suite across all 8 check categories. Runs every check including MCP server discovery, shadow AI identification, and agentic risk. Best starting point — shows all framework mappings side by side with no framework filter applied.</div>
+    <div class="card-meta">
+      <span class="tag tag-all">Full Suite</span>
+      <span class="tag tag-agent">Agent Discovery</span>
+    </div>
+    <div class="check-count"><strong>All checks</strong> &nbsp;·&nbsp; All categories &nbsp;·&nbsp; Severity: LOW+</div>
+  </div>
+
+  <div class="card">
+    <div class="card-name">FedRAMP</div>
+    <div class="card-id">id: fedramp</div>
+    <div class="card-desc">Full check suite with NIST 800-53 control mappings emphasized in every finding. Required for federal cloud systems, agency deployments, and any system hosting government data. Maps checks to AC, AU, CM, SC, SI, and other NIST control families.</div>
+    <div class="card-meta">
+      <span class="tag tag-all">Full Suite</span>
+      <span class="tag tag-fed">Federal</span>
+    </div>
+    <div class="check-count"><strong>All checks</strong> &nbsp;·&nbsp; Framework: NIST 800-53 &nbsp;·&nbsp; Severity: LOW+</div>
+  </div>
+
+  <div class="card">
+    <div class="card-name">CMMC 2.0</div>
+    <div class="card-id">id: cmmc</div>
+    <div class="card-desc">Full check suite with CMMC Level 2 practice mappings emphasized. Required for DoD contractors who handle Controlled Unclassified Information (CUI). Maps checks to CMMC domains: AC, AU, CM, IA, IR, MP, PL, SC, SI.</div>
+    <div class="card-meta">
+      <span class="tag tag-all">Full Suite</span>
+      <span class="tag tag-fed">DoD</span>
+    </div>
+    <div class="check-count"><strong>All checks</strong> &nbsp;·&nbsp; Framework: CMMC 2.0 Level 2 &nbsp;·&nbsp; Severity: LOW+</div>
+  </div>
+
+  <div class="card">
+    <div class="card-name">Financial Services</div>
+    <div class="card-id">id: financial</div>
+    <div class="card-desc">Full check suite aligned to financial sector AI risk guidance: NIST AI RMF 1.0 GOVERN/MAP/MEASURE/MANAGE functions, Federal Reserve SR 11-7 model risk management, and SR 26-2 AI-specific guidance for banks and financial institutions.</div>
+    <div class="card-meta">
+      <span class="tag tag-all">Full Suite</span>
+    </div>
+    <div class="check-count"><strong>All checks</strong> &nbsp;·&nbsp; Framework: NIST AI RMF, SR 11-7, SR 26-2 &nbsp;·&nbsp; Severity: LOW+</div>
+  </div>
+
+  <div class="card">
+    <div class="card-name">SMB</div>
+    <div class="card-id">id: smb</div>
+    <div class="card-desc">Streamlined profile for small and medium businesses. Focuses on the 18 highest-impact controls a non-technical owner can act on. Uses plain business language instead of technical jargon. Skips LOW-severity findings to reduce noise.</div>
+    <div class="card-meta">
+      <span class="tag tag-minimal">18 Checks</span>
+    </div>
+    <div class="check-count"><strong>18 checks</strong> &nbsp;·&nbsp; No framework mapping &nbsp;·&nbsp; Severity: MEDIUM+</div>
+  </div>
+
+  <div class="card">
+    <div class="card-name">Biotech</div>
+    <div class="card-id">id: biotech</div>
+    <div class="card-desc">Full check suite for pharmaceutical and biotech organizations. Emphasizes FDA 21 CFR Part 11 (electronic records), HIPAA 45 CFR §164, ICH E6(R2) Good Clinical Practice, GxP ALCOA+ data integrity, and FDA AI/ML Software as a Medical Device guidance.</div>
+    <div class="card-meta">
+      <span class="tag tag-all">Full Suite</span>
+      <span class="tag tag-health">Regulated Industry</span>
+    </div>
+    <div class="check-count"><strong>All checks</strong> &nbsp;·&nbsp; Framework: FDA, HIPAA, GxP, ICH &nbsp;·&nbsp; Severity: LOW+</div>
+  </div>
+
+  <div class="card">
+    <div class="card-name">Healthcare</div>
+    <div class="card-id">id: healthcare</div>
+    <div class="card-desc">Targeted profile for clinical AI, EHR systems, and health data platforms. Covers HIPAA Security &amp; Privacy Rules, HITECH breach notification, 21st Century Cures data access requirements, FDA SaMD guidance, CMS cybersecurity requirements, and HL7 FHIR security.</div>
+    <div class="card-meta">
+      <span class="tag tag-targeted">31 Checks</span>
+      <span class="tag tag-health">Clinical AI</span>
+    </div>
+    <div class="check-count"><strong>31 checks</strong> &nbsp;·&nbsp; Framework: HIPAA, HITECH, FDA SaMD &nbsp;·&nbsp; Severity: LOW+</div>
+  </div>
+
+  <div class="card">
+    <div class="card-name">OWASP Agentic AI</div>
+    <div class="card-id">id: owasp_agentic</div>
+    <div class="card-desc">Targeted profile mapped to the OWASP Top 10 for Agentic Applications (2026). Focuses on AI agent and tool call attack surface: tool hijacking, prompt injection, memory poisoning, excessive agency, cascading hallucinations, and rogue agent behavior.</div>
+    <div class="card-meta">
+      <span class="tag tag-targeted">26 Checks</span>
+      <span class="tag tag-agent">Agentic AI</span>
+    </div>
+    <div class="check-count"><strong>26 checks</strong> &nbsp;·&nbsp; Framework: OWASP Agentic Top 10 (2026) &nbsp;·&nbsp; Severity: LOW+</div>
+  </div>
+
+  <div class="card">
+    <div class="card-name">EU AI Act</div>
+    <div class="card-id">id: eu_ai_act</div>
+    <div class="card-desc">Targeted profile for organizations subject to the EU AI Act. Maps checks to Articles 9–15: risk management systems, data governance, technical documentation, logging obligations, transparency, human oversight, and accuracy/robustness requirements. Enforcement begins August 2026.</div>
+    <div class="card-meta">
+      <span class="tag tag-targeted">23 Checks</span>
+      <span class="tag tag-fed">EU Compliance</span>
+    </div>
+    <div class="check-count"><strong>23 checks</strong> &nbsp;·&nbsp; Framework: EU AI Act Articles 9–15 &nbsp;·&nbsp; Severity: LOW+</div>
+  </div>
+
+</div>
+
+<!-- ─────────────────────────────────────────── COVERAGE MATRIX -->
+<h2>Check Category Coverage by Profile</h2>
+<div class="legend">
+  <span class="legend-item"><span class="cov-full">●</span> All checks in category</span>
+  <span class="legend-item"><span class="cov-part">●</span> Partial (targeted subset)</span>
+  <span class="legend-item"><span class="cov-none">●</span> Not included</span>
+</div>
+<div class="matrix-wrap">
+<table class="matrix">
+<thead>
+<tr>
+  <th>Check Category</th>
+  <th>Security<br>Best Practices</th>
+  <th>FedRAMP</th>
+  <th>CMMC 2.0</th>
+  <th>Financial</th>
+  <th>SMB</th>
+  <th>Biotech</th>
+  <th>Healthcare</th>
+  <th>OWASP<br>Agentic</th>
+  <th>EU AI Act</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+  <td>AI-DEPLOY &nbsp;<span style="font-size:10px;color:#484f58">(6 checks)</span><br><span style="font-size:11px;color:#6e7681;font-weight:400">Deployment security, access control, isolation</span></td>
+  <td class="cov-full">● All 6</td>
+  <td class="cov-full">● All 6</td>
+  <td class="cov-full">● All 6</td>
+  <td class="cov-full">● All 6</td>
+  <td class="cov-full">● All 6</td>
+  <td class="cov-full">● All 6</td>
+  <td class="cov-full">● All 6</td>
+  <td class="cov-none">—</td>
+  <td class="cov-full">● All 6</td>
+</tr>
+<tr>
+  <td>AI-INP &nbsp;<span style="font-size:10px;color:#484f58">(5 checks)</span><br><span style="font-size:11px;color:#6e7681;font-weight:400">Input validation, prompt injection prevention</span></td>
+  <td class="cov-full">● All 5</td>
+  <td class="cov-full">● All 5</td>
+  <td class="cov-full">● All 5</td>
+  <td class="cov-full">● All 5</td>
+  <td class="cov-part">● 1 of 5</td>
+  <td class="cov-full">● All 5</td>
+  <td class="cov-part">● 3 of 5</td>
+  <td class="cov-part">● 2 of 5</td>
+  <td class="cov-none">—</td>
+</tr>
+<tr>
+  <td>AI-OUT &nbsp;<span style="font-size:10px;color:#484f58">(5 checks)</span><br><span style="font-size:11px;color:#6e7681;font-weight:400">Output filtering, sensitive data, hallucination control</span></td>
+  <td class="cov-full">● All 5</td>
+  <td class="cov-full">● All 5</td>
+  <td class="cov-full">● All 5</td>
+  <td class="cov-full">● All 5</td>
+  <td class="cov-none">—</td>
+  <td class="cov-full">● All 5</td>
+  <td class="cov-part">● 4 of 5</td>
+  <td class="cov-part">● 1 of 5</td>
+  <td class="cov-part">● 1 of 5</td>
+</tr>
+<tr>
+  <td>AI-AGENT &nbsp;<span style="font-size:10px;color:#484f58">(6 checks)</span><br><span style="font-size:11px;color:#6e7681;font-weight:400">Agent permissions, autonomy limits, identity, memory</span></td>
+  <td class="cov-full">● All 6</td>
+  <td class="cov-full">● All 6</td>
+  <td class="cov-full">● All 6</td>
+  <td class="cov-full">● All 6</td>
+  <td class="cov-none">—</td>
+  <td class="cov-full">● All 6</td>
+  <td class="cov-part">● 3 of 6</td>
+  <td class="cov-full">● All 6</td>
+  <td class="cov-part">● 3 of 6</td>
+</tr>
+<tr>
+  <td>AI-TOOL &nbsp;<span style="font-size:10px;color:#484f58">(7 checks)</span><br><span style="font-size:11px;color:#6e7681;font-weight:400">MCP server security, tool call authentication, hijacking</span></td>
+  <td class="cov-full">● All 7</td>
+  <td class="cov-none">—</td>
+  <td class="cov-none">—</td>
+  <td class="cov-none">—</td>
+  <td class="cov-none">—</td>
+  <td class="cov-none">—</td>
+  <td class="cov-none">—</td>
+  <td class="cov-full">● All 7</td>
+  <td class="cov-none">—</td>
+</tr>
+<tr>
+  <td>AI-SUPPLY &nbsp;<span style="font-size:10px;color:#484f58">(6 checks)</span><br><span style="font-size:11px;color:#6e7681;font-weight:400">Third-party models, vendor risk, model provenance</span></td>
+  <td class="cov-full">● All 6</td>
+  <td class="cov-full">● All 6</td>
+  <td class="cov-full">● All 6</td>
+  <td class="cov-full">● All 5</td>
+  <td class="cov-part">● 2 of 6</td>
+  <td class="cov-full">● All 6</td>
+  <td class="cov-part">● 5 of 6</td>
+  <td class="cov-none">—</td>
+  <td class="cov-part">● 3 of 6</td>
+</tr>
+<tr>
+  <td>AI-GOV &nbsp;<span style="font-size:10px;color:#484f58">(5 checks)</span><br><span style="font-size:11px;color:#6e7681;font-weight:400">Policy, inventory, incident response, audit logging</span></td>
+  <td class="cov-full">● All 5</td>
+  <td class="cov-full">● All 5</td>
+  <td class="cov-full">● All 5</td>
+  <td class="cov-full">● All 5</td>
+  <td class="cov-part">● 4 of 5</td>
+  <td class="cov-full">● All 5</td>
+  <td class="cov-full">● All 5</td>
+  <td class="cov-full">● All 5</td>
+  <td class="cov-full">● All 5</td>
+</tr>
+<tr>
+  <td>AI-RUNTIME &nbsp;<span style="font-size:10px;color:#484f58">(5 checks)</span><br><span style="font-size:11px;color:#6e7681;font-weight:400">Live monitoring, anomaly detection, kill switch, drift</span></td>
+  <td class="cov-full">● All 5</td>
+  <td class="cov-full">● All 5</td>
+  <td class="cov-full">● All 5</td>
+  <td class="cov-full">● All 5</td>
+  <td class="cov-full">● All 5</td>
+  <td class="cov-full">● All 5</td>
+  <td class="cov-full">● All 5</td>
+  <td class="cov-full">● All 5</td>
+  <td class="cov-full">● All 5</td>
+</tr>
+<tr style="background:#161b22;font-weight:700">
+  <td style="color:#8b949e;font-size:11px;font-weight:600;text-transform:uppercase">Total Checks</td>
+  <td style="color:#e6edf3">45</td>
+  <td style="color:#e6edf3">38</td>
+  <td style="color:#e6edf3">38</td>
+  <td style="color:#e6edf3">37</td>
+  <td style="color:#d29922">18</td>
+  <td style="color:#e6edf3">38</td>
+  <td style="color:#58a6ff">31</td>
+  <td style="color:#58a6ff">26</td>
+  <td style="color:#58a6ff">23</td>
+</tr>
+</tbody>
+</table>
+</div>
+
+<!-- ─────────────────────────────────────────── FRAMEWORK TABLE -->
+<h2>Regulatory &amp; Framework Mapping</h2>
+<table class="fw">
+<thead>
+<tr>
+  <th style="width:160px">Profile</th>
+  <th>Frameworks Mapped</th>
+  <th style="width:200px">Best For</th>
+  <th style="width:160px">Severity Filter</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+  <td>Security Best Practices</td>
+  <td class="fw-list">NIST AI RMF · NIST 800-53 · CMMC 2.0 · EU AI Act · OWASP Agentic Top 10<br>All frameworks shown side by side — no single framework emphasized</td>
+  <td class="fw-audience">Internal security reviews, baseline assessments, new customer onboarding</td>
+  <td style="color:#3fb950;font-size:12px">LOW and above (everything)</td>
+</tr>
+<tr>
+  <td>FedRAMP</td>
+  <td class="fw-list">NIST 800-53 Rev 5 (AC, AU, CM, IA, IR, MP, PL, SC, SI control families)<br>FedRAMP Moderate authorization baseline</td>
+  <td class="fw-audience">Federal agencies, cloud service providers seeking FedRAMP authorization</td>
+  <td style="color:#3fb950;font-size:12px">LOW and above</td>
+</tr>
+<tr>
+  <td>CMMC 2.0</td>
+  <td class="fw-list">CMMC Level 2 domains: AC, AU, CM, IA, IR, MP, PL, SC, SI<br>Based on NIST 800-171 Rev 2</td>
+  <td class="fw-audience">DoD prime contractors, subcontractors handling CUI data</td>
+  <td style="color:#3fb950;font-size:12px">LOW and above</td>
+</tr>
+<tr>
+  <td>Financial Services</td>
+  <td class="fw-list">NIST AI RMF 1.0 (GOVERN, MAP, MEASURE, MANAGE)<br>Federal Reserve SR 11-7 Model Risk Management<br>Federal Reserve SR 26-2 AI-specific guidance</td>
+  <td class="fw-audience">Banks, credit unions, insurance, investment firms, fintechs</td>
+  <td style="color:#3fb950;font-size:12px">LOW and above</td>
+</tr>
+<tr>
+  <td>SMB</td>
+  <td class="fw-list">No framework mapping — plain business language only<br>Focused on actionable items, not compliance citations</td>
+  <td class="fw-audience">Small businesses, startups, non-technical owners, first-time AI adopters</td>
+  <td style="color:#d29922;font-size:12px">MEDIUM and above only</td>
+</tr>
+<tr>
+  <td>Biotech</td>
+  <td class="fw-list">FDA 21 CFR Part 11 (Electronic Records)<br>HIPAA 45 CFR §164 (Privacy &amp; Security)<br>ICH E6(R2) Good Clinical Practice<br>GxP ALCOA+ Data Integrity · FDA AI/ML SaMD · EU MDR Annex I</td>
+  <td class="fw-audience">Pharma, biotech, CROs, medical device manufacturers, clinical trial sponsors</td>
+  <td style="color:#3fb950;font-size:12px">LOW and above</td>
+</tr>
+<tr>
+  <td>Healthcare</td>
+  <td class="fw-list">HIPAA Security Rule (45 CFR §164.312)<br>HIPAA Privacy Rule · HITECH Breach Notification<br>FDA AI/ML SaMD Action Plan · CMS Cybersecurity<br>21st Century Cures Act · HL7 FHIR Security</td>
+  <td class="fw-audience">Hospitals, health systems, EHR vendors, telehealth, clinical AI companies</td>
+  <td style="color:#3fb950;font-size:12px">LOW and above</td>
+</tr>
+<tr>
+  <td>OWASP Agentic AI</td>
+  <td class="fw-list">OWASP Top 10 for Agentic Applications (2026)<br>A01 Memory Poisoning · A02 Tool/Plugin Hijacking · A03 Prompt Injection<br>A04 Cascading Hallucinations · A05 Resource Oversubscription<br>A06 AI Social Engineering · A07 Data Exfiltration<br>A08 Excessive Agency · A09 Audit Bypass · A10 Rogue Agent</td>
+  <td class="fw-audience">Security teams deploying AI agents, MCP server operators, OWASP-aligned assessments</td>
+  <td style="color:#3fb950;font-size:12px">LOW and above</td>
+</tr>
+<tr>
+  <td>EU AI Act</td>
+  <td class="fw-list">Article 9 — Risk Management Systems<br>Article 10 — Data Governance<br>Article 11 — Technical Documentation<br>Article 12 — Logging &amp; Record Keeping<br>Article 13 — Transparency<br>Article 14 — Human Oversight<br>Article 15 — Accuracy &amp; Robustness<br><em style="color:#f85149">Enforcement: August 2026</em></td>
+  <td class="fw-audience">Any org selling or deploying high-risk AI in EU markets</td>
+  <td style="color:#3fb950;font-size:12px">LOW and above</td>
+</tr>
+</tbody>
+</table>
+
+<!-- ─────────────────────────────────────────── QUICK DECISION GUIDE -->
+<h2>Quick Decision Guide</h2>
+<table class="fw">
+<thead>
+<tr>
+  <th>If your customer / situation is…</th>
+  <th>Use this profile</th>
+  <th>Why</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+  <td>Starting fresh, no specific compliance requirement</td>
+  <td style="color:#3fb950;font-weight:700">Security Best Practices</td>
+  <td style="color:#8b949e;font-size:12px">Gets everything — full picture, all frameworks shown for reference</td>
+</tr>
+<tr>
+  <td>Federal agency or bidding on a federal contract</td>
+  <td style="color:#a5a5ff;font-weight:700">FedRAMP</td>
+  <td style="color:#8b949e;font-size:12px">NIST 800-53 citations auditors expect to see</td>
+</tr>
+<tr>
+  <td>DoD contractor, works with CUI data</td>
+  <td style="color:#a5a5ff;font-weight:700">CMMC 2.0</td>
+  <td style="color:#8b949e;font-size:12px">Required for DFARS compliance and contract eligibility</td>
+</tr>
+<tr>
+  <td>Bank, credit union, investment firm</td>
+  <td style="color:#c9d1d9;font-weight:700">Financial Services</td>
+  <td style="color:#8b949e;font-size:12px">SR 11-7 and SR 26-2 are what bank examiners reference</td>
+</tr>
+<tr>
+  <td>Small business, non-technical owner</td>
+  <td style="color:#d29922;font-weight:700">SMB</td>
+  <td style="color:#8b949e;font-size:12px">Plain language, only actionable items, no compliance jargon</td>
+</tr>
+<tr>
+  <td>Drug company, CRO, medical device (non-clinical)</td>
+  <td style="color:#d2a0ff;font-weight:700">Biotech</td>
+  <td style="color:#8b949e;font-size:12px">21 CFR Part 11, GxP, ICH — what FDA inspectors look for</td>
+</tr>
+<tr>
+  <td>Hospital, EHR system, clinical AI, telehealth</td>
+  <td style="color:#d2a0ff;font-weight:700">Healthcare</td>
+  <td style="color:#8b949e;font-size:12px">HIPAA, HITECH, FDA SaMD — focused on patient data and clinical risk</td>
+</tr>
+<tr>
+  <td>Deploying AI agents, using MCP servers, LLM tool calls</td>
+  <td style="color:#ff7b72;font-weight:700">OWASP Agentic</td>
+  <td style="color:#8b949e;font-size:12px">Covers the specific attack surface agents introduce — this market is wide open</td>
+</tr>
+<tr>
+  <td>Selling into EU or have EU customers</td>
+  <td style="color:#58a6ff;font-weight:700">EU AI Act</td>
+  <td style="color:#8b949e;font-size:12px">Enforcement begins August 2026 — customers need this now to prepare</td>
+</tr>
+<tr>
+  <td>Large enterprise, multiple compliance requirements</td>
+  <td style="color:#3fb950;font-weight:700">Run multiple profiles together</td>
+  <td style="color:#8b949e;font-size:12px">Sentinel supports stacking — e.g., FedRAMP + OWASP Agentic for a federal AI agent deployment</td>
+</tr>
+</tbody>
+</table>
+
+<div class="note">
+  <strong>Note on AI-TOOL checks:</strong> The AI-TOOL category (MCP server security, tool call authentication, plugin hijacking) is included in Security Best Practices and OWASP Agentic profiles. Other profiles don't include AI-TOOL checks yet because the category was added after those frameworks were finalized — we can add it selectively as customer demand warrants.
+  <br><br>
+  <strong>Stacking profiles:</strong> You can run multiple profiles in a single scan. The report shows all framework citations side by side. Common combos: <em>FedRAMP + OWASP Agentic</em> (federal AI agents), <em>Healthcare + EU AI Act</em> (EU health systems), <em>Financial + CMMC</em> (defense bank contractors).
+</div>
+
+</body>
+</html>
