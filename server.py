@@ -2965,6 +2965,24 @@ def _build_fleet_html(devices: list[dict], shadow: list[dict] | None = None,
     total_warn = sum((d.get('warn_count') or 0) for d in devices)
     total_pass = sum((d.get('pass_count') or 0) for d in devices)
 
+    # Severity-based counts for stat cards (one query, all devices)
+    _dash_ch = _dash_med = _dash_li = 0
+    try:
+        for _rpt in _get_store().get_all_latest_reports():
+            _rjson = _rpt if isinstance(_rpt, dict) else {}
+            for _f in _rjson.get('findings', _rjson.get('results', [])):
+                if _f.get('status') == 'SKIP':
+                    continue
+                _sev = _f.get('severity', 'INFO')
+                if _sev in ('CRITICAL', 'HIGH'):
+                    _dash_ch += 1
+                elif _sev == 'MEDIUM':
+                    _dash_med += 1
+                else:
+                    _dash_li += 1
+    except Exception:
+        _dash_ch, _dash_med, _dash_li = total_fail, total_warn, total_pass
+
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -3094,12 +3112,12 @@ body.light #theme-toggle,html.light #theme-toggle{{background:#f6f8fa;border-col
   <div class="stat-row">
     <div class="scard" id="sf-all" onclick="window.open('/','_blank')" title="Open all devices in new tab">
       <div class="scard-n c-blue" id="sc-count">{len(devices)}</div><div class="scard-l">Devices</div></div>
-    <div class="scard" id="sf-fail" onclick="window.open('/api/fleet/report?tier=technical&amp;status=fail&amp;fmt=html','_blank')" title="View all failed items across all devices">
-      <div class="scard-n c-red" id="sc-fail">{total_fail}</div><div class="scard-l">High Risk</div></div>
-    <div class="scard" id="sf-warn" onclick="window.open('/api/fleet/report?tier=technical&amp;status=warn&amp;fmt=html','_blank')" title="View all medium risk items across all devices">
-      <div class="scard-n c-yellow" id="sc-warn">{total_warn}</div><div class="scard-l">Medium Risk</div></div>
-    <div class="scard" id="sf-pass" onclick="window.open('/api/fleet/report?tier=technical&amp;status=pass&amp;fmt=html','_blank')" title="View all low risk checks across all devices">
-      <div class="scard-n c-blue" id="sc-pass">{total_pass}</div><div class="scard-l">Info</div></div>
+    <div class="scard" id="sf-fail" onclick="window.open('/api/fleet/report?tier=technical&amp;status=fail&amp;fmt=html','_blank')" title="View all Critical &amp; High severity findings across all devices">
+      <div class="scard-n c-red" id="sc-fail">{_dash_ch}</div><div class="scard-l">Critical / High</div></div>
+    <div class="scard" id="sf-warn" onclick="window.open('/api/fleet/report?tier=technical&amp;status=warn&amp;fmt=html','_blank')" title="View all Medium severity findings across all devices">
+      <div class="scard-n c-yellow" id="sc-warn">{_dash_med}</div><div class="scard-l">Medium</div></div>
+    <div class="scard" id="sf-pass" onclick="window.open('/api/fleet/report?tier=ciso&amp;fmt=html','_blank')" title="View Low and Informational findings across all devices">
+      <div class="scard-n c-blue" id="sc-pass">{_dash_li}</div><div class="scard-l">Low / Info</div></div>
     <div class="scard" id="sf-shadow" onclick="document.getElementById('shadow-section').scrollIntoView({{behavior:'smooth'}})" title="Unmanaged AI devices discovered on your network — click to view">
       <div class="scard-n" id="sc-shadow" style="color:#a371f7">{len(shadow)}</div><div class="scard-l">Shadow AI</div></div>
     <div class="scard" id="sf-mcp" onclick="window.open('/api/fleet/mcp/report?tier=ciso','_blank')" title="MCP servers and AI agent tool call exposure — click to open report">
@@ -3361,9 +3379,6 @@ async function refreshDevices() {{
     const data = await resp.json();
     const devs = data.devices || [];
     document.getElementById('sc-count').textContent = devs.length;
-    document.getElementById('sc-fail').textContent  = devs.reduce((s,d)=>s+(d.fail_count||0),0);
-    document.getElementById('sc-warn').textContent  = devs.reduce((s,d)=>s+(d.warn_count||0),0);
-    document.getElementById('sc-pass').textContent  = devs.reduce((s,d)=>s+(d.pass_count||0),0);
     _allDevices = devs;
     _syncFilterUI();
     const maxPage = Math.max(1, Math.ceil(_visibleDevices().length / _pageSize));
