@@ -564,7 +564,7 @@ function switchTier(t){{location.href='/api/fleet/mcp/report?tier='+t;}}
     return ''.join(parts)
 
 
-def _build_fleet_report_html(devices: list, tier: str, profile: str = '', profiles: list | None = None, status_filter: str = '') -> str:
+def _build_fleet_report_html(devices: list, tier: str, profile: str = '', profiles: list | None = None, status_filter: str = '', sev_filter: str = '') -> str:
     from datetime import datetime, timezone
     import html as _html
 
@@ -580,8 +580,10 @@ def _build_fleet_report_html(devices: list, tier: str, profile: str = '', profil
             return str(epoch)
 
     _status_label = {'fail': 'High Risk Items', 'warn': 'Medium Risk Items', 'pass': 'Info Items'}.get(status_filter, '')
+    _sev_label    = {'ch': 'Critical / High Severity', 'med': 'Medium Severity', 'li': 'Low / Info'}.get(sev_filter, '')
     _tier_base    = {'executive': 'Executive Summary', 'ciso': 'CISO Report', 'technical': 'Technical Findings'}.get(tier, 'Fleet Report')
-    tier_label    = f'{_tier_base} — {_status_label}' if _status_label else _tier_base
+    _active_label = _sev_label or _status_label
+    tier_label    = f'{_tier_base} — {_active_label}' if _active_label else _tier_base
     total_fail = sum(d.get('fail_count', 0) or 0 for d in devices)
     total_warn = sum(d.get('warn_count', 0) or 0 for d in devices)
     total_pass = sum(d.get('pass_count', 0) or 0 for d in devices)
@@ -752,10 +754,17 @@ function switchTier(t){{
         return ''.join(rows)
 
     exec_limit = 15
-    parts.append(_sev_table('Critical &amp; High Severity', _bkt_ch, exec_limit if tier == 'executive' else None))
-    if tier != 'executive':
+    if sev_filter == 'ch':
+        parts.append(_sev_table('Critical &amp; High Severity', _bkt_ch))
+    elif sev_filter == 'med':
         parts.append(_sev_table('Medium Severity', _bkt_med))
+    elif sev_filter == 'li':
         parts.append(_sev_table('Low / Info', _bkt_li))
+    else:
+        parts.append(_sev_table('Critical &amp; High Severity', _bkt_ch, exec_limit if tier == 'executive' else None))
+        if tier != 'executive':
+            parts.append(_sev_table('Medium Severity', _bkt_med))
+            parts.append(_sev_table('Low / Info', _bkt_li))
 
     if tier == 'executive':
         posture = ('Strong — healthy AI security posture.' if fleet_score >= 90
@@ -1833,17 +1842,20 @@ button:hover{{background:#2ea043}}
             self._json({'error': str(e)}, 500)
 
     def _api_fleet_report(self):
-        """GET /api/fleet/report?tier=executive|ciso|technical&fmt=pdf|html|json[&profile=fedramp,cmmc][&status=fail|warn|pass]"""
+        """GET /api/fleet/report?tier=executive|ciso|technical&fmt=pdf|html|json[&profile=fedramp,cmmc][&status=fail|warn|pass][&sev=ch|med|li]"""
         from urllib.parse import parse_qs, urlparse as _up
         qs = parse_qs(_up(self.path).query)
         tier          = (qs.get('tier',    ['ciso'])[0]).lower()
         fmt           = (qs.get('fmt',     ['html'])[0]).lower()
         profile_raw   = (qs.get('profile', [''])[0]).lower().strip()
         status_filter = (qs.get('status',  [''])[0]).lower().strip()
+        sev_filter    = (qs.get('sev',     [''])[0]).lower().strip()
         if tier not in ('executive', 'ciso', 'technical'):
             tier = 'ciso'
         if status_filter not in ('fail', 'warn', 'pass', ''):
             status_filter = ''
+        if sev_filter not in ('ch', 'med', 'li', ''):
+            sev_filter = ''
         _VALID_PROFILES = {'default', 'fedramp', 'cmmc', 'financial', 'smb', 'biotech', 'healthcare', 'lifesciences', 'owasp_agentic', 'eu_ai_act'}
         profiles = [p for p in profile_raw.split(',') if p in _VALID_PROFILES]
         profile  = ','.join(profiles)
@@ -1884,7 +1896,7 @@ button:hover{{background:#2ea043}}
                     self._send(500, f'PDF generation failed: {pdf_err}\n\n{tb}'.encode(), 'text/plain')
                     return
 
-            html = _build_fleet_report_html(devices, tier, profile=profile, profiles=profiles, status_filter=status_filter)
+            html = _build_fleet_report_html(devices, tier, profile=profile, profiles=profiles, status_filter=status_filter, sev_filter=sev_filter)
             data = html.encode('utf-8')
             self.send_response(200)
             self.send_header('Content-Type', 'text/html; charset=utf-8')
@@ -3112,11 +3124,11 @@ body.light #theme-toggle,html.light #theme-toggle{{background:#f6f8fa;border-col
   <div class="stat-row">
     <div class="scard" id="sf-all" onclick="window.open('/','_blank')" title="Open all devices in new tab">
       <div class="scard-n c-blue" id="sc-count">{len(devices)}</div><div class="scard-l">Devices</div></div>
-    <div class="scard" id="sf-fail" onclick="window.open('/api/fleet/report?tier=technical&amp;status=fail&amp;fmt=html','_blank')" title="View all Critical &amp; High severity findings across all devices">
+    <div class="scard" id="sf-fail" onclick="window.open('/api/fleet/report?tier=ciso&amp;sev=ch&amp;fmt=html','_blank')" title="View Critical &amp; High severity findings only">
       <div class="scard-n c-red" id="sc-fail">{_dash_ch}</div><div class="scard-l">Critical / High</div></div>
-    <div class="scard" id="sf-warn" onclick="window.open('/api/fleet/report?tier=technical&amp;status=warn&amp;fmt=html','_blank')" title="View all Medium severity findings across all devices">
+    <div class="scard" id="sf-warn" onclick="window.open('/api/fleet/report?tier=ciso&amp;sev=med&amp;fmt=html','_blank')" title="View Medium severity findings only">
       <div class="scard-n c-yellow" id="sc-warn">{_dash_med}</div><div class="scard-l">Medium</div></div>
-    <div class="scard" id="sf-pass" onclick="window.open('/api/fleet/report?tier=ciso&amp;fmt=html','_blank')" title="View Low and Informational findings across all devices">
+    <div class="scard" id="sf-pass" onclick="window.open('/api/fleet/report?tier=ciso&amp;sev=li&amp;fmt=html','_blank')" title="View Low and Informational findings only">
       <div class="scard-n c-blue" id="sc-pass">{_dash_li}</div><div class="scard-l">Low / Info</div></div>
     <div class="scard" id="sf-shadow" onclick="document.getElementById('shadow-section').scrollIntoView({{behavior:'smooth'}})" title="Unmanaged AI devices discovered on your network — click to view">
       <div class="scard-n" id="sc-shadow" style="color:#a371f7">{len(shadow)}</div><div class="scard-l">Shadow AI</div></div>
