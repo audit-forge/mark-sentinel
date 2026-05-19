@@ -209,6 +209,7 @@ def _rebuild_dashboard(out_dir: Path) -> bool:
 _SEV_ORDER_REPORT = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW', 'INFO']
 _SEV_COLOR_HTML = {'CRITICAL': '#f85149', 'HIGH': '#d29922', 'MEDIUM': '#58a6ff', 'LOW': '#3fb950', 'INFO': '#6e7681'}
 _STATUS_COLOR_HTML = {'FAIL': '#f85149', 'WARN': '#d29922', 'PASS': '#3fb950', 'SKIP': '#6e7681', 'N/A': '#444c56'}
+_STATUS_LABEL_HTML = {'FAIL': 'HIGH RISK', 'WARN': 'MEDIUM RISK', 'PASS': 'LOW RISK', 'SKIP': 'SKIP', 'N/A': 'N/A'}
 
 
 def _risk_score_html(fail, warn, total) -> int:
@@ -510,7 +511,7 @@ def _build_fleet_report_html(devices: list, tier: str, profile: str = '', profil
         except Exception:
             return str(epoch)
 
-    _status_label = {'fail': 'Failed Items', 'warn': 'Warnings', 'pass': 'Passing Checks'}.get(status_filter, '')
+    _status_label = {'fail': 'High Risk Items', 'warn': 'Medium Risk Items', 'pass': 'Low Risk Items'}.get(status_filter, '')
     _tier_base    = {'executive': 'Executive Summary', 'ciso': 'CISO Report', 'technical': 'Technical Findings'}.get(tier, 'Fleet Report')
     tier_label    = f'{_tier_base} — {_status_label}' if _status_label else _tier_base
     total_fail = sum(d.get('fail_count', 0) or 0 for d in devices)
@@ -596,14 +597,14 @@ function switchTier(t){{
 <div class="meta">Generated {esc(now)} &nbsp;&bull;&nbsp; {len(devices)} device(s){(' &nbsp;&bull;&nbsp; Profiles: <strong>' + esc(_profile_label) + '</strong>') if _profile_label else ''} &nbsp;&bull;&nbsp; Confidential</div>
 <div class="cards">
   <div class="card"><div class="card-n score">{fleet_score}%</div><div class="card-l">Fleet Score</div></div>
-  <div class="card"><div class="card-n fail">{total_fail}</div><div class="card-l">Failing Checks</div></div>
-  <div class="card"><div class="card-n warn">{total_warn}</div><div class="card-l">Warnings</div></div>
-  <div class="card"><div class="card-n pass">{total_pass}</div><div class="card-l">Passing</div></div>
+  <div class="card"><div class="card-n fail">{total_fail}</div><div class="card-l">High Risk</div></div>
+  <div class="card"><div class="card-n warn">{total_warn}</div><div class="card-l">Medium Risk</div></div>
+  <div class="card"><div class="card-n pass">{total_pass}</div><div class="card-l">Low Risk</div></div>
   <div class="card"><div class="card-n" style="color:#58a6ff">{len(devices)}</div><div class="card-l">Devices</div></div>
 </div>''']
 
     # Device summary table
-    parts.append('<h2>Device Status</h2><table><thead><tr><th>Hostname</th><th>Platform</th><th>Fail</th><th>Warn</th><th>Pass</th><th>Score</th><th>Last Seen</th></tr></thead><tbody>')
+    parts.append('<h2>Device Status</h2><table><thead><tr><th>Hostname</th><th>Platform</th><th>High</th><th>Medium</th><th>Low</th><th>Score</th><th>Last Seen</th></tr></thead><tbody>')
     for d in devices:
         f = d.get('fail_count', 0) or 0
         w = d.get('warn_count', 0) or 0
@@ -629,7 +630,7 @@ function switchTier(t){{
         _target_status = {'fail': 'FAIL', 'warn': 'WARN', 'pass': 'PASS'}.get(status_filter, '')
         all_findings = [f for f in all_findings if f.get('status', '').upper() == _target_status]
 
-    _section_label = {'fail': 'Failed', 'warn': 'Warning', 'pass': 'Passing'}.get(status_filter, 'Critical &amp; High')
+    _section_label = {'fail': 'High Risk', 'warn': 'Medium Risk', 'pass': 'Low Risk'}.get(status_filter, 'Critical &amp; High')
     if status_filter:
         crit_high = sorted(all_findings, key=lambda x: _SEV_ORDER_REPORT.index(x.get('severity','INFO')) if x.get('severity') in _SEV_ORDER_REPORT else 99)
     else:
@@ -638,7 +639,7 @@ function switchTier(t){{
 
     parts.append(f'<h2>{_section_label} Findings ({len(crit_high)})</h2>')
     if not crit_high:
-        _empty_msg = f'No {_status_label.lower()} found across the fleet.' if status_filter else 'No critical or high severity failures found across the fleet.'
+        _empty_msg = f'No {_status_label.lower()} found across the fleet.' if status_filter else 'No critical or high severity issues found across the fleet.'
         parts.append(f'<p style="color:#3fb950;padding:12px 0">{esc(_empty_msg)}</p>')
     else:
         limit = 20 if tier == 'executive' else len(crit_high)
@@ -693,7 +694,7 @@ function switchTier(t){{
             sc2 = _STATUS_COLOR_HTML.get(st, '#c9d1d9')
             sv2 = _SEV_COLOR_HTML.get(sev, '#6e7681')
             parts.append(f'<div class="finding">'
-                         f'<span style="color:{sc2};font-weight:700">[{esc(st)}]</span> '
+                         f'<span style="color:{sc2};font-weight:700">[{esc(_STATUS_LABEL_HTML.get(st, st))}]</span> '
                          f'<span style="color:{sv2}">[{esc(sev)}]</span> '
                          f'<strong>{esc(r.get("title",""))}</strong>')
             if tier == 'technical' and r.get('details'):
@@ -2345,9 +2346,9 @@ body{{background:#0d1117;color:#e6edf3;font-family:-apple-system,BlinkMacSystemF
 <div class="print-date">M.A.R.K. Sentinel &#8212; AI API Security Report &nbsp;|&nbsp; {__import__('datetime').datetime.now().strftime('%Y-%m-%d %H:%M')}</div>
 <div class="model-tag">Model tested: <strong>{e(model)}</strong></div>
 <div class="strip">
-  <div class="sc"><div class="sc-n" style="color:#f85149">{summary["fail"]}</div><div class="sc-l">Failed</div></div>
-  <div class="sc"><div class="sc-n" style="color:#d29922">{summary["warn"]}</div><div class="sc-l">Warnings</div></div>
-  <div class="sc"><div class="sc-n" style="color:#3fb950">{summary["pass"]}</div><div class="sc-l">Passed</div></div>
+  <div class="sc"><div class="sc-n" style="color:#f85149">{summary["fail"]}</div><div class="sc-l">High Risk</div></div>
+  <div class="sc"><div class="sc-n" style="color:#d29922">{summary["warn"]}</div><div class="sc-l">Medium Risk</div></div>
+  <div class="sc"><div class="sc-n" style="color:#3fb950">{summary["pass"]}</div><div class="sc-l">Low Risk</div></div>
   <div class="sc"><div class="sc-n" style="color:#6e7681">{summary["skip"]}</div><div class="sc-l">Skipped</div></div>
   <div class="sc"><div class="sc-n" style="color:#444c56">{summary.get("n/a", 0)}</div><div class="sc-l">N/A</div></div>
 </div>'''
@@ -2946,11 +2947,11 @@ body{{background:#0d1117;color:#c9d1d9;font-family:-apple-system,BlinkMacSystemF
     <div class="scard" id="sf-all" onclick="window.open('/','_blank')" title="Open all devices in new tab">
       <div class="scard-n c-blue" id="sc-count">{len(devices)}</div><div class="scard-l">Devices</div></div>
     <div class="scard" id="sf-fail" onclick="window.open('/api/fleet/report?tier=technical&amp;status=fail&amp;fmt=html','_blank')" title="View all failed items across all devices">
-      <div class="scard-n c-red" id="sc-fail">{total_fail}</div><div class="scard-l">Total Fails</div></div>
-    <div class="scard" id="sf-warn" onclick="window.open('/api/fleet/report?tier=technical&amp;status=warn&amp;fmt=html','_blank')" title="View all warnings across all devices">
-      <div class="scard-n c-yellow" id="sc-warn">{total_warn}</div><div class="scard-l">Total Warns</div></div>
-    <div class="scard" id="sf-pass" onclick="window.open('/api/fleet/report?tier=technical&amp;status=pass&amp;fmt=html','_blank')" title="View all passing checks across all devices">
-      <div class="scard-n c-green" id="sc-pass">{total_pass}</div><div class="scard-l">Total Passes</div></div>
+      <div class="scard-n c-red" id="sc-fail">{total_fail}</div><div class="scard-l">High Risk</div></div>
+    <div class="scard" id="sf-warn" onclick="window.open('/api/fleet/report?tier=technical&amp;status=warn&amp;fmt=html','_blank')" title="View all medium risk items across all devices">
+      <div class="scard-n c-yellow" id="sc-warn">{total_warn}</div><div class="scard-l">Medium Risk</div></div>
+    <div class="scard" id="sf-pass" onclick="window.open('/api/fleet/report?tier=technical&amp;status=pass&amp;fmt=html','_blank')" title="View all low risk checks across all devices">
+      <div class="scard-n c-green" id="sc-pass">{total_pass}</div><div class="scard-l">Low Risk</div></div>
     <div class="scard" id="sf-shadow" onclick="document.getElementById('shadow-section').scrollIntoView({{behavior:'smooth'}})" title="Unmanaged AI devices discovered on your network — click to view">
       <div class="scard-n" id="sc-shadow" style="color:#a371f7">{len(shadow)}</div><div class="scard-l">Shadow AI</div></div>
     <div class="scard" id="sf-mcp" onclick="window.open('/api/fleet/mcp/report?tier=ciso','_blank')" title="MCP servers and AI agent tool call exposure — click to open report">
@@ -2999,7 +3000,7 @@ body{{background:#0d1117;color:#c9d1d9;font-family:-apple-system,BlinkMacSystemF
   <table class="dev-table">
     <thead><tr>
       <th>Hostname</th><th>Platform</th>
-      <th class="c-red">Fail</th><th class="c-yellow">Warn</th><th class="c-green">Pass</th>
+      <th class="c-red">High</th><th class="c-yellow">Medium</th><th class="c-green">Low</th>
       <th>Profile</th><th>Last seen</th><th>Risk</th><th></th>
     </tr></thead>
     <tbody id="device-tbody">{rows}</tbody>
@@ -3136,7 +3137,7 @@ function _visibleDevices() {{
 
 function _syncFilterUI() {{
   const colorMap = {{fail:'sf-active-red', warn:'sf-active-yellow', pass:'sf-active-green'}};
-  const labelMap = {{fail:'Failed Devices', warn:'Devices with Warnings', pass:'Clean Devices'}};
+  const labelMap = {{fail:'High Risk Devices', warn:'Medium Risk Devices', pass:'Low Risk Devices'}};
   ['fail','warn','pass'].forEach(t => {{
     const el = document.getElementById('sf-' + t);
     if (!el) return;
@@ -3196,7 +3197,7 @@ function renderDevicePage() {{
     return;
   }}
   if (!visible.length) {{
-    const msg = _activeFilter === 'fail' ? 'No devices with failures.' : _activeFilter === 'warn' ? 'No devices with warnings.' : 'No clean devices.';
+    const msg = _activeFilter === 'fail' ? 'No high risk devices.' : _activeFilter === 'warn' ? 'No medium risk devices.' : 'No low risk devices.';
     tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:32px;color:#484f58">' + msg + '</td></tr>';
     pgEl.style.display = 'none';
     return;
@@ -3948,9 +3949,9 @@ function renderTrendChart(points) {{
     + mkline('fail','#f85149') + mkline('warn','#d29922') + mkline('pass','#3fb950')
     + mkdots('fail','#f85149') + mkdots('warn','#d29922') + mkdots('pass','#3fb950')
     + xlabels
-    + '<circle cx="'+(padL+10)+'" cy="12" r="4" fill="#f85149"/><text x="'+(padL+18)+'" y="16" font-size="11" fill="#8b949e">FAIL</text>'
-    + '<circle cx="'+(padL+58)+'" cy="12" r="4" fill="#d29922"/><text x="'+(padL+66)+'" y="16" font-size="11" fill="#8b949e">WARN</text>'
-    + '<circle cx="'+(padL+106)+'" cy="12" r="4" fill="#3fb950"/><text x="'+(padL+114)+'" y="16" font-size="11" fill="#8b949e">PASS</text>'
+    + '<circle cx="'+(padL+10)+'" cy="12" r="4" fill="#f85149"/><text x="'+(padL+18)+'" y="16" font-size="11" fill="#8b949e">HIGH</text>'
+    + '<circle cx="'+(padL+58)+'" cy="12" r="4" fill="#d29922"/><text x="'+(padL+66)+'" y="16" font-size="11" fill="#8b949e">MEDIUM</text>'
+    + '<circle cx="'+(padL+106)+'" cy="12" r="4" fill="#3fb950"/><text x="'+(padL+114)+'" y="16" font-size="11" fill="#8b949e">LOW</text>'
     + '</svg></div>';
 }}
 
