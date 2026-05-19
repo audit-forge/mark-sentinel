@@ -1,6 +1,6 @@
 {
   "name": "Healthcare",
-  "description": "AI security checks for healthcare organizations — aligned to HIPAA Security Rule (45 CFR §164), HITECH Act, 21st Century Cures Act, CMS cybersecurity requirements, FDA AI/ML Software as a Medical Device (SaMD) guidance, and HL7 FHIR security standards. Covers clinical AI, EHR systems, patient data protection, and health information exchanges.",
+  "description": "AI security checks for healthcare organizations — aligned to HIPAA Security Rule (45 CFR §164), HITECH Act, 21st Century Cures Act, CMS cybersecurity requirements, FDA AI/ML Software as a Medical Device (SaMD) guidance, and HL7 FHIR security standards. Covers clinical AI, EHR systems, patient data protection, health information exchanges, and agentic AI in care workflows.",
   "checks": [
     "AI-DEPLOY-001",
     "AI-DEPLOY-002",
@@ -9,11 +9,14 @@
     "AI-DEPLOY-005",
     "AI-DEPLOY-006",
     "AI-INP-001",
+    "AI-INP-002",
     "AI-INP-003",
+    "AI-INP-004",
     "AI-INP-005",
     "AI-OUT-001",
     "AI-OUT-002",
     "AI-OUT-003",
+    "AI-OUT-004",
     "AI-OUT-005",
     "AI-GOV-001",
     "AI-GOV-002",
@@ -25,6 +28,7 @@
     "AI-SUPPLY-003",
     "AI-SUPPLY-004",
     "AI-SUPPLY-005",
+    "AI-SUPPLY-006",
     "AI-RUNTIME-001",
     "AI-RUNTIME-002",
     "AI-RUNTIME-003",
@@ -32,7 +36,13 @@
     "AI-RUNTIME-005",
     "AI-AGENT-001",
     "AI-AGENT-002",
-    "AI-AGENT-003"
+    "AI-AGENT-003",
+    "AI-AGENT-004",
+    "AI-AGENT-005",
+    "AI-AGENT-006",
+    "AI-LS-001",
+    "AI-LS-002",
+    "AI-LS-003"
   ],
   "default_output": "plain",
   "include_remediation": true,
@@ -41,11 +51,14 @@
   "smb_language": false,
   "framework_emphasis": "healthcare",
   "healthcare_mapping": {
-    "hipaa_security_rule":    ["AI-DEPLOY-003", "AI-DEPLOY-004", "AI-GOV-001", "AI-GOV-005", "AI-RUNTIME-002"],
-    "hipaa_privacy_rule":     ["AI-OUT-001", "AI-OUT-002", "AI-OUT-005", "AI-SUPPLY-003"],
-    "hitech_breach_notif":    ["AI-DEPLOY-001", "AI-DEPLOY-002", "AI-RUNTIME-001", "AI-RUNTIME-003"],
-    "fda_samd_guidance":      ["AI-GOV-002", "AI-GOV-003", "AI-GOV-004", "AI-OUT-003", "AI-SUPPLY-001"],
+    "hipaa_security_rule":    ["AI-DEPLOY-003", "AI-DEPLOY-004", "AI-GOV-001", "AI-GOV-005", "AI-RUNTIME-002", "AI-AGENT-005", "AI-LS-001"],
+    "hipaa_privacy_rule":     ["AI-OUT-001", "AI-OUT-002", "AI-OUT-005", "AI-SUPPLY-003", "AI-AGENT-006", "AI-LS-002"],
+    "hitech_breach_notif":    ["AI-DEPLOY-001", "AI-DEPLOY-002", "AI-RUNTIME-001", "AI-RUNTIME-003", "AI-AGENT-006"],
+    "fda_samd_guidance":      ["AI-GOV-002", "AI-GOV-003", "AI-GOV-004", "AI-OUT-003", "AI-OUT-004", "AI-SUPPLY-001", "AI-LS-003"],
     "cms_cybersecurity":      ["AI-DEPLOY-005", "AI-DEPLOY-006", "AI-INP-001", "AI-INP-003"],
-    "21st_cures_data_access": ["AI-AGENT-001", "AI-AGENT-002", "AI-INP-005", "AI-SUPPLY-004"]
+    "21st_cures_data_access": ["AI-AGENT-001", "AI-AGENT-002", "AI-INP-005", "AI-SUPPLY-004"],
+    "patient_safety":         ["AI-INP-002", "AI-INP-004", "AI-OUT-004", "AI-LS-003"],
+    "phi_integrity":          ["AI-INP-001", "AI-INP-002", "AI-SUPPLY-006", "AI-AGENT-004"],
+    "audit_accountability":   ["AI-DEPLOY-003", "AI-AGENT-005", "AI-RUNTIME-001", "AI-LS-001"]
   }
 }
