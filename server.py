@@ -97,6 +97,14 @@ def _load_license() -> None:
     from license import load_license
     load_license(ROOT / 'license.json')
 
+def _has_technical_reports() -> bool:
+    """Return True if this license includes Technical reports and remediation. Defaults True."""
+    try:
+        from license import get_license
+        return get_license().has_technical_reports
+    except Exception:
+        return True
+
 def _content_length(headers) -> int:
     """Safely parse Content-Length header; returns 0 on missing or invalid value."""
     try:
@@ -490,17 +498,6 @@ function switchTier(t){{location.href='/api/fleet/mcp/report?tier='+t;}}
     parts.append('</div>')
 
     if tier == 'ciso':
-        parts.append('<h2>Remediation Priorities</h2><div class="block"><ol style="padding-left:20px;line-height:2;font-size:13px">')
-        if no_auth:
-            parts.append(f'<li><strong style="color:#f85149">IMMEDIATE:</strong> Add authentication to {len(no_auth)} unauthenticated server{"s" if len(no_auth)>1 else ""}: '
-                         + ', '.join(f'{s.get("host","")}:{s.get("port",0)}' for s in no_auth[:5])
-                         + ('…' if len(no_auth) > 5 else '') + '</li>')
-        if unknown_auth:
-            parts.append(f'<li><strong style="color:#d29922">SHORT-TERM:</strong> Manually verify authentication on {len(unknown_auth)} server{"s" if len(unknown_auth)>1 else ""} with unconfirmed status</li>')
-        parts.append('<li>Establish an MCP server registry — assign an owner to each server</li>')
-        parts.append('<li>Enable tool call logging on all MCP servers before the EU AI Act August 2026 deadline</li>')
-        parts.append('<li>Review exposed tools — remove or restrict high-risk capabilities (code execution, email, database writes)</li>')
-        parts.append('</ol></div>')
         parts.append('</body></html>')
         return ''.join(parts)
 
@@ -999,6 +996,18 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self._api_device_report(path[len('/api/devices/'):])
         elif path == '/api/fleet/report' or path.startswith('/api/fleet/report?'):
             self._api_fleet_report()
+        elif path == '/api/fleet/evidence-export' or path.startswith('/api/fleet/evidence-export?'):
+            self._api_evidence_export()
+        elif path == '/api/fleet/risk-register':
+            self._api_risk_register()
+        elif path == '/api/fleet/risk-register/csv':
+            self._api_risk_register_csv()
+        elif path == '/api/fleet/inventory':
+            self._api_inventory()
+        elif path == '/api/schedules':
+            self._api_schedules_list()
+        elif path == '/api/verify' or path.startswith('/api/verify?'):
+            self._api_verify_signature()
         else:
             self._not_found()
 
@@ -1079,6 +1088,18 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self._api_fleet_discover(path[len('/api/fleet/discover/'):])
         elif path.startswith('/api/fleet/shadow/dismiss/'):
             self._api_fleet_shadow_dismiss(path[len('/api/fleet/shadow/dismiss/'):])
+        elif path.startswith('/api/fleet/inventory/approve/'):
+            self._api_inventory_set_status(path[len('/api/fleet/inventory/approve/'):], 'approved')
+        elif path.startswith('/api/fleet/inventory/review/'):
+            self._api_inventory_set_status(path[len('/api/fleet/inventory/review/'):], 'under_review')
+        elif path.startswith('/api/fleet/inventory/unapprove/'):
+            self._api_inventory_set_status(path[len('/api/fleet/inventory/unapprove/'):], 'unapproved')
+        elif path == '/api/schedules':
+            self._api_schedules_create()
+        elif path.startswith('/api/schedules/') and path.endswith('/toggle'):
+            self._api_schedule_toggle(path[len('/api/schedules/'):-len('/toggle')])
+        elif path.startswith('/api/schedules/') and path.endswith('/delete'):
+            self._api_schedule_delete(path[len('/api/schedules/'):-len('/delete')])
         elif path == '/api/fleet/mcp/discover/all':
             self._api_fleet_mcp_discover_all()
         elif path.startswith('/api/fleet/mcp/dismiss/'):
@@ -1852,6 +1873,9 @@ button:hover{{background:#2ea043}}
         sev_filter    = (qs.get('sev',     [''])[0]).lower().strip()
         if tier not in ('executive', 'ciso', 'technical'):
             tier = 'ciso'
+        if tier == 'technical' and not _has_technical_reports():
+            self._send(402, b'Technical reports require a Plus license. Contact sales@markai.io to upgrade.', 'text/plain')
+            return
         if status_filter not in ('fail', 'warn', 'pass', ''):
             status_filter = ''
         if sev_filter not in ('ch', 'med', 'li', ''):
@@ -1908,6 +1932,233 @@ button:hover{{background:#2ea043}}
         except Exception as e:
             log.error('fleet report error: %s', e)
             self._json({'error': str(e)}, 500)
+
+    def _api_evidence_export(self):
+        """GET /api/fleet/evidence-export[?profile=fedramp,cmmc] — ZIP bundle: cover letter, findings CSV, fleet PDF, per-device JSON."""
+        import io, zipfile, csv
+        from urllib.parse import parse_qs, urlparse as _up
+        from datetime import datetime as _dt
+        qs = parse_qs(_up(self.path).query)
+        profile_raw = (qs.get('profile', [''])[0]).lower().strip()
+        _VALID = {'default', 'fedramp', 'cmmc', 'financial', 'biotech', 'healthcare',
+                  'lifesciences', 'owasp_agentic', 'eu_ai_act'}
+        profiles = [p for p in profile_raw.split(',') if p in _VALID]
+        try:
+            store = _get_store()
+            devices = store.list_devices_by_profile(profiles) if profiles else store.list_devices()
+            for d in devices:
+                if '_report' not in d:
+                    d['_report'] = store.get_latest_report(d['device_id']) or {}
+
+            now = _dt.utcnow()
+            date_str = now.strftime('%Y%m%d')
+            profile_label = ', '.join(p.upper() for p in profiles) if profiles else 'All Profiles'
+
+            buf = io.BytesIO()
+            with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED) as zf:
+                cover = (
+                    f"SENTINEL COMPLIANCE EVIDENCE PACKAGE\n"
+                    f"{'=' * 50}\n"
+                    f"Generated:  {now.strftime('%Y-%m-%d %H:%M UTC')}\n"
+                    f"Profile(s): {profile_label}\n"
+                    f"Devices:    {len(devices)}\n"
+                    f"Tool:       M.A.R.K. Sentinel — AI Security Audit\n\n"
+                    f"CONTENTS\n--------\n"
+                    f"1. cover_letter.txt       — This document\n"
+                    f"2. findings.csv           — All findings across all devices\n"
+                    f"3. fleet_report.pdf       — CISO-tier fleet summary (cryptographically signed)\n"
+                    f"4. manifest.json          — Report ID, signature, and key fingerprint\n"
+                    f"5. device_reports/<host>.json — Per-device raw scan data\n\n"
+                    f"ATTESTATION\n-----------\n"
+                    f"Generated automatically by M.A.R.K. Sentinel. All findings\n"
+                    f"reflect the most recent scan for each enrolled device. Scan\n"
+                    f"data is stored locally and has not been transmitted to any\n"
+                    f"third party.\n"
+                )
+                zf.writestr('cover_letter.txt', cover)
+
+                csv_buf = io.StringIO()
+                writer = csv.writer(csv_buf)
+                writer.writerow([
+                    'Device', 'Check ID', 'Title', 'Status', 'Severity', 'Category',
+                    'NIST AI RMF', 'FedRAMP', 'OWASP LLM', 'MITRE ATLAS', 'ISO/IEC 42001', 'Details',
+                ])
+                for d in devices:
+                    hostname = d.get('hostname', d.get('device_id', ''))
+                    findings = d['_report'].get('findings', d['_report'].get('results', []))
+                    for f in findings:
+                        fw = f.get('frameworks', {}) if isinstance(f.get('frameworks'), dict) else {}
+                        writer.writerow([
+                            hostname,
+                            f.get('check_id', ''), f.get('title', ''),
+                            f.get('status', ''), f.get('severity', ''), f.get('category', ''),
+                            fw.get('NIST AI RMF', ''), fw.get('FedRAMP', ''),
+                            fw.get('OWASP LLM', ''), fw.get('MITRE ATLAS', ''), fw.get('ISO/IEC 42001', ''),
+                            str(f.get('details', ''))[:200],
+                        ])
+                zf.writestr('findings.csv', csv_buf.getvalue())
+
+                try:
+                    from output.fleet_report import generate_fleet_pdf
+                    from output.signing import sign_content, key_fingerprint
+                    findings_json = json.dumps([{
+                        'device': d.get('hostname',''), 'findings': d['_report'].get('findings', [])
+                    } for d in devices], sort_keys=True)
+                    report_id, sig_hex = sign_content(findings_json)
+                    pdf_bytes = generate_fleet_pdf(devices, tier='ciso', report_id=report_id)
+                    zf.writestr('fleet_report.pdf', pdf_bytes)
+                    manifest = {
+                        'report_id': report_id,
+                        'generated': now.strftime('%Y-%m-%d %H:%M UTC'),
+                        'devices': len(devices),
+                        'profile': profile_label,
+                        'signature': sig_hex,
+                        'key_fingerprint': key_fingerprint(),
+                        'algorithm': 'HMAC-SHA256',
+                        'note': 'Signature covers findings JSON. Verify at /api/verify with report_id + signature.',
+                    }
+                    zf.writestr('manifest.json', json.dumps(manifest, indent=2))
+                except Exception as _pe:
+                    zf.writestr('fleet_report_error.txt', f'PDF generation failed: {_pe}')
+
+                for d in devices:
+                    safe_name = d.get('hostname', d.get('device_id', 'unknown')).replace('/', '_').replace('\\', '_')
+                    zf.writestr(f'device_reports/{safe_name}.json', json.dumps(d['_report'], indent=2))
+
+            zip_bytes = buf.getvalue()
+            fname = f'sentinel_evidence_{date_str}.zip'
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/zip')
+            self.send_header('Content-Disposition', f'attachment; filename="{fname}"')
+            self.send_header('Content-Length', str(len(zip_bytes)))
+            self.end_headers()
+            self.wfile.write(zip_bytes)
+        except Exception as e:
+            log.error('evidence export error: %s', e, exc_info=True)
+            self._json({'error': str(e)}, 500)
+
+    def _api_risk_register(self):
+        """GET /api/fleet/risk-register — deduplicated open findings with trend info."""
+        try:
+            store = _get_store()
+            entries = store.get_risk_register()
+            self._json({'entries': entries, 'count': len(entries)})
+        except Exception as e:
+            log.error('risk register error: %s', e, exc_info=True)
+            self._json({'error': str(e)}, 500)
+
+    def _api_risk_register_csv(self):
+        """GET /api/fleet/risk-register/csv — download risk register as CSV."""
+        import io, csv
+        from datetime import datetime as _dt
+        try:
+            store = _get_store()
+            entries = store.get_risk_register()
+            buf = io.StringIO()
+            writer = csv.writer(buf)
+            writer.writerow(['Check ID', 'Severity', 'Title', 'Category', 'Status',
+                             'Affected Devices', 'Trend', 'Days Open', 'Device Names'])
+            for e in entries:
+                writer.writerow([
+                    e['check_id'], e['severity'], e['title'], e['category'], e['status'],
+                    e['affected_count'], e['trend'], e['days_open'],
+                    '; '.join(e['affected_devices']),
+                ])
+            data = buf.getvalue().encode('utf-8')
+            fname = f'sentinel_risk_register_{_dt.utcnow().strftime("%Y%m%d")}.csv'
+            self.send_response(200)
+            self.send_header('Content-Type', 'text/csv; charset=utf-8')
+            self.send_header('Content-Disposition', f'attachment; filename="{fname}"')
+            self.send_header('Content-Length', str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+        except Exception as e:
+            log.error('risk register CSV error: %s', e, exc_info=True)
+            self._json({'error': str(e)}, 500)
+
+    def _api_inventory(self):
+        """GET /api/fleet/inventory — all shadow AI devices as formal asset inventory."""
+        try:
+            store = _get_store()
+            items = store.list_inventory()
+            counts = {'approved': 0, 'under_review': 0, 'unapproved': 0}
+            for item in items:
+                s = item.get('approval_status', 'unapproved')
+                counts[s] = counts.get(s, 0) + 1
+            self._json({'items': items, 'counts': counts})
+        except Exception as e:
+            log.error('inventory error: %s', e, exc_info=True)
+            self._json({'error': str(e)}, 500)
+
+    def _api_inventory_set_status(self, shadow_id_str: str, status: str):
+        """POST /api/fleet/inventory/{approve|review|unapprove}/<id>"""
+        try:
+            shadow_id = int(shadow_id_str.strip('/'))
+            store = _get_store()
+            ok = store.set_shadow_approval(shadow_id, status)
+            self._json({'ok': ok, 'status': status})
+        except (ValueError, TypeError):
+            self._json({'error': 'invalid id'}, 400)
+        except Exception as e:
+            log.error('inventory set status error: %s', e, exc_info=True)
+            self._json({'error': str(e)}, 500)
+
+    def _api_verify_signature(self):
+        """GET /api/verify?sig=<hex>&content=<json> — verify a Sentinel report signature."""
+        from urllib.parse import parse_qs, urlparse as _up
+        from output.signing import verify_content, key_fingerprint
+        qs = parse_qs(_up(self.path).query)
+        sig = (qs.get('sig', [''])[0]).strip()
+        content = (qs.get('content', [''])[0]).strip()
+        if not sig or not content:
+            self._json({'error': 'Provide sig= and content= parameters', 'key_fingerprint': key_fingerprint()}, 400)
+            return
+        valid = verify_content(content, sig)
+        self._json({'valid': valid, 'key_fingerprint': key_fingerprint()})
+
+    def _api_schedules_list(self):
+        """GET /api/schedules"""
+        try:
+            store = _get_store()
+            self._json({'schedules': store.list_schedules()})
+        except Exception as e:
+            self._json({'error': str(e)}, 500)
+
+    def _api_schedules_create(self):
+        """POST /api/schedules — create a new scan schedule."""
+        try:
+            body = json.loads(self.rfile.read(int(self.headers.get('Content-Length', 0))))
+            cadence = body.get('cadence', 'daily')
+            hour = int(body.get('hour', 2)) % 24
+            profile = body.get('profile', 'default')
+            label = str(body.get('label', ''))[:80]
+            device_id = body.get('device_id', 'all')
+            weekday = int(body['weekday']) if 'weekday' in body else None
+            monthday = int(body['monthday']) if 'monthday' in body else None
+            store = _get_store()
+            new_id = store.add_schedule(device_id, cadence, hour, profile, label, weekday, monthday)
+            self._json({'ok': True, 'id': new_id})
+        except Exception as e:
+            log.error('schedule create error: %s', e)
+            self._json({'error': str(e)}, 400)
+
+    def _api_schedule_toggle(self, schedule_id_str: str):
+        """POST /api/schedules/<id>/toggle"""
+        try:
+            store = _get_store()
+            ok = store.toggle_schedule(int(schedule_id_str.strip('/')))
+            self._json({'ok': ok})
+        except Exception as e:
+            self._json({'error': str(e)}, 400)
+
+    def _api_schedule_delete(self, schedule_id_str: str):
+        """POST /api/schedules/<id>/delete"""
+        try:
+            store = _get_store()
+            ok = store.delete_schedule(int(schedule_id_str.strip('/')))
+            self._json({'ok': ok})
+        except Exception as e:
+            self._json({'error': str(e)}, 400)
 
     def _api_discover(self):
         """GET /api/discover[?subnets=10.0.1.0/24,10.0.2.0/24] — scan for AI services."""
@@ -3003,8 +3254,25 @@ def _build_fleet_html(devices: list[dict], shadow: list[dict] | None = None,
 <title>M.A.R.K. Sentinel — Command Center</title>
 <style>
 *{{box-sizing:border-box;margin:0;padding:0}}
-body{{background:#0d1117;color:#c9d1d9;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:14px}}
-#wrap{{max-width:1200px;margin:0 auto;padding:32px 24px}}
+body{{background:#0d1117;color:#c9d1d9;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:14px;height:100vh;overflow:hidden}}
+#app{{display:flex;height:100vh;overflow:hidden}}
+#sidebar{{width:216px;flex-shrink:0;background:#0d1117;border-right:1px solid #21262d;display:flex;flex-direction:column;height:100vh;overflow-y:auto}}
+#main{{flex:1;overflow-y:auto;padding:24px 32px;min-width:0}}
+.sb-logo{{padding:18px 18px 14px;border-bottom:1px solid #21262d}}
+.sb-logo-mark{{font-size:9px;letter-spacing:3px;color:#58a6ff;font-weight:700;text-transform:uppercase}}
+.sb-logo-name{{font-size:16px;font-weight:800;color:#e6edf3;letter-spacing:1px;line-height:1.2}}
+.sb-logo-sub{{font-size:10px;color:#484f58;margin-top:2px}}
+.sb-nav{{flex:1;padding:6px 0}}
+.sb-group{{font-size:9px;font-weight:700;letter-spacing:1.2px;text-transform:uppercase;color:#484f58;padding:12px 18px 4px}}
+.sb-item{{display:block;width:100%;padding:7px 18px;font-size:13px;color:#8b949e;cursor:pointer;text-decoration:none;user-select:none;border:none;border-left:2px solid transparent;background:none;text-align:left;transition:color .1s,background .1s}}
+.sb-item:hover{{color:#c9d1d9;background:#161b22}}
+.sb-item.sb-active{{color:#e6edf3;background:#1a2332;border-left-color:#58a6ff}}
+.sb-footer{{padding:14px 18px;border-top:1px solid #21262d;display:flex;flex-direction:column;gap:7px}}
+.sb-footer a{{font-size:11px;color:#484f58;text-decoration:none}}
+.sb-footer a:hover{{color:#8b949e}}
+.page{{display:none}}
+.page.active{{display:block}}
+#kpi-bar{{margin-bottom:20px}}
 .brand-bar{{display:flex;align-items:baseline;gap:14px;margin-bottom:28px;border-bottom:1px solid #21262d;padding-bottom:18px}}
 .brand-mark{{font-size:10px;letter-spacing:3px;color:#58a6ff;font-weight:700;text-transform:uppercase}}
 .brand-name{{font-size:22px;font-weight:800;color:#e6edf3;letter-spacing:1px}}
@@ -3031,6 +3299,20 @@ body{{background:#0d1117;color:#c9d1d9;font-family:-apple-system,BlinkMacSystemF
 .risk-dot{{display:inline-block;width:10px;height:10px;border-radius:50%}}
 .risk-dot.r-fail{{background:#f85149}}.risk-dot.r-warn{{background:#d29922}}.risk-dot.r-pass{{background:#3fb950}}
 .scan-btn{{background:#161b22;border:1px solid #30363d;color:#58a6ff;border-radius:4px;padding:3px 10px;font-size:12px;cursor:pointer;white-space:nowrap}}
+.rr-fil{{background:#161b22;border:1px solid #30363d;color:#8b949e;border-radius:4px;padding:3px 12px;font-size:12px;cursor:pointer}}
+.rr-fil.rr-active{{color:#e6edf3;border-color:#58a6ff}}
+.rr-table{{width:100%;border-collapse:collapse;margin-bottom:8px;font-size:13px}}
+.rr-table th{{background:#161b22;color:#8b949e;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;padding:8px 12px;text-align:left;border-bottom:2px solid #30363d}}
+.rr-table td{{padding:8px 12px;border-bottom:1px solid #21262d;vertical-align:middle}}
+.rr-new{{background:#0f2a1a;color:#3fb950;border:1px solid #238636;border-radius:10px;padding:2px 8px;font-size:11px;font-weight:600}}
+.rr-recurring{{background:#2a1a0f;color:#d29922;border:1px solid #9e6a03;border-radius:10px;padding:2px 8px;font-size:11px;font-weight:600}}
+.inv-badge-approved{{background:#0f2a1a;color:#3fb950;border:1px solid #238636;border-radius:10px;padding:2px 8px;font-size:11px;font-weight:600}}
+.inv-badge-review{{background:#2a1a0f;color:#d29922;border:1px solid #9e6a03;border-radius:10px;padding:2px 8px;font-size:11px;font-weight:600}}
+.inv-badge-unapp{{background:#2a1010;color:#f85149;border:1px solid #8b1a1a;border-radius:10px;padding:2px 8px;font-size:11px;font-weight:600}}
+.inv-action{{background:#161b22;border:1px solid #30363d;border-radius:4px;padding:2px 8px;font-size:11px;cursor:pointer;color:#8b949e}}
+.inv-action:hover{{color:#e6edf3;border-color:#58a6ff}}
+.inv-count-card{{background:#161b22;border:1px solid #21262d;border-radius:6px;padding:10px 18px;font-size:12px;display:flex;flex-direction:column;gap:2px}}
+.inv-count-n{{font-size:22px;font-weight:800}}
 .scan-btn:hover{{background:#1c2128;border-color:#58a6ff}}
 .scan-btn:disabled{{color:#484f58;border-color:#21262d;cursor:default}}
 #detail-panel{{background:#161b22;border:1px solid #21262d;border-radius:8px;padding:22px;min-height:200px}}
@@ -3107,19 +3389,54 @@ body.light .c-gray,html.light .c-gray{{color:#57606a}}
 body.light ::-webkit-scrollbar-track,html.light ::-webkit-scrollbar-track{{background:#ffffff}}
 body.light ::-webkit-scrollbar-thumb,html.light ::-webkit-scrollbar-thumb{{background:#d0d7de}}
 body.light #theme-toggle,html.light #theme-toggle{{background:#f6f8fa;border-color:#d0d7de;color:#24292f}}
+html.light #sidebar,body.light #sidebar{{background:#f6f8fa;border-right-color:#d0d7de}}
+html.light .sb-logo,body.light .sb-logo{{border-bottom-color:#d0d7de}}
+html.light .sb-logo-name,body.light .sb-logo-name{{color:#1f2328}}
+html.light .sb-logo-mark,body.light .sb-logo-mark{{color:#0969da}}
+html.light .sb-logo-sub,body.light .sb-logo-sub{{color:#57606a}}
+html.light .sb-group,body.light .sb-group{{color:#8c959f}}
+html.light .sb-item,body.light .sb-item{{color:#57606a}}
+html.light .sb-item:hover,body.light .sb-item:hover{{background:#eaeef2;color:#24292f}}
+html.light .sb-item.sb-active,body.light .sb-item.sb-active{{background:#ddf4ff;color:#0969da;border-left-color:#0969da}}
+html.light .sb-footer,body.light .sb-footer{{border-top-color:#d0d7de}}
+html.light .sb-footer a,body.light .sb-footer a{{color:#8c959f}}
 </style>
 </head>
 <body>
 <script>if(localStorage.getItem('sentinel_theme')==='light')document.documentElement.classList.add('light');</script>
-<div id="wrap">
-  <div class="brand-bar">
-    <span class="brand-mark">M.A.R.K.</span>
-    <span class="brand-name">SENTINEL</span>
-    <span class="brand-sub">Command Center</span>
-    <a class="hlink" href="/academy" target="_blank" style="margin-right:16px">Academy</a>
-    <a class="hlink" href="/probe" target="_blank">&#128272; API Security Tester</a>
-    <button id="theme-toggle" onclick="toggleTheme()" style="margin-left:16px;background:#161b22;border:1px solid #30363d;color:#8b949e;border-radius:4px;padding:4px 12px;font-size:12px;cursor:pointer">☀ Light</button>
-  </div>
+<div id="app">
+  <aside id="sidebar">
+    <div class="sb-logo">
+      <div class="sb-logo-mark">M.A.R.K.</div>
+      <div class="sb-logo-name">SENTINEL</div>
+      <div class="sb-logo-sub">Command Center</div>
+    </div>
+    <nav class="sb-nav">
+      <div class="sb-group">Overview</div>
+      <button class="sb-item sb-active" id="nav-overview" onclick="navTo('overview')">&#8962; Home</button>
+      <div class="sb-group">Fleet</div>
+      <button class="sb-item" id="nav-shadow" onclick="navTo('shadow')">&#9888; Shadow AI</button>
+      <button class="sb-item" id="nav-mcp" onclick="navTo('mcp')">&#128279; MCP Servers</button>
+      <div class="sb-group">Security</div>
+      <button class="sb-item" id="nav-riskregister" onclick="navTo('riskregister')">&#128203; Risk Register</button>
+      <button class="sb-item" id="nav-inventory" onclick="navTo('inventory')">&#128196; Asset Inventory</button>
+      <div class="sb-group">Operations</div>
+      <button class="sb-item" id="nav-schedules" onclick="navTo('schedules')">&#128337; Schedules</button>
+      <button class="sb-item" id="nav-discovery" onclick="navTo('discovery')">&#128270; Discovery</button>
+      <div class="sb-group">Device</div>
+      <button class="sb-item" id="nav-findings" onclick="navTo('findings')">&#128202; Findings</button>
+      <div class="sb-group">Export</div>
+      <button class="sb-item" id="nav-reports" onclick="navTo('reports')">&#128196; Reports</button>
+      <div class="sb-group"></div>
+      <button class="sb-item" id="nav-settings" onclick="navTo('settings')">&#9881; Settings</button>
+    </nav>
+    <div class="sb-footer">
+      <a href="/academy" target="_blank">Academy</a>
+      <a href="/probe" target="_blank">&#128272; API Tester</a>
+      <button id="theme-toggle" onclick="toggleTheme()" style="background:none;border:none;font-size:11px;color:#484f58;cursor:pointer;text-align:left;padding:0;margin-top:2px">&#9728; Theme</button>
+    </div>
+  </aside>
+  <div id="main">
 
   <div class="stat-row">
     <div class="scard" id="sf-all" onclick="window.open('/','_blank')" title="Open all devices in new tab">
@@ -3135,6 +3452,8 @@ body.light #theme-toggle,html.light #theme-toggle{{background:#f6f8fa;border-col
     <div class="scard" id="sf-mcp" onclick="window.open('/api/fleet/mcp/report?tier=ciso','_blank')" title="MCP servers and AI agent tool call exposure — click to open report">
       <div class="scard-n" id="sc-mcp" style="color:#58a6ff">{len(mcp)}</div><div class="scard-l">MCP Servers</div></div>
   </div>
+
+  <div class="page active" id="page-overview">
   <div id="filter-banner" style="display:none;background:#161b22;border:1px solid #30363d;border-radius:6px;padding:10px 18px;margin-bottom:18px;align-items:center;justify-content:space-between;gap:12px">
     <span id="filter-banner-text" style="font-size:13px;font-weight:600"></span>
     <a href="/" style="font-size:12px;color:#8b949e;text-decoration:none;white-space:nowrap;flex-shrink:0">&#8592; All devices</a>
@@ -3144,21 +3463,13 @@ body.light #theme-toggle,html.light #theme-toggle{{background:#f6f8fa;border-col
     <span>Connected Devices</span>
     <span id="filter-badge" style="display:none;font-size:11px;background:#1a2332;color:#58a6ff;border:1px solid #30363d;border-radius:10px;padding:2px 10px;cursor:pointer" onclick="filterBy(null)" title="Clear filter">&#10005; clear filter</span>
     <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-      <span style="font-size:11px;color:#8b949e;white-space:nowrap">Profiles:</span>
-      <label style="font-size:12px;color:#c9d1d9;white-space:nowrap;cursor:pointer"><input type="checkbox" class="rpt-profile" value="default"> Base Scan</label>
-      <label style="font-size:12px;color:#c9d1d9;white-space:nowrap;cursor:pointer"><input type="checkbox" class="rpt-profile" value="fedramp"> FedRAMP</label>
-      <label style="font-size:12px;color:#c9d1d9;white-space:nowrap;cursor:pointer"><input type="checkbox" class="rpt-profile" value="cmmc"> CMMC 2.0</label>
-      <label style="font-size:12px;color:#c9d1d9;white-space:nowrap;cursor:pointer"><input type="checkbox" class="rpt-profile" value="financial"> Financial</label>
-      <label style="font-size:12px;color:#c9d1d9;white-space:nowrap;cursor:pointer"><input type="checkbox" class="rpt-profile" value="biotech"> Biotech</label>
-      <label style="font-size:12px;color:#c9d1d9;white-space:nowrap;cursor:pointer"><input type="checkbox" class="rpt-profile" value="healthcare"> Healthcare</label>
-      <label style="font-size:12px;color:#c9d1d9;white-space:nowrap;cursor:pointer"><input type="checkbox" class="rpt-profile" value="owasp_agentic"> OWASP Agentic</label>
-      <label style="font-size:12px;color:#c9d1d9;white-space:nowrap;cursor:pointer"><input type="checkbox" class="rpt-profile" value="eu_ai_act"> EU AI Act</label>
       <button onclick="openReport('executive')" class="scan-btn"
          style="color:#3fb950;border-color:#30363d;font-size:12px">&#9654; Executive Report</button>
       <button onclick="openReport('ciso')" class="scan-btn"
          style="color:#58a6ff;border-color:#30363d;font-size:12px">&#9654; CISO Report</button>
-      <button onclick="openReport('technical')" class="scan-btn"
-         style="color:#8b949e;border-color:#30363d;font-size:12px">&#9654; Technical Report</button>
+      {'<button onclick="openReport(\'technical\')" class="scan-btn" style="color:#8b949e;border-color:#30363d;font-size:12px">&#9654; Technical Report</button>' if _has_technical_reports() else '<button disabled title="Technical Reports + Remediation require a Plus license" class="scan-btn" style="color:#484f58;border-color:#21262d;font-size:12px;cursor:default">&#128274; Technical (Plus)</button>'}
+      <button id="btn-evidence-export" class="scan-btn" onclick="downloadEvidencePackage(this)"
+              style="color:#a371f7;border-color:#30363d;font-size:12px">&#8659; Evidence Package</button>
       <select id="scan-all-stagger" class="form-select" style="font-size:12px;padding:3px 6px;height:28px" title="Scan stagger — spread scans over time to avoid network spikes">
         <option value="normal">Normal (25/30s)</option>
         <option value="slow">Slow (10/60s)</option>
@@ -3197,12 +3508,133 @@ body.light #theme-toggle,html.light #theme-toggle{{background:#f6f8fa;border-col
     </div>
     <div id="page-btns" style="display:flex;gap:4px;align-items:center;flex-wrap:wrap"></div>
   </div>
+  </div>
 
+  <div class="page" id="page-shadow">
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:8px">
+    <div>
+      <div class="sec-hdr" style="margin:0;padding:0">Shadow AI</div>
+      <div style="font-size:12px;color:#6e7681;margin-top:4px">Unmanaged AI devices and services detected on your network</div>
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+      <input id="discover-subnets-shadow" type="text" placeholder="Subnets (auto-detect if blank)"
+        style="width:240px;background:#0d1117;border:1px solid #30363d;border-radius:4px;color:#e6edf3;font-size:12px;font-family:monospace;padding:5px 10px;outline:none" />
+      <button id="btn-discover-all" class="scan-btn" onclick="discoverAll(this)"
+              style="color:#a371f7;border-color:#6e40c9;font-size:12px">&#128270; Run Shadow AI Scan</button>
+    </div>
+  </div>
   {_build_shadow_section(shadow, ts_now)}
+  </div>
 
+  <div class="page" id="page-mcp">
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:8px">
+    <div>
+      <div class="sec-hdr" style="margin:0;padding:0">MCP &amp; Agent Governance</div>
+      <div style="font-size:12px;color:#6e7681;margin-top:4px">AI agent tool servers discovered on your network — auth status and exposure</div>
+    </div>
+    <button id="btn-discover-mcp" class="scan-btn" onclick="discoverMcp(this)"
+            style="color:#58a6ff;border-color:#1f6feb;font-size:12px">&#128279; Scan for MCP Servers</button>
+  </div>
   {_build_mcp_section(mcp, ts_now)}
+  </div>
 
-  <div class="sec-hdr" style="margin-top:32px">
+  <div class="page" id="page-riskregister">
+  <div class="sec-hdr" style="margin-top:0;padding-top:0">
+    Open Findings Risk Register
+    <span style="font-size:12px;font-weight:400;color:#6e7681;margin-left:8px">Deduplicated across all devices · updated each scan</span>
+    <a href="/api/fleet/risk-register/csv" download style="margin-left:auto;font-size:12px;color:#3fb950;text-decoration:none;border:1px solid #238636;border-radius:4px;padding:3px 10px">&#8659; Export CSV</a>
+  </div>
+  <div id="rr-filters" style="display:flex;gap:6px;margin-bottom:10px;flex-wrap:wrap">
+    <button class="rr-fil rr-active" onclick="rrFilter('all',this)">All</button>
+    <button class="rr-fil" onclick="rrFilter('CRITICAL',this)">Critical</button>
+    <button class="rr-fil" onclick="rrFilter('HIGH',this)">High</button>
+    <button class="rr-fil" onclick="rrFilter('MEDIUM',this)">Medium</button>
+    <button class="rr-fil" onclick="rrFilter('LOW',this)">Low</button>
+  </div>
+  <div id="rr-body">
+    <div style="color:#6e7681;font-size:13px;padding:16px 0">Loading risk register…</div>
+  </div>
+  </div>
+
+  <div class="page" id="page-inventory">
+  <div class="sec-hdr" style="margin-top:0;padding-top:0">
+    AI Asset Inventory
+    <span style="font-size:12px;font-weight:400;color:#6e7681;margin-left:8px">Formal record of all AI in the environment · approve or flag each asset</span>
+  </div>
+  <div id="inv-counts" style="display:flex;gap:12px;margin-bottom:12px;flex-wrap:wrap"></div>
+  <div id="inv-filters" style="display:flex;gap:6px;margin-bottom:10px;flex-wrap:wrap">
+    <button class="rr-fil rr-active" onclick="invFilter('all',this)">All</button>
+    <button class="rr-fil" onclick="invFilter('unapproved',this)">Unapproved</button>
+    <button class="rr-fil" onclick="invFilter('under_review',this)">Under Review</button>
+    <button class="rr-fil" onclick="invFilter('approved',this)">Approved</button>
+  </div>
+  <div id="inv-body">
+    <div style="color:#6e7681;font-size:13px;padding:16px 0">Loading inventory…</div>
+  </div>
+  </div>
+
+  <div class="page" id="page-schedules">
+  <div class="sec-hdr" style="margin-top:0;padding-top:0">
+    Scan Schedule
+    <span style="font-size:12px;font-weight:400;color:#6e7681;margin-left:8px">Automated recurring scans dispatched to all enrolled agents</span>
+  </div>
+  <div id="sched-list" style="margin-bottom:12px">
+    <div style="color:#6e7681;font-size:13px">Loading schedules…</div>
+  </div>
+  <details style="margin-bottom:24px">
+    <summary style="cursor:pointer;font-size:13px;color:#58a6ff;user-select:none">+ Add schedule</summary>
+    <div style="background:#161b22;border:1px solid #21262d;border-radius:6px;padding:16px;margin-top:8px;display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end">
+      <div style="display:flex;flex-direction:column;gap:4px">
+        <label style="font-size:11px;color:#6e7681">Label</label>
+        <input id="sched-label" type="text" placeholder="e.g. Nightly FedRAMP" style="background:#0d1117;border:1px solid #30363d;border-radius:4px;color:#e6edf3;font-size:12px;padding:4px 8px;width:160px">
+      </div>
+      <div style="display:flex;flex-direction:column;gap:4px">
+        <label style="font-size:11px;color:#6e7681">Profile</label>
+        <select id="sched-profile" style="background:#0d1117;border:1px solid #30363d;border-radius:4px;color:#e6edf3;font-size:12px;padding:4px 8px">
+          <option value="default">Base Scan</option>
+          <option value="fedramp">FedRAMP</option>
+          <option value="cmmc">CMMC 2.0</option>
+          <option value="financial">Financial</option>
+          <option value="healthcare">Healthcare</option>
+          <option value="biotech">Biotech</option>
+          <option value="owasp_agentic">OWASP Agentic</option>
+          <option value="eu_ai_act">EU AI Act</option>
+        </select>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:4px">
+        <label style="font-size:11px;color:#6e7681">Cadence</label>
+        <select id="sched-cadence" onchange="schedCadenceChange()" style="background:#0d1117;border:1px solid #30363d;border-radius:4px;color:#e6edf3;font-size:12px;padding:4px 8px">
+          <option value="daily">Daily</option>
+          <option value="weekly">Weekly</option>
+          <option value="monthly">Monthly</option>
+        </select>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:4px" id="sched-weekday-wrap" style="display:none">
+        <label style="font-size:11px;color:#6e7681">Day</label>
+        <select id="sched-weekday" style="background:#0d1117;border:1px solid #30363d;border-radius:4px;color:#e6edf3;font-size:12px;padding:4px 8px">
+          <option value="0">Monday</option><option value="1">Tuesday</option><option value="2">Wednesday</option>
+          <option value="3">Thursday</option><option value="4">Friday</option><option value="5">Saturday</option><option value="6">Sunday</option>
+        </select>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:4px" id="sched-monthday-wrap" style="display:none">
+        <label style="font-size:11px;color:#6e7681">Day of month</label>
+        <select id="sched-monthday" style="background:#0d1117;border:1px solid #30363d;border-radius:4px;color:#e6edf3;font-size:12px;padding:4px 8px">
+          {' '.join(f'<option value="{d}">{d}</option>' for d in range(1,29))}
+        </select>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:4px">
+        <label style="font-size:11px;color:#6e7681">Time (UTC)</label>
+        <select id="sched-hour" style="background:#0d1117;border:1px solid #30363d;border-radius:4px;color:#e6edf3;font-size:12px;padding:4px 8px">
+          {' '.join(f'<option value="{h}"{" selected" if h==2 else ""}>{h:02d}:00 UTC</option>' for h in range(24))}
+        </select>
+      </div>
+      <button class="scan-btn" onclick="addSchedule()" style="color:#3fb950;border-color:#238636">Save Schedule</button>
+    </div>
+  </details>
+  </div>
+
+  <div class="page" id="page-discovery">
+  <div class="sec-hdr" style="margin-top:0;padding-top:0">
     AI Service Discovery
     <button id="discover-btn" class="scan-btn" style="margin-left:12px" onclick="runDiscovery()">Scan Network</button>
   </div>
@@ -3216,13 +3648,31 @@ body.light #theme-toggle,html.light #theme-toggle{{background:#f6f8fa;border-col
   <div id="discover-panel" class="content-panel" style="background:#161b22;border:1px solid #21262d;border-radius:8px;padding:18px;min-height:60px;margin-bottom:28px">
     <div class="empty" style="padding:12px">Click Scan Network to probe the local subnet for AI services.</div>
   </div>
-
-  <div class="sec-hdr">Device Findings</div>
-  <div id="detail-panel">
-    <div class="empty">← Click a device row to view its dashboard</div>
   </div>
 
-  <div class="sec-hdr" style="margin-top:32px;display:flex;align-items:center;justify-content:space-between">
+  <div class="page" id="page-findings">
+  <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:16px">
+    <div class="sec-hdr" style="margin:0;padding:0">Device Findings</div>
+    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+      <label style="font-size:12px;color:#6e7681">Device:</label>
+      <select id="findings-device-sel"
+              onchange="if(this.value) selectDevice(this.value)"
+              style="background:#161b22;border:1px solid #30363d;border-radius:4px;
+                     color:#c9d1d9;font-size:13px;padding:4px 10px;min-width:220px;cursor:pointer">
+        <option value="">— select a device —</option>
+      </select>
+    </div>
+  </div>
+  <div id="detail-panel">
+    <div class="empty" id="findings-empty-state" style="padding:64px;text-align:center">
+      <div style="font-size:15px;color:#484f58;margin-bottom:8px">No device selected</div>
+      <div style="font-size:12px;color:#363d47">Choose a device from the dropdown above, or click any row on the Home page</div>
+    </div>
+  </div>
+  </div>
+
+  <div class="page" id="page-settings">
+  <div class="sec-hdr" style="margin-top:0;padding-top:0;display:flex;align-items:center;justify-content:space-between">
     <span>Settings</span>
     <a href="/download/shortcut" class="scan-btn"
        style="text-decoration:none;font-size:12px;color:#58a6ff;border-color:#30363d;padding:3px 10px">
@@ -3273,6 +3723,94 @@ body.light #theme-toggle,html.light #theme-toggle{{background:#f6f8fa;border-col
     <div id="sys-log" style="display:none;background:#0d1117;border:1px solid #30363d;border-radius:6px;
          padding:12px;font-family:monospace;font-size:12px;color:#8b949e;white-space:pre-wrap;
          max-height:200px;overflow-y:auto;line-height:1.6"></div>
+  </div>
+  </div>
+
+  <div class="page" id="page-reports">
+  <div class="sec-hdr" style="margin-top:0;padding-top:0">Reports</div>
+
+  <div style="background:#161b22;border:1px solid #21262d;border-radius:8px;padding:18px 22px;margin-bottom:24px">
+    <div style="font-size:11px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:#6e7681;margin-bottom:12px">Compliance Profile Filter</div>
+    <div style="display:flex;flex-wrap:wrap;gap:8px 20px;margin-bottom:4px">
+      <label style="font-size:13px;color:#c9d1d9;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="rpt-profile" value="default"> Base Scan</label>
+      <label style="font-size:13px;color:#c9d1d9;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="rpt-profile" value="fedramp"> FedRAMP / NIST 800-53</label>
+      <label style="font-size:13px;color:#c9d1d9;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="rpt-profile" value="cmmc"> CMMC 2.0</label>
+      <label style="font-size:13px;color:#c9d1d9;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="rpt-profile" value="financial"> Financial Services</label>
+      <label style="font-size:13px;color:#c9d1d9;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="rpt-profile" value="biotech"> Biotech</label>
+      <label style="font-size:13px;color:#c9d1d9;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="rpt-profile" value="healthcare"> Healthcare</label>
+      <label style="font-size:13px;color:#c9d1d9;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="rpt-profile" value="owasp_agentic"> OWASP Agentic AI</label>
+      <label style="font-size:13px;color:#c9d1d9;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="rpt-profile" value="eu_ai_act"> EU AI Act</label>
+    </div>
+    <div style="font-size:11px;color:#484f58;margin-top:8px">Select one or more profiles to filter report content. Leave all unchecked for the full base scan.</div>
+  </div>
+
+  <div style="font-size:11px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:#6e7681;margin-bottom:12px">Fleet Reports</div>
+  <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:16px;margin-bottom:28px">
+
+    <div style="background:#161b22;border:1px solid #21262d;border-radius:8px;padding:20px">
+      <div style="font-size:15px;font-weight:700;color:#e6edf3;margin-bottom:6px">&#128200; Executive Summary</div>
+      <div style="font-size:12px;color:#6e7681;line-height:1.6;margin-bottom:16px">High-level posture for leadership. Fleet score, top risks, business context. No individual findings or technical detail.</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="scan-btn" onclick="rptDownloadPdf('executive',this)" style="color:#3fb950;border-color:#238636;font-size:12px">&#8659; Download PDF</button>
+        <button class="scan-btn" onclick="rptPreview('executive')" style="color:#8b949e;font-size:12px">&#128065; Preview</button>
+      </div>
+    </div>
+
+    <div style="background:#161b22;border:1px solid #21262d;border-radius:8px;padding:20px">
+      <div style="font-size:15px;font-weight:700;color:#e6edf3;margin-bottom:6px">&#128203; CISO Report</div>
+      <div style="font-size:12px;color:#6e7681;line-height:1.6;margin-bottom:16px">Per-device FAIL and WARN findings grouped by severity. Risk exposure and compliance posture. No remediation steps.</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="scan-btn" onclick="rptDownloadPdf('ciso',this)" style="color:#3fb950;border-color:#238636;font-size:12px">&#8659; Download PDF</button>
+        <button class="scan-btn" onclick="rptPreview('ciso')" style="color:#8b949e;font-size:12px">&#128065; Preview</button>
+      </div>
+    </div>
+
+    <div style="background:#161b22;border:1px solid #21262d;border-radius:8px;padding:20px">
+      <div style="font-size:15px;font-weight:700;color:#e6edf3;margin-bottom:6px">&#128295; Technical Report</div>
+      <div style="font-size:12px;color:#6e7681;line-height:1.6;margin-bottom:16px">All findings including pass/fail/warn with full details and step-by-step remediation for each check. For security engineers.</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        {'<button class="scan-btn" onclick="rptDownloadPdf(\'technical\',this)" style="color:#3fb950;border-color:#238636;font-size:12px">&#8659; Download PDF</button><button class="scan-btn" onclick="rptPreview(\'technical\')" style="color:#8b949e;font-size:12px">&#128065; Preview</button>' if _has_technical_reports() else '<button disabled class="scan-btn" style="color:#484f58;border-color:#21262d;font-size:12px;cursor:default">&#128274; Plus Plan Required</button><div style="font-size:11px;color:#484f58;margin-top:8px">Contact sales@markai.io to upgrade</div>'}
+      </div>
+    </div>
+  </div>
+
+  <div style="font-size:11px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:#6e7681;margin-bottom:12px">MCP &amp; Agent Governance Reports</div>
+  <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:16px;margin-bottom:28px">
+
+    <div style="background:#161b22;border:1px solid #21262d;border-radius:8px;padding:20px">
+      <div style="font-size:15px;font-weight:700;color:#e6edf3;margin-bottom:6px">&#128279; Executive — Agent Risk</div>
+      <div style="font-size:12px;color:#6e7681;line-height:1.6;margin-bottom:16px">Business risk summary of AI agent tool exposure. No server inventory or technical detail. Safe for board-level distribution.</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="scan-btn" onclick="rptPreviewMcp('executive')" style="color:#8b949e;font-size:12px">&#128065; Preview</button>
+      </div>
+    </div>
+
+    <div style="background:#161b22;border:1px solid #21262d;border-radius:8px;padding:20px">
+      <div style="font-size:15px;font-weight:700;color:#e6edf3;margin-bottom:6px">&#128279; CISO — Agent Governance</div>
+      <div style="font-size:12px;color:#6e7681;line-height:1.6;margin-bottom:16px">Full MCP server inventory, auth status, OWASP Agentic AI risks, and EU AI Act exposure mapping. No remediation steps.</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="scan-btn" onclick="rptPreviewMcp('ciso')" style="color:#8b949e;font-size:12px">&#128065; Preview</button>
+      </div>
+    </div>
+
+    <div style="background:#161b22;border:1px solid #21262d;border-radius:8px;padding:20px">
+      <div style="font-size:15px;font-weight:700;color:#e6edf3;margin-bottom:6px">&#128279; Technical — Per-Server Detail</div>
+      <div style="font-size:12px;color:#6e7681;line-height:1.6;margin-bottom:16px">Per-server auth status, exposed tools, high-risk tool flags, and remediation steps for each unauthenticated server.</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="scan-btn" onclick="rptPreviewMcp('technical')" style="color:#8b949e;font-size:12px">&#128065; Preview</button>
+      </div>
+    </div>
+  </div>
+
+  <div style="font-size:11px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:#6e7681;margin-bottom:12px">Evidence &amp; Compliance</div>
+  <div style="background:#161b22;border:1px solid #21262d;border-radius:8px;padding:20px;max-width:520px">
+    <div style="font-size:15px;font-weight:700;color:#e6edf3;margin-bottom:6px">&#128230; Evidence Package</div>
+    <div style="font-size:12px;color:#6e7681;line-height:1.6;margin-bottom:6px">Complete audit bundle for compliance review: cover letter, findings CSV, signed fleet PDF, per-device JSON reports, and cryptographic manifest.</div>
+    <div style="font-size:12px;color:#6e7681;margin-bottom:16px">Contents are cryptographically signed with HMAC-SHA256 — tamper-evident for auditor submission.</div>
+    <button id="btn-evidence-export-rpt" class="scan-btn" onclick="downloadEvidencePackage(this)" style="color:#a371f7;border-color:#6e40c9;font-size:12px">&#8659; Download ZIP</button>
+  </div>
+  </div>
+
   </div>
 </div>
 
@@ -3345,6 +3883,35 @@ window.addEventListener('storage', function(e) {{
   if (e.key === 'sentinel_theme') _applyTheme(e.newValue === 'light');
 }});
 
+function navTo(page) {{
+  document.querySelectorAll('.page').forEach(function(n) {{ n.classList.remove('active'); }});
+  document.querySelectorAll('.sb-item').forEach(function(n) {{ n.classList.remove('sb-active'); }});
+  const p = document.getElementById('page-' + page);
+  if (p) p.classList.add('active');
+  const b = document.getElementById('nav-' + page);
+  if (b) b.classList.add('sb-active');
+  document.getElementById('main').scrollTop = 0;
+}}
+
+function _syncFindingsSelector() {{
+  const sel = document.getElementById('findings-device-sel');
+  if (!sel) return;
+  const current = sel.value;
+  sel.innerHTML = '<option value="">— select a device —</option>';
+  _allDevices.forEach(function(d) {{
+    const age  = d.last_seen ? Math.floor(Date.now()/1000) - d.last_seen : null;
+    const when = age === null ? 'never' : age < 120 ? 'just now' : age < 3600 ? Math.floor(age/60)+'m ago' : age < 86400 ? Math.floor(age/3600)+'h ago' : Math.floor(age/86400)+'d ago';
+    const fail = d.fail_count || 0;
+    const warn = d.warn_count || 0;
+    const label = (d.hostname || d.device_id) + ' — ' + (fail ? fail+' fail' : warn ? warn+' warn' : 'clean') + ' · ' + when;
+    const opt = document.createElement('option');
+    opt.value = d.device_id;
+    opt.textContent = label;
+    if (d.device_id === current) opt.selected = true;
+    sel.appendChild(opt);
+  }});
+}}
+
 let _countdown = 60;
 let _allDevices = [];
 let _activeFilter = new URLSearchParams(location.search).get('filter') || null;
@@ -3359,6 +3926,9 @@ setInterval(() => {{
 refreshDevices();
 refreshShadow();
 refreshMcp();
+loadRiskRegister();
+loadInventory();
+loadSchedules();
 
 function _age(ts) {{
   if (!ts) return 'never';
@@ -3424,6 +3994,7 @@ async function refreshDevices() {{
     document.getElementById('sc-count').textContent = devs.length;
     _allDevices = devs;
     _syncFilterUI();
+    _syncFindingsSelector();
     const maxPage = Math.max(1, Math.ceil(_visibleDevices().length / _pageSize));
     if (_currentPage > maxPage) _currentPage = maxPage;
     renderDevicePage();
@@ -3848,17 +4419,18 @@ async function discoverAll(btn) {{
       btn.innerHTML = `Queued (${{data.count}}) — agents scanning…`;
       setTimeout(() => {{
         btn.disabled = false;
-        btn.innerHTML = '&#128270; Find Shadow AI';
+        btn.disabled = false;
+        btn.innerHTML = '&#128270; Run Shadow AI Scan';
         refreshShadow();
       }}, 45000);
     }} else {{
       btn.disabled = false;
-      btn.innerHTML = '&#128270; Find Shadow AI';
+      btn.innerHTML = '&#128270; Run Shadow AI Scan';
       alert(data.error || 'Failed to queue discovery');
     }}
   }} catch (e) {{
     btn.disabled = false;
-    btn.innerHTML = '&#128270; Find Shadow AI';
+    btn.innerHTML = '&#128270; Run Shadow AI Scan';
   }}
 }}
 
@@ -4073,6 +4645,9 @@ async function refreshMcp() {{
 }}
 
 async function selectDevice(id) {{
+  navTo('findings');
+  const sel = document.getElementById('findings-device-sel');
+  if (sel && sel.value !== id) sel.value = id;
   const panel = document.getElementById('detail-panel');
   panel.style.padding = '0';
   panel.style.minHeight = 'unset';
@@ -4215,10 +4790,36 @@ function _sysLog(msg, color) {{
   el.textContent = msg;
 }}
 
-function openReport(tier) {{
+function _rptProfileParam() {{
   const checked = [...document.querySelectorAll('.rpt-profile:checked')].map(c => c.value);
-  const profileParam = checked.length ? '&profile=' + checked.join(',') : '';
-  window.open('/api/fleet/report?tier=' + tier + '&fmt=html' + profileParam, '_blank');
+  return checked.length ? '&profile=' + checked.join(',') : '';
+}}
+function openReport(tier) {{
+  window.open('/api/fleet/report?tier=' + tier + '&fmt=html' + _rptProfileParam(), '_blank');
+}}
+function rptPreview(tier) {{
+  window.open('/api/fleet/report?tier=' + tier + '&fmt=html' + _rptProfileParam(), '_blank');
+}}
+function rptPreviewMcp(tier) {{
+  window.open('/api/fleet/mcp/report?tier=' + tier, '_blank');
+}}
+async function rptDownloadPdf(tier, btn) {{
+  const orig = btn.textContent;
+  btn.disabled = true; btn.textContent = 'Generating…';
+  try {{
+    const r = await fetch('/api/fleet/report?tier=' + tier + '&fmt=pdf' + _rptProfileParam());
+    if (!r.ok) {{ alert('Report failed: ' + await r.text().catch(() => r.status)); return; }}
+    const blob = await r.blob();
+    if (!blob.size) {{ alert('Server returned an empty PDF — check server log.'); return; }}
+    const a = Object.assign(document.createElement('a'), {{
+      href: URL.createObjectURL(blob),
+      download: 'sentinel_fleet_' + tier + '.pdf'
+    }});
+    document.body.appendChild(a); a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(a.href);
+  }} catch(e) {{ alert('Download error: ' + e); }}
+  finally {{ btn.disabled = false; btn.textContent = orig; }}
 }}
 
 async function downloadFleetReport(tier, btn) {{
@@ -4251,6 +4852,240 @@ async function downloadFleetReport(tier, btn) {{
     btn.disabled  = false;
     btn.textContent = orig;
   }}
+}}
+
+let _invData = [];
+let _invStatus = 'all';
+
+async function loadInventory() {{
+  try {{
+    const r = await fetch('/api/fleet/inventory');
+    const d = await r.json();
+    _invData = d.items || [];
+    const c = d.counts || {{}};
+    document.getElementById('inv-counts').innerHTML =
+      `<div class="inv-count-card"><div class="inv-count-n" style="color:#f85149">${{c.unapproved||0}}</div><div style="color:#8b949e">Unapproved</div></div>` +
+      `<div class="inv-count-card"><div class="inv-count-n" style="color:#d29922">${{c.under_review||0}}</div><div style="color:#8b949e">Under Review</div></div>` +
+      `<div class="inv-count-card"><div class="inv-count-n" style="color:#3fb950">${{c.approved||0}}</div><div style="color:#8b949e">Approved</div></div>`;
+    renderInventory();
+  }} catch(e) {{
+    document.getElementById('inv-body').innerHTML = '<div style="color:#f85149;font-size:13px;padding:8px 0">Failed to load inventory.</div>';
+  }}
+}}
+
+function invFilter(status, btn) {{
+  _invStatus = status;
+  document.querySelectorAll('#inv-filters .rr-fil').forEach(b => b.classList.remove('rr-active'));
+  btn.classList.add('rr-active');
+  renderInventory();
+}}
+
+function renderInventory() {{
+  const rows = _invStatus === 'all' ? _invData : _invData.filter(i => i.approval_status === _invStatus);
+  const el = document.getElementById('inv-body');
+  if (!rows.length) {{
+    el.innerHTML = '<div style="color:#6e7681;font-size:13px;padding:16px 0">' +
+      (_invData.length ? 'No assets at this status.' : 'No AI assets discovered yet. Run Shadow AI discovery first.') + '</div>';
+    return;
+  }}
+  const SRC_ICON = {{network:'🌐',cloud:'☁️',dns:'🔍',process:'⚙️',container:'🐳'}};
+  const trs = rows.map(item => {{
+    const icon = SRC_ICON[item.source] || '🤖';
+    const models = (item.models||[]).slice(0,3).join(', ') || '—';
+    const st = item.approval_status || 'unapproved';
+    let badge, actions;
+    if (st === 'approved') {{
+      badge = '<span class="inv-badge-approved">Approved</span>';
+      actions = `<button class="inv-action" onclick="invSetStatus(${{item.id}},'under_review',this)">→ Review</button>
+                 <button class="inv-action" onclick="invSetStatus(${{item.id}},'unapproved',this)">Unapprove</button>`;
+    }} else if (st === 'under_review') {{
+      badge = '<span class="inv-badge-review">Under Review</span>';
+      actions = `<button class="inv-action" onclick="invSetStatus(${{item.id}},'approved',this)">Approve</button>
+                 <button class="inv-action" onclick="invSetStatus(${{item.id}},'unapproved',this)">Unapprove</button>`;
+    }} else {{
+      badge = '<span class="inv-badge-unapp">Unapproved</span>';
+      actions = `<button class="inv-action" onclick="invSetStatus(${{item.id}},'approved',this)">Approve</button>
+                 <button class="inv-action" onclick="invSetStatus(${{item.id}},'under_review',this)">Flag for Review</button>`;
+    }}
+    return `<tr>
+      <td style="font-size:16px">${{icon}}</td>
+      <td style="color:#e6edf3;font-weight:600">${{esc(item.host)}}${{item.port ? ':'+item.port : ''}}</td>
+      <td style="color:#8b949e">${{esc(item.service||item.source)}}</td>
+      <td style="color:#8b949e;font-size:12px">${{esc(models)}}</td>
+      <td style="color:#6e7681;font-size:11px">${{esc(item.reporter_hostname||'')}}</td>
+      <td>${{badge}}</td>
+      <td style="white-space:nowrap;display:flex;gap:4px">${{actions}}</td>
+    </tr>`;
+  }}).join('');
+  el.innerHTML = `<table class="rr-table">
+    <thead><tr><th></th><th>Host</th><th>Service</th><th>Models</th><th>Reported by</th><th>Status</th><th>Actions</th></tr></thead>
+    <tbody>${{trs}}</tbody>
+  </table><div style="font-size:11px;color:#484f58;margin-bottom:8px">${{rows.length}} asset${{rows.length!==1?'s':''}} · approvals are timestamped and attributed in the evidence export</div>`;
+}}
+
+async function invSetStatus(id, status, btn) {{
+  const orig = btn.textContent;
+  btn.disabled = true; btn.textContent = '…';
+  try {{
+    const slug = status==='under_review'?'review':status==='approved'?'approve':'unapprove';
+    const r = await fetch('/api/fleet/inventory/' + slug + '/' + id, {{method:'POST'}});
+    const d = await r.json();
+    if (d.ok) {{ await loadInventory(); }} else {{ btn.disabled=false; btn.textContent=orig; }}
+  }} catch(e) {{ btn.disabled=false; btn.textContent=orig; }}
+}}
+
+const CADENCE_LABELS = {{daily:'Daily',weekly:'Weekly',monthly:'Monthly'}};
+const WEEKDAY_LABELS = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+const PROFILE_LABELS = {{default:'Base Scan',fedramp:'FedRAMP',cmmc:'CMMC 2.0',financial:'Financial',
+  healthcare:'Healthcare',biotech:'Biotech',owasp_agentic:'OWASP Agentic',eu_ai_act:'EU AI Act'}};
+
+async function loadSchedules() {{
+  try {{
+    const r = await fetch('/api/schedules');
+    const d = await r.json();
+    renderSchedules(d.schedules || []);
+  }} catch(e) {{
+    document.getElementById('sched-list').innerHTML = '<div style="color:#f85149;font-size:13px">Failed to load schedules.</div>';
+  }}
+}}
+
+function renderSchedules(scheds) {{
+  const el = document.getElementById('sched-list');
+  if (!scheds.length) {{
+    el.innerHTML = '<div style="color:#6e7681;font-size:13px;padding:8px 0">No schedules configured. Use "+ Add schedule" below to create one.</div>';
+    return;
+  }}
+  const rows = scheds.map(s => {{
+    const lbl = s.label || (PROFILE_LABELS[s.profile]||s.profile) + ' ' + (CADENCE_LABELS[s.cadence]||s.cadence);
+    let when = `${{String(s.hour).padStart(2,'0')}}:00 UTC`;
+    if (s.cadence==='weekly') when = WEEKDAY_LABELS[s.weekday||0] + ' ' + when;
+    if (s.cadence==='monthly') when = 'Day ' + (s.monthday||1) + ' ' + when;
+    const enabled = s.enabled ? '🟢' : '⚫';
+    const fired = s.last_fired ? new Date(s.last_fired*1000).toLocaleDateString() : 'Never';
+    return `<div style="display:flex;align-items:center;gap:12px;padding:6px 0;border-bottom:1px solid #21262d;font-size:13px;flex-wrap:wrap">
+      <span style="min-width:16px">${{enabled}}</span>
+      <span style="font-weight:600;color:#e6edf3;min-width:160px">${{esc(lbl)}}</span>
+      <span class="tag">${{CADENCE_LABELS[s.cadence]||s.cadence}}</span>
+      <span class="tag">${{PROFILE_LABELS[s.profile]||s.profile}}</span>
+      <span style="color:#8b949e;font-size:12px">${{when}}</span>
+      <span style="color:#484f58;font-size:11px;margin-left:auto">Last ran: ${{fired}}</span>
+      <button class="inv-action" onclick="toggleSchedule(${{s.id}},this)">${{s.enabled?'Disable':'Enable'}}</button>
+      <button class="inv-action" style="color:#f85149" onclick="deleteSchedule(${{s.id}},this)">Delete</button>
+    </div>`;
+  }}).join('');
+  el.innerHTML = rows;
+}}
+
+function schedCadenceChange() {{
+  const c = document.getElementById('sched-cadence').value;
+  document.getElementById('sched-weekday-wrap').style.display = c==='weekly' ? '' : 'none';
+  document.getElementById('sched-monthday-wrap').style.display = c==='monthly' ? '' : 'none';
+}}
+
+async function addSchedule() {{
+  const body = {{
+    label:    document.getElementById('sched-label').value.trim(),
+    profile:  document.getElementById('sched-profile').value,
+    cadence:  document.getElementById('sched-cadence').value,
+    hour:     parseInt(document.getElementById('sched-hour').value),
+    device_id:'all',
+  }};
+  const c = body.cadence;
+  if (c==='weekly') body.weekday = parseInt(document.getElementById('sched-weekday').value);
+  if (c==='monthly') body.monthday = parseInt(document.getElementById('sched-monthday').value);
+  try {{
+    const r = await fetch('/api/schedules', {{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify(body)}});
+    const d = await r.json();
+    if (d.ok) {{ document.getElementById('sched-label').value=''; await loadSchedules(); }}
+    else alert('Error: ' + (d.error||'unknown'));
+  }} catch(e) {{ alert('Error: ' + e); }}
+}}
+
+async function toggleSchedule(id, btn) {{
+  btn.disabled = true;
+  try {{
+    await fetch('/api/schedules/'+id+'/toggle', {{method:'POST'}});
+    await loadSchedules();
+  }} finally {{ btn.disabled = false; }}
+}}
+
+async function deleteSchedule(id, btn) {{
+  if (!confirm('Delete this schedule?')) return;
+  btn.disabled = true;
+  try {{
+    await fetch('/api/schedules/'+id+'/delete', {{method:'POST'}});
+    await loadSchedules();
+  }} finally {{ btn.disabled = false; }}
+}}
+
+async function downloadEvidencePackage(btn) {{
+  const orig = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = 'Building…';
+  try {{
+    const p = _rptProfileParam().replace('&profile=','?profile=');
+    const r = await fetch('/api/fleet/evidence-export' + p);
+    if (!r.ok) {{ alert('Export failed: ' + await r.text().catch(() => r.status)); return; }}
+    const blob = await r.blob();
+    const disp = r.headers.get('Content-Disposition') || '';
+    const fname = (disp.match(/filename="([^"]+)"/) || [])[1] || 'sentinel_evidence.zip';
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = fname;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }} catch(e) {{ alert('Download error: ' + e); }}
+  finally {{ btn.disabled = false; btn.textContent = orig; }}
+}}
+
+let _rrData = [];
+let _rrSev = 'all';
+
+async function loadRiskRegister() {{
+  try {{
+    const r = await fetch('/api/fleet/risk-register');
+    const d = await r.json();
+    _rrData = d.entries || [];
+    renderRiskRegister();
+  }} catch(e) {{
+    document.getElementById('rr-body').innerHTML = '<div style="color:#f85149;font-size:13px;padding:8px 0">Failed to load risk register.</div>';
+  }}
+}}
+
+function rrFilter(sev, btn) {{
+  _rrSev = sev;
+  document.querySelectorAll('.rr-fil').forEach(b => b.classList.remove('rr-active'));
+  btn.classList.add('rr-active');
+  renderRiskRegister();
+}}
+
+function renderRiskRegister() {{
+  const rows = _rrSev === 'all' ? _rrData : _rrData.filter(e => e.severity === _rrSev);
+  const el = document.getElementById('rr-body');
+  if (!rows.length) {{
+    el.innerHTML = '<div style="color:#6e7681;font-size:13px;padding:16px 0">' +
+      (_rrData.length ? 'No findings at this severity.' : 'No open findings — fleet is clean.') + '</div>';
+    return;
+  }}
+  const SEV_CLS = {{CRITICAL:'critical',HIGH:'high',MEDIUM:'medium',LOW:'low'}};
+  const trs = rows.map(e => {{
+    const badge = e.trend === 'Recurring'
+      ? '<span class="rr-recurring">Recurring</span>'
+      : '<span class="rr-new">New</span>';
+    const devTip = e.affected_devices.join(', ');
+    return `<tr>
+      <td><span class="badge ${{SEV_CLS[e.severity]||'low'}}">${{esc(e.severity)}}</span></td>
+      <td style="font-family:monospace;font-size:12px;color:#8b949e">${{esc(e.check_id)}}</td>
+      <td style="color:#c9d1d9">${{esc(e.title)}}</td>
+      <td title="${{esc(devTip)}}" style="cursor:default;color:#e6edf3;font-weight:600">${{e.affected_count}}</td>
+      <td>${{badge}}</td>
+      <td style="color:#8b949e">${{e.days_open}}d</td>
+    </tr>`;
+  }}).join('');
+  el.innerHTML = `<table class="rr-table">
+    <thead><tr><th>Severity</th><th>Check ID</th><th>Finding</th><th title="Hover for device list">Devices</th><th>Trend</th><th>Open</th></tr></thead>
+    <tbody>${{trs}}</tbody>
+  </table><div style="font-size:11px;color:#484f58;margin-bottom:8px">${{rows.length}} open finding${{rows.length!==1?'s':''}} · hover device count for affected hostnames</div>`;
 }}
 
 async function pullUpdates() {{
@@ -4414,6 +5249,29 @@ def main():
         start_monitors(_get_store())
     except Exception as _startup_err:
         log.error('License/monitor startup error (non-fatal): %s', _startup_err, exc_info=True)
+    def _schedule_ticker():
+        import time as _t
+        while True:
+            _t.sleep(60)
+            try:
+                _store = _get_store()
+                due = _store.get_due_schedules()
+                for sched in due:
+                    device_id = sched.get('device_id', 'all')
+                    if device_id == 'all':
+                        devices = _store.list_devices()
+                        for d in devices:
+                            _store.enqueue_command(d['device_id'], 'scan_now')
+                        log.info('schedule %s fired: queued scan for %d devices', sched['id'], len(devices))
+                    else:
+                        _store.enqueue_command(device_id, 'scan_now')
+                        log.info('schedule %s fired: queued scan for device %s', sched['id'], device_id)
+                    _store.mark_schedule_fired(sched['id'])
+            except Exception as _se:
+                log.error('schedule ticker error: %s', _se)
+
+    threading.Thread(target=_schedule_ticker, daemon=True, name='schedule-ticker').start()
+
     server = http.server.ThreadingHTTPServer((args.host, args.port), _Handler)
 
     tls_cert = os.environ.get('SENTINEL_TLS_CERT', '')

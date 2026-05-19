@@ -1,6 +1,6 @@
 {
-  "name": "Life Sciences",
-  "description": "AI security checks for pharmaceutical and life sciences organizations — aligned to FDA 21 CFR Part 11, HIPAA 45 CFR §164, ICH E6(R2) Good Clinical Practice, GxP ALCOA+ data integrity principles, FDA AI/ML SaMD guidance, and NIST AI RMF.",
+  "name": "BioMedical",
+  "description": "AI security checks for pharmaceutical, biotech, and clinical organizations — aligned to FDA 21 CFR Part 11, HIPAA 45 CFR §164, ICH E6(R2) Good Clinical Practice, GxP ALCOA+ data integrity principles, FDA AI/ML SaMD guidance, and NIST AI RMF.",
   "checks": "all",
   "default_output": "plain",
   "include_remediation": true,

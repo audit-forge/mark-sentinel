@@ -271,7 +271,7 @@ function init(){
   document.getElementById('hdr-date').textContent=m.scan_date||'';
   function _tick(){document.getElementById('hdr-time').textContent=new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});}
   _tick(); setInterval(_tick,30000);
-  const _fwLabels={fedramp:'NIST 800-53',cmmc:'CMMC Level 2'};
+  const _fwLabels={fedramp:'NIST 800-53',cmmc:'CMMC Level 2',financial:'NIST AI RMF',default:'NIST AI RMF',healthcare:'HIPAA',biotech:'FDA/GxP',lifesciences:'FDA/GxP',owasp_agentic:'OWASP Agentic',eu_ai_act:'EU AI Act'};
   const _fwLabel=_fwLabels[m.profile_framework]||'';
   document.getElementById('hdr-profile').textContent=(m.profile||'')+(_fwLabel?' · '+_fwLabel:'');
   document.querySelectorAll('.nav-item').forEach(el=>{
@@ -507,7 +507,7 @@ function renderFindings(){
     const remHtml=(f.remediation||'').split('\n').filter(Boolean).map(s=>`<div class="rem-step">${esc(s)}</div>`).join('');
     const fwHtml=Object.entries(f.frameworks||{}).map(([k,v])=>`<span class="fw-tag">${esc(k)}: ${esc(v)}</span>`).join('');
     const ctrlHtml=(f.emphasis_controls||[]).map(c=>`<span class="ctrl-tag">${esc(c)}</span>`).join('');
-    const ctrlLabel={fedramp:'NIST 800-53',cmmc:'CMMC Practices'}[(DATA.meta||{}).profile_framework]||'Controls';
+    const ctrlLabel={fedramp:'NIST 800-53',cmmc:'CMMC Practices',financial:'NIST AI RMF',default:'NIST AI RMF',healthcare:'HIPAA',biotech:'FDA/GxP',lifesciences:'FDA/GxP',owasp_agentic:'OWASP',eu_ai_act:'EU AI Act'}[(DATA.meta||{}).profile_framework]||'Controls';
     return`<div class="finding" id="f${i}">
       <div class="fhdr" onclick="togF(${i})">
         <div class="find-ind ${sl}"></div>
@@ -874,7 +874,7 @@ function buildExecReport(p){
 <div class="page">
   <div class="rpt-hdr">
     <div><div class="rpt-brand">M.A.R.K. Sentinel</div><div class="rpt-brand-name">SENTINEL</div><div class="rpt-type">Executive Security Report</div></div>
-    <div class="rpt-meta"><strong>Target:</strong> ${esc((d.target||'').split('/').pop()||d.target||'')}<br><strong>Provider:</strong> ${esc(p.label)}<br><strong>Date:</strong> ${esc(d.scan_date||new Date().toLocaleDateString())}<br><strong>Profile:</strong> ${esc(d.profile||'')}${d.profile_framework?` · ${esc({fedramp:'NIST 800-53',cmmc:'CMMC Level 2'}[d.profile_framework]||d.profile_framework)}`:''}</div>
+    <div class="rpt-meta"><strong>Target:</strong> ${esc((d.target||'').split('/').pop()||d.target||'')}<br><strong>Provider:</strong> ${esc(p.label)}<br><strong>Date:</strong> ${esc(d.scan_date||new Date().toLocaleDateString())}<br><strong>Profile:</strong> ${esc(d.profile||'')}${d.profile_framework?` · ${esc({fedramp:'NIST 800-53',cmmc:'CMMC Level 2',financial:'NIST AI RMF',default:'NIST AI RMF',healthcare:'HIPAA',biotech:'FDA/GxP',lifesciences:'FDA/GxP',owasp_agentic:'OWASP Agentic',eu_ai_act:'EU AI Act'}[d.profile_framework]||d.profile_framework)}`:''}</div>
   </div>
   <h1>AI Security Assessment</h1>
   <p>We audited your AI deployment and evaluated ${s.total_evaluated} security controls. Here is what we found and what needs to happen next.</p>
@@ -918,7 +918,7 @@ function buildCISOReport(p){
   const fwMap={};
   p.findings.forEach(f=>Object.entries(f.frameworks||{}).forEach(([k,v])=>{if(!fwMap[k])fwMap[k]=new Set();v.split(',').forEach(x=>fwMap[k].add(x.trim()));}));
   const _emph=(DATA.meta||{}).profile_framework;
-  if(_emph){const _el={fedramp:'NIST 800-53',cmmc:'CMMC Level 2'}[_emph];if(_el){if(!fwMap[_el])fwMap[_el]=new Set();p.findings.forEach(f=>(f.emphasis_controls||[]).forEach(c=>fwMap[_el].add(c)));}}
+  if(_emph){const _el={fedramp:'NIST 800-53',cmmc:'CMMC Level 2',financial:'NIST AI RMF',default:'NIST AI RMF',healthcare:'HIPAA',biotech:'FDA/GxP',lifesciences:'FDA/GxP',owasp_agentic:'OWASP Agentic',eu_ai_act:'EU AI Act'}[_emph];if(_el){if(!fwMap[_el])fwMap[_el]=new Set();p.findings.forEach(f=>(f.emphasis_controls||[]).forEach(c=>fwMap[_el].add(c)));}}
   const fwRows=Object.entries(fwMap).map(([k,v])=>`<tr><td><strong>${esc(k)}</strong></td><td style="font-family:monospace;font-size:12px">${[...v].sort().join(', ')}</td></tr>`).join('');
   const critHigh=p.findings.filter(f=>f.status==='FAIL'&&(f.severity==='CRITICAL'||f.severity==='HIGH'));
   const chRows=critHigh.map(f=>`<tr><td style="font-family:monospace;font-size:12px">${esc(f.check_id)}</td><td><span class="badge ${f.severity.toLowerCase()}">${f.severity}</span></td><td>${esc(f.title)}</td><td style="font-size:12px;color:#6b7280">${esc((f.evidence||[])[0]||'')}</td></tr>`).join('');
@@ -942,7 +942,7 @@ function buildCISOReport(p){
 <div class="page">
   <div class="rpt-hdr">
     <div><div class="rpt-brand">M.A.R.K. Sentinel</div><div class="rpt-brand-name">SENTINEL</div><div class="rpt-type">CISO Security Report</div></div>
-    <div class="rpt-meta"><strong>Target:</strong> ${esc((d.target||'').split('/').pop()||d.target||'')}<br><strong>Provider:</strong> ${esc(p.label)}<br><strong>Date:</strong> ${esc(d.scan_date||new Date().toLocaleDateString())}<br><strong>Profile:</strong> ${esc(d.profile||'')}${d.profile_framework?` · ${esc({fedramp:'NIST 800-53',cmmc:'CMMC Level 2'}[d.profile_framework]||d.profile_framework)}`:''}</div>
+    <div class="rpt-meta"><strong>Target:</strong> ${esc((d.target||'').split('/').pop()||d.target||'')}<br><strong>Provider:</strong> ${esc(p.label)}<br><strong>Date:</strong> ${esc(d.scan_date||new Date().toLocaleDateString())}<br><strong>Profile:</strong> ${esc(d.profile||'')}${d.profile_framework?` · ${esc({fedramp:'NIST 800-53',cmmc:'CMMC Level 2',financial:'NIST AI RMF',default:'NIST AI RMF',healthcare:'HIPAA',biotech:'FDA/GxP',lifesciences:'FDA/GxP',owasp_agentic:'OWASP Agentic',eu_ai_act:'EU AI Act'}[d.profile_framework]||d.profile_framework)}`:''}</div>
   </div>
   <h1>AI Security Posture Report</h1>
   <div class="risk-banner ${bc}"><div class="rscore ${bc}">${risk.score}</div>
@@ -983,7 +983,7 @@ function buildAnalystReport(p){
     const remHtml=(f.remediation||'').split('\n').filter(Boolean).map(r=>`<p>→ ${esc(r)}</p>`).join('');
     const fwHtml=Object.entries(f.frameworks||{}).map(([k,v])=>`<span class="badge" style="background:#dbeafe;color:#1e40af;margin-right:4px;margin-bottom:3px">${esc(k)}: ${esc(v)}</span>`).join('');
     const aCtrlHtml=(f.emphasis_controls||[]).map(c=>`<span class="ctrl-tag">${esc(c)}</span>`).join('');
-    const aCtrlLabel={fedramp:'NIST 800-53',cmmc:'CMMC Practices'}[(DATA.meta||{}).profile_framework]||'';
+    const aCtrlLabel={fedramp:'NIST 800-53',cmmc:'CMMC Practices',financial:'NIST AI RMF',default:'NIST AI RMF',healthcare:'HIPAA',biotech:'FDA/GxP',lifesciences:'FDA/GxP',owasp_agentic:'OWASP',eu_ai_act:'EU AI Act'}[(DATA.meta||{}).profile_framework]||'';
     return`<div class="frow">
       <div class="frow-hdr"><span class="badge ${sl}">${esc(f.severity)}</span><span class="badge ${st}">${esc(f.status)}</span><strong style="font-family:monospace;font-size:13px">${esc(f.check_id)}</strong><span style="flex:1">${esc(f.title)}</span><span style="font-size:11px;color:#9ca3af">${esc(f.category)}</span></div>
       <div class="frow-body"><p>${esc(f.details)}</p>
@@ -1294,20 +1294,26 @@ function renderCoverage(){
       ${provBar('coverage')}
       <div style="padding:32px;text-align:center;color:#8b949e">
         <div style="font-size:32px;margin-bottom:12px">📋</div>
-        <div style="font-size:14px">Control coverage analysis is available for <strong style="color:#c9d1d9">FedRAMP</strong> and <strong style="color:#c9d1d9">CMMC</strong> profiles.</div>
-        <div style="font-size:12px;margin-top:8px">Re-run the scan with a FedRAMP or CMMC profile to see coverage.</div>
+        <div style="font-size:14px">Control coverage analysis is available for all scan profiles.</div>
+        <div style="font-size:12px;margin-top:8px">Run a scan with any named profile to see which framework controls are tested vs. which require manual assessment.</div>
       </div>`;
     return;
   }
 
-  const isFedRAMP=type==='fedramp';
-  const title=isFedRAMP?'NIST 800-53 Control Coverage':'CMMC Domain Coverage';
+  const _covTitles={
+    fedramp:'NIST 800-53 Control Coverage',cmmc:'CMMC Domain Coverage',
+    healthcare:'HIPAA Security Rule Coverage',owasp_agentic:'OWASP Agentic AI Coverage',
+    eu_ai_act:'EU AI Act Article Coverage',biotech:'BioMedical Framework Coverage',
+    lifesciences:'BioMedical Framework Coverage',financial:'NIST AI RMF Coverage',
+    default:'NIST AI RMF Coverage',
+  };
+  const title=_covTitles[type]||'Control Coverage';
   const pctColor=pct>=80?'#3fb950':pct>=50?'#eab308':'#f85149';
 
   // Group by family
   const families={};
   for(const id of expected){
-    const fam=isFedRAMP?id.split('-')[0]:id;
+    const fam=type==='fedramp'?id.split('-')[0]:id;
     const lbl=labels[fam]||fam;
     if(!families[fam])families[fam]={label:lbl,expected:[],covered:[],notCovered:[]};
     families[fam].expected.push(id);
@@ -1533,6 +1539,55 @@ _CMMC_LABELS = {
     'SA':'Sys & Services Acq','SC':'Comms Protection','SI':'System Integrity',
 }
 
+_HEALTHCARE_EXPECTED = ['Admin','Technical','Privacy','SaMD','HITECH','CMS']
+_HEALTHCARE_LABELS = {
+    'Admin':    'Administrative Safeguards (§164.308)',
+    'Technical':'Technical Safeguards (§164.312)',
+    'Privacy':  'Privacy Rule / PHI Protection',
+    'SaMD':     'FDA SaMD / Clinical AI',
+    'HITECH':   'HITECH Breach Notification',
+    'CMS':      'CMS Cybersecurity Requirements',
+}
+
+_OWASP_EXPECTED = ['A01','A02','A03','A04','A05','A06','A07','A08','A09','A10']
+_OWASP_LABELS = {
+    'A01':'Memory Poisoning','A02':'Tool & Plugin Hijacking','A03':'Prompt Injection',
+    'A04':'Cascading Hallucinations','A05':'Resource Oversubscription',
+    'A06':'AI Social Engineering','A07':'Data Exfiltration',
+    'A08':'Excessive Agency','A09':'Audit Bypass','A10':'Rogue Agent',
+}
+
+_EU_AI_EXPECTED = ['Art.9','Art.10','Art.11','Art.12','Art.13','Art.14','Art.15']
+_EU_AI_LABELS = {
+    'Art.9': 'Risk Management System',
+    'Art.10':'Data & Data Governance',
+    'Art.11':'Technical Documentation',
+    'Art.12':'Record-Keeping & Logging',
+    'Art.13':'Transparency',
+    'Art.14':'Human Oversight',
+    'Art.15':'Accuracy, Robustness & Cybersecurity',
+}
+
+_BIOTECH_EXPECTED = ['GOVERN','MANAGE','MEASURE','FDA','ICH','GxP','HIPAA','SaMD']
+_BIOTECH_LABELS = {
+    'GOVERN': 'NIST AI RMF — GOVERN',
+    'MANAGE': 'NIST AI RMF — MANAGE',
+    'MEASURE':'NIST AI RMF — MEASURE',
+    'FDA':    'FDA 21 CFR Part 11',
+    'ICH':    'ICH E6(R2) / Q10 GCP',
+    'GxP':    'GxP ALCOA+ Integrity',
+    'HIPAA':  'HIPAA §164 Safeguards',
+    'SaMD':   'FDA AI/ML SaMD',
+}
+
+_NIST_RMF_EXPECTED = ['GOVERN','MAP','MEASURE','MANAGE']
+_NIST_RMF_LABELS = {
+    'GOVERN': 'GOVERN — Policies & Organizational Culture',
+    'MAP':    'MAP — Context & Risk Identification',
+    'MEASURE':'MEASURE — Risk Analysis & Assessment',
+    'MANAGE': 'MANAGE — Risk Response & Operations',
+}
+
 
 def generate(reports: list[dict], output_path: str | Path, *,
              meta: dict | None = None) -> Path:
@@ -1589,6 +1644,53 @@ def generate(reports: list[dict], output_path: str | Path, *,
             'type': 'cmmc', 'covered': covered_in, 'not_covered': not_covered,
             'expected': expected, 'pct': round(len(covered_in) / len(expected) * 100),
             'labels': _CMMC_LABELS,
+        }
+    elif framework == 'healthcare':
+        expected = _HEALTHCARE_EXPECTED
+        covered_in = sorted(covered & set(expected))
+        not_covered = sorted(set(expected) - covered)
+        resolved_meta['coverage'] = {
+            'type': 'healthcare', 'covered': covered_in, 'not_covered': not_covered,
+            'expected': expected, 'pct': round(len(covered_in) / max(len(expected), 1) * 100),
+            'labels': _HEALTHCARE_LABELS,
+        }
+    elif framework == 'owasp_agentic':
+        expected = _OWASP_EXPECTED
+        covered_in = sorted(covered & set(expected))
+        not_covered = sorted(set(expected) - covered)
+        resolved_meta['coverage'] = {
+            'type': 'owasp_agentic', 'covered': covered_in, 'not_covered': not_covered,
+            'expected': expected, 'pct': round(len(covered_in) / max(len(expected), 1) * 100),
+            'labels': _OWASP_LABELS,
+        }
+    elif framework == 'eu_ai_act':
+        expected = _EU_AI_EXPECTED
+        covered_in = sorted(covered & set(expected))
+        not_covered = sorted(set(expected) - covered)
+        resolved_meta['coverage'] = {
+            'type': 'eu_ai_act', 'covered': covered_in, 'not_covered': not_covered,
+            'expected': expected, 'pct': round(len(covered_in) / max(len(expected), 1) * 100),
+            'labels': _EU_AI_LABELS,
+        }
+    elif framework in ('biotech', 'lifesciences'):
+        expected = _BIOTECH_EXPECTED
+        covered_in = sorted(covered & set(expected))
+        not_covered = sorted(set(expected) - covered)
+        resolved_meta['coverage'] = {
+            'type': framework, 'covered': covered_in, 'not_covered': not_covered,
+            'expected': expected, 'pct': round(len(covered_in) / max(len(expected), 1) * 100),
+            'labels': _BIOTECH_LABELS,
+        }
+    elif framework in ('financial', 'default'):
+        _rmf = {'GOVERN', 'MAP', 'MEASURE', 'MANAGE'}
+        norm = {c.split(' ')[0] for c in covered if c.split(' ')[0] in _rmf}
+        expected = _NIST_RMF_EXPECTED
+        covered_in = sorted(norm & set(expected))
+        not_covered = sorted(set(expected) - norm)
+        resolved_meta['coverage'] = {
+            'type': framework, 'covered': covered_in, 'not_covered': not_covered,
+            'expected': expected, 'pct': round(len(covered_in) / max(len(expected), 1) * 100),
+            'labels': _NIST_RMF_LABELS,
         }
     else:
         resolved_meta['coverage'] = {'type': 'none', 'covered': [], 'not_covered': [], 'expected': [], 'pct': 0}

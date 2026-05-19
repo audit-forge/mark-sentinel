@@ -128,11 +128,30 @@ class AgentStore:
 
                 CREATE INDEX IF NOT EXISTS idx_mcp_last_seen
                     ON mcp_servers(last_seen DESC);
+
+                CREATE TABLE IF NOT EXISTS scan_schedules (
+                    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                    device_id  TEXT NOT NULL DEFAULT 'all',
+                    cadence    TEXT NOT NULL DEFAULT 'daily',
+                    hour       INTEGER NOT NULL DEFAULT 2,
+                    weekday    INTEGER,
+                    monthday   INTEGER,
+                    profile    TEXT NOT NULL DEFAULT 'default',
+                    label      TEXT NOT NULL DEFAULT '',
+                    enabled    INTEGER NOT NULL DEFAULT 1,
+                    created_at INTEGER NOT NULL,
+                    last_fired INTEGER
+                );
             """)
-            # Migration: add ip_address column to existing databases
+            # Migrations
             cols = {r[1] for r in conn.execute("PRAGMA table_info(devices)")}
             if 'ip_address' not in cols:
                 conn.execute("ALTER TABLE devices ADD COLUMN ip_address TEXT NOT NULL DEFAULT ''")
+            sh_cols = {r[1] for r in conn.execute("PRAGMA table_info(shadow_devices)")}
+            if 'approval_status' not in sh_cols:
+                conn.execute(
+                    "ALTER TABLE shadow_devices ADD COLUMN approval_status TEXT NOT NULL DEFAULT 'unapproved'"
+                )
 
         # Prune old reports per retention policy (env var or default 90 days)
         self.prune_old_reports(int(os.environ.get('SENTINEL_RETAIN_DAYS', '90')))
@@ -268,6 +287,88 @@ class AgentStore:
                 ORDER BY received_at DESC LIMIT 1
             """, (device_id,)).fetchone()
         return json.loads(row['report_json']) if row else None
+
+    def get_risk_register(self) -> list[dict]:
+        """Return deduplicated open FAIL/WARN findings across all devices with trend info."""
+        now = int(time.time())
+        with self._lock, self._conn() as conn:
+            latest_rows = conn.execute("""
+                SELECT r.device_id, d.hostname, r.received_at, r.report_json
+                FROM reports r
+                JOIN devices d ON d.device_id = r.device_id
+                WHERE r.received_at = (
+                    SELECT MAX(r2.received_at) FROM reports r2 WHERE r2.device_id = r.device_id
+                )
+                ORDER BY r.received_at DESC
+            """).fetchall()
+            prev_rows = conn.execute("""
+                SELECT r.device_id, r.report_json
+                FROM reports r
+                WHERE r.received_at = (
+                    SELECT r2.received_at FROM reports r2
+                    WHERE r2.device_id = r.device_id
+                    ORDER BY r2.received_at DESC LIMIT 1 OFFSET 1
+                )
+            """).fetchall()
+
+        prev_failing: dict[str, set] = {}
+        for row in prev_rows:
+            prev_data = json.loads(row['report_json'])
+            prev_failing[row['device_id']] = {
+                f['check_id'] for f in prev_data.get('findings', prev_data.get('results', []))
+                if f.get('status') in ('FAIL', 'WARN')
+            }
+
+        findings_map: dict[str, dict] = {}
+        for row in latest_rows:
+            device_id = row['device_id']
+            hostname = row['hostname']
+            received_at = row['received_at']
+            data = json.loads(row['report_json'])
+            prev_ids = prev_failing.get(device_id, set())
+            for f in data.get('findings', data.get('results', [])):
+                if f.get('status') not in ('FAIL', 'WARN'):
+                    continue
+                check_id = f.get('check_id', '')
+                if not check_id:
+                    continue
+                if check_id not in findings_map:
+                    findings_map[check_id] = {
+                        'check_id': check_id,
+                        'title': f.get('title', ''),
+                        'severity': f.get('severity', ''),
+                        'category': f.get('category', ''),
+                        'status': f.get('status', ''),
+                        'affected_devices': [],
+                        'recurring_count': 0,
+                        'first_seen_ts': received_at,
+                    }
+                entry = findings_map[check_id]
+                entry['affected_devices'].append(hostname)
+                if check_id in prev_ids:
+                    entry['recurring_count'] += 1
+                entry['first_seen_ts'] = min(entry['first_seen_ts'], received_at)
+
+        result = []
+        for entry in findings_map.values():
+            affected_count = len(entry['affected_devices'])
+            trend = 'Recurring' if entry['recurring_count'] > 0 else 'New'
+            days_open = max(1, (now - entry['first_seen_ts']) // 86400)
+            result.append({
+                'check_id': entry['check_id'],
+                'title': entry['title'],
+                'severity': entry['severity'],
+                'category': entry['category'],
+                'status': entry['status'],
+                'affected_count': affected_count,
+                'affected_devices': entry['affected_devices'][:10],
+                'trend': trend,
+                'days_open': days_open,
+            })
+
+        sev_order = {'CRITICAL': 0, 'HIGH': 1, 'MEDIUM': 2, 'LOW': 3}
+        result.sort(key=lambda x: (sev_order.get(x['severity'], 99), -x['affected_count']))
+        return result
 
     def get_device(self, device_id: str) -> dict | None:
         """Return device metadata row or None."""
@@ -456,6 +557,98 @@ class AgentStore:
             return conn.execute(
                 "SELECT COUNT(*) FROM shadow_devices WHERE dismissed = 0"
             ).fetchone()[0]
+
+    def add_schedule(self, device_id: str, cadence: str, hour: int,
+                     profile: str, label: str = '',
+                     weekday: int | None = None, monthday: int | None = None) -> int:
+        now = int(time.time())
+        with self._lock, self._conn() as conn:
+            cur = conn.execute("""
+                INSERT INTO scan_schedules
+                    (device_id, cadence, hour, weekday, monthday, profile, label, enabled, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?)
+            """, (device_id, cadence, hour, weekday, monthday, profile, label, now))
+            return cur.lastrowid
+
+    def list_schedules(self) -> list[dict]:
+        with self._lock, self._conn() as conn:
+            rows = conn.execute(
+                "SELECT * FROM scan_schedules ORDER BY created_at DESC"
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def delete_schedule(self, schedule_id: int) -> bool:
+        with self._lock, self._conn() as conn:
+            cur = conn.execute("DELETE FROM scan_schedules WHERE id = ?", (schedule_id,))
+            return cur.rowcount > 0
+
+    def toggle_schedule(self, schedule_id: int) -> bool:
+        with self._lock, self._conn() as conn:
+            cur = conn.execute(
+                "UPDATE scan_schedules SET enabled = 1 - enabled WHERE id = ?", (schedule_id,)
+            )
+            return cur.rowcount > 0
+
+    def get_due_schedules(self) -> list[dict]:
+        """Return enabled schedules that are due to fire right now."""
+        import datetime as _dt
+        now_ts = int(time.time())
+        now_utc = _dt.datetime.utcnow()
+        h, wd, md = now_utc.hour, now_utc.weekday(), now_utc.day
+        with self._lock, self._conn() as conn:
+            rows = conn.execute(
+                "SELECT * FROM scan_schedules WHERE enabled = 1"
+            ).fetchall()
+        due = []
+        for row in rows:
+            r = dict(row)
+            last = r.get('last_fired') or 0
+            cadence = r['cadence']
+            if cadence == 'daily':
+                if r['hour'] == h and (now_ts - last) >= 82800:  # 23h gap
+                    due.append(r)
+            elif cadence == 'weekly':
+                if r['hour'] == h and r.get('weekday') == wd and (now_ts - last) >= 604800 - 3600:
+                    due.append(r)
+            elif cadence == 'monthly':
+                if r['hour'] == h and r.get('monthday') == md and (now_ts - last) >= 2419200 - 3600:
+                    due.append(r)
+        return due
+
+    def mark_schedule_fired(self, schedule_id: int) -> None:
+        with self._lock, self._conn() as conn:
+            conn.execute(
+                "UPDATE scan_schedules SET last_fired = ? WHERE id = ?",
+                (int(time.time()), schedule_id),
+            )
+
+    def list_inventory(self) -> list[dict]:
+        """Return all shadow devices (inc. dismissed) as the formal AI asset inventory."""
+        with self._lock, self._conn() as conn:
+            rows = conn.execute("""
+                SELECT id, reporter_hostname, host, port, service, models_json,
+                       source, detail, first_seen, last_seen, dismissed, approval_status
+                FROM shadow_devices
+                ORDER BY approval_status ASC, last_seen DESC
+            """).fetchall()
+        result = []
+        for row in rows:
+            d = dict(row)
+            d['models'] = json.loads(d.pop('models_json', '[]'))
+            result.append(d)
+        return result
+
+    def set_shadow_approval(self, shadow_id: int, status: str) -> bool:
+        """Set approval_status for a shadow device. Status: approved|under_review|unapproved."""
+        if status not in ('approved', 'under_review', 'unapproved'):
+            return False
+        now = int(time.time())
+        with self._lock, self._conn() as conn:
+            cur = conn.execute(
+                "UPDATE shadow_devices SET approval_status = ?, last_seen = ? WHERE id = ?",
+                (status, now, shadow_id),
+            )
+            return cur.rowcount > 0
 
     def upsert_mcp_server(self, reporter_device_id: str, reporter_hostname: str,
                           host: str, port: int, server_name: str, tools: list,

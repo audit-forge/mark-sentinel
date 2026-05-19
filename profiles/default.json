@@ -23,6 +23,7 @@
   ],
   "default_output": "plain",
   "include_remediation": true,
+  "framework_emphasis": "default",
   "include_frameworks": false,
   "severity_threshold": "MEDIUM",
   "smb_language": true

@@ -29,7 +29,7 @@
     "AI-RUNTIME-004",
     "AI-RUNTIME-005"
   ],
-  "framework_emphasis": null,
+  "framework_emphasis": "owasp_agentic",
   "default_output": "plain",
   "include_remediation": true,
   "include_frameworks": true,

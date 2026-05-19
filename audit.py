@@ -425,6 +425,26 @@ examples:
     results.extend(runtime_checks(ctx))
     results.extend(ls_checks(ctx))
 
+    # Augment every result with MITRE ATLAS and ISO 42001 mappings
+    _profiles_dir = Path(__file__).parent / 'profiles'
+    _atlas_map: dict = {}
+    _iso_map: dict = {}
+    try:
+        with open(_profiles_dir / 'atlas_controls.json') as _f:
+            _atlas_map = json.load(_f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        pass
+    try:
+        with open(_profiles_dir / 'iso42001_controls.json') as _f:
+            _iso_map = json.load(_f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        pass
+    for _r in results:
+        if _atlas_map.get(_r.check_id):
+            _r.frameworks['MITRE ATLAS'] = _atlas_map[_r.check_id]
+        if _iso_map.get(_r.check_id):
+            _r.frameworks['ISO/IEC 42001'] = _iso_map[_r.check_id]
+
     # Apply profile filter
     results = filter_results(results, profile)
 

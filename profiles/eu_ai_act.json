@@ -26,7 +26,7 @@
     "AI-SUPPLY-002",
     "AI-SUPPLY-003"
   ],
-  "framework_emphasis": null,
+  "framework_emphasis": "eu_ai_act",
   "default_output": "plain",
   "include_remediation": true,
   "include_frameworks": true,

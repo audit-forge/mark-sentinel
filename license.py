@@ -33,6 +33,11 @@ _DEFAULT_GRACE = 10
 
 
 class License:
+    # plan values: 'standard' (exec+ciso reports only) | 'plus' (full technical+remediation)
+    # No license file = defaults to 'plus' so existing installs are unaffected.
+    PLAN_STANDARD = 'standard'
+    PLAN_PLUS     = 'plus'
+
     def __init__(self, data: dict):
         self.customer_id          = data.get('customer_id', 'unknown')
         self.licensed_to          = data.get('licensed_to', 'Unknown')
@@ -45,6 +50,12 @@ class License:
         self.telemetry_url        = data.get('telemetry_url', '')
         self.telemetry_interval_h = float(data.get('telemetry_interval_h', 24))
         self.stale_alert_hours    = float(data.get('stale_alert_hours', 26))
+        self.plan                 = data.get('plan', self.PLAN_PLUS)
+
+    @property
+    def has_technical_reports(self) -> bool:
+        """True when the license includes Technical reports and remediation steps."""
+        return self.plan == self.PLAN_PLUS
 
     @property
     def unlimited(self) -> bool:
