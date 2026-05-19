@@ -2931,9 +2931,52 @@ body{{background:#0d1117;color:#c9d1d9;font-family:-apple-system,BlinkMacSystemF
 .shadow-card:hover{{background:#1a1f2e}}
 ::-webkit-scrollbar{{width:6px}}::-webkit-scrollbar-track{{background:#0d1117}}
 ::-webkit-scrollbar-thumb{{background:#30363d;border-radius:3px}}
+/* ── Light mode ── */
+body.light{{background:#ffffff;color:#24292f}}
+body.light .brand-bar{{border-color:#d0d7de}}
+body.light .brand-name{{color:#1f2328}}
+body.light .brand-sub{{color:#57606a}}
+body.light .brand-mark{{color:#0969da}}
+body.light .hlink{{color:#0969da}}
+body.light .scard{{background:#f6f8fa;border-color:#d0d7de}}
+body.light .scard:hover{{background:#eaeef2}}
+body.light .scard.sf-active{{background:#ddf4ff;border-color:#0969da}}
+body.light .scard.sf-active-red{{background:#ffebe9;border-color:#cf222e}}
+body.light .scard.sf-active-yellow{{background:#fff8c5;border-color:#9a6700}}
+body.light .scard.sf-active-green{{background:#dafbe1;border-color:#1a7f37}}
+body.light .scard-l{{color:#57606a}}
+body.light .sec-hdr{{color:#57606a}}
+body.light .dev-table th{{background:#f6f8fa;color:#57606a;border-color:#d0d7de}}
+body.light .dev-table td{{border-color:#eaeef2}}
+body.light .dev-row:hover{{background:#f6f8fa}}
+body.light .dev-host{{color:#1f2328}}
+body.light .detail-host{{color:#1f2328}}
+body.light .detail-meta{{color:#57606a}}
+body.light #detail-panel{{background:#f6f8fa;border-color:#d0d7de}}
+body.light .finding{{background:#f6f8fa;border-color:#d0d7de}}
+body.light .fhdr:hover{{background:#eaeef2}}
+body.light .fbody{{color:#57606a;border-color:#d0d7de}}
+body.light .find-title{{color:#24292f}}
+body.light .find-id{{color:#57606a}}
+body.light .find-chev{{color:#8c959f}}
+body.light .shadow-card{{background:#f6f8fa;border-color:#d0d7de;border-left-color:#8250df}}
+body.light .shadow-card:hover{{background:#eaeef2}}
+body.light .scan-btn{{background:#f6f8fa;border-color:#d0d7de;color:#0969da}}
+body.light .scan-btn:hover{{background:#eaeef2;border-color:#0969da}}
+body.light .refresh-note{{color:#8c959f}}
+body.light .empty{{color:#8c959f}}
+body.light .c-red{{color:#cf222e}}
+body.light .c-yellow{{color:#9a6700}}
+body.light .c-blue{{color:#0969da}}
+body.light .c-green{{color:#1a7f37}}
+body.light .c-gray{{color:#57606a}}
+body.light ::-webkit-scrollbar-track{{background:#ffffff}}
+body.light ::-webkit-scrollbar-thumb{{background:#d0d7de}}
+body.light #theme-toggle{{background:#f6f8fa;border-color:#d0d7de;color:#24292f}}
 </style>
 </head>
 <body>
+<script>if(localStorage.getItem('sentinel_theme')==='light')document.body.classList.add('light');</script>
 <div id="wrap">
   <div class="brand-bar">
     <span class="brand-mark">M.A.R.K.</span>
@@ -2941,6 +2984,7 @@ body{{background:#0d1117;color:#c9d1d9;font-family:-apple-system,BlinkMacSystemF
     <span class="brand-sub">Command Center</span>
     <a class="hlink" href="/academy" target="_blank" style="margin-right:16px">Academy</a>
     <a class="hlink" href="/probe" target="_blank">&#128272; API Security Tester</a>
+    <button id="theme-toggle" onclick="toggleTheme()" style="margin-left:16px;background:#161b22;border:1px solid #30363d;color:#8b949e;border-radius:4px;padding:4px 12px;font-size:12px;cursor:pointer">☀ Light</button>
   </div>
 
   <div class="stat-row">
@@ -3101,6 +3145,19 @@ body{{background:#0d1117;color:#c9d1d9;font-family:-apple-system,BlinkMacSystemF
 </div>
 
 <script>
+// ── Theme ──
+function _applyTheme(light) {{
+  document.body.classList.toggle('light', light);
+  const btn = document.getElementById('theme-toggle');
+  if (btn) btn.textContent = light ? '⬛ Dark' : '☀ Light';
+}}
+function toggleTheme() {{
+  const light = !document.body.classList.contains('light');
+  localStorage.setItem('sentinel_theme', light ? 'light' : 'dark');
+  _applyTheme(light);
+}}
+_applyTheme(localStorage.getItem('sentinel_theme') === 'light');
+
 let _countdown = 60;
 let _allDevices = [];
 let _activeFilter = new URLSearchParams(location.search).get('filter') || null;
