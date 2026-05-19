@@ -57,7 +57,6 @@ body{background:#0d1117;color:#c9d1d9;font-family:-apple-system,BlinkMacSystemFo
 .stat-sub{font-size:11px;margin-top:5px}
 .risk-row{display:flex;gap:12px;margin-bottom:24px}
 .risk-card{background:#161b22;border:1px solid #21262d;border-radius:8px;padding:18px 22px;flex:1;display:flex;align-items:center;gap:20px}
-.risk-score{font-size:52px;font-weight:800;line-height:1}
 .risk-info{flex:1}
 .risk-label{font-size:18px;font-weight:700;color:#e6edf3}
 .risk-desc{font-size:12px;color:#8b949e;margin-top:5px;line-height:1.5}
@@ -377,10 +376,10 @@ function renderOverview(){
     ${provBar('overview')}
     <div class="risk-row">
       <div class="risk-card">
-        <div class="risk-score ${risk.cls}">${risk.score}</div>
         <div class="risk-info">
-          <div class="risk-label">${risk.label}</div>
-          <div class="risk-desc">${s.fail} failing check${s.fail!==1?'s':''} · ${s.warn} warning${s.warn!==1?'s':''} · ${s.total_evaluated} controls evaluated</div>
+          <div class="risk-label ${risk.cls}" style="font-size:22px;font-weight:800;margin-bottom:6px">${risk.label}</div>
+          <div style="font-size:13px;margin-bottom:4px">${[critCount?`<span class="c-red">${critCount} critical</span>`:'',highCount?`<span class="c-orange">${highCount} high</span>`:'',medCount?`<span class="c-yellow">${medCount} medium</span>`:''].filter(Boolean).join(' · ')||'<span class="c-green">No failures</span>'}</div>
+          <div class="risk-desc">${s.fail} failing · ${s.warn} warnings · ${s.total_evaluated} controls evaluated</div>
         </div>
       </div>
       <div class="probe-card">
