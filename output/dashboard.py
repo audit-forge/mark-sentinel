@@ -261,7 +261,8 @@ const CATS=['AI-DEPLOY','AI-INP','AI-OUT','AI-AGENT','AI-SUPPLY','AI-GOV'];
 const CAT_LBL={'AI-DEPLOY':'Deployment Security','AI-INP':'Input Safety','AI-OUT':'Output Safety','AI-AGENT':'Agentic Safety','AI-SUPPLY':'Supply Chain','AI-GOV':'Governance'};
 const SEV_ORD={CRITICAL:0,HIGH:1,MEDIUM:2,LOW:3};
 const STAT_ORD={FAIL:0,WARN:1,PASS:2,SKIP:3};
-let curProv=0,curFilter='all',curCat='all',curSearch='',curSev='all',showDisagreementsOnly=false;
+let curProv=0,curFilter='fail',curCat='all',curSearch='',curSev='all',showDisagreementsOnly=false;
+let curObsFilter='all',curObsCat='all',curObsSearch='';
 let _simFixed=new Set();
 
 function esc(s){if(!s)return'';return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
@@ -291,6 +292,7 @@ function renderView(v){
   switch(v){
     case'overview':renderOverview();break;
     case'findings':renderFindings();break;
+    case'observations':renderObservations();break;
     case'probes':renderProbes();break;
     case'compare':renderCompare();break;
     case'remediation':renderRemediation();break;
@@ -391,10 +393,10 @@ function renderOverview(){
       </div>
     </div>
     <div class="stat-grid">
-      <div class="stat-card t-red" onclick="goFindings('fail')"><div class="stat-num c-red">${s.fail}</div><div class="stat-label">Failing</div>${sevBrk?`<div class="stat-sub" style="font-size:10px">${sevBrk}</div>`:''}</div>
-      <div class="stat-card t-yellow" onclick="goFindings('warn')"><div class="stat-num c-yellow">${s.warn}</div><div class="stat-label">Warnings</div></div>
-      <div class="stat-card t-green" onclick="goFindings('pass')"><div class="stat-num c-green">${s.pass}</div><div class="stat-label">Passing</div></div>
-      <div class="stat-card t-gray"><div class="stat-num c-gray">${s.skip}</div><div class="stat-label">Not Evaluated</div><div class="stat-sub c-gray" style="font-size:10px">requires agent env</div></div>
+      <div class="stat-card t-red" onclick="goFindings('fail')"><div class="stat-num c-red">${s.fail}</div><div class="stat-label">Active Threats</div>${sevBrk?`<div class="stat-sub" style="font-size:10px">${sevBrk}</div>`:''}</div>
+      <div class="stat-card t-yellow" onclick="goObservations('warn')"><div class="stat-num c-yellow">${s.warn}</div><div class="stat-label">Observations</div><div class="stat-sub" style="font-size:10px;color:#8b949e">advisory · not active threats</div></div>
+      <div class="stat-card t-green" onclick="goObservations('pass')"><div class="stat-num c-green">${s.pass}</div><div class="stat-label">Passing</div></div>
+      <div class="stat-card t-gray" onclick="goObservations('skip')"><div class="stat-num c-gray">${s.skip}</div><div class="stat-label">Not Evaluated</div><div class="stat-sub c-gray" style="font-size:10px">requires agent env</div></div>
     </div>
     <div class="sec-hdr">Security Posture by Category</div>
     <div class="cat-grid">${catCards}</div>`;
@@ -402,22 +404,25 @@ function renderOverview(){
 
 function renderFindings(){
   const p=DATA.providers[curProv];
-  const fbtns=['all','critical','fail','warn','pass','skip'].map(s=>{
-    const lbl=s==='all'?'All':s.toUpperCase();
-    return`<button class="fbtn f-${s}${curFilter===s?' on':''}" onclick="setFlt('${s}')">${lbl}</button>`;
-  }).join('');
+  const fbtns=[
+    {k:'fail',lbl:'All Failures'},
+    {k:'critical',lbl:'Critical'},
+    {k:'high',lbl:'High'},
+    {k:'medium',lbl:'Medium'},
+    {k:'low',lbl:'Low'}
+  ].map(b=>`<button class="fbtn f-${b.k}${curFilter===b.k?' on':''}" onclick="setFlt('${b.k}')">${b.lbl}</button>`).join('');
   const cbtns=['all',...CATS].map(c=>{
     const lbl=c==='all'?'All Categories':(CAT_LBL[c]||c);
     return`<button class="fbtn${curCat===c?' on f-all':''}" onclick="setCat('${c}')">${lbl}</button>`;
   }).join('');
 
-  let findings=[...p.findings].sort((a,b)=>{
-    const sd=(STAT_ORD[a.status]??3)-(STAT_ORD[b.status]??3);
-    if(sd!==0)return sd;
-    return(SEV_ORD[a.severity]??3)-(SEV_ORD[b.severity]??3);
-  });
-  if(curFilter==='critical')findings=findings.filter(f=>f.severity==='CRITICAL'&&f.status==='FAIL');
-  else if(curFilter!=='all')findings=findings.filter(f=>f.status.toLowerCase()===curFilter);
+  let findings=[...p.findings.filter(f=>f.status==='FAIL')].sort((a,b)=>
+    (SEV_ORD[a.severity]??3)-(SEV_ORD[b.severity]??3)
+  );
+  if(curFilter==='critical')findings=findings.filter(f=>f.severity==='CRITICAL');
+  else if(curFilter==='high')findings=findings.filter(f=>f.severity==='HIGH');
+  else if(curFilter==='medium')findings=findings.filter(f=>f.severity==='MEDIUM');
+  else if(curFilter==='low')findings=findings.filter(f=>f.severity==='LOW');
   if(curCat!=='all')findings=findings.filter(f=>f.category===curCat);
   if(curSev!=='all')findings=findings.filter(f=>f.severity===curSev);
   if(curSearch){const q=curSearch.toLowerCase();findings=findings.filter(f=>(f.title||'').toLowerCase().includes(q)||(f.check_id||'').toLowerCase().includes(q)||(f.category||'').toLowerCase().includes(q)||(f.details||'').toLowerCase().includes(q));}
@@ -449,12 +454,16 @@ function renderFindings(){
     </div>`;
   }).join('');
 
+  const obsCount=p.findings.filter(f=>f.status!=='FAIL').length;
   document.getElementById('view-findings').innerHTML=`
     ${provBar('findings')}
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+      <div style="font-size:13px;color:#8b949e">Confirmed failures requiring action. <span style="cursor:pointer;color:#58a6ff" onclick="goObservations('all')">View ${obsCount} observations (warnings, passing, skipped) →</span></div>
+    </div>
     <input id="findings-search" class="search-input" type="text" placeholder="Search by title, ID, category, or details…" value="${esc(curSearch)}" oninput="setSearch(this.value)">
     <div class="filter-bar">${fbtns}</div>
     <div class="filter-bar">${cbtns}</div>
-    <div class="findings-list">${rows||'<div class="empty"><div class="empty-icon">✓</div><div class="empty-text">No findings match this filter.</div></div>'}</div>`;
+    <div class="findings-list">${rows||'<div class="empty"><div class="empty-icon">✓</div><div class="empty-text">No active failures match this filter.</div></div>'}</div>`;
   const si=document.getElementById('findings-search');
   if(si&&curSearch){si.focus();si.setSelectionRange(curSearch.length,curSearch.length);}
 }
@@ -463,6 +472,84 @@ function setFlt(f){curFilter=f;curSev='all';renderFindings();}
 function setCat(c){curCat=c;renderFindings();}
 function setSearch(v){curSearch=v;renderFindings();}
 function togF(i){document.getElementById('f'+i).classList.toggle('open');}
+
+function goObservations(flt){
+  curObsFilter=flt||'all';curObsCat='all';curObsSearch='';
+  document.querySelectorAll('.nav-item').forEach(n=>n.classList.remove('active'));
+  document.querySelector('.nav-item[data-view="observations"]').classList.add('active');
+  document.querySelectorAll('.view').forEach(x=>x.classList.remove('active'));
+  document.getElementById('view-observations').classList.add('active');
+  renderObservations();
+}
+
+function renderObservations(){
+  const p=DATA.providers[curProv];
+  const fbtns=[
+    {k:'all',lbl:'All Identified'},
+    {k:'warn',lbl:'Warnings'},
+    {k:'pass',lbl:'Passing'},
+    {k:'skip',lbl:'Not Evaluated'}
+  ].map(b=>`<button class="fbtn f-${b.k}${curObsFilter===b.k?' on':''}" onclick="setObsFlt('${b.k}')">${b.lbl}</button>`).join('');
+  const cbtns=['all',...CATS].map(c=>{
+    const lbl=c==='all'?'All Categories':(CAT_LBL[c]||c);
+    return`<button class="fbtn${curObsCat===c?' on f-all':''}" onclick="setObsCat('${c}')">${lbl}</button>`;
+  }).join('');
+
+  let findings=[...p.findings.filter(f=>f.status!=='FAIL')].sort((a,b)=>{
+    const sd=(STAT_ORD[a.status]??3)-(STAT_ORD[b.status]??3);
+    if(sd!==0)return sd;
+    return(SEV_ORD[a.severity]??3)-(SEV_ORD[b.severity]??3);
+  });
+  if(curObsFilter==='warn')findings=findings.filter(f=>f.status==='WARN');
+  else if(curObsFilter==='pass')findings=findings.filter(f=>f.status==='PASS');
+  else if(curObsFilter==='skip')findings=findings.filter(f=>f.status==='SKIP');
+  if(curObsCat!=='all')findings=findings.filter(f=>f.category===curObsCat);
+  if(curObsSearch){const q=curObsSearch.toLowerCase();findings=findings.filter(f=>(f.title||'').toLowerCase().includes(q)||(f.check_id||'').toLowerCase().includes(q)||(f.category||'').toLowerCase().includes(q)||(f.details||'').toLowerCase().includes(q));}
+
+  const rows=findings.map((f,i)=>{
+    const sl=f.severity.toLowerCase(),stl=f.status.toLowerCase();
+    const evHtml=(f.evidence||[]).map(e=>`<li class="ev-item">${esc(e)}</li>`).join('');
+    const remHtml=(f.remediation||'').split('\n').filter(Boolean).map(s=>`<div class="rem-step">${esc(s)}</div>`).join('');
+    const fwHtml=Object.entries(f.frameworks||{}).map(([k,v])=>`<span class="fw-tag">${esc(k)}: ${esc(v)}</span>`).join('');
+    return`<div class="finding" id="obs${i}">
+      <div class="fhdr" onclick="togObs(${i})">
+        <div class="find-ind ${sl}"></div>
+        <span class="sev-badge ${sl}">${esc(f.severity)}</span>
+        <span class="stat-badge ${stl}">${esc(f.status)}</span>
+        <span class="find-id">${esc(f.check_id)}</span>
+        <span class="find-title">${esc(f.title)}</span>
+        <span class="find-cat">${esc(f.category)}</span>
+        <span class="find-chev">▶</span>
+      </div>
+      <div class="fbody">
+        <div class="find-details">${esc(f.details)}</div>
+        ${evHtml?`<div class="sub-lbl">Evidence</div><ul class="ev-list">${evHtml}</ul>`:''}
+        ${remHtml?`<div class="sub-lbl">How to Fix</div><div class="rem-steps">${remHtml}</div>`:''}
+        ${fwHtml?`<div class="sub-lbl">Framework Mappings</div><div class="fw-tags">${fwHtml}</div>`:''}
+      </div>
+    </div>`;
+  }).join('');
+
+  const warnCount=p.findings.filter(f=>f.status==='WARN').length;
+  const passCount=p.findings.filter(f=>f.status==='PASS').length;
+  const skipCount=p.findings.filter(f=>f.status==='SKIP').length;
+  document.getElementById('view-observations').innerHTML=`
+    ${provBar('observations')}
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+      <div style="font-size:13px;color:#8b949e">Items identified but not confirmed active threats — <span style="color:#d29922">${warnCount} advisory warnings</span> · <span style="color:#3fb950">${passCount} passing</span> · <span style="color:#8b949e">${skipCount} not evaluated</span>. <span style="cursor:pointer;color:#58a6ff" onclick="goFindings('fail')">View active failures →</span></div>
+    </div>
+    <input id="obs-search" class="search-input" type="text" placeholder="Search observations…" value="${esc(curObsSearch)}" oninput="setObsSearch(this.value)">
+    <div class="filter-bar">${fbtns}</div>
+    <div class="filter-bar">${cbtns}</div>
+    <div class="findings-list">${rows||'<div class="empty"><div class="empty-icon">◎</div><div class="empty-text">No items match this filter.</div></div>'}</div>`;
+  const si=document.getElementById('obs-search');
+  if(si&&curObsSearch){si.focus();si.setSelectionRange(curObsSearch.length,curObsSearch.length);}
+}
+
+function setObsFlt(f){curObsFilter=f;renderObservations();}
+function setObsCat(c){curObsCat=c;renderObservations();}
+function setObsSearch(v){curObsSearch=v;renderObservations();}
+function togObs(i){document.getElementById('obs'+i).classList.toggle('open');}
 
 function renderProbes(){
   const p=DATA.providers[curProv];
@@ -1298,14 +1385,15 @@ def _build_html(data: dict) -> str:
     </div>
     <nav id="nav">
       <div class="nav-item active" data-view="overview"><span class="nav-icon">◈</span> Overview</div>
-      <div class="nav-item" data-view="findings"><span class="nav-icon">⚑</span> Findings</div>
+      <div class="nav-item" data-view="findings"><span class="nav-icon">⚑</span> Active Findings</div>
+      <div class="nav-item" data-view="observations"><span class="nav-icon">◎</span> Observations</div>
       <div class="nav-item" data-view="probes"><span class="nav-icon">⚡</span> Live Probes</div>
       <div class="nav-item" data-view="compare"><span class="nav-icon">⊞</span> Compare</div>
       <div class="nav-item" data-view="remediation"><span class="nav-icon">✓</span> Remediation</div>
       <div class="nav-item" data-view="reports"><span class="nav-icon">📄</span> Reports</div>
       <div class="nav-item" data-view="scan"><span class="nav-icon">▶</span> Run Scan</div>
       <div class="nav-item" data-view="heatmap"><span class="nav-icon">⬛</span> Risk Heat Map</div>
-      <div class="nav-item" data-view="coverage"><span class="nav-icon">◎</span> Control Coverage</div>
+      <div class="nav-item" data-view="coverage"><span class="nav-icon">⊙</span> Control Coverage</div>
       <div class="nav-item" data-view="simulator"><span class="nav-icon">⚗</span> What-If Simulator</div>
     </nav>
     <div class="sidebar-footer">Powered by Hash<br>M.A.R.K. Sentinel v1.0</div>
@@ -1324,6 +1412,7 @@ def _build_html(data: dict) -> str:
     <div id="content">
       <div id="view-overview" class="view active"></div>
       <div id="view-findings" class="view"></div>
+      <div id="view-observations" class="view"></div>
       <div id="view-probes" class="view"></div>
       <div id="view-compare" class="view"></div>
       <div id="view-remediation" class="view"></div>
