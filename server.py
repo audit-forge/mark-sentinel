@@ -3213,7 +3213,7 @@ body.light #theme-toggle,html.light #theme-toggle{{background:#f6f8fa;border-col
              color:#e6edf3;font-size:12px;font-family:monospace;padding:5px 10px;outline:none" />
     <span style="font-size:11px;color:#484f58">Leave blank to scan the local subnet automatically</span>
   </div>
-  <div id="discover-panel" style="background:#161b22;border:1px solid #21262d;border-radius:8px;padding:18px;min-height:60px;margin-bottom:28px">
+  <div id="discover-panel" class="content-panel" style="background:#161b22;border:1px solid #21262d;border-radius:8px;padding:18px;min-height:60px;margin-bottom:28px">
     <div class="empty" style="padding:12px">Click Scan Network to probe the local subnet for AI services.</div>
   </div>
 
@@ -3229,8 +3229,8 @@ body.light #theme-toggle,html.light #theme-toggle{{background:#f6f8fa;border-col
       &#8659; Desktop Shortcut
     </a>
   </div>
-  <div style="background:#161b22;border:1px solid #21262d;border-radius:8px;padding:20px;margin-bottom:16px">
-    <div style="font-size:12px;color:#8b949e;font-weight:600;text-transform:uppercase;letter-spacing:.06em;margin-bottom:14px">Configuration</div>
+  <div class="content-panel" style="background:#161b22;border:1px solid #21262d;border-radius:8px;padding:20px;margin-bottom:16px">
+    <div class="panel-sub-hdr" style="font-size:12px;color:#8b949e;font-weight:600;text-transform:uppercase;letter-spacing:.06em;margin-bottom:14px">Configuration</div>
     <div id="cfg-saved" style="display:none;color:#3fb950;font-size:12px;margin-bottom:10px">&#10003; Saved — takes effect on next scan</div>
     <div style="display:grid;grid-template-columns:160px 1fr;gap:10px 16px;align-items:center;max-width:640px">
       <label style="font-size:13px;color:#8b949e;align-self:start;padding-top:4px">Compliance Profile</label>
@@ -3260,8 +3260,8 @@ body.light #theme-toggle,html.light #theme-toggle{{background:#f6f8fa;border-col
     </div>
   </div>
 
-  <div style="background:#161b22;border:1px solid #21262d;border-radius:8px;padding:20px;margin-bottom:28px">
-    <div style="font-size:12px;color:#8b949e;font-weight:600;text-transform:uppercase;letter-spacing:.06em;margin-bottom:14px">System</div>
+  <div class="content-panel" style="background:#161b22;border:1px solid #21262d;border-radius:8px;padding:20px;margin-bottom:28px">
+    <div class="panel-sub-hdr" style="font-size:12px;color:#8b949e;font-weight:600;text-transform:uppercase;letter-spacing:.06em;margin-bottom:14px">System</div>
     <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px">
       <button class="scan-btn" id="btn-pull" onclick="pullUpdates()"
               style="color:#e3b341;border-color:#30363d">&#8659; Pull Latest Updates</button>
@@ -3301,6 +3301,39 @@ function _applyTheme(light) {{
       n.style.color = light ? '#57606a' : null;
     }});
   }}
+  // content panels (Settings, System, Discovery)
+  document.querySelectorAll('.content-panel').forEach(n => {{
+    n.style.background  = light ? '#f6f8fa' : '#161b22';
+    n.style.borderColor = light ? '#d0d7de' : '#21262d';
+  }});
+  // sub-headers inside panels (Configuration, System labels)
+  document.querySelectorAll('.panel-sub-hdr').forEach(n => {{
+    n.style.color = light ? '#57606a' : '#8b949e';
+  }});
+  // form inputs (scan interval, extra subnets)
+  document.querySelectorAll('.form-input').forEach(n => {{
+    n.style.background  = light ? '#ffffff' : '#0d1117';
+    n.style.color       = light ? '#24292f' : '#c9d1d9';
+    n.style.borderColor = light ? '#d0d7de' : '#30363d';
+  }});
+  // subnet discovery text input
+  const _sni = document.getElementById('discover-subnets');
+  if (_sni) {{
+    _sni.style.background  = light ? '#ffffff' : '#0d1117';
+    _sni.style.color       = light ? '#24292f' : '#e6edf3';
+    _sni.style.borderColor = light ? '#d0d7de' : '#30363d';
+  }}
+  // system log panel
+  const _sl = document.getElementById('sys-log');
+  if (_sl) {{
+    _sl.style.background  = light ? '#f6f8fa' : '#0d1117';
+    _sl.style.borderColor = light ? '#d0d7de' : '#30363d';
+    _sl.style.color       = light ? '#57606a' : '#8b949e';
+  }}
+  // compliance profile checkbox labels
+  document.querySelectorAll('#cfg-profile-group label').forEach(n => {{
+    n.style.color = light ? '#24292f' : '#e6edf3';
+  }});
 }}
 function toggleTheme() {{
   const light = !document.documentElement.classList.contains('light');
