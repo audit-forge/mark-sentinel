@@ -378,6 +378,17 @@ class AgentStore:
             ).fetchone()
         return dict(row) if row else None
 
+    def get_previous_report(self, device_id: str) -> dict | None:
+        """Return the second-most-recent report for a device (used for new-finding detection)."""
+        with self._lock, self._conn() as conn:
+            row = conn.execute("""
+                SELECT report_json FROM reports
+                WHERE device_id = ?
+                ORDER BY received_at DESC
+                LIMIT 1 OFFSET 1
+            """, (device_id,)).fetchone()
+        return json.loads(row['report_json']) if row else None
+
     def get_all_latest_reports(self) -> list[dict]:
         """Return the latest report for every known device."""
         with self._lock, self._conn() as conn:
@@ -506,9 +517,15 @@ class AgentStore:
 
     def upsert_shadow_device(self, reporter_device_id: str, reporter_hostname: str,
                              host: str, port: int, service: str, models: list,
-                             source: str = 'network', detail: str = '') -> None:
+                             source: str = 'network', detail: str = '') -> bool:
+        """Upsert a shadow device. Returns True if this is a brand-new discovery."""
         now = int(time.time())
         with self._lock, self._conn() as conn:
+            existing = conn.execute(
+                "SELECT id FROM shadow_devices WHERE source=? AND reporter_device_id=? AND host=? AND port=?",
+                (source, reporter_device_id, host, port)
+            ).fetchone()
+            is_new = existing is None
             conn.execute("""
                 INSERT INTO shadow_devices
                     (reporter_device_id, reporter_hostname, host, port, service,
@@ -523,6 +540,7 @@ class AgentStore:
                     dismissed          = 0
             """, (reporter_device_id, reporter_hostname, host, port, service,
                   json.dumps(models), source, detail, now, now))
+        return is_new
 
     def list_shadow_devices(self) -> list[dict]:
         with self._lock, self._conn() as conn:

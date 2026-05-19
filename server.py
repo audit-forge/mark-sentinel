@@ -976,6 +976,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             '/probe':          self._serve_probe_tester,
             '/command':        lambda: self._redirect('/'),
             '/api/config':        self._api_get_config,
+            '/api/alerts/config': self._api_get_alert_config,
             '/api/fleet/shadow':  self._api_fleet_shadow,
             '/api/fleet/mcp':        self._api_fleet_mcp,
             '/api/fleet/mcp/report': self._api_fleet_mcp_report,
@@ -1060,6 +1061,10 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self._api_scan()
         elif path == '/api/config':
             self._api_set_config()
+        elif path == '/api/alerts/config':
+            self._api_set_alert_config()
+        elif path == '/api/alerts/test':
+            self._api_test_alert()
         elif path == '/api/system/update':
             self._api_system_update()
         elif path == '/api/system/restart-agent':
@@ -1536,7 +1541,7 @@ button:hover{{background:#2ea043}}
             if alert_cfg:
                 threading.Thread(
                     target=fire_alerts,
-                    args=(report, device_id, hostname, alert_cfg),
+                    args=(report, device_id, hostname, alert_cfg, store),
                     daemon=True,
                 ).start()
         except Exception as _ae:
@@ -1709,10 +1714,22 @@ button:hover{{background:#2ea043}}
                 continue
             if not isinstance(models, list):
                 models = []
-            store.upsert_shadow_device(
+            is_new = store.upsert_shadow_device(
                 device_id, reporter_host, host, int(port), service, models, source, detail
             )
             stored += 1
+            if is_new:
+                try:
+                    from alerts import load_alert_config, fire_shadow_alert
+                    _acfg = load_alert_config(ROOT / 'alerts_config.json')
+                    if _acfg:
+                        threading.Thread(
+                            target=fire_shadow_alert,
+                            args=(reporter_host, service, host, _acfg),
+                            daemon=True,
+                        ).start()
+                except Exception as _ae:
+                    log.error('shadow alert error: %s', _ae)
 
         log.info('agent discovery: %s reported %d unmanaged AI services', device_id, stored)
         self._json({'status': 'accepted', 'stored': stored})
@@ -2406,6 +2423,47 @@ button:hover{{background:#2ea043}}
                 pass
 
         self._json({'status': 'saved', 'pushed_to_agents': pushed})
+
+    def _api_get_alert_config(self):
+        from alerts import load_alert_config_for_ui
+        self._json(load_alert_config_for_ui(ROOT / 'alerts_config.json'))
+
+    def _api_set_alert_config(self):
+        length = _content_length(self.headers)
+        if not length:
+            self._send(400, b'Empty body', 'text/plain')
+            return
+        try:
+            body = json.loads(self.rfile.read(length))
+        except json.JSONDecodeError:
+            self._send(400, b'Invalid JSON', 'text/plain')
+            return
+        try:
+            from alerts import save_alert_config
+            path = ROOT / 'alerts_config.json'
+            save_alert_config(path, body, path)
+            self._json({'status': 'saved'})
+        except Exception as e:
+            self._json({'error': str(e)}, 500)
+
+    def _api_test_alert(self):
+        length = _content_length(self.headers)
+        if not length:
+            self._send(400, b'Empty body', 'text/plain')
+            return
+        try:
+            body = json.loads(self.rfile.read(length))
+        except json.JSONDecodeError:
+            self._send(400, b'Invalid JSON', 'text/plain')
+            return
+        channel = body.get('channel', '')
+        try:
+            from alerts import load_alert_config, send_test_alert
+            cfg = load_alert_config(ROOT / 'alerts_config.json') or {}
+            ok, msg = send_test_alert(cfg, channel)
+            self._json({'ok': ok, 'message': msg})
+        except Exception as e:
+            self._json({'ok': False, 'message': str(e)}, 500)
 
     def _serve_shortcut(self):
         url = f'http://localhost:{_serve_port}/fleet'
@@ -3707,6 +3765,76 @@ html.light .sb-footer a,body.light .sb-footer a{{color:#8c959f}}
     </div>
     <div style="margin-top:16px">
       <button class="scan-btn" onclick="saveConfig()" style="color:#3fb950;border-color:#30363d">Save</button>
+    </div>
+  </div>
+
+  <div class="content-panel" style="background:#161b22;border:1px solid #21262d;border-radius:8px;padding:20px;margin-bottom:16px">
+    <div class="panel-sub-hdr" style="font-size:12px;color:#8b949e;font-weight:600;text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px">Alert Notifications</div>
+    <div style="font-size:12px;color:#484f58;margin-bottom:14px">Notify your team on Slack or email when new critical findings or shadow AI are detected. Zero cost — uses Slack&#39;s free incoming webhooks and your existing email.</div>
+    <div id="alert-saved" style="display:none;color:#3fb950;font-size:12px;margin-bottom:10px">&#10003; Alert settings saved</div>
+    <div id="alert-test-result" style="display:none;font-size:12px;margin-bottom:10px"></div>
+
+    <div style="display:grid;grid-template-columns:160px 1fr;gap:10px 16px;align-items:start;max-width:680px">
+
+      <label style="font-size:13px;color:#8b949e;padding-top:4px">Slack Webhook</label>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <input id="alert-slack" type="url" class="form-input" placeholder="https://hooks.slack.com/services/..."
+               style="flex:1;min-width:280px;font-family:monospace;font-size:12px">
+        <button class="scan-btn" onclick="testAlert('slack')" style="font-size:11px;padding:3px 10px;color:#58a6ff;border-color:#30363d">Test</button>
+      </div>
+
+      <div style="font-size:11px;color:#484f58;padding-top:2px">How to get one: Slack → Your workspace → Apps → Incoming Webhooks</div>
+      <div></div>
+
+      <label style="font-size:13px;color:#8b949e;padding-top:4px">Webhook URL</label>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <input id="alert-webhook" type="url" class="form-input" placeholder="https://your-endpoint.com/alerts"
+               style="flex:1;min-width:280px;font-family:monospace;font-size:12px">
+        <button class="scan-btn" onclick="testAlert('webhook')" style="font-size:11px;padding:3px 10px;color:#58a6ff;border-color:#30363d">Test</button>
+      </div>
+
+      <div style="font-size:11px;color:#484f58;grid-column:1/-1;border-top:1px solid #21262d;margin:6px 0;padding-top:10px">Email (SMTP) — Gmail: use an App Password from myaccount.google.com/apppasswords</div>
+
+      <label style="font-size:13px;color:#8b949e">SMTP Host</label>
+      <div style="display:flex;gap:8px;align-items:center">
+        <input id="alert-smtp-host" type="text" class="form-input" placeholder="smtp.gmail.com" style="width:220px;font-family:monospace;font-size:12px">
+        <label style="font-size:12px;color:#8b949e">Port</label>
+        <input id="alert-smtp-port" type="number" class="form-input" placeholder="587" style="width:70px;font-family:monospace;font-size:12px">
+      </div>
+
+      <label style="font-size:13px;color:#8b949e">SMTP Username</label>
+      <input id="alert-smtp-user" type="text" class="form-input" placeholder="you@gmail.com" style="width:280px;font-family:monospace;font-size:12px">
+
+      <label style="font-size:13px;color:#8b949e">SMTP Password</label>
+      <input id="alert-smtp-pass" type="password" class="form-input" placeholder="App password" style="width:280px;font-family:monospace;font-size:12px">
+
+      <label style="font-size:13px;color:#8b949e">From Address</label>
+      <input id="alert-email-from" type="email" class="form-input" placeholder="sentinel@yourdomain.com" style="width:280px;font-family:monospace;font-size:12px">
+
+      <label style="font-size:13px;color:#8b949e">Send Alerts To</label>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <input id="alert-email-to" type="email" class="form-input" placeholder="security-team@yourdomain.com" style="width:280px;font-family:monospace;font-size:12px">
+        <button class="scan-btn" onclick="testAlert('email')" style="font-size:11px;padding:3px 10px;color:#58a6ff;border-color:#30363d">Test</button>
+      </div>
+
+      <div style="font-size:11px;color:#484f58;grid-column:1/-1;border-top:1px solid #21262d;margin:6px 0;padding-top:10px">Trigger Events</div>
+
+      <label style="font-size:13px;color:#8b949e">Alert when</label>
+      <div style="display:flex;flex-direction:column;gap:6px">
+        <label style="font-size:13px;color:#e6edf3;display:flex;align-items:center;gap:8px;cursor:pointer">
+          <input type="checkbox" id="trig-crit"> New <span style="color:#f85149;font-weight:700">CRITICAL</span> finding detected on any device
+        </label>
+        <label style="font-size:13px;color:#e6edf3;display:flex;align-items:center;gap:8px;cursor:pointer">
+          <input type="checkbox" id="trig-high"> New <span style="color:#d2992a;font-weight:700">HIGH</span> finding detected on any device
+        </label>
+        <label style="font-size:13px;color:#e6edf3;display:flex;align-items:center;gap:8px;cursor:pointer">
+          <input type="checkbox" id="trig-shadow"> New <span style="color:#58a6ff;font-weight:700">Shadow AI</span> asset discovered
+        </label>
+      </div>
+
+    </div>
+    <div style="margin-top:16px">
+      <button class="scan-btn" onclick="saveAlertConfig()" style="color:#3fb950;border-color:#30363d">Save Alert Settings</button>
     </div>
   </div>
 
@@ -5212,6 +5340,79 @@ async function saveConfig() {{
 }}
 
 loadConfig();
+
+async function loadAlertConfig() {{
+  try {{
+    const r = await fetch('/api/alerts/config');
+    if (!r.ok) return;
+    const c = await r.json();
+    const v = (id, val) => {{ const el = document.getElementById(id); if (el) el.value = val || ''; }};
+    v('alert-slack',     c.slack_webhook || '');
+    v('alert-webhook',   c.webhook_url   || '');
+    v('alert-smtp-host', c.email?.smtp_host || '');
+    const portEl = document.getElementById('alert-smtp-port');
+    if (portEl) portEl.value = c.email?.smtp_port || 587;
+    v('alert-smtp-user', c.email?.smtp_user || '');
+    v('alert-smtp-pass', c.email?.smtp_pass || '');
+    v('alert-email-from', c.email?.from || '');
+    v('alert-email-to',   c.email?.to   || '');
+    const t = c.triggers || {{}};
+    const cb = (id, val) => {{ const el = document.getElementById(id); if (el) el.checked = val !== false; }};
+    cb('trig-crit',   t.new_critical);
+    cb('trig-high',   t.new_high);
+    cb('trig-shadow', t.new_shadow_ai);
+  }} catch (_) {{}}
+}}
+
+async function saveAlertConfig() {{
+  const gv = id => document.getElementById(id)?.value?.trim() || '';
+  const body = {{
+    slack_webhook: gv('alert-slack'),
+    webhook_url:   gv('alert-webhook'),
+    email: {{
+      smtp_host: gv('alert-smtp-host'),
+      smtp_port: parseInt(document.getElementById('alert-smtp-port')?.value || '587', 10),
+      smtp_user: gv('alert-smtp-user'),
+      smtp_pass: document.getElementById('alert-smtp-pass')?.value || '',
+      from:      gv('alert-email-from'),
+      to:        gv('alert-email-to'),
+    }},
+    triggers: {{
+      new_critical:  document.getElementById('trig-crit')?.checked  ?? true,
+      new_high:      document.getElementById('trig-high')?.checked  ?? true,
+      new_shadow_ai: document.getElementById('trig-shadow')?.checked ?? true,
+    }},
+  }};
+  try {{
+    const r = await fetch('/api/alerts/config', {{
+      method: 'POST', headers: {{'Content-Type': 'application/json'}},
+      body: JSON.stringify(body),
+    }});
+    const el = document.getElementById('alert-saved');
+    if (el) {{ el.style.display = 'block'; setTimeout(() => el.style.display = 'none', 4000); }}
+  }} catch (e) {{ alert('Save failed: ' + e); }}
+}}
+
+async function testAlert(channel) {{
+  const el = document.getElementById('alert-test-result');
+  if (el) {{ el.style.display = 'block'; el.style.color = '#8b949e'; el.textContent = 'Sending test…'; }}
+  try {{
+    const r = await fetch('/api/alerts/test', {{
+      method: 'POST', headers: {{'Content-Type': 'application/json'}},
+      body: JSON.stringify({{channel}}),
+    }});
+    const d = await r.json();
+    if (el) {{
+      el.style.color = d.ok ? '#3fb950' : '#f85149';
+      el.textContent = (d.ok ? '✓ ' : '✗ ') + d.message;
+      setTimeout(() => el.style.display = 'none', 6000);
+    }}
+  }} catch (e) {{
+    if (el) {{ el.style.color = '#f85149'; el.textContent = '✗ Request failed: ' + e; }}
+  }}
+}}
+
+loadAlertConfig();
 </script>
 <div style="margin-top:48px;padding:16px 0 24px;border-top:1px solid #21262d;text-align:center;font-size:11px;color:#484f58">
   © 2026 M.A.R.K. AI Systems. All rights reserved. Patent Pending.
