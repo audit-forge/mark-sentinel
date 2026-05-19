@@ -257,6 +257,8 @@ _THEME_TOGGLE_JS = (
     "_applyTheme(l);}"
     "document.addEventListener('DOMContentLoaded',function(){"
     "_applyTheme(localStorage.getItem('sentinel_theme')==='light');});"
+    "window.addEventListener('storage',function(e){"
+    "if(e.key==='sentinel_theme')_applyTheme(e.newValue==='light');});"
     "_applyTheme(localStorage.getItem('sentinel_theme')==='light');"
 )
 _THEME_BTN = (
@@ -3229,6 +3231,9 @@ function toggleTheme() {{
   _applyTheme(light);
 }}
 _applyTheme(localStorage.getItem('sentinel_theme') === 'light');
+window.addEventListener('storage', function(e) {{
+  if (e.key === 'sentinel_theme') _applyTheme(e.newValue === 'light');
+}});
 
 let _countdown = 60;
 let _allDevices = [];
