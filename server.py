@@ -211,6 +211,47 @@ _SEV_COLOR_HTML = {'CRITICAL': '#f85149', 'HIGH': '#d29922', 'MEDIUM': '#58a6ff'
 _STATUS_COLOR_HTML = {'FAIL': '#f85149', 'WARN': '#d29922', 'PASS': '#58a6ff', 'SKIP': '#6e7681', 'N/A': '#444c56'}
 _STATUS_LABEL_HTML = {'FAIL': 'HIGH RISK', 'WARN': 'MEDIUM RISK', 'PASS': 'INFO', 'SKIP': 'SKIP', 'N/A': 'N/A'}
 
+# ── Shared theme constants injected into every HTML page ──────────────────────
+_LIGHT_MODE_CSS = (
+    'body.light{background:#fff;color:#24292f}'
+    'body.light h1{color:#0969da}'
+    'body.light h2{color:#0969da;border-color:#d0d7de}'
+    'body.light h3{color:#57606a}'
+    'body.light .meta{color:#57606a}'
+    'body.light .toolbar{background:#f6f8fa;border-color:#d0d7de}'
+    'body.light .card{background:#f6f8fa;border-color:#d0d7de}'
+    'body.light .card-l{color:#57606a}'
+    'body.light th{background:#f6f8fa;color:#57606a;border-color:#d0d7de}'
+    'body.light td{border-color:#eaeef2}'
+    'body.light tr:hover td{background:#f6f8fa}'
+    'body.light .block{background:#f6f8fa;border-color:#d0d7de}'
+    'body.light .tag{background:#f6f8fa;border-color:#d0d7de;color:#24292f}'
+    'body.light .device-block{background:#f6f8fa;border-color:#d0d7de}'
+    'body.light .finding{border-color:#d0d7de}'
+    'body.light .det{color:#57606a}'
+    'body.light .rem{color:#1a7f37}'
+    'body.light .no-auth{color:#cf222e}'
+    'body.light .unknown{color:#9a6700}'
+    'body.light .auth-ok{color:#1a7f37}'
+)
+_THEME_EARLY_SCRIPT = (
+    "<script>if(localStorage.getItem('sentinel_theme')==='light')"
+    "document.body.classList.add('light');</script>"
+)
+_THEME_TOGGLE_JS = (
+    "function _applyTheme(l){document.body.classList.toggle('light',l);"
+    "var b=document.getElementById('theme-toggle');if(b)b.textContent=l?'⬛ Dark':'☀ Light';}"
+    "function toggleTheme(){var l=!document.body.classList.contains('light');"
+    "localStorage.setItem('sentinel_theme',l?'light':'dark');_applyTheme(l);}"
+    "_applyTheme(localStorage.getItem('sentinel_theme')==='light');"
+)
+_THEME_BTN = (
+    '<button id="theme-toggle" onclick="toggleTheme()" '
+    'style="margin-left:auto;background:#21262d;border:1px solid #30363d;'
+    'color:#8b949e;border-radius:4px;padding:4px 12px;font-size:12px;cursor:pointer">'
+    '☀ Light</button>'
+)
+
 
 def _risk_score_html(fail, warn, total) -> int:
     if not total:
@@ -297,10 +338,13 @@ tr:hover td{{background:#161b22}}
 .toolbar{{position:sticky;top:0;z-index:100;background:#161b22;border-bottom:1px solid #21262d;
           margin:-32px -32px 28px;padding:10px 32px;display:flex;align-items:center;gap:10px;flex-wrap:wrap}}
 @media print{{.toolbar{{display:none}}body{{background:#fff;color:#000;padding:16px}}h1,h2,h3,.card-l{{color:#000}}}}
+{_LIGHT_MODE_CSS}
 </style>
 <script>
 function switchTier(t){{location.href='/api/fleet/mcp/report?tier='+t;}}
+{_THEME_TOGGLE_JS}
 </script>
+{_THEME_EARLY_SCRIPT}
 </head><body>
 <div class="toolbar">
   <span style="font-size:13px;font-weight:600;color:#c9d1d9;margin-right:6px">M.A.R.K. Sentinel</span>
@@ -308,6 +352,7 @@ function switchTier(t){{location.href='/api/fleet/mcp/report?tier='+t;}}
   <button onclick="switchTier('ciso')"      style="{btn_style}{';' + active_btn if tier=='ciso'      else ''}">CISO</button>
   <button onclick="switchTier('technical')" style="{btn_style}{';' + active_btn if tier=='technical' else ''}">Technical</button>
   <button onclick="window.print()" style="{btn_style}">&#128438; Print</button>
+  {_THEME_BTN}
 </div>
 <h1>M.A.R.K. Sentinel &mdash; MCP &amp; Agent Governance &mdash; {esc(tier_label)}</h1>
 <div class="meta">Generated {esc(now)} &nbsp;&bull;&nbsp; {len(servers)} MCP server(s) discovered &nbsp;&bull;&nbsp; Confidential</div>''']
@@ -563,8 +608,10 @@ tr:hover td{{background:#161b22}}
 .toolbar{{position:sticky;top:0;z-index:100;background:#161b22;border-bottom:1px solid #21262d;
           margin:-32px -32px 28px;padding:10px 32px;display:flex;align-items:center;gap:10px;flex-wrap:wrap}}
 @media print{{.toolbar{{display:none}}body{{background:#fff;color:#000;padding:16px}}h1,h2,h3,.card-l{{color:#000}}.card{{border:1px solid #ccc}}.fail{{color:#c00}}.pass{{color:#090}}.warn{{color:#850}}}}
+{_LIGHT_MODE_CSS}
 </style>
 <script>
+{_THEME_TOGGLE_JS}
 var _sf='{status_filter}';
 function applyProfiles(){{
   var checked=[...document.querySelectorAll('.rpt-cb:checked')].map(function(c){{return c.value;}});
@@ -579,6 +626,7 @@ function switchTier(t){{
   location.href='/api/fleet/report?tier='+t+'&fmt=html'+p+sf;
 }}
 </script>
+{_THEME_EARLY_SCRIPT}
 </head><body>
 <div class="toolbar">
   <span style="font-size:13px;font-weight:600;color:#c9d1d9;margin-right:6px">M.A.R.K. Sentinel</span>
@@ -591,6 +639,7 @@ function switchTier(t){{
   <a href="/api/fleet/report?tier={tier}&fmt=pdf{_pdf_profile_param}{'&status=' + status_filter if status_filter else ''}" download="sentinel_fleet_{tier}{_pdf_fname_suffix}.pdf" style="{btn_style};color:#3fb950;border-color:#238636">&#8659; Download PDF</a>
   <button onclick="window.print()" style="{btn_style}">&#128438; Print</button>
   {'<a href="/api/fleet/report?tier=' + tier + '&fmt=html' + _pdf_profile_param + '" style="' + btn_style + ';color:#f85149;border-color:#30363d">&#10005; Clear filter</a>' if status_filter else ''}
+  {_THEME_BTN}
 </div>
 {'<div style="background:#1c2128;border:1px solid #30363d;border-radius:6px;padding:10px 18px;margin-bottom:20px;display:flex;align-items:center;justify-content:space-between"><span style="font-size:13px;font-weight:600;color:' + ('#f85149' if status_filter=='fail' else '#d29922' if status_filter=='warn' else '#58a6ff') + '">Showing: ' + esc(_status_label) + ' only — across all devices</span></div>' if status_filter else ''}
 <h1>M.A.R.K. Sentinel &mdash; Fleet {esc(tier_label)}</h1>
