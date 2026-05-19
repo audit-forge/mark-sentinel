@@ -58,16 +58,24 @@ def _bar_ascii(score: int, width: int = 20) -> str:
 class _PDF(FPDF):
     def header(self):
         self.set_font('Helvetica', 'B', 9)
-        self.set_text_color(110, 118, 129)
-        self.cell(0, 6, 'M.A.R.K. Sentinel - Fleet Security Report  |  CONFIDENTIAL', align='R')
+        if getattr(self, '_demo', False):
+            self.set_text_color(240, 165, 0)
+            self.cell(0, 6, 'DEMO REPORT - FOR EVALUATION ONLY - NOT FOR DISTRIBUTION', align='C')
+        else:
+            self.set_text_color(110, 118, 129)
+            self.cell(0, 6, 'M.A.R.K. Sentinel - Fleet Security Report  |  CONFIDENTIAL', align='R')
         self.ln(4)
 
     def footer(self):
         self.set_y(-13)
         self.set_font('Helvetica', size=8)
-        self.set_text_color(110, 118, 129)
-        sig_text = f'  |  Report ID: {self._report_id}  |  Signed by M.A.R.K. Sentinel' if getattr(self, '_report_id', None) else ''
-        self.cell(0, 5, f'Generated {datetime.now(tz=timezone.utc).strftime("%Y-%m-%d %H:%M UTC")}  |  © 2026 M.A.R.K. AI Systems. Patent Pending.{sig_text}', align='L')
+        if getattr(self, '_demo', False):
+            self.set_text_color(240, 165, 0)
+            self.cell(0, 5, 'DEMO - M.A.R.K. Sentinel Evaluation Copy - Not for distribution  |  Contact sales@markai.io', align='L')
+        else:
+            self.set_text_color(110, 118, 129)
+            sig_text = f'  |  Report ID: {self._report_id}  |  Signed by M.A.R.K. Sentinel' if getattr(self, '_report_id', None) else ''
+            self.cell(0, 5, f'Generated {datetime.now(tz=timezone.utc).strftime("%Y-%m-%d %H:%M UTC")}  |  © 2026 M.A.R.K. AI Systems. Patent Pending.{sig_text}', align='L')
         self.cell(0, 5, f'Page {self.page_no()}', align='R')
 
 
@@ -106,14 +114,16 @@ def _device_row(pdf: _PDF, hostname: str, platform: str, fail: int, warn: int, p
     pdf.cell(0, 6, _safe(_ts(last_seen)), ln=True)
 
 
-def generate_fleet_pdf(devices: list, tier: str = 'ciso', report_id: str = '') -> bytes:
+def generate_fleet_pdf(devices: list, tier: str = 'ciso', report_id: str = '', demo: bool = False) -> bytes:
     """
     devices: list of dicts from storage.list_devices() merged with get_latest_report()
     tier: 'executive' | 'ciso' | 'technical'
     report_id: optional signing report ID to embed in footer
+    demo: True adds watermark headers/footers and a cover banner
     """
     pdf = _PDF()
     pdf._report_id = report_id or ''
+    pdf._demo = demo
     pdf.set_auto_page_break(auto=True, margin=16)
     pdf.set_margins(14, 14, 14)
     pdf.add_page()
@@ -133,6 +143,14 @@ def generate_fleet_pdf(devices: list, tier: str = 'ciso', report_id: str = '') -
     pdf.set_font('Helvetica', size=9)
     pdf.set_text_color(110, 118, 129)
     pdf.cell(0, 6, datetime.now(tz=timezone.utc).strftime('%B %d, %Y'), ln=True, align='C')
+    if demo:
+        pdf.ln(4)
+        pdf.set_font('Helvetica', 'B', 10)
+        pdf.set_text_color(240, 165, 0)
+        pdf.cell(0, 8, 'DEMO REPORT - FOR EVALUATION PURPOSES ONLY', ln=True, align='C')
+        pdf.set_font('Helvetica', size=9)
+        pdf.set_text_color(110, 118, 129)
+        pdf.cell(0, 6, 'Not for distribution. Contact sales@markai.io to purchase a license.', ln=True, align='C')
     pdf.ln(14)
 
     # ── Aggregate stats ────────────────────────────────────────────────────────

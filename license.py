@@ -33,8 +33,12 @@ _DEFAULT_GRACE = 10
 
 
 class License:
-    # plan values: 'standard' (exec+ciso reports only) | 'plus' (full technical+remediation)
+    # plan values:
+    #   'demo'     — full feature access, all reports watermarked, evidence package disabled
+    #   'standard' — exec + ciso reports only, no technical/remediation, no evidence package
+    #   'plus'     — full access, no watermarks (production)
     # No license file = defaults to 'plus' so existing installs are unaffected.
+    PLAN_DEMO     = 'demo'
     PLAN_STANDARD = 'standard'
     PLAN_PLUS     = 'plus'
 
@@ -53,8 +57,18 @@ class License:
         self.plan                 = data.get('plan', self.PLAN_PLUS)
 
     @property
+    def is_demo(self) -> bool:
+        """True when running in demo mode — full access but reports are watermarked."""
+        return self.plan == self.PLAN_DEMO
+
+    @property
     def has_technical_reports(self) -> bool:
         """True when the license includes Technical reports and remediation steps."""
+        return self.plan in (self.PLAN_PLUS, self.PLAN_DEMO)
+
+    @property
+    def has_evidence_package(self) -> bool:
+        """True when the license allows Evidence Package export."""
         return self.plan == self.PLAN_PLUS
 
     @property

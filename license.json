@@ -1,0 +1,13 @@
+{
+  "customer_id": "mark-demo",
+  "licensed_to": "M.A.R.K. AI Systems — Demo",
+  "max_agents": 0,
+  "grace_pct": 10,
+  "expires_at": "",
+  "issued_at": "2026-05-19",
+  "issued_by": "M.A.R.K. AI Systems",
+  "plan": "demo",
+  "telemetry_url": "",
+  "telemetry_interval_h": 24,
+  "stale_alert_hours": 26
+}

@@ -105,6 +105,22 @@ def _has_technical_reports() -> bool:
     except Exception:
         return True
 
+def _is_demo() -> bool:
+    """Return True when running in demo mode."""
+    try:
+        from license import get_license
+        return get_license().is_demo
+    except Exception:
+        return False
+
+def _has_evidence_package() -> bool:
+    """Return True when the license allows Evidence Package export. Defaults True."""
+    try:
+        from license import get_license
+        return get_license().has_evidence_package
+    except Exception:
+        return True
+
 def _content_length(headers) -> int:
     """Safely parse Content-Length header; returns 0 on missing or invalid value."""
     try:
@@ -561,7 +577,7 @@ function switchTier(t){{location.href='/api/fleet/mcp/report?tier='+t;}}
     return ''.join(parts)
 
 
-def _build_fleet_report_html(devices: list, tier: str, profile: str = '', profiles: list | None = None, status_filter: str = '', sev_filter: str = '') -> str:
+def _build_fleet_report_html(devices: list, tier: str, profile: str = '', profiles: list | None = None, status_filter: str = '', sev_filter: str = '', demo: bool = False) -> str:
     from datetime import datetime, timezone
     import html as _html
 
@@ -676,8 +692,9 @@ function switchTier(t){{
   {_THEME_BTN}
 </div>
 {'<div style="background:#1c2128;border:1px solid #30363d;border-radius:6px;padding:10px 18px;margin-bottom:20px;display:flex;align-items:center;justify-content:space-between"><span style="font-size:13px;font-weight:600;color:' + ('#f85149' if status_filter=='fail' else '#d29922' if status_filter=='warn' else '#58a6ff') + '">Showing: ' + esc(_status_label) + ' only — across all devices</span></div>' if status_filter else ''}
+{'<div style="background:#3d2000;border:1px solid #bb6800;border-radius:6px;padding:10px 18px;margin-bottom:18px;display:flex;align-items:center;gap:12px"><span style="font-size:15px">⚠️</span><div><span style="font-size:13px;font-weight:700;color:#f0a500">DEMO REPORT — For evaluation purposes only. Not for distribution.</span><span style="font-size:12px;color:#8b949e;margin-left:12px">Contact <a href="mailto:sales@markai.io" style="color:#58a6ff">sales@markai.io</a> to purchase a license.</span></div></div>' if demo else ''}
 <h1>M.A.R.K. Sentinel &mdash; Fleet {esc(tier_label)}</h1>
-<div class="meta">Generated {esc(now)} &nbsp;&bull;&nbsp; {len(devices)} device(s){(' &nbsp;&bull;&nbsp; Profiles: <strong>' + esc(_profile_label) + '</strong>') if _profile_label else ''} &nbsp;&bull;&nbsp; Confidential</div>
+<div class="meta">Generated {esc(now)} &nbsp;&bull;&nbsp; {len(devices)} device(s){(' &nbsp;&bull;&nbsp; Profiles: <strong>' + esc(_profile_label) + '</strong>') if _profile_label else ''} &nbsp;&bull;&nbsp; {'DEMO — Not for distribution' if demo else 'Confidential'}</div>
 <div class="cards">
   <div class="card"><div class="card-n score">{fleet_score}%</div><div class="card-l">Fleet Score</div></div>
   <div class="card"><div class="card-n fail">{_cnt_ch}</div><div class="card-l">Critical / High</div></div>
@@ -1921,7 +1938,7 @@ button:hover{{background:#2ea043}}
             if fmt == 'pdf':
                 try:
                     from output.fleet_report import generate_fleet_pdf
-                    pdf_bytes = generate_fleet_pdf(devices, tier=tier)
+                    pdf_bytes = generate_fleet_pdf(devices, tier=tier, demo=_is_demo())
                     fname = f'sentinel_fleet_{tier}{"_" + profile.replace(",","_") if profile else ""}.pdf'
                     self.send_response(200)
                     self.send_header('Content-Type', 'application/pdf')
@@ -1937,7 +1954,7 @@ button:hover{{background:#2ea043}}
                     self._send(500, f'PDF generation failed: {pdf_err}\n\n{tb}'.encode(), 'text/plain')
                     return
 
-            html = _build_fleet_report_html(devices, tier, profile=profile, profiles=profiles, status_filter=status_filter, sev_filter=sev_filter)
+            html = _build_fleet_report_html(devices, tier, profile=profile, profiles=profiles, status_filter=status_filter, sev_filter=sev_filter, demo=_is_demo())
             data = html.encode('utf-8')
             self.send_response(200)
             self.send_header('Content-Type', 'text/html; charset=utf-8')
@@ -1952,6 +1969,9 @@ button:hover{{background:#2ea043}}
 
     def _api_evidence_export(self):
         """GET /api/fleet/evidence-export[?profile=fedramp,cmmc] — ZIP bundle: cover letter, findings CSV, fleet PDF, per-device JSON."""
+        if not _has_evidence_package():
+            self._send(402, b'Evidence Package requires a Plus license. Contact sales@markai.io to upgrade.', 'text/plain')
+            return
         import io, zipfile, csv
         from urllib.parse import parse_qs, urlparse as _up
         from datetime import datetime as _dt
@@ -3467,7 +3487,7 @@ html.light .sb-footer a,body.light .sb-footer a{{color:#8c959f}}
     <div class="sb-logo">
       <div class="sb-logo-mark">M.A.R.K.</div>
       <div class="sb-logo-name">SENTINEL</div>
-      <div class="sb-logo-sub">Command Center</div>
+      <div class="sb-logo-sub">{'<span style="color:#f0a500;font-weight:700;font-size:9px;letter-spacing:1px">⚠ DEMO MODE</span>' if _is_demo() else 'Command Center'}</div>
     </div>
     <nav class="sb-nav">
       <div class="sb-group">Overview</div>
@@ -3526,8 +3546,7 @@ html.light .sb-footer a,body.light .sb-footer a{{color:#8c959f}}
       <button onclick="openReport('ciso')" class="scan-btn"
          style="color:#58a6ff;border-color:#30363d;font-size:12px">&#9654; CISO Report</button>
       {'<button onclick="openReport(\'technical\')" class="scan-btn" style="color:#8b949e;border-color:#30363d;font-size:12px">&#9654; Technical Report</button>' if _has_technical_reports() else '<button disabled title="Technical Reports + Remediation require a Plus license" class="scan-btn" style="color:#484f58;border-color:#21262d;font-size:12px;cursor:default">&#128274; Technical (Plus)</button>'}
-      <button id="btn-evidence-export" class="scan-btn" onclick="downloadEvidencePackage(this)"
-              style="color:#a371f7;border-color:#30363d;font-size:12px">&#8659; Evidence Package</button>
+      {'<button id="btn-evidence-export" class="scan-btn" onclick="downloadEvidencePackage(this)" style="color:#a371f7;border-color:#30363d;font-size:12px">&#8659; Evidence Package</button>' if _has_evidence_package() else '<button disabled title="Evidence Package requires a Plus license" class="scan-btn" style="color:#484f58;border-color:#21262d;font-size:12px;cursor:default">&#128274; Evidence Pkg (Plus)</button>'}
       <select id="scan-all-stagger" class="form-select" style="font-size:12px;padding:3px 6px;height:28px" title="Scan stagger — spread scans over time to avoid network spikes">
         <option value="normal">Normal (25/30s)</option>
         <option value="slow">Slow (10/60s)</option>
@@ -3935,7 +3954,7 @@ html.light .sb-footer a,body.light .sb-footer a{{color:#8c959f}}
     <div style="font-size:15px;font-weight:700;color:#e6edf3;margin-bottom:6px">&#128230; Evidence Package</div>
     <div style="font-size:12px;color:#6e7681;line-height:1.6;margin-bottom:6px">Complete audit bundle for compliance review: cover letter, findings CSV, signed fleet PDF, per-device JSON reports, and cryptographic manifest.</div>
     <div style="font-size:12px;color:#6e7681;margin-bottom:16px">Contents are cryptographically signed with HMAC-SHA256 — tamper-evident for auditor submission.</div>
-    <button id="btn-evidence-export-rpt" class="scan-btn" onclick="downloadEvidencePackage(this)" style="color:#a371f7;border-color:#6e40c9;font-size:12px">&#8659; Download ZIP</button>
+    {'<button id="btn-evidence-export-rpt" class="scan-btn" onclick="downloadEvidencePackage(this)" style="color:#a371f7;border-color:#6e40c9;font-size:12px">&#8659; Download ZIP</button>' if _has_evidence_package() else '<button class="scan-btn" disabled style="color:#6e7681;border-color:#30363d;font-size:12px;cursor:not-allowed;opacity:.55">&#128274; Plus Plan Required</button><div style="font-size:11px;color:#f0a500;margin-top:8px">{"&#9888; Available in evaluation — upgrade to Plus for production use." if _is_demo() else "&#9888; Evidence Package is a Plus plan feature. Contact sales@markai.io to upgrade."}</div>'}
   </div>
   </div>
 
