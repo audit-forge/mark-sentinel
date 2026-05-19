@@ -208,8 +208,8 @@ def _rebuild_dashboard(out_dir: Path) -> bool:
 
 _SEV_ORDER_REPORT = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW', 'INFO']
 _SEV_COLOR_HTML = {'CRITICAL': '#f85149', 'HIGH': '#d29922', 'MEDIUM': '#58a6ff', 'LOW': '#3fb950', 'INFO': '#6e7681'}
-_STATUS_COLOR_HTML = {'FAIL': '#f85149', 'WARN': '#d29922', 'PASS': '#3fb950', 'SKIP': '#6e7681', 'N/A': '#444c56'}
-_STATUS_LABEL_HTML = {'FAIL': 'HIGH RISK', 'WARN': 'MEDIUM RISK', 'PASS': 'LOW RISK', 'SKIP': 'SKIP', 'N/A': 'N/A'}
+_STATUS_COLOR_HTML = {'FAIL': '#f85149', 'WARN': '#d29922', 'PASS': '#58a6ff', 'SKIP': '#6e7681', 'N/A': '#444c56'}
+_STATUS_LABEL_HTML = {'FAIL': 'HIGH RISK', 'WARN': 'MEDIUM RISK', 'PASS': 'INFO', 'SKIP': 'SKIP', 'N/A': 'N/A'}
 
 
 def _risk_score_html(fail, warn, total) -> int:
@@ -511,7 +511,7 @@ def _build_fleet_report_html(devices: list, tier: str, profile: str = '', profil
         except Exception:
             return str(epoch)
 
-    _status_label = {'fail': 'High Risk Items', 'warn': 'Medium Risk Items', 'pass': 'Low Risk Items'}.get(status_filter, '')
+    _status_label = {'fail': 'High Risk Items', 'warn': 'Medium Risk Items', 'pass': 'Info Items'}.get(status_filter, '')
     _tier_base    = {'executive': 'Executive Summary', 'ciso': 'CISO Report', 'technical': 'Technical Findings'}.get(tier, 'Fleet Report')
     tier_label    = f'{_tier_base} — {_status_label}' if _status_label else _tier_base
     total_fail = sum(d.get('fail_count', 0) or 0 for d in devices)
@@ -524,7 +524,7 @@ def _build_fleet_report_html(devices: list, tier: str, profile: str = '', profil
     active_profiles = profiles or ([profile] if profile else [])
 
     _rpt_profiles = [('default', 'Default'), ('fedramp', 'FedRAMP'), ('cmmc', 'CMMC 2.0'),
-                     ('financial', 'Financial'), ('smb', 'SMB'), ('lifesciences', 'Life Sciences')]
+                     ('financial', 'Financial'), ('smb', 'SMB'), ('biotech', 'Biotech'), ('healthcare', 'Healthcare')]
     _toolbar_cbs = ' '.join(
         f'<label style="font-size:12px;color:#c9d1d9;white-space:nowrap;cursor:pointer">'
         f'<input type="checkbox" class="rpt-cb" value="{v}"{" checked" if v in active_profiles else ""}> {lbl}</label>'
@@ -553,7 +553,7 @@ table{{width:100%;border-collapse:collapse;font-size:13px;margin-bottom:16px}}
 th{{background:#161b22;color:#6e7681;font-size:11px;text-transform:uppercase;padding:8px 10px;text-align:left;border-bottom:1px solid #21262d}}
 td{{padding:7px 10px;border-bottom:1px solid #161b22}}
 tr:hover td{{background:#161b22}}
-.fail{{color:#f85149}}.warn{{color:#d29922}}.pass{{color:#3fb950}}.skip{{color:#6e7681}}
+.fail{{color:#f85149}}.warn{{color:#d29922}}.pass{{color:#58a6ff}}.skip{{color:#6e7681}}
 .crit{{color:#f85149}}.high{{color:#d29922}}.med{{color:#58a6ff}}.low{{color:#3fb950}}
 .device-block{{background:#161b22;border:1px solid #21262d;border-radius:8px;padding:20px;margin-bottom:20px}}
 .finding{{padding:6px 0;border-bottom:1px solid #21262d;font-size:13px}}
@@ -592,19 +592,19 @@ function switchTier(t){{
   <button onclick="window.print()" style="{btn_style}">&#128438; Print</button>
   {'<a href="/api/fleet/report?tier=' + tier + '&fmt=html' + _pdf_profile_param + '" style="' + btn_style + ';color:#f85149;border-color:#30363d">&#10005; Clear filter</a>' if status_filter else ''}
 </div>
-{'<div style="background:#1c2128;border:1px solid #30363d;border-radius:6px;padding:10px 18px;margin-bottom:20px;display:flex;align-items:center;justify-content:space-between"><span style="font-size:13px;font-weight:600;color:' + ('#f85149' if status_filter=='fail' else '#d29922' if status_filter=='warn' else '#3fb950') + '">Showing: ' + esc(_status_label) + ' only — across all devices</span></div>' if status_filter else ''}
+{'<div style="background:#1c2128;border:1px solid #30363d;border-radius:6px;padding:10px 18px;margin-bottom:20px;display:flex;align-items:center;justify-content:space-between"><span style="font-size:13px;font-weight:600;color:' + ('#f85149' if status_filter=='fail' else '#d29922' if status_filter=='warn' else '#58a6ff') + '">Showing: ' + esc(_status_label) + ' only — across all devices</span></div>' if status_filter else ''}
 <h1>M.A.R.K. Sentinel &mdash; Fleet {esc(tier_label)}</h1>
 <div class="meta">Generated {esc(now)} &nbsp;&bull;&nbsp; {len(devices)} device(s){(' &nbsp;&bull;&nbsp; Profiles: <strong>' + esc(_profile_label) + '</strong>') if _profile_label else ''} &nbsp;&bull;&nbsp; Confidential</div>
 <div class="cards">
   <div class="card"><div class="card-n score">{fleet_score}%</div><div class="card-l">Fleet Score</div></div>
   <div class="card"><div class="card-n fail">{total_fail}</div><div class="card-l">High Risk</div></div>
   <div class="card"><div class="card-n warn">{total_warn}</div><div class="card-l">Medium Risk</div></div>
-  <div class="card"><div class="card-n pass">{total_pass}</div><div class="card-l">Low Risk</div></div>
+  <div class="card"><div class="card-n pass">{total_pass}</div><div class="card-l">Info</div></div>
   <div class="card"><div class="card-n" style="color:#58a6ff">{len(devices)}</div><div class="card-l">Devices</div></div>
 </div>''']
 
     # Device summary table
-    parts.append('<h2>Device Status</h2><table><thead><tr><th>Hostname</th><th>Platform</th><th>High</th><th>Medium</th><th>Low</th><th>Score</th><th>Last Seen</th></tr></thead><tbody>')
+    parts.append('<h2>Device Status</h2><table><thead><tr><th>Hostname</th><th>Platform</th><th>High</th><th>Medium</th><th>Info</th><th>Score</th><th>Last Seen</th></tr></thead><tbody>')
     for d in devices:
         f = d.get('fail_count', 0) or 0
         w = d.get('warn_count', 0) or 0
@@ -630,7 +630,7 @@ function switchTier(t){{
         _target_status = {'fail': 'FAIL', 'warn': 'WARN', 'pass': 'PASS'}.get(status_filter, '')
         all_findings = [f for f in all_findings if f.get('status', '').upper() == _target_status]
 
-    _section_label = {'fail': 'High Risk', 'warn': 'Medium Risk', 'pass': 'Low Risk'}.get(status_filter, 'Critical &amp; High')
+    _section_label = {'fail': 'High Risk', 'warn': 'Medium Risk', 'pass': 'Info'}.get(status_filter, 'Critical &amp; High')
     if status_filter:
         crit_high = sorted(all_findings, key=lambda x: _SEV_ORDER_REPORT.index(x.get('severity','INFO')) if x.get('severity') in _SEV_ORDER_REPORT else 99)
     else:
@@ -1740,7 +1740,7 @@ button:hover{{background:#2ea043}}
             tier = 'ciso'
         if status_filter not in ('fail', 'warn', 'pass', ''):
             status_filter = ''
-        _VALID_PROFILES = {'default', 'fedramp', 'cmmc', 'financial', 'smb'}
+        _VALID_PROFILES = {'default', 'fedramp', 'cmmc', 'financial', 'smb', 'biotech', 'healthcare', 'lifesciences', 'owasp_agentic', 'eu_ai_act'}
         profiles = [p for p in profile_raw.split(',') if p in _VALID_PROFILES]
         profile  = ','.join(profiles)
         try:
@@ -2251,11 +2251,11 @@ button:hover{{background:#2ea043}}
             self._serve_probe_tester(error=f'Scan error: {exc}')
 
     def _build_probe_results(self, model, summary, results, live_error):
-        STATUS_COLOR = {'PASS': '#3fb950', 'FAIL': '#f85149', 'WARN': '#d29922', 'SKIP': '#6e7681', 'N/A': '#444c56'}
-        STATUS_BG    = {'PASS': '#0d4a1a', 'FAIL': '#4a0d0d', 'WARN': '#4a3b0d', 'SKIP': '#1c2128', 'N/A': '#161b22'}
+        STATUS_COLOR = {'PASS': '#58a6ff', 'FAIL': '#f85149', 'WARN': '#d29922', 'SKIP': '#6e7681', 'N/A': '#444c56'}
+        STATUS_BG    = {'PASS': '#0d1a2d', 'FAIL': '#4a0d0d', 'WARN': '#4a3b0d', 'SKIP': '#1c2128', 'N/A': '#161b22'}
         SEV_COLOR    = {'CRITICAL': '#f85149', 'HIGH': '#d29922', 'MEDIUM': '#58a6ff', 'LOW': '#8b949e'}
         SEV_BG       = {'CRITICAL': '#4a0d0d', 'HIGH': '#4a3b0d', 'MEDIUM': '#1d3250', 'LOW': '#21262d'}
-        BORDER       = {'PASS': '#3fb950', 'FAIL': '#f85149', 'WARN': '#d29922', 'SKIP': '#30363d', 'N/A': '#21262d'}
+        BORDER       = {'PASS': '#58a6ff', 'FAIL': '#f85149', 'WARN': '#d29922', 'SKIP': '#30363d', 'N/A': '#21262d'}
 
         def e(s):
             return str(s or '').replace('&','&amp;').replace('<','&lt;').replace('>','&gt;').replace('"','&quot;')
@@ -2348,7 +2348,7 @@ body{{background:#0d1117;color:#e6edf3;font-family:-apple-system,BlinkMacSystemF
 <div class="strip">
   <div class="sc"><div class="sc-n" style="color:#f85149">{summary["fail"]}</div><div class="sc-l">High Risk</div></div>
   <div class="sc"><div class="sc-n" style="color:#d29922">{summary["warn"]}</div><div class="sc-l">Medium Risk</div></div>
-  <div class="sc"><div class="sc-n" style="color:#3fb950">{summary["pass"]}</div><div class="sc-l">Low Risk</div></div>
+  <div class="sc"><div class="sc-n" style="color:#58a6ff">{summary["pass"]}</div><div class="sc-l">Info</div></div>
   <div class="sc"><div class="sc-n" style="color:#6e7681">{summary["skip"]}</div><div class="sc-l">Skipped</div></div>
   <div class="sc"><div class="sc-n" style="color:#444c56">{summary.get("n/a", 0)}</div><div class="sc-l">N/A</div></div>
 </div>'''
@@ -2909,7 +2909,7 @@ body{{background:#0d1117;color:#c9d1d9;font-family:-apple-system,BlinkMacSystemF
 .find-ind{{width:3px;height:28px;border-radius:2px;flex-shrink:0}}
 .find-ind.critical,.find-ind.fail{{background:#f85149}}
 .find-ind.high{{background:#f0883e}}.find-ind.medium{{background:#d29922}}
-.find-ind.pass{{background:#3fb950}}.find-ind.warn{{background:#d29922}}.find-ind.skip{{background:#363d47}}
+.find-ind.pass{{background:#58a6ff}}.find-ind.warn{{background:#d29922}}.find-ind.skip{{background:#363d47}}
 .sev-badge,.stat-badge{{font-size:10px;font-weight:700;padding:2px 7px;border-radius:3px;text-transform:uppercase;flex-shrink:0}}
 .sev-badge.critical{{background:#3d1212;color:#f85149;border:1px solid #f85149}}
 .sev-badge.high{{background:#3d1f00;color:#f0883e;border:1px solid #f0883e}}
@@ -2917,7 +2917,7 @@ body{{background:#0d1117;color:#c9d1d9;font-family:-apple-system,BlinkMacSystemF
 .sev-badge.low{{background:#0d1f3d;color:#388bfd;border:1px solid #388bfd}}
 .stat-badge.fail{{background:#3d1212;color:#f85149}}
 .stat-badge.warn{{background:#2d2000;color:#d29922}}
-.stat-badge.pass{{background:#0d2d1a;color:#3fb950}}
+.stat-badge.pass{{background:#0d1a2d;color:#58a6ff}}
 .stat-badge.skip{{background:#1a1f27;color:#6e7681}}
 .find-id{{font-size:11px;color:#6e7681;font-family:monospace;flex-shrink:0}}
 .find-title{{font-size:13px;font-weight:500;color:#c9d1d9;flex:1}}
@@ -2951,7 +2951,7 @@ body{{background:#0d1117;color:#c9d1d9;font-family:-apple-system,BlinkMacSystemF
     <div class="scard" id="sf-warn" onclick="window.open('/api/fleet/report?tier=technical&amp;status=warn&amp;fmt=html','_blank')" title="View all medium risk items across all devices">
       <div class="scard-n c-yellow" id="sc-warn">{total_warn}</div><div class="scard-l">Medium Risk</div></div>
     <div class="scard" id="sf-pass" onclick="window.open('/api/fleet/report?tier=technical&amp;status=pass&amp;fmt=html','_blank')" title="View all low risk checks across all devices">
-      <div class="scard-n c-green" id="sc-pass">{total_pass}</div><div class="scard-l">Low Risk</div></div>
+      <div class="scard-n c-blue" id="sc-pass">{total_pass}</div><div class="scard-l">Info</div></div>
     <div class="scard" id="sf-shadow" onclick="document.getElementById('shadow-section').scrollIntoView({{behavior:'smooth'}})" title="Unmanaged AI devices discovered on your network — click to view">
       <div class="scard-n" id="sc-shadow" style="color:#a371f7">{len(shadow)}</div><div class="scard-l">Shadow AI</div></div>
     <div class="scard" id="sf-mcp" onclick="window.open('/api/fleet/mcp/report?tier=ciso','_blank')" title="MCP servers and AI agent tool call exposure — click to open report">
@@ -2972,7 +2972,8 @@ body{{background:#0d1117;color:#c9d1d9;font-family:-apple-system,BlinkMacSystemF
       <label style="font-size:12px;color:#c9d1d9;white-space:nowrap;cursor:pointer"><input type="checkbox" class="rpt-profile" value="cmmc"> CMMC 2.0</label>
       <label style="font-size:12px;color:#c9d1d9;white-space:nowrap;cursor:pointer"><input type="checkbox" class="rpt-profile" value="financial"> Financial</label>
       <label style="font-size:12px;color:#c9d1d9;white-space:nowrap;cursor:pointer"><input type="checkbox" class="rpt-profile" value="smb"> SMB</label>
-      <label style="font-size:12px;color:#c9d1d9;white-space:nowrap;cursor:pointer"><input type="checkbox" class="rpt-profile" value="lifesciences"> Life Sciences</label>
+      <label style="font-size:12px;color:#c9d1d9;white-space:nowrap;cursor:pointer"><input type="checkbox" class="rpt-profile" value="biotech"> Biotech</label>
+      <label style="font-size:12px;color:#c9d1d9;white-space:nowrap;cursor:pointer"><input type="checkbox" class="rpt-profile" value="healthcare"> Healthcare</label>
       <label style="font-size:12px;color:#c9d1d9;white-space:nowrap;cursor:pointer"><input type="checkbox" class="rpt-profile" value="owasp_agentic"> OWASP Agentic</label>
       <label style="font-size:12px;color:#c9d1d9;white-space:nowrap;cursor:pointer"><input type="checkbox" class="rpt-profile" value="eu_ai_act"> EU AI Act</label>
       <button onclick="openReport('executive')" class="scan-btn"
@@ -3062,7 +3063,8 @@ body{{background:#0d1117;color:#c9d1d9;font-family:-apple-system,BlinkMacSystemF
         <label style="font-size:13px;color:#e6edf3;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="cfg-profile-cb" value="fedramp"> FedRAMP / NIST 800-53</label>
         <label style="font-size:13px;color:#e6edf3;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="cfg-profile-cb" value="cmmc"> CMMC 2.0</label>
         <label style="font-size:13px;color:#e6edf3;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="cfg-profile-cb" value="smb"> SMB</label>
-        <label style="font-size:13px;color:#e6edf3;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="cfg-profile-cb" value="lifesciences"> Life Sciences (FDA / HIPAA / GxP)</label>
+        <label style="font-size:13px;color:#e6edf3;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="cfg-profile-cb" value="biotech"> Biotech (FDA 21 CFR Part 11 / HIPAA / GxP)</label>
+        <label style="font-size:13px;color:#e6edf3;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="cfg-profile-cb" value="healthcare"> Healthcare (HIPAA / HITECH / FDA SaMD)</label>
         <label style="font-size:13px;color:#e6edf3;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="cfg-profile-cb" value="owasp_agentic"> OWASP Agentic AI Top 10</label>
         <label style="font-size:13px;color:#e6edf3;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="cfg-profile-cb" value="eu_ai_act"> EU AI Act (High-Risk Systems)</label>
       </div>
@@ -3137,7 +3139,7 @@ function _visibleDevices() {{
 
 function _syncFilterUI() {{
   const colorMap = {{fail:'sf-active-red', warn:'sf-active-yellow', pass:'sf-active-green'}};
-  const labelMap = {{fail:'High Risk Devices', warn:'Medium Risk Devices', pass:'Low Risk Devices'}};
+  const labelMap = {{fail:'High Risk Devices', warn:'Medium Risk Devices', pass:'Info Devices'}};
   ['fail','warn','pass'].forEach(t => {{
     const el = document.getElementById('sf-' + t);
     if (!el) return;
@@ -3151,7 +3153,7 @@ function _syncFilterUI() {{
   if (banner) {{
     if (_activeFilter) {{
       bannerText.textContent = 'Showing: ' + (labelMap[_activeFilter] || _activeFilter);
-      bannerText.style.color = _activeFilter === 'fail' ? '#f85149' : _activeFilter === 'warn' ? '#d29922' : '#3fb950';
+      bannerText.style.color = _activeFilter === 'fail' ? '#f85149' : _activeFilter === 'warn' ? '#d29922' : '#58a6ff';
       banner.style.display = 'flex';
       document.title = 'Sentinel — ' + (labelMap[_activeFilter] || _activeFilter);
     }} else {{
@@ -3197,7 +3199,7 @@ function renderDevicePage() {{
     return;
   }}
   if (!visible.length) {{
-    const msg = _activeFilter === 'fail' ? 'No high risk devices.' : _activeFilter === 'warn' ? 'No medium risk devices.' : 'No low risk devices.';
+    const msg = _activeFilter === 'fail' ? 'No high risk devices.' : _activeFilter === 'warn' ? 'No medium risk devices.' : 'No info items.';
     tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:32px;color:#484f58">' + msg + '</td></tr>';
     pgEl.style.display = 'none';
     return;
@@ -3442,12 +3444,15 @@ async function runDiscovery() {{
 }}
 
 const _SCAN_PROFILES = [
-  {{id:'default',   label:'Default',             desc:'All AI-STIG checks'}},
-  {{id:'fedramp',   label:'FedRAMP',             desc:'FedRAMP Moderate controls'}},
-  {{id:'cmmc',      label:'CMMC 2.0',            desc:'Cybersecurity Maturity Model'}},
-  {{id:'financial', label:'Financial Services',  desc:'Financial sector AI controls'}},
-  {{id:'smb',       label:'SMB',                 desc:'Small-medium business baseline'}},
-  {{id:'lifesciences', label:'Life Sciences',    desc:'FDA 21 CFR Part 11, HIPAA, ICH E6(R2), GxP'}},
+  {{id:'default',       label:'Default',             desc:'Full AI-STIG suite — all checks across all 6 risk categories, no framework filter. Best starting point.'}},
+  {{id:'fedramp',       label:'FedRAMP',             desc:'FedRAMP Moderate — NIST 800-53 control mappings. Required for federal cloud systems and agency deployments.'}},
+  {{id:'cmmc',          label:'CMMC 2.0',            desc:'Cybersecurity Maturity Model Certification — required for DoD contractors handling CUI.'}},
+  {{id:'financial',     label:'Financial Services',  desc:'Financial sector AI controls — SOC 2, FFIEC, SR 11-7 model risk guidance.'}},
+  {{id:'smb',           label:'SMB',                 desc:'Essential controls for small and medium businesses — plain language, highest-impact items only.'}},
+  {{id:'biotech',       label:'Biotech',             desc:'FDA 21 CFR Part 11, HIPAA, ICH E6(R2), GxP — for pharma and biotech AI systems.'}},
+  {{id:'healthcare',    label:'Healthcare',          desc:'HIPAA, HITECH, FDA SaMD guidance — for clinical AI, EHR systems, and patient data protection.'}},
+  {{id:'owasp_agentic', label:'OWASP Agentic',       desc:'OWASP Top 10 for Agentic AI (2026) — tool hijacking, prompt injection, excessive agency, rogue agents.'}},
+  {{id:'eu_ai_act',     label:'EU AI Act',           desc:'EU AI Act Articles 9-15 — mandatory for high-risk AI systems in Europe. Enforcement begins August 2026.'}},
 ];
 
 function openScanModal(id, triggerBtn) {{
@@ -3951,7 +3956,7 @@ function renderTrendChart(points) {{
     + xlabels
     + '<circle cx="'+(padL+10)+'" cy="12" r="4" fill="#f85149"/><text x="'+(padL+18)+'" y="16" font-size="11" fill="#8b949e">HIGH</text>'
     + '<circle cx="'+(padL+58)+'" cy="12" r="4" fill="#d29922"/><text x="'+(padL+66)+'" y="16" font-size="11" fill="#8b949e">MEDIUM</text>'
-    + '<circle cx="'+(padL+106)+'" cy="12" r="4" fill="#3fb950"/><text x="'+(padL+114)+'" y="16" font-size="11" fill="#8b949e">LOW</text>'
+    + '<circle cx="'+(padL+106)+'" cy="12" r="4" fill="#58a6ff"/><text x="'+(padL+114)+'" y="16" font-size="11" fill="#8b949e">INFO</text>'
     + '</svg></div>';
 }}
 
