@@ -1827,7 +1827,7 @@ button:hover{{background:#2ea043}}
             if fmt == 'pdf':
                 try:
                     from output.fleet_report import generate_fleet_pdf
-                    pdf_bytes = generate_fleet_pdf(devices, tier=tier, profile=profile or None)
+                    pdf_bytes = generate_fleet_pdf(devices, tier=tier)
                     fname = f'sentinel_fleet_{tier}{"_" + profile.replace(",","_") if profile else ""}.pdf'
                     self.send_response(200)
                     self.send_header('Content-Type', 'application/pdf')
