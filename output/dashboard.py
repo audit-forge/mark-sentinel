@@ -329,6 +329,37 @@ function riskInfo(s){
   return{cls:'c-green',label:'Minimal Risk',score:0};
 }
 
+function calcExposure(s,critCount,highCount,medCount,lowCount){
+  const n=s.total_evaluated||0;
+  if(n===0)return{pct:0,simple:0,tier:'No Data',color:'#6e7681',
+    meaning:'No controls have been evaluated yet. Run a scan to assess your AI security posture.',
+    nextStep:'Run a scan to generate your risk profile.'};
+  const maxWeight=n*4;
+  const actual=(critCount*4)+(highCount*3)+(medCount*2)+(lowCount*1);
+  const pct=Math.round(actual/maxWeight*100);
+  const simple=Math.round((s.fail||0)/n*100);
+  let tier,color;
+  if(pct===0)      {tier='No Risk';      color='#3fb950';}
+  else if(pct<=15) {tier='Low Risk';     color='#3fb950';}
+  else if(pct<=40) {tier='Medium Risk';  color='#d29922';}
+  else if(pct<=65) {tier='High Risk';    color='#f0883e';}
+  else             {tier='Critical Risk';color='#f85149';}
+  const meanings={
+    'No Risk':'All evaluated controls are passing. Your AI deployment is operating within current security best practices. Continue monitoring for new vulnerabilities and keep your controls current.',
+    'Low Risk':'Minor issues were detected but your AI systems are largely secure. No critical or high-severity failures were found. Address the remaining issues as part of your normal security maintenance cycle.',
+    'Medium Risk':'Multiple controls are failing across your AI deployment. Your systems have meaningful exposure that could be exploited by a motivated attacker. These issues should be remediated within 30 days to prevent escalation.',
+    'High Risk':'Significant failures were detected across your AI deployment. Your systems have substantial exposure to data breach, model manipulation, and unauthorized access. Prioritize remediation immediately — do not expand AI usage until high-severity issues are resolved.',
+    'Critical Risk':'Critical failures put your AI systems at immediate risk of data breach, regulatory penalty, and unauthorized AI access. This represents active danger to your organization. Stop new AI deployments and remediate critical findings before proceeding.'
+  };
+  let nextStep;
+  if(critCount>0)      nextStep=`To reduce to High Risk: resolve the ${critCount} critical finding${critCount!==1?'s':''} first — they carry the highest weight in this score.`;
+  else if(highCount>0) nextStep=`To reduce to Medium Risk: resolve the ${highCount} high-severity finding${highCount!==1?'s':''}.`;
+  else if(medCount>0)  nextStep=`To reduce to Low Risk: address the ${medCount} medium-severity finding${medCount!==1?'s':''}.`;
+  else if(lowCount>0)  nextStep=`To reach No Risk: resolve the ${lowCount} remaining low-severity finding${lowCount!==1?'s':''}.`;
+  else                 nextStep='Continue monitoring and maintaining your current security controls.';
+  return{pct,simple,tier,color,meaning:meanings[tier],nextStep};
+}
+
 function renderOverview(){
   const p=DATA.providers[curProv];
   const s=p.summary;
@@ -371,18 +402,62 @@ function renderOverview(){
   const critCount=p.findings.filter(f=>f.status==='FAIL'&&f.severity==='CRITICAL').length;
   const highCount=p.findings.filter(f=>f.status==='FAIL'&&f.severity==='HIGH').length;
   const medCount=p.findings.filter(f=>f.status==='FAIL'&&f.severity==='MEDIUM').length;
+  const lowCount=p.findings.filter(f=>f.status==='FAIL'&&f.severity==='LOW').length;
   const sevBrk=[critCount?`<span class="c-red">${critCount} crit</span>`:'',highCount?`<span class="c-orange">${highCount} high</span>`:'',medCount?`<span class="c-yellow">${medCount} med</span>`:''].filter(Boolean).join(' · ');
+  const exp=calcExposure(s,critCount,highCount,medCount,lowCount);
+  const n=s.total_evaluated||0;
   document.getElementById('view-overview').innerHTML=`
     ${provBar('overview')}
-    <div class="risk-row">
-      <div class="risk-card">
-        <div class="risk-info">
-          <div class="risk-label ${risk.cls}" style="font-size:22px;font-weight:800;margin-bottom:6px">${risk.label}</div>
-          <div style="font-size:13px;margin-bottom:4px">${[critCount?`<span class="c-red">${critCount} critical</span>`:'',highCount?`<span class="c-orange">${highCount} high</span>`:'',medCount?`<span class="c-yellow">${medCount} medium</span>`:''].filter(Boolean).join(' · ')||'<span class="c-green">No failures</span>'}</div>
-          <div class="risk-desc">${s.fail} failing · ${s.warn} warnings · ${s.total_evaluated} controls evaluated</div>
+    <div style="background:#161b22;border:1px solid #21262d;border-radius:8px;padding:22px 24px;margin-bottom:16px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+        <div style="font-size:11px;color:#6e7681;text-transform:uppercase;letter-spacing:1px;font-weight:600">Overall AI Risk Exposure</div>
+        <div style="font-size:10px;color:#3d444d">Severity-weighted score &nbsp;·&nbsp; Critical ×4 &nbsp;·&nbsp; High ×3 &nbsp;·&nbsp; Medium ×2 &nbsp;·&nbsp; Low ×1 &nbsp;·&nbsp; normalized to 100%</div>
+      </div>
+      <div style="display:flex;align-items:flex-end;gap:18px;margin-bottom:14px">
+        <div style="font-size:54px;font-weight:900;line-height:1;color:${exp.color}">${exp.pct}%</div>
+        <div style="padding-bottom:6px">
+          <div style="font-size:17px;font-weight:700;color:${exp.color}">${exp.tier}</div>
+          <div style="font-size:11px;color:#6e7681;margin-top:3px">${s.fail} of ${n} controls failing &nbsp;·&nbsp; ${exp.simple}% of controls failing by raw count</div>
         </div>
       </div>
-      <div class="probe-card">
+      <div style="background:#21262d;border-radius:6px;height:9px;overflow:hidden;margin-bottom:18px">
+        <div style="width:${exp.pct}%;height:100%;background:${exp.color};border-radius:6px"></div>
+      </div>
+      ${critCount>0||highCount>0||medCount>0||lowCount>0?`
+      <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:18px">
+        ${critCount>0?`<div style="display:flex;align-items:center;gap:10px">
+          <div style="width:58px;font-size:11px;color:#f85149;font-weight:600">Critical</div>
+          <div style="width:22px;font-size:12px;font-weight:700;color:#f85149;text-align:right">${critCount}</div>
+          <div style="flex:1;background:#21262d;border-radius:3px;height:5px;overflow:hidden"><div style="width:${Math.min(100,Math.round(critCount/Math.max(1,n)*100))}%;height:100%;background:#f85149;border-radius:3px"></div></div>
+          <div style="font-size:11px;color:#6e7681;width:180px">Immediate action required</div>
+        </div>`:''}
+        ${highCount>0?`<div style="display:flex;align-items:center;gap:10px">
+          <div style="width:58px;font-size:11px;color:#f0883e;font-weight:600">High</div>
+          <div style="width:22px;font-size:12px;font-weight:700;color:#f0883e;text-align:right">${highCount}</div>
+          <div style="flex:1;background:#21262d;border-radius:3px;height:5px;overflow:hidden"><div style="width:${Math.min(100,Math.round(highCount/Math.max(1,n)*100))}%;height:100%;background:#f0883e;border-radius:3px"></div></div>
+          <div style="font-size:11px;color:#6e7681;width:180px">Resolve within 7 days</div>
+        </div>`:''}
+        ${medCount>0?`<div style="display:flex;align-items:center;gap:10px">
+          <div style="width:58px;font-size:11px;color:#d29922;font-weight:600">Medium</div>
+          <div style="width:22px;font-size:12px;font-weight:700;color:#d29922;text-align:right">${medCount}</div>
+          <div style="flex:1;background:#21262d;border-radius:3px;height:5px;overflow:hidden"><div style="width:${Math.min(100,Math.round(medCount/Math.max(1,n)*100))}%;height:100%;background:#d29922;border-radius:3px"></div></div>
+          <div style="font-size:11px;color:#6e7681;width:180px">Schedule for remediation</div>
+        </div>`:''}
+        ${lowCount>0?`<div style="display:flex;align-items:center;gap:10px">
+          <div style="width:58px;font-size:11px;color:#388bfd;font-weight:600">Low</div>
+          <div style="width:22px;font-size:12px;font-weight:700;color:#388bfd;text-align:right">${lowCount}</div>
+          <div style="flex:1;background:#21262d;border-radius:3px;height:5px;overflow:hidden"><div style="width:${Math.min(100,Math.round(lowCount/Math.max(1,n)*100))}%;height:100%;background:#388bfd;border-radius:3px"></div></div>
+          <div style="font-size:11px;color:#6e7681;width:180px">Address in next review cycle</div>
+        </div>`:''}
+      </div>`:''}
+      <div style="background:#0d1117;border:1px solid #21262d;border-radius:6px;padding:14px 16px">
+        <div style="font-size:10px;color:#6e7681;text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px">What This Means For Your Organization</div>
+        <div style="font-size:13px;color:#c9d1d9;line-height:1.6">${exp.meaning}</div>
+        <div style="font-size:12px;color:#58a6ff;margin-top:10px">→ ${exp.nextStep}</div>
+      </div>
+    </div>
+    <div class="risk-row">
+      <div class="probe-card" style="flex:1">
         <div class="probe-title">Live Probe Results</div>
         <div class="probe-stats">
           <div class="probe-stat"><div class="probe-num c-green">${pPass}</div><div class="probe-lbl">Passed</div></div>
