@@ -241,13 +241,22 @@ _THEME_EARLY_SCRIPT = (
 _THEME_TOGGLE_JS = (
     "function _applyTheme(l){"
     "document.documentElement.classList.toggle('light',l);"
-    "if(document.body)document.body.classList.toggle('light',l);"
+    "if(document.body){"
+    "document.body.classList.toggle('light',l);"
+    "document.body.style.background=l?'#fff':'#0d1117';"
+    "document.body.style.color=l?'#24292f':'#c9d1d9';}"
     "var b=document.getElementById('theme-toggle');"
-    "if(b)b.textContent=l?'⬛ Dark':'☀ Light';}"
+    "if(b){b.textContent=l?'⬛ Dark':'☀ Light';"
+    "b.style.background=l?'#f6f8fa':'#21262d';"
+    "b.style.color=l?'#24292f':'#8b949e';}"
+    "var tb=document.querySelector('.toolbar');"
+    "if(tb)tb.style.background=l?'#f6f8fa':'#161b22';}"
     "function toggleTheme(){"
     "var l=!document.documentElement.classList.contains('light');"
     "localStorage.setItem('sentinel_theme',l?'light':'dark');"
     "_applyTheme(l);}"
+    "document.addEventListener('DOMContentLoaded',function(){"
+    "_applyTheme(localStorage.getItem('sentinel_theme')==='light');});"
     "_applyTheme(localStorage.getItem('sentinel_theme')==='light');"
 )
 _THEME_BTN = (
@@ -3203,8 +3212,16 @@ body.light #theme-toggle,html.light #theme-toggle{{background:#f6f8fa;border-col
 function _applyTheme(light) {{
   document.documentElement.classList.toggle('light', light);
   document.body.classList.toggle('light', light);
+  document.body.style.background = light ? '#f6f8fa' : '#0d1117';
+  document.body.style.color = light ? '#24292f' : '#c9d1d9';
   const btn = document.getElementById('theme-toggle');
-  if (btn) btn.textContent = light ? '⬛ Dark' : '☀ Light';
+  if (btn) {{
+    btn.textContent = light ? '⬛ Dark' : '☀ Light';
+    btn.style.background = light ? '#f6f8fa' : '#161b22';
+    btn.style.color = light ? '#24292f' : '#8b949e';
+  }}
+  const tb = document.querySelector('.toolbar');
+  if (tb) tb.style.background = light ? '#f6f8fa' : '#161b22';
 }}
 function toggleTheme() {{
   const light = !document.documentElement.classList.contains('light');
