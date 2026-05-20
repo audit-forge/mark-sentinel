@@ -1,29 +1,75 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>M.A.R.K. Sentinel — Login</title>
+<script>
+  (function() {
+    var t = localStorage.getItem('theme') || 'dark';
+    document.documentElement.setAttribute('data-theme', t);
+  })();
+</script>
 <style>
+:root {
+  --bg:        #0a0a0a;
+  --bg-card:   #111;
+  --bg-input:  #0d0d0d;
+  --border:    #1c1c1c;
+  --border-in: #252525;
+  --text:      #e0e0e0;
+  --text-sub:  #444;
+  --accent:    #00ff88;
+  --accent-hov:#00dd77;
+  --accent-btn:#000;
+  --err-txt:   #ff5555;
+  --err-bg:    #ff444410;
+  --err-bdr:   #ff444430;
+  --focus-bdr: #00ff8860;
+  --toggle-c:  #555;
+}
+[data-theme="light"] {
+  --bg:        #f4f4f4;
+  --bg-card:   #ffffff;
+  --bg-input:  #f9f9f9;
+  --border:    #e0e0e0;
+  --border-in: #d0d0d0;
+  --text:      #1a1a1a;
+  --text-sub:  #aaa;
+  --accent:    #00aa55;
+  --accent-hov:#008844;
+  --accent-btn:#ffffff;
+  --err-txt:   #cc2222;
+  --err-bg:    #ff000008;
+  --err-bdr:   #cc222220;
+  --focus-bdr: #00aa5560;
+  --toggle-c:  #aaa;
+}
 * { box-sizing: border-box; margin: 0; padding: 0; }
-body { font-family: 'Courier New', monospace; background: #0a0a0a; color: #e0e0e0; min-height: 100vh; display: flex; align-items: center; justify-content: center; }
+body { font-family: 'Courier New', monospace; background: var(--bg); color: var(--text); min-height: 100vh; display: flex; align-items: center; justify-content: center; transition: background .2s, color .2s; }
 .login-box { width: 360px; }
-.brand { color: #00ff88; font-size: 12px; letter-spacing: 4px; text-align: center; margin-bottom: 4px; }
-.subtitle { color: #444; font-size: 11px; text-align: center; margin-bottom: 36px; letter-spacing: 1px; }
-.card { background: #111; border: 1px solid #1c1c1c; border-radius: 3px; padding: 32px; }
+.brand { color: var(--accent); font-size: 12px; letter-spacing: 4px; text-align: center; margin-bottom: 4px; }
+.subtitle { color: var(--text-sub); font-size: 11px; text-align: center; margin-bottom: 36px; letter-spacing: 1px; }
+.card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 3px; padding: 32px; }
 .form-group { margin-bottom: 16px; }
-label { display: block; font-size: 10px; color: #555; letter-spacing: 1px; text-transform: uppercase; margin-bottom: 6px; }
-input { background: #0d0d0d; border: 1px solid #252525; color: #ddd; padding: 10px 14px; border-radius: 2px; font-family: 'Courier New', monospace; font-size: 13px; width: 100%; }
-input:focus { outline: none; border-color: #00ff8860; }
-.btn { width: 100%; padding: 11px; background: #00ff88; color: #000; font-weight: bold; font-family: 'Courier New', monospace; font-size: 13px; border: none; border-radius: 2px; cursor: pointer; margin-top: 8px; letter-spacing: 1px; }
-.btn:hover { background: #00dd77; }
-.error { color: #ff5555; font-size: 11px; margin-bottom: 16px; padding: 8px 12px; background: #ff444410; border: 1px solid #ff444430; border-radius: 2px; }
+label { display: block; font-size: 10px; color: var(--text-sub); letter-spacing: 1px; text-transform: uppercase; margin-bottom: 6px; }
+input { background: var(--bg-input); border: 1px solid var(--border-in); color: var(--text); padding: 10px 14px; border-radius: 2px; font-family: 'Courier New', monospace; font-size: 13px; width: 100%; }
+input:focus { outline: none; border-color: var(--focus-bdr); }
+.btn { width: 100%; padding: 11px; background: var(--accent); color: var(--accent-btn); font-weight: bold; font-family: 'Courier New', monospace; font-size: 13px; border: none; border-radius: 2px; cursor: pointer; margin-top: 8px; letter-spacing: 1px; }
+.btn:hover { background: var(--accent-hov); }
+.error { color: var(--err-txt); font-size: 11px; margin-bottom: 16px; padding: 8px 12px; background: var(--err-bg); border: 1px solid var(--err-bdr); border-radius: 2px; }
+.toggle-wrap { text-align: right; margin-bottom: 12px; }
+.theme-toggle { background: none; border: none; color: var(--toggle-c); font-family: 'Courier New', monospace; font-size: 11px; cursor: pointer; padding: 0; }
+.theme-toggle:hover { color: var(--accent); }
 </style>
 </head>
 <body>
 <div class="login-box">
   <div class="brand">M.A.R.K. SENTINEL</div>
   <div class="subtitle">ADMIN PANEL</div>
+  <div class="toggle-wrap">
+    <button class="theme-toggle" onclick="toggleTheme()" id="theme-btn">Light</button>
+  </div>
   <div class="card">
     {% if error %}<div class="error">{{ error }}</div>{% endif %}
     <form method="post" action="/login">
@@ -39,5 +85,16 @@ input:focus { outline: none; border-color: #00ff8860; }
     </form>
   </div>
 </div>
+<script>
+  function toggleTheme() {
+    var current = document.documentElement.getAttribute('data-theme');
+    var next = current === 'dark' ? 'light' : 'dark';
+    document.documentElement.setAttribute('data-theme', next);
+    localStorage.setItem('theme', next);
+    document.getElementById('theme-btn').textContent = next === 'dark' ? 'Light' : 'Dark';
+  }
+  document.getElementById('theme-btn').textContent =
+    document.documentElement.getAttribute('data-theme') === 'dark' ? 'Light' : 'Dark';
+</script>
 </body>
 </html>
