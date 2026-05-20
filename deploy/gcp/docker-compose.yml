@@ -1,0 +1,41 @@
+services:
+  nginx:
+    image: nginx:alpine
+    container_name: sentinel-nginx
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx:/etc/nginx/conf.d:ro
+    networks:
+      - sentinel-net
+    restart: always
+    depends_on:
+      - user-manager
+
+  user-manager:
+    build:
+      context: ../../admin
+    container_name: sentinel-admin
+    environment:
+      - SECRET_KEY=${SECRET_KEY}
+      - ADMIN_EMAIL=${ADMIN_EMAIL}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD}
+      - PUBLIC_IP=${PUBLIC_IP}
+      - DB_PATH=/data/sentinel.db
+    volumes:
+      - user-manager-data:/data
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./provision_customer.sh:/app/provision_customer.sh:ro
+      - ./remove_customer.sh:/app/remove_customer.sh:ro
+      - ./nginx:/app/nginx
+    networks:
+      - sentinel-net
+    restart: always
+
+volumes:
+  user-manager-data:
+
+networks:
+  sentinel-net:
+    name: sentinel-net
+    driver: bridge

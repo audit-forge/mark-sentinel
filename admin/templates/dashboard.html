@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>DASHBOARD</h1>
+
+<div class="grid-stats">
+  <div class="stat-card">
+    <div class="stat-num">{{ customer_count }}</div>
+    <div class="stat-label">Active Customers</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-num">{{ user_count }}</div>
+    <div class="stat-label">Total Users</div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-title">Quick Access</div>
+  <table>
+    <tr>
+      <td style="color:#666;width:160px">Admin Panel</td>
+      <td><span class="url">http://admin.{{ ip }}.nip.io</span></td>
+    </tr>
+    <tr>
+      <td style="color:#666">Customer URL pattern</td>
+      <td><span class="url">http://[customer-id].{{ ip }}.nip.io</span></td>
+    </tr>
+  </table>
+</div>
+{% endblock %}

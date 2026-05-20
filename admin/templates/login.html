@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>M.A.R.K. Sentinel — Login</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: 'Courier New', monospace; background: #0a0a0a; color: #e0e0e0; min-height: 100vh; display: flex; align-items: center; justify-content: center; }
+.login-box { width: 360px; }
+.brand { color: #00ff88; font-size: 12px; letter-spacing: 4px; text-align: center; margin-bottom: 4px; }
+.subtitle { color: #444; font-size: 11px; text-align: center; margin-bottom: 36px; letter-spacing: 1px; }
+.card { background: #111; border: 1px solid #1c1c1c; border-radius: 3px; padding: 32px; }
+.form-group { margin-bottom: 16px; }
+label { display: block; font-size: 10px; color: #555; letter-spacing: 1px; text-transform: uppercase; margin-bottom: 6px; }
+input { background: #0d0d0d; border: 1px solid #252525; color: #ddd; padding: 10px 14px; border-radius: 2px; font-family: 'Courier New', monospace; font-size: 13px; width: 100%; }
+input:focus { outline: none; border-color: #00ff8860; }
+.btn { width: 100%; padding: 11px; background: #00ff88; color: #000; font-weight: bold; font-family: 'Courier New', monospace; font-size: 13px; border: none; border-radius: 2px; cursor: pointer; margin-top: 8px; letter-spacing: 1px; }
+.btn:hover { background: #00dd77; }
+.error { color: #ff5555; font-size: 11px; margin-bottom: 16px; padding: 8px 12px; background: #ff444410; border: 1px solid #ff444430; border-radius: 2px; }
+</style>
+</head>
+<body>
+<div class="login-box">
+  <div class="brand">M.A.R.K. SENTINEL</div>
+  <div class="subtitle">ADMIN PANEL</div>
+  <div class="card">
+    {% if error %}<div class="error">{{ error }}</div>{% endif %}
+    <form method="post" action="/login">
+      <div class="form-group">
+        <label>Email</label>
+        <input type="email" name="email" required autofocus>
+      </div>
+      <div class="form-group">
+        <label>Password</label>
+        <input type="password" name="password" required>
+      </div>
+      <button type="submit" class="btn">LOGIN</button>
+    </form>
+  </div>
+</div>
+</body>
+</html>

@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>CUSTOMERS</h1>
+
+<div class="card">
+  <div class="card-title">Add Customer</div>
+  <form method="post" action="/customers/add">
+    <div class="form-row">
+      <div class="form-group">
+        <label>Customer ID (slug)</label>
+        <input type="text" name="customer_id" placeholder="acme-corp" pattern="[a-zA-Z0-9\-]+" required>
+      </div>
+      <div class="form-group">
+        <label>Display Name</label>
+        <input type="text" name="customer_name" placeholder="Acme Corporation" required>
+      </div>
+      <button type="submit" class="btn btn-primary">Provision</button>
+    </div>
+  </form>
+</div>
+
+<div class="card">
+  <div class="card-title">All Customers ({{ customers|length }})</div>
+  {% if customers %}
+  <table>
+    <thead>
+      <tr>
+        <th>ID</th>
+        <th>Name</th>
+        <th>Dashboard URL</th>
+        <th>Status</th>
+        <th>Created</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for c in customers %}
+    <tr>
+      <td>{{ c.id }}</td>
+      <td>{{ c.name }}</td>
+      <td><a class="url" href="http://{{ c.id }}.{{ ip }}.nip.io" target="_blank">{{ c.id }}.{{ ip }}.nip.io</a></td>
+      <td>
+        {% if c.active %}
+          <span class="badge badge-green">active</span>
+        {% else %}
+          <span class="badge badge-red">inactive</span>
+        {% endif %}
+      </td>
+      <td style="color:#555">{{ c.created_at[:10] }}</td>
+      <td>
+        {% if c.active %}
+        <form method="post" action="/customers/remove" style="display:inline" onsubmit="return confirm('Remove {{ c.name }}?')">
+          <input type="hidden" name="customer_id" value="{{ c.id }}">
+          <button type="submit" class="btn btn-danger btn-sm">Remove</button>
+        </form>
+        {% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty">No customers yet. Provision your first one above.</div>
+  {% endif %}
+</div>
+{% endblock %}

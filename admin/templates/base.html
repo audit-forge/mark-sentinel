@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>M.A.R.K. Sentinel — Admin</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: 'Courier New', monospace; background: #0a0a0a; color: #e0e0e0; min-height: 100vh; }
+nav { background: #111; border-bottom: 1px solid #1c1c1c; padding: 14px 28px; display: flex; align-items: center; gap: 24px; }
+.brand { color: #00ff88; font-weight: bold; font-size: 13px; letter-spacing: 3px; flex-shrink: 0; }
+nav a { color: #666; text-decoration: none; font-size: 12px; transition: color .15s; }
+nav a:hover { color: #00ff88; }
+.spacer { flex: 1; }
+.nav-user { font-size: 11px; color: #444; }
+main { padding: 36px 32px; max-width: 1100px; margin: 0 auto; }
+h1 { font-size: 18px; color: #fff; margin-bottom: 28px; letter-spacing: 1px; font-weight: normal; }
+.card { background: #111; border: 1px solid #1c1c1c; border-radius: 3px; padding: 24px; margin-bottom: 24px; }
+.card-title { font-size: 11px; color: #555; letter-spacing: 2px; text-transform: uppercase; margin-bottom: 16px; }
+table { width: 100%; border-collapse: collapse; font-size: 12px; }
+th { text-align: left; color: #555; font-weight: normal; padding: 8px 12px; border-bottom: 1px solid #1c1c1c; font-size: 11px; letter-spacing: 1px; text-transform: uppercase; }
+td { padding: 11px 12px; border-bottom: 1px solid #141414; color: #ccc; }
+tr:hover td { background: #131313; }
+.badge { font-size: 10px; padding: 2px 8px; border-radius: 2px; display: inline-block; }
+.badge-green { background: #00ff8818; color: #00ff88; border: 1px solid #00ff8830; }
+.badge-red { background: #ff444418; color: #ff6666; border: 1px solid #ff444430; }
+.badge-blue { background: #4488ff18; color: #6699ff; border: 1px solid #4488ff30; }
+.badge-yellow { background: #ffaa0018; color: #ffbb33; border: 1px solid #ffaa0030; }
+.btn { display: inline-block; padding: 8px 18px; border-radius: 2px; font-size: 12px; font-family: 'Courier New', monospace; cursor: pointer; border: none; text-decoration: none; letter-spacing: .5px; }
+.btn-primary { background: #00ff88; color: #000; font-weight: bold; }
+.btn-primary:hover { background: #00dd77; }
+.btn-danger { background: transparent; color: #ff5555; border: 1px solid #ff555530; font-size: 11px; padding: 4px 10px; }
+.btn-danger:hover { background: #ff555515; }
+.btn-sm { padding: 4px 10px; font-size: 11px; }
+.form-row { display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap; margin-top: 8px; }
+.form-group { display: flex; flex-direction: column; gap: 6px; flex: 1; min-width: 150px; }
+label { font-size: 10px; color: #555; letter-spacing: 1px; text-transform: uppercase; }
+input, select { background: #0d0d0d; border: 1px solid #252525; color: #ddd; padding: 9px 12px; border-radius: 2px; font-family: 'Courier New', monospace; font-size: 12px; width: 100%; }
+input:focus, select:focus { outline: none; border-color: #00ff8860; }
+.error { color: #ff5555; font-size: 12px; margin-bottom: 12px; padding: 8px 12px; background: #ff444410; border: 1px solid #ff444430; border-radius: 2px; }
+.grid-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 16px; margin-bottom: 24px; }
+.stat-card { background: #111; border: 1px solid #1c1c1c; border-radius: 3px; padding: 20px 24px; }
+.stat-num { font-size: 40px; color: #00ff88; font-weight: bold; line-height: 1; }
+.stat-label { font-size: 11px; color: #555; margin-top: 6px; letter-spacing: 1px; text-transform: uppercase; }
+.url { color: #4488ff; font-size: 11px; }
+.empty { color: #444; font-size: 12px; text-align: center; padding: 24px; }
+</style>
+</head>
+<body>
+<nav>
+  <span class="brand">M.A.R.K. SENTINEL</span>
+  <a href="/dashboard">Dashboard</a>
+  {% if user.role == 'super_admin' %}<a href="/customers">Customers</a>{% endif %}
+  <a href="/users">Users</a>
+  <span class="spacer"></span>
+  <span class="nav-user">{{ user.role }}</span>
+  <a href="/logout">Logout</a>
+</nav>
+<main>
+{% block content %}{% endblock %}
+</main>
+</body>
+</html>
