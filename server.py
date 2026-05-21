@@ -2198,14 +2198,44 @@ button:hover{{background:#2ea043}}
             self._json({'error': str(e)}, 400)
 
     def _api_discover(self):
-        """GET /api/discover[?subnets=10.0.1.0/24,10.0.2.0/24] — scan for AI services."""
+        """GET /api/discover — return agent-reported shadow devices from the database.
+        Server-side subnet scanning is disabled; discovery runs on registered agents
+        via /api/fleet/discover/all and results are stored in shadow_devices.
+        """
         try:
-            from urllib.parse import urlparse, parse_qs
-            from discovery import discover, expand_subnets
-            qs = parse_qs(urlparse(self.path).query)
-            raw = qs.get('subnets', [''])[0].strip()
-            hosts = expand_subnets(raw) if raw else None
-            services = discover(hosts=hosts)
+            shadow = _get_store().list_shadow_devices()
+            src_map = {
+                'network':   'network_probe',
+                'process':   'process_scan',
+                'cloud_api': 'env_var',
+            }
+            services = []
+            for s in shadow:
+                if s.get('dismissed'):
+                    continue
+                src  = src_map.get(s.get('source', 'network'), 'network_probe')
+                host = s.get('host', '')
+                port = int(s.get('port') or 0)
+                try:
+                    models = json.loads(s.get('models_json') or '[]')
+                except Exception:
+                    models = []
+                svc = {
+                    'host':     host,
+                    'port':     port,
+                    'service':  s.get('service', ''),
+                    'url':      f'http://{host}:{port}' if port else '',
+                    'status':   200,
+                    'reachable': True,
+                    'source':   src,
+                    'models':   models,
+                    'reporter': s.get('reporter_hostname', ''),
+                }
+                if src == 'process_scan':
+                    svc['process_sig'] = s.get('detail', '')
+                elif src == 'env_var':
+                    svc['env_var'] = s.get('detail', '')
+                services.append(svc)
             self._json({'services': services, 'count': len(services)})
         except Exception as e:
             log.error('discovery error: %s', e, exc_info=True)
