@@ -3324,6 +3324,25 @@ def _build_fleet_html(devices: list[dict], shadow: list[dict] | None = None,
     except Exception:
         _dash_ch, _dash_med, _dash_li = total_fail, total_warn, total_pass
 
+    _btn_technical_report = (
+        '<button onclick="openReport(\'technical\')" class="scan-btn"'
+        ' style="color:#8b949e;border-color:#30363d;font-size:12px">&#9654; Technical Report</button>'
+        if _has_technical_reports() else
+        '<button disabled title="Technical Reports + Remediation require a Plus license"'
+        ' class="scan-btn" style="color:#484f58;border-color:#21262d;font-size:12px;cursor:default">'
+        '&#128274; Technical (Plus)</button>'
+    )
+    _btn_technical_pdf = (
+        '<button class="scan-btn" onclick="rptDownloadPdf(\'technical\',this)"'
+        ' style="color:#3fb950;border-color:#238636;font-size:12px">&#8659; Download PDF</button>'
+        '<button class="scan-btn" onclick="rptPreview(\'technical\')"'
+        ' style="color:#8b949e;font-size:12px">&#128065; Preview</button>'
+        if _has_technical_reports() else
+        '<button disabled class="scan-btn" style="color:#484f58;border-color:#21262d;font-size:12px;cursor:default">'
+        '&#128274; Plus Plan Required</button>'
+        '<div style="font-size:11px;color:#484f58;margin-top:8px">Contact sales@markai.io to upgrade</div>'
+    )
+
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -3545,7 +3564,7 @@ html.light .sb-footer a,body.light .sb-footer a{{color:#8c959f}}
          style="color:#3fb950;border-color:#30363d;font-size:12px">&#9654; Executive Report</button>
       <button onclick="openReport('ciso')" class="scan-btn"
          style="color:#58a6ff;border-color:#30363d;font-size:12px">&#9654; CISO Report</button>
-      {'<button onclick="openReport(\'technical\')" class="scan-btn" style="color:#8b949e;border-color:#30363d;font-size:12px">&#9654; Technical Report</button>' if _has_technical_reports() else '<button disabled title="Technical Reports + Remediation require a Plus license" class="scan-btn" style="color:#484f58;border-color:#21262d;font-size:12px;cursor:default">&#128274; Technical (Plus)</button>'}
+      {_btn_technical_report}
       {'<button id="btn-evidence-export" class="scan-btn" onclick="downloadEvidencePackage(this)" style="color:#a371f7;border-color:#30363d;font-size:12px">&#8659; Evidence Package</button>' if _has_evidence_package() else '<button disabled title="Evidence Package requires a Plus license" class="scan-btn" style="color:#484f58;border-color:#21262d;font-size:12px;cursor:default">&#128274; Evidence Pkg (Plus)</button>'}
       <select id="scan-all-stagger" class="form-select" style="font-size:12px;padding:3px 6px;height:28px" title="Scan stagger — spread scans over time to avoid network spikes">
         <option value="normal">Normal (25/30s)</option>
@@ -3916,7 +3935,7 @@ html.light .sb-footer a,body.light .sb-footer a{{color:#8c959f}}
       <div style="font-size:15px;font-weight:700;color:#e6edf3;margin-bottom:6px">&#128295; Technical Report</div>
       <div style="font-size:12px;color:#6e7681;line-height:1.6;margin-bottom:16px">All findings including pass/fail/warn with full details and step-by-step remediation for each check. For security engineers.</div>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
-        {'<button class="scan-btn" onclick="rptDownloadPdf(\'technical\',this)" style="color:#3fb950;border-color:#238636;font-size:12px">&#8659; Download PDF</button><button class="scan-btn" onclick="rptPreview(\'technical\')" style="color:#8b949e;font-size:12px">&#128065; Preview</button>' if _has_technical_reports() else '<button disabled class="scan-btn" style="color:#484f58;border-color:#21262d;font-size:12px;cursor:default">&#128274; Plus Plan Required</button><div style="font-size:11px;color:#484f58;margin-top:8px">Contact sales@markai.io to upgrade</div>'}
+        {_btn_technical_pdf}
       </div>
     </div>
   </div>
