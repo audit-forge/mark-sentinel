@@ -34,11 +34,14 @@ PUBLIC_IP=$(curl -sf \
 
 SECRET_KEY=$(openssl rand -hex 32)
 
+mkdir -p /opt/licenses
+
 cat > /opt/sentinel/deploy/gcp/.env <<EOF
 SECRET_KEY=${SECRET_KEY}
 ADMIN_EMAIL=keith@mfdynamics.ai
 ADMIN_PASSWORD=$(openssl rand -base64 16)
 PUBLIC_IP=${PUBLIC_IP}
+MAX_CUSTOMERS=0
 EOF
 
 # ── Start stack ───────────────────────────────────────────────────────────────

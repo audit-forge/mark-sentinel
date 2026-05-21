@@ -1,7 +1,8 @@
 import os
 import uuid
+import json
 import subprocess
-from datetime import datetime, timezone
+from datetime import datetime, date, timezone, timedelta
 from fastapi import FastAPI, Request, Form, HTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
@@ -12,7 +13,8 @@ from auth import hash_password, verify_password, create_token, get_current_user,
 app = FastAPI(docs_url=None, redoc_url=None)
 templates = Jinja2Templates(directory="templates")
 
-ADMIN_EMAIL = os.environ.get("ADMIN_EMAIL", "admin@sentinel.local")
+ADMIN_EMAIL    = os.environ.get("ADMIN_EMAIL", "admin@sentinel.local")
+MAX_CUSTOMERS  = int(os.environ.get("MAX_CUSTOMERS", "0"))  # 0 = unlimited
 ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "changeme")
 PUBLIC_IP = os.environ.get("PUBLIC_IP", "35.255.19.236")
 
@@ -101,28 +103,80 @@ async def customers_page(request: Request):
         rows = conn.execute(
             "SELECT * FROM customers ORDER BY created_at DESC"
         ).fetchall()
+    customers = []
+    for r in rows:
+        c = dict(r)
+        try:
+            c["days_remaining"] = (date.fromisoformat(c["license_expires_at"]) - date.today()).days
+        except (TypeError, ValueError):
+            c["days_remaining"] = None
+        customers.append(c)
     return templates.TemplateResponse("customers.html", {
         "request": request, "user": user,
-        "customers": [dict(r) for r in rows], "ip": PUBLIC_IP,
+        "customers": customers, "ip": PUBLIC_IP,
     })
 
 
 @app.post("/customers/add")
-async def add_customer(request: Request, customer_id: str = Form(...), customer_name: str = Form(...)):
+async def add_customer(
+    request: Request,
+    customer_id: str = Form(...),
+    customer_name: str = Form(...),
+    tier: str = Form("standard"),
+    max_seats: int = Form(5),
+):
     try:
         require_super_admin(request)
     except HTTPException:
         return RedirectResponse("/login")
     cid = customer_id.lower().strip().replace(" ", "-")
+    if tier not in ("standard", "plus"):
+        tier = "standard"
+    expires = (date.today() + timedelta(days=365)).isoformat()
     with get_conn() as conn:
+        if MAX_CUSTOMERS > 0:
+            active_count = conn.execute(
+                "SELECT COUNT(*) FROM customers WHERE active=1"
+            ).fetchone()[0]
+            if active_count >= MAX_CUSTOMERS:
+                return RedirectResponse("/customers?error=cap", status_code=303)
         exists = conn.execute("SELECT id FROM customers WHERE id=?", (cid,)).fetchone()
         if exists:
             return RedirectResponse("/customers?error=exists", status_code=303)
         conn.execute(
-            "INSERT INTO customers (id, name, created_at, active) VALUES (?,?,?,1)",
-            (cid, customer_name.strip(), datetime.now(timezone.utc).isoformat())
+            "INSERT INTO customers (id, name, created_at, active, tier, license_expires_at, max_seats) VALUES (?,?,?,1,?,?,?)",
+            (cid, customer_name.strip(), datetime.now(timezone.utc).isoformat(), tier, expires, max_seats)
         )
-    _run_script("provision_customer.sh", cid, PUBLIC_IP)
+    _write_license_file(cid, customer_name.strip(), tier, expires, max_seats)
+    _run_script("provision_customer.sh", cid, PUBLIC_IP, tier, expires, str(max_seats), customer_name.strip())
+    return RedirectResponse("/customers", status_code=303)
+
+
+@app.post("/customers/renew")
+async def renew_customer(request: Request, customer_id: str = Form(...)):
+    try:
+        require_super_admin(request)
+    except HTTPException:
+        return RedirectResponse("/login")
+    with get_conn() as conn:
+        row = conn.execute("SELECT * FROM customers WHERE id=?", (customer_id,)).fetchone()
+        if not row:
+            return RedirectResponse("/customers", status_code=303)
+        current_expiry = row["license_expires_at"]
+        try:
+            base = max(date.fromisoformat(current_expiry), date.today())
+        except (TypeError, ValueError):
+            base = date.today()
+        new_expiry = (base + timedelta(days=365)).isoformat()
+        conn.execute(
+            "UPDATE customers SET license_expires_at=? WHERE id=?",
+            (new_expiry, customer_id)
+        )
+        tier = row["tier"]
+        max_seats = row["max_seats"]
+        name = row["name"]
+    _write_license_file(customer_id, name, tier, new_expiry, max_seats)
+    _run_script("restart_customer.sh", customer_id)
     return RedirectResponse("/customers", status_code=303)
 
 
@@ -220,3 +274,22 @@ def _run_script(name: str, *args: str):
     script = f"/app/{name}"
     if os.path.exists(script):
         subprocess.Popen(["bash", script, *args])
+
+
+def _write_license_file(customer_id: str, name: str, tier: str, expires: str, max_seats: int):
+    licenses_dir = os.environ.get("LICENSES_DIR", "/licenses")
+    customer_dir = os.path.join(licenses_dir, customer_id)
+    os.makedirs(customer_dir, exist_ok=True)
+    payload = {
+        "customer_id":   customer_id,
+        "licensed_to":   name,
+        "max_agents":    max_seats,
+        "grace_pct":     10,
+        "expires_at":    expires,
+        "issued_at":     date.today().isoformat(),
+        "issued_by":     "M.A.R.K. AI Systems",
+        "plan":          tier,
+    }
+    path = os.path.join(customer_dir, "license.json")
+    with open(path, "w") as f:
+        json.dump(payload, f, indent=2)

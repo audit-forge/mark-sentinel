@@ -14,7 +14,21 @@
         <label>Display Name</label>
         <input type="text" name="customer_name" placeholder="Acme Corporation" required>
       </div>
+      <div class="form-group" style="max-width:140px">
+        <label>Plan</label>
+        <select name="tier">
+          <option value="standard">Standard</option>
+          <option value="plus">Pro</option>
+        </select>
+      </div>
+      <div class="form-group" style="max-width:120px">
+        <label>Max Seats</label>
+        <input type="number" name="max_seats" value="5" min="1" max="500">
+      </div>
       <button type="submit" class="btn btn-primary">Provision</button>
+    </div>
+    <div style="font-size:11px;color:var(--text-muted);margin-top:10px">
+      License expires 1 year from today. Standard = findings only. Pro = findings + remediation steps.
     </div>
   </form>
 </div>
@@ -27,27 +41,58 @@
       <tr>
         <th>ID</th>
         <th>Name</th>
+        <th>Plan</th>
+        <th>Seats</th>
         <th>Dashboard URL</th>
+        <th>License Expiry</th>
         <th>Status</th>
-        <th>Created</th>
         <th></th>
       </tr>
     </thead>
     <tbody>
     {% for c in customers %}
+    {% set days = c.days_remaining %}
     <tr>
       <td>{{ c.id }}</td>
       <td>{{ c.name }}</td>
-      <td><a class="url" href="http://{{ c.id }}.{{ ip }}.nip.io" target="_blank">{{ c.id }}.{{ ip }}.nip.io</a></td>
       <td>
-        {% if c.active %}
-          <span class="badge badge-green">active</span>
+        {% if c.tier == 'plus' %}
+          <span class="badge badge-blue">Pro</span>
         {% else %}
-          <span class="badge badge-red">inactive</span>
+          <span class="badge badge-yellow">Standard</span>
         {% endif %}
       </td>
-      <td style="color:#555">{{ c.created_at[:10] }}</td>
+      <td style="color:var(--text-muted)">{{ c.max_seats }}</td>
+      <td><a class="url" href="http://{{ c.id }}.{{ ip }}.nip.io" target="_blank">{{ c.id }}.{{ ip }}.nip.io</a></td>
       <td>
+        {% if c.license_expires_at %}
+          {% if days is not none and days < 0 %}
+            <span style="color:var(--danger-txt)">{{ c.license_expires_at[:10] }} (expired)</span>
+          {% elif days is not none and days <= 30 %}
+            <span style="color:#ffbb33">{{ c.license_expires_at[:10] }} ({{ days }}d left)</span>
+          {% else %}
+            <span style="color:var(--text-muted)">{{ c.license_expires_at[:10] }}</span>
+          {% endif %}
+        {% else %}
+          <span style="color:var(--text-dim)">—</span>
+        {% endif %}
+      </td>
+      <td>
+        {% if not c.active %}
+          <span class="badge badge-red">inactive</span>
+        {% elif days is not none and days < 0 %}
+          <span class="badge badge-red">expired</span>
+        {% elif days is not none and days <= 30 %}
+          <span class="badge badge-yellow">expiring</span>
+        {% else %}
+          <span class="badge badge-green">active</span>
+        {% endif %}
+      </td>
+      <td style="display:flex;gap:6px;flex-wrap:wrap">
+        <form method="post" action="/customers/renew" style="display:inline">
+          <input type="hidden" name="customer_id" value="{{ c.id }}">
+          <button type="submit" class="btn btn-sm" style="background:var(--bg-input);color:var(--accent);border:1px solid var(--accent)30">Renew</button>
+        </form>
         {% if c.active %}
         <form method="post" action="/customers/remove" style="display:inline" onsubmit="return confirm('Remove {{ c.name }}?')">
           <input type="hidden" name="customer_id" value="{{ c.id }}">

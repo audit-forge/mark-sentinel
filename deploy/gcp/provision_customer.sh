@@ -3,14 +3,21 @@ set -euo pipefail
 
 CUSTOMER_ID="$1"
 PUBLIC_IP="${2:-35.255.19.236}"
+TIER="${3:-standard}"
+EXPIRES="${4:-}"
+MAX_SEATS="${5:-5}"
+CUSTOMER_NAME="${6:-$CUSTOMER_ID}"
 CONTAINER_NAME="sentinel-${CUSTOMER_ID}"
 NGINX_CONF_DIR="/app/nginx/customers"
+LICENSE_FILE="/licenses/${CUSTOMER_ID}/license.json"
 
 docker run -d \
   --name "$CONTAINER_NAME" \
   --network sentinel-net \
   --restart always \
   --label "sentinel.customer=${CUSTOMER_ID}" \
+  --label "sentinel.tier=${TIER}" \
+  -v "${LICENSE_FILE}:/opt/sentinel/license.json:ro" \
   mark-sentinel:latest \
   python3 server.py --no-browser --port 7331
 
@@ -31,4 +38,4 @@ server {
 EOF
 
 docker exec sentinel-nginx nginx -s reload
-echo "Provisioned: http://${CUSTOMER_ID}.${PUBLIC_IP}.nip.io"
+echo "Provisioned: http://${CUSTOMER_ID}.${PUBLIC_IP}.nip.io (${TIER})"

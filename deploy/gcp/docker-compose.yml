@@ -22,11 +22,15 @@ services:
       - ADMIN_PASSWORD=${ADMIN_PASSWORD}
       - PUBLIC_IP=${PUBLIC_IP}
       - DB_PATH=/data/sentinel.db
+      - MAX_CUSTOMERS=${MAX_CUSTOMERS:-0}
+      - LICENSES_DIR=/licenses
     volumes:
       - user-manager-data:/data
+      - /opt/licenses:/licenses
       - /var/run/docker.sock:/var/run/docker.sock
       - ./provision_customer.sh:/app/provision_customer.sh:ro
       - ./remove_customer.sh:/app/remove_customer.sh:ro
+      - ./restart_customer.sh:/app/restart_customer.sh:ro
       - ./nginx:/app/nginx
     networks:
       - sentinel-net
