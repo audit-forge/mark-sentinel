@@ -3606,38 +3606,38 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
     <div class="scard" id="sf-shadow" onclick="document.getElementById('shadow-section').scrollIntoView({{behavior:'smooth'}})" title="Unmanaged AI devices discovered on your network — click to view">
       <div class="scard-n" id="sc-shadow" style="color:#a371f7">{len(shadow)}</div><div class="scard-l">Shadow AI</div></div>
     <div class="scard" id="sf-mcp" onclick="window.open('/api/fleet/mcp/report?tier=ciso','_blank')" title="MCP servers and AI agent tool call exposure — click to open report">
-      <div class="scard-n" id="sc-mcp" style="color:#58a6ff">{len(mcp)}</div><div class="scard-l">MCP Servers</div></div>
+      <div class="scard-n" id="sc-mcp" style="color:#4F46E5">{len(mcp)}</div><div class="scard-l">MCP Servers</div></div>
   </div>
 
   <div class="page active" id="page-overview">
-  <div id="filter-banner" style="display:none;background:#161b22;border:1px solid #30363d;border-radius:6px;padding:10px 18px;margin-bottom:18px;align-items:center;justify-content:space-between;gap:12px">
+  <div id="filter-banner" style="display:none;background:#ffffff;border:1px solid #E5E7EB;border-radius:6px;padding:10px 18px;margin-bottom:18px;align-items:center;justify-content:space-between;gap:12px">
     <span id="filter-banner-text" style="font-size:13px;font-weight:600"></span>
-    <a href="/" style="font-size:12px;color:#8b949e;text-decoration:none;white-space:nowrap;flex-shrink:0">&#8592; All devices</a>
+    <a href="/" style="font-size:12px;color:#6B7280;text-decoration:none;white-space:nowrap;flex-shrink:0">&#8592; All devices</a>
   </div>
 
   <div class="sec-hdr" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
     <span>Connected Devices</span>
-    <span id="filter-badge" style="display:none;font-size:11px;background:#1a2332;color:#58a6ff;border:1px solid #30363d;border-radius:10px;padding:2px 10px;cursor:pointer" onclick="filterBy(null)" title="Clear filter">&#10005; clear filter</span>
+    <span id="filter-badge" style="display:none;font-size:11px;background:#EEF2FF;color:#4F46E5;border:1px solid #E5E7EB;border-radius:10px;padding:2px 10px;cursor:pointer" onclick="filterBy(null)" title="Clear filter">&#10005; clear filter</span>
     <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
       <button onclick="openReport('executive')" class="scan-btn"
-         style="color:#3fb950;border-color:#30363d;font-size:12px">&#9654; Executive Report</button>
+         style="color:#16A34A;border-color:#E5E7EB;font-size:12px">&#9654; Executive Report</button>
       <button onclick="openReport('ciso')" class="scan-btn"
-         style="color:#58a6ff;border-color:#30363d;font-size:12px">&#9654; CISO Report</button>
+         style="color:#4F46E5;border-color:#E5E7EB;font-size:12px">&#9654; CISO Report</button>
       {_btn_technical_report}
-      {'<button id="btn-evidence-export" class="scan-btn" onclick="downloadEvidencePackage(this)" style="color:#a371f7;border-color:#30363d;font-size:12px">&#8659; Evidence Package</button>' if _has_evidence_package() else '<button disabled title="Evidence Package requires a Plus license" class="scan-btn" style="color:#484f58;border-color:#21262d;font-size:12px;cursor:default">&#128274; Evidence Pkg (Plus)</button>'}
+      {'<button id="btn-evidence-export" class="scan-btn" onclick="downloadEvidencePackage(this)" style="color:#a371f7;border-color:#E5E7EB;font-size:12px">&#8659; Evidence Package</button>' if _has_evidence_package() else '<button disabled title="Evidence Package requires a Plus license" class="scan-btn" style="color:#9CA3AF;border-color:#F3F4F6;font-size:12px;cursor:default">&#128274; Evidence Pkg (Plus)</button>'}
       <select id="scan-all-stagger" class="form-select" style="font-size:12px;padding:3px 6px;height:28px" title="Scan stagger — spread scans over time to avoid network spikes">
         <option value="normal">Normal (25/30s)</option>
         <option value="slow">Slow (10/60s)</option>
         <option value="instant">Instant</option>
       </select>
       <button id="btn-scan-all" class="scan-btn" onclick="scanAllDevices(this)"
-              style="color:#f0883e;border-color:#30363d;font-size:12px">&#9654;&#9654; Scan All</button>
+              style="color:#F97316;border-color:#E5E7EB;font-size:12px">&#9654;&#9654; Scan All</button>
       <button class="scan-btn" onclick="updateAllDevices()"
-              style="color:#e3b341;border-color:#30363d;font-size:12px">Update All Agents</button>
+              style="color:#CA8A04;border-color:#E5E7EB;font-size:12px">Update All Agents</button>
       <button id="btn-discover-all" class="scan-btn" onclick="discoverAll(this)"
-              style="color:#a371f7;border-color:#30363d;font-size:12px">&#128270; Find Shadow AI</button>
+              style="color:#a371f7;border-color:#E5E7EB;font-size:12px">&#128270; Find Shadow AI</button>
       <button id="btn-discover-mcp" class="scan-btn" onclick="discoverMcp(this)"
-              style="color:#58a6ff;border-color:#30363d;font-size:12px">&#128279; Scan MCP Servers</button>
+              style="color:#4F46E5;border-color:#E5E7EB;font-size:12px">&#128279; Scan MCP Servers</button>
     </div>
   </div>
   <div class="refresh-note" id="refresh-note">Auto-refreshes every 60s</div>
@@ -3649,17 +3649,17 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
     </tr></thead>
     <tbody id="device-tbody">{rows}</tbody>
   </table>
-  <div id="device-pagination" style="display:none;align-items:center;justify-content:space-between;padding:10px 2px 4px;font-size:13px;color:#8b949e;flex-wrap:wrap;gap:8px">
+  <div id="device-pagination" style="display:none;align-items:center;justify-content:space-between;padding:10px 2px 4px;font-size:13px;color:#6B7280;flex-wrap:wrap;gap:8px">
     <div style="display:flex;align-items:center;gap:8px">
       <span>Show</span>
       <select id="page-size-sel" onchange="changePageSize(+this.value)"
-              style="background:#161b22;border:1px solid #30363d;color:#c9d1d9;border-radius:4px;padding:2px 8px;font-size:12px;cursor:pointer">
+              style="background:#ffffff;border:1px solid #E5E7EB;color:#374151;border-radius:4px;padding:2px 8px;font-size:12px;cursor:pointer">
         <option value="10" selected>10</option>
         <option value="25">25</option>
         <option value="50">50</option>
         <option value="100">100</option>
       </select>
-      <span id="page-info" style="color:#6e7681"></span>
+      <span id="page-info" style="color:#6B7280"></span>
     </div>
     <div id="page-btns" style="display:flex;gap:4px;align-items:center;flex-wrap:wrap"></div>
   </div>
@@ -3669,11 +3669,11 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
   <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:8px">
     <div>
       <div class="sec-hdr" style="margin:0;padding:0">Shadow AI</div>
-      <div style="font-size:12px;color:#6e7681;margin-top:4px">Unmanaged AI devices and services detected on your network</div>
+      <div style="font-size:12px;color:#6B7280;margin-top:4px">Unmanaged AI devices and services detected on your network</div>
     </div>
     <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
       <input id="discover-subnets-shadow" type="text" placeholder="Subnets (auto-detect if blank)"
-        style="width:240px;background:#0d1117;border:1px solid #30363d;border-radius:4px;color:#e6edf3;font-size:12px;font-family:monospace;padding:5px 10px;outline:none" />
+        style="width:240px;background:#F9FAFB;border:1px solid #E5E7EB;border-radius:4px;color:#111827;font-size:12px;font-family:monospace;padding:5px 10px;outline:none" />
       <button id="btn-discover-all" class="scan-btn" onclick="discoverAll(this)"
               style="color:#a371f7;border-color:#6e40c9;font-size:12px">&#128270; Run Shadow AI Scan</button>
     </div>
@@ -3685,10 +3685,10 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
   <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:8px">
     <div>
       <div class="sec-hdr" style="margin:0;padding:0">MCP &amp; Agent Governance</div>
-      <div style="font-size:12px;color:#6e7681;margin-top:4px">AI agent tool servers discovered on your network — auth status and exposure</div>
+      <div style="font-size:12px;color:#6B7280;margin-top:4px">AI agent tool servers discovered on your network — auth status and exposure</div>
     </div>
     <button id="btn-discover-mcp" class="scan-btn" onclick="discoverMcp(this)"
-            style="color:#58a6ff;border-color:#1f6feb;font-size:12px">&#128279; Scan for MCP Servers</button>
+            style="color:#4F46E5;border-color:#1f6feb;font-size:12px">&#128279; Scan for MCP Servers</button>
   </div>
   {_build_mcp_section(mcp, ts_now)}
   </div>
@@ -3696,8 +3696,8 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
   <div class="page" id="page-riskregister">
   <div class="sec-hdr" style="margin-top:0;padding-top:0">
     Open Findings Risk Register
-    <span style="font-size:12px;font-weight:400;color:#6e7681;margin-left:8px">Deduplicated across all devices · updated each scan</span>
-    <a href="/api/fleet/risk-register/csv" download style="margin-left:auto;font-size:12px;color:#3fb950;text-decoration:none;border:1px solid #238636;border-radius:4px;padding:3px 10px">&#8659; Export CSV</a>
+    <span style="font-size:12px;font-weight:400;color:#6B7280;margin-left:8px">Deduplicated across all devices · updated each scan</span>
+    <a href="/api/fleet/risk-register/csv" download style="margin-left:auto;font-size:12px;color:#16A34A;text-decoration:none;border:1px solid #238636;border-radius:4px;padding:3px 10px">&#8659; Export CSV</a>
   </div>
   <div id="rr-filters" style="display:flex;gap:6px;margin-bottom:10px;flex-wrap:wrap">
     <button class="rr-fil rr-active" onclick="rrFilter('all',this)">All</button>
@@ -3707,14 +3707,14 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
     <button class="rr-fil" onclick="rrFilter('LOW',this)">Low</button>
   </div>
   <div id="rr-body">
-    <div style="color:#6e7681;font-size:13px;padding:16px 0">Loading risk register…</div>
+    <div style="color:#6B7280;font-size:13px;padding:16px 0">Loading risk register…</div>
   </div>
   </div>
 
   <div class="page" id="page-inventory">
   <div class="sec-hdr" style="margin-top:0;padding-top:0">
     AI Asset Inventory
-    <span style="font-size:12px;font-weight:400;color:#6e7681;margin-left:8px">Formal record of all AI in the environment · approve or flag each asset</span>
+    <span style="font-size:12px;font-weight:400;color:#6B7280;margin-left:8px">Formal record of all AI in the environment · approve or flag each asset</span>
   </div>
   <div id="inv-counts" style="display:flex;gap:12px;margin-bottom:12px;flex-wrap:wrap"></div>
   <div id="inv-filters" style="display:flex;gap:6px;margin-bottom:10px;flex-wrap:wrap">
@@ -3724,28 +3724,28 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
     <button class="rr-fil" onclick="invFilter('approved',this)">Approved</button>
   </div>
   <div id="inv-body">
-    <div style="color:#6e7681;font-size:13px;padding:16px 0">Loading inventory…</div>
+    <div style="color:#6B7280;font-size:13px;padding:16px 0">Loading inventory…</div>
   </div>
   </div>
 
   <div class="page" id="page-schedules">
   <div class="sec-hdr" style="margin-top:0;padding-top:0">
     Scan Schedule
-    <span style="font-size:12px;font-weight:400;color:#6e7681;margin-left:8px">Automated recurring scans dispatched to all enrolled agents</span>
+    <span style="font-size:12px;font-weight:400;color:#6B7280;margin-left:8px">Automated recurring scans dispatched to all enrolled agents</span>
   </div>
   <div id="sched-list" style="margin-bottom:12px">
-    <div style="color:#6e7681;font-size:13px">Loading schedules…</div>
+    <div style="color:#6B7280;font-size:13px">Loading schedules…</div>
   </div>
   <details style="margin-bottom:24px">
-    <summary style="cursor:pointer;font-size:13px;color:#58a6ff;user-select:none">+ Add schedule</summary>
-    <div style="background:#161b22;border:1px solid #21262d;border-radius:6px;padding:16px;margin-top:8px;display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end">
+    <summary style="cursor:pointer;font-size:13px;color:#4F46E5;user-select:none">+ Add schedule</summary>
+    <div style="background:#ffffff;border:1px solid #F3F4F6;border-radius:6px;padding:16px;margin-top:8px;display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end">
       <div style="display:flex;flex-direction:column;gap:4px">
-        <label style="font-size:11px;color:#6e7681">Label</label>
-        <input id="sched-label" type="text" placeholder="e.g. Nightly FedRAMP" style="background:#0d1117;border:1px solid #30363d;border-radius:4px;color:#e6edf3;font-size:12px;padding:4px 8px;width:160px">
+        <label style="font-size:11px;color:#6B7280">Label</label>
+        <input id="sched-label" type="text" placeholder="e.g. Nightly FedRAMP" style="background:#F9FAFB;border:1px solid #E5E7EB;border-radius:4px;color:#111827;font-size:12px;padding:4px 8px;width:160px">
       </div>
       <div style="display:flex;flex-direction:column;gap:4px">
-        <label style="font-size:11px;color:#6e7681">Profile</label>
-        <select id="sched-profile" style="background:#0d1117;border:1px solid #30363d;border-radius:4px;color:#e6edf3;font-size:12px;padding:4px 8px">
+        <label style="font-size:11px;color:#6B7280">Profile</label>
+        <select id="sched-profile" style="background:#F9FAFB;border:1px solid #E5E7EB;border-radius:4px;color:#111827;font-size:12px;padding:4px 8px">
           <option value="default">Base Scan</option>
           <option value="fedramp">FedRAMP</option>
           <option value="cmmc">CMMC 2.0</option>
@@ -3757,33 +3757,33 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
         </select>
       </div>
       <div style="display:flex;flex-direction:column;gap:4px">
-        <label style="font-size:11px;color:#6e7681">Cadence</label>
-        <select id="sched-cadence" onchange="schedCadenceChange()" style="background:#0d1117;border:1px solid #30363d;border-radius:4px;color:#e6edf3;font-size:12px;padding:4px 8px">
+        <label style="font-size:11px;color:#6B7280">Cadence</label>
+        <select id="sched-cadence" onchange="schedCadenceChange()" style="background:#F9FAFB;border:1px solid #E5E7EB;border-radius:4px;color:#111827;font-size:12px;padding:4px 8px">
           <option value="daily">Daily</option>
           <option value="weekly">Weekly</option>
           <option value="monthly">Monthly</option>
         </select>
       </div>
       <div style="display:flex;flex-direction:column;gap:4px" id="sched-weekday-wrap" style="display:none">
-        <label style="font-size:11px;color:#6e7681">Day</label>
-        <select id="sched-weekday" style="background:#0d1117;border:1px solid #30363d;border-radius:4px;color:#e6edf3;font-size:12px;padding:4px 8px">
+        <label style="font-size:11px;color:#6B7280">Day</label>
+        <select id="sched-weekday" style="background:#F9FAFB;border:1px solid #E5E7EB;border-radius:4px;color:#111827;font-size:12px;padding:4px 8px">
           <option value="0">Monday</option><option value="1">Tuesday</option><option value="2">Wednesday</option>
           <option value="3">Thursday</option><option value="4">Friday</option><option value="5">Saturday</option><option value="6">Sunday</option>
         </select>
       </div>
       <div style="display:flex;flex-direction:column;gap:4px" id="sched-monthday-wrap" style="display:none">
-        <label style="font-size:11px;color:#6e7681">Day of month</label>
-        <select id="sched-monthday" style="background:#0d1117;border:1px solid #30363d;border-radius:4px;color:#e6edf3;font-size:12px;padding:4px 8px">
+        <label style="font-size:11px;color:#6B7280">Day of month</label>
+        <select id="sched-monthday" style="background:#F9FAFB;border:1px solid #E5E7EB;border-radius:4px;color:#111827;font-size:12px;padding:4px 8px">
           {' '.join(f'<option value="{d}">{d}</option>' for d in range(1,29))}
         </select>
       </div>
       <div style="display:flex;flex-direction:column;gap:4px">
-        <label style="font-size:11px;color:#6e7681">Time (UTC)</label>
-        <select id="sched-hour" style="background:#0d1117;border:1px solid #30363d;border-radius:4px;color:#e6edf3;font-size:12px;padding:4px 8px">
+        <label style="font-size:11px;color:#6B7280">Time (UTC)</label>
+        <select id="sched-hour" style="background:#F9FAFB;border:1px solid #E5E7EB;border-radius:4px;color:#111827;font-size:12px;padding:4px 8px">
           {' '.join(f'<option value="{h}"{" selected" if h==2 else ""}>{h:02d}:00 UTC</option>' for h in range(24))}
         </select>
       </div>
-      <button class="scan-btn" onclick="addSchedule()" style="color:#3fb950;border-color:#238636">Save Schedule</button>
+      <button class="scan-btn" onclick="addSchedule()" style="color:#16A34A;border-color:#238636">Save Schedule</button>
     </div>
   </details>
   </div>
@@ -3794,13 +3794,13 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
     <button id="discover-btn" class="scan-btn" style="margin-left:12px" onclick="runDiscovery()">Scan Network</button>
   </div>
   <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap">
-    <label style="font-size:12px;color:#6e7681;white-space:nowrap">Subnets to scan:</label>
+    <label style="font-size:12px;color:#6B7280;white-space:nowrap">Subnets to scan:</label>
     <input id="discover-subnets" type="text" placeholder="auto-detect  (e.g. 10.0.1.0/24, 192.168.2.0/24)"
-      style="flex:1;min-width:260px;max-width:540px;background:#0d1117;border:1px solid #30363d;border-radius:4px;
-             color:#e6edf3;font-size:12px;font-family:monospace;padding:5px 10px;outline:none" />
-    <span style="font-size:11px;color:#484f58">Leave blank to scan the local subnet automatically</span>
+      style="flex:1;min-width:260px;max-width:540px;background:#F9FAFB;border:1px solid #E5E7EB;border-radius:4px;
+             color:#111827;font-size:12px;font-family:monospace;padding:5px 10px;outline:none" />
+    <span style="font-size:11px;color:#9CA3AF">Leave blank to scan the local subnet automatically</span>
   </div>
-  <div id="discover-panel" class="content-panel" style="background:#161b22;border:1px solid #21262d;border-radius:8px;padding:18px;min-height:60px;margin-bottom:28px">
+  <div id="discover-panel" class="content-panel" style="background:#ffffff;border:1px solid #F3F4F6;border-radius:8px;padding:18px;min-height:60px;margin-bottom:28px">
     <div class="empty" style="padding:12px">Click Scan Network to probe the local subnet for AI services.</div>
   </div>
   </div>
@@ -3809,19 +3809,19 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
   <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:16px">
     <div class="sec-hdr" style="margin:0;padding:0">Device Findings</div>
     <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-      <label style="font-size:12px;color:#6e7681">Device:</label>
+      <label style="font-size:12px;color:#6B7280">Device:</label>
       <select id="findings-device-sel"
               onchange="if(this.value) selectDevice(this.value)"
-              style="background:#161b22;border:1px solid #30363d;border-radius:4px;
-                     color:#c9d1d9;font-size:13px;padding:4px 10px;min-width:220px;cursor:pointer">
+              style="background:#ffffff;border:1px solid #E5E7EB;border-radius:4px;
+                     color:#374151;font-size:13px;padding:4px 10px;min-width:220px;cursor:pointer">
         <option value="">— select a device —</option>
       </select>
     </div>
   </div>
   <div id="detail-panel">
     <div class="empty" id="findings-empty-state" style="padding:64px;text-align:center">
-      <div style="font-size:15px;color:#484f58;margin-bottom:8px">No device selected</div>
-      <div style="font-size:12px;color:#363d47">Choose a device from the dropdown above, or click any row on the Home page</div>
+      <div style="font-size:15px;color:#9CA3AF;margin-bottom:8px">No device selected</div>
+      <div style="font-size:12px;color:#9CA3AF">Choose a device from the dropdown above, or click any row on the Home page</div>
     </div>
   </div>
   </div>
@@ -3830,123 +3830,123 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
   <div class="sec-hdr" style="margin-top:0;padding-top:0;display:flex;align-items:center;justify-content:space-between">
     <span>Settings</span>
     <a href="/download/shortcut" class="scan-btn"
-       style="text-decoration:none;font-size:12px;color:#58a6ff;border-color:#30363d;padding:3px 10px">
+       style="text-decoration:none;font-size:12px;color:#4F46E5;border-color:#E5E7EB;padding:3px 10px">
       &#8659; Desktop Shortcut
     </a>
   </div>
-  <div class="content-panel" style="background:#161b22;border:1px solid #21262d;border-radius:8px;padding:20px;margin-bottom:16px">
-    <div class="panel-sub-hdr" style="font-size:12px;color:#8b949e;font-weight:600;text-transform:uppercase;letter-spacing:.06em;margin-bottom:14px">Configuration</div>
-    <div id="cfg-saved" style="display:none;color:#3fb950;font-size:12px;margin-bottom:10px">&#10003; Saved — takes effect on next scan</div>
+  <div class="content-panel" style="background:#ffffff;border:1px solid #F3F4F6;border-radius:8px;padding:20px;margin-bottom:16px">
+    <div class="panel-sub-hdr" style="font-size:12px;color:#6B7280;font-weight:600;text-transform:uppercase;letter-spacing:.06em;margin-bottom:14px">Configuration</div>
+    <div id="cfg-saved" style="display:none;color:#16A34A;font-size:12px;margin-bottom:10px">&#10003; Saved — takes effect on next scan</div>
     <div style="display:grid;grid-template-columns:160px 1fr;gap:10px 16px;align-items:center;max-width:640px">
-      <label style="font-size:13px;color:#8b949e;align-self:start;padding-top:4px">Compliance Profile</label>
+      <label style="font-size:13px;color:#6B7280;align-self:start;padding-top:4px">Compliance Profile</label>
       <div id="cfg-profile-group" style="display:flex;flex-wrap:wrap;gap:8px 24px">
-        <label style="font-size:13px;color:#e6edf3;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="cfg-profile-cb" value="default"> Base Scan</label>
-        <label style="font-size:13px;color:#e6edf3;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="cfg-profile-cb" value="financial"> Financial Services</label>
-        <label style="font-size:13px;color:#e6edf3;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="cfg-profile-cb" value="fedramp"> FedRAMP / NIST 800-53</label>
-        <label style="font-size:13px;color:#e6edf3;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="cfg-profile-cb" value="cmmc"> CMMC 2.0</label>
-        <label style="font-size:13px;color:#e6edf3;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="cfg-profile-cb" value="biotech"> Biotech (FDA 21 CFR Part 11 / HIPAA / GxP)</label>
-        <label style="font-size:13px;color:#e6edf3;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="cfg-profile-cb" value="healthcare"> Healthcare (HIPAA / HITECH / FDA SaMD)</label>
-        <label style="font-size:13px;color:#e6edf3;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="cfg-profile-cb" value="owasp_agentic"> OWASP Agentic AI Top 10</label>
-        <label style="font-size:13px;color:#e6edf3;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="cfg-profile-cb" value="eu_ai_act"> EU AI Act (High-Risk Systems)</label>
+        <label style="font-size:13px;color:#111827;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="cfg-profile-cb" value="default"> Base Scan</label>
+        <label style="font-size:13px;color:#111827;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="cfg-profile-cb" value="financial"> Financial Services</label>
+        <label style="font-size:13px;color:#111827;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="cfg-profile-cb" value="fedramp"> FedRAMP / NIST 800-53</label>
+        <label style="font-size:13px;color:#111827;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="cfg-profile-cb" value="cmmc"> CMMC 2.0</label>
+        <label style="font-size:13px;color:#111827;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="cfg-profile-cb" value="biotech"> Biotech (FDA 21 CFR Part 11 / HIPAA / GxP)</label>
+        <label style="font-size:13px;color:#111827;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="cfg-profile-cb" value="healthcare"> Healthcare (HIPAA / HITECH / FDA SaMD)</label>
+        <label style="font-size:13px;color:#111827;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="cfg-profile-cb" value="owasp_agentic"> OWASP Agentic AI Top 10</label>
+        <label style="font-size:13px;color:#111827;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="cfg-profile-cb" value="eu_ai_act"> EU AI Act (High-Risk Systems)</label>
       </div>
-      <label style="font-size:13px;color:#8b949e">Scan Interval</label>
+      <label style="font-size:13px;color:#6B7280">Scan Interval</label>
       <div style="display:flex;align-items:center;gap:8px">
         <input id="cfg-interval" class="form-input" type="number" min="60" placeholder="3600" style="width:120px">
-        <span style="font-size:12px;color:#484f58">seconds &nbsp;(3600 = hourly · 86400 = daily)</span>
+        <span style="font-size:12px;color:#9CA3AF">seconds &nbsp;(3600 = hourly · 86400 = daily)</span>
       </div>
-      <label style="font-size:13px;color:#8b949e">Extra Subnets</label>
+      <label style="font-size:13px;color:#6B7280">Extra Subnets</label>
       <div style="display:flex;align-items:center;gap:8px">
         <input id="cfg-subnets" class="form-input" type="text" placeholder="192.168.50.0/24, 10.0.2.0/24" style="width:320px">
-        <span style="font-size:12px;color:#484f58">additional ranges for Shadow AI scans</span>
+        <span style="font-size:12px;color:#9CA3AF">additional ranges for Shadow AI scans</span>
       </div>
     </div>
     <div style="margin-top:16px">
-      <button class="scan-btn" onclick="saveConfig()" style="color:#3fb950;border-color:#30363d">Save</button>
+      <button class="scan-btn" onclick="saveConfig()" style="color:#16A34A;border-color:#E5E7EB">Save</button>
     </div>
   </div>
 
-  <div class="content-panel" style="background:#161b22;border:1px solid #21262d;border-radius:8px;padding:20px;margin-bottom:16px">
-    <div class="panel-sub-hdr" style="font-size:12px;color:#8b949e;font-weight:600;text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px">Alert Notifications</div>
-    <div style="font-size:12px;color:#484f58;margin-bottom:14px">Notify your team on Slack or email when new critical findings or shadow AI are detected. Zero cost — uses Slack&#39;s free incoming webhooks and your existing email.</div>
-    <div id="alert-saved" style="display:none;color:#3fb950;font-size:12px;margin-bottom:10px">&#10003; Alert settings saved</div>
+  <div class="content-panel" style="background:#ffffff;border:1px solid #F3F4F6;border-radius:8px;padding:20px;margin-bottom:16px">
+    <div class="panel-sub-hdr" style="font-size:12px;color:#6B7280;font-weight:600;text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px">Alert Notifications</div>
+    <div style="font-size:12px;color:#9CA3AF;margin-bottom:14px">Notify your team on Slack or email when new critical findings or shadow AI are detected. Zero cost — uses Slack&#39;s free incoming webhooks and your existing email.</div>
+    <div id="alert-saved" style="display:none;color:#16A34A;font-size:12px;margin-bottom:10px">&#10003; Alert settings saved</div>
     <div id="alert-test-result" style="display:none;font-size:12px;margin-bottom:10px"></div>
 
     <div style="display:grid;grid-template-columns:160px 1fr;gap:10px 16px;align-items:start;max-width:680px">
 
-      <label style="font-size:13px;color:#8b949e;padding-top:4px">Slack Webhook</label>
+      <label style="font-size:13px;color:#6B7280;padding-top:4px">Slack Webhook</label>
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
         <input id="alert-slack" type="url" class="form-input" placeholder="https://hooks.slack.com/services/..."
                style="flex:1;min-width:280px;font-family:monospace;font-size:12px">
-        <button class="scan-btn" onclick="testAlert('slack')" style="font-size:11px;padding:3px 10px;color:#58a6ff;border-color:#30363d">Test</button>
+        <button class="scan-btn" onclick="testAlert('slack')" style="font-size:11px;padding:3px 10px;color:#4F46E5;border-color:#E5E7EB">Test</button>
       </div>
 
-      <div style="font-size:11px;color:#484f58;padding-top:2px">How to get one: Slack → Your workspace → Apps → Incoming Webhooks</div>
+      <div style="font-size:11px;color:#9CA3AF;padding-top:2px">How to get one: Slack → Your workspace → Apps → Incoming Webhooks</div>
       <div></div>
 
-      <label style="font-size:13px;color:#8b949e;padding-top:4px">Webhook URL</label>
+      <label style="font-size:13px;color:#6B7280;padding-top:4px">Webhook URL</label>
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
         <input id="alert-webhook" type="url" class="form-input" placeholder="https://your-endpoint.com/alerts"
                style="flex:1;min-width:280px;font-family:monospace;font-size:12px">
-        <button class="scan-btn" onclick="testAlert('webhook')" style="font-size:11px;padding:3px 10px;color:#58a6ff;border-color:#30363d">Test</button>
+        <button class="scan-btn" onclick="testAlert('webhook')" style="font-size:11px;padding:3px 10px;color:#4F46E5;border-color:#E5E7EB">Test</button>
       </div>
 
-      <div style="font-size:11px;color:#484f58;grid-column:1/-1;border-top:1px solid #21262d;margin:6px 0;padding-top:10px">Email (SMTP) — Gmail: use an App Password from myaccount.google.com/apppasswords</div>
+      <div style="font-size:11px;color:#9CA3AF;grid-column:1/-1;border-top:1px solid #F3F4F6;margin:6px 0;padding-top:10px">Email (SMTP) — Gmail: use an App Password from myaccount.google.com/apppasswords</div>
 
-      <label style="font-size:13px;color:#8b949e">SMTP Host</label>
+      <label style="font-size:13px;color:#6B7280">SMTP Host</label>
       <div style="display:flex;gap:8px;align-items:center">
         <input id="alert-smtp-host" type="text" class="form-input" placeholder="smtp.gmail.com" style="width:220px;font-family:monospace;font-size:12px">
-        <label style="font-size:12px;color:#8b949e">Port</label>
+        <label style="font-size:12px;color:#6B7280">Port</label>
         <input id="alert-smtp-port" type="number" class="form-input" placeholder="587" style="width:70px;font-family:monospace;font-size:12px">
       </div>
 
-      <label style="font-size:13px;color:#8b949e">SMTP Username</label>
+      <label style="font-size:13px;color:#6B7280">SMTP Username</label>
       <input id="alert-smtp-user" type="text" class="form-input" placeholder="you@gmail.com" style="width:280px;font-family:monospace;font-size:12px">
 
-      <label style="font-size:13px;color:#8b949e">SMTP Password</label>
+      <label style="font-size:13px;color:#6B7280">SMTP Password</label>
       <input id="alert-smtp-pass" type="password" class="form-input" placeholder="App password" style="width:280px;font-family:monospace;font-size:12px">
 
-      <label style="font-size:13px;color:#8b949e">From Address</label>
+      <label style="font-size:13px;color:#6B7280">From Address</label>
       <input id="alert-email-from" type="email" class="form-input" placeholder="sentinel@yourdomain.com" style="width:280px;font-family:monospace;font-size:12px">
 
-      <label style="font-size:13px;color:#8b949e">Send Alerts To</label>
+      <label style="font-size:13px;color:#6B7280">Send Alerts To</label>
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
         <input id="alert-email-to" type="email" class="form-input" placeholder="security-team@yourdomain.com" style="width:280px;font-family:monospace;font-size:12px">
-        <button class="scan-btn" onclick="testAlert('email')" style="font-size:11px;padding:3px 10px;color:#58a6ff;border-color:#30363d">Test</button>
+        <button class="scan-btn" onclick="testAlert('email')" style="font-size:11px;padding:3px 10px;color:#4F46E5;border-color:#E5E7EB">Test</button>
       </div>
 
-      <div style="font-size:11px;color:#484f58;grid-column:1/-1;border-top:1px solid #21262d;margin:6px 0;padding-top:10px">Trigger Events</div>
+      <div style="font-size:11px;color:#9CA3AF;grid-column:1/-1;border-top:1px solid #F3F4F6;margin:6px 0;padding-top:10px">Trigger Events</div>
 
-      <label style="font-size:13px;color:#8b949e">Alert when</label>
+      <label style="font-size:13px;color:#6B7280">Alert when</label>
       <div style="display:flex;flex-direction:column;gap:6px">
-        <label style="font-size:13px;color:#e6edf3;display:flex;align-items:center;gap:8px;cursor:pointer">
-          <input type="checkbox" id="trig-crit"> New <span style="color:#f85149;font-weight:700">CRITICAL</span> finding detected on any device
+        <label style="font-size:13px;color:#111827;display:flex;align-items:center;gap:8px;cursor:pointer">
+          <input type="checkbox" id="trig-crit"> New <span style="color:#DC2626;font-weight:700">CRITICAL</span> finding detected on any device
         </label>
-        <label style="font-size:13px;color:#e6edf3;display:flex;align-items:center;gap:8px;cursor:pointer">
-          <input type="checkbox" id="trig-high"> New <span style="color:#d2992a;font-weight:700">HIGH</span> finding detected on any device
+        <label style="font-size:13px;color:#111827;display:flex;align-items:center;gap:8px;cursor:pointer">
+          <input type="checkbox" id="trig-high"> New <span style="color:#CA8A04;font-weight:700">HIGH</span> finding detected on any device
         </label>
-        <label style="font-size:13px;color:#e6edf3;display:flex;align-items:center;gap:8px;cursor:pointer">
-          <input type="checkbox" id="trig-shadow"> New <span style="color:#58a6ff;font-weight:700">Shadow AI</span> asset discovered
+        <label style="font-size:13px;color:#111827;display:flex;align-items:center;gap:8px;cursor:pointer">
+          <input type="checkbox" id="trig-shadow"> New <span style="color:#4F46E5;font-weight:700">Shadow AI</span> asset discovered
         </label>
       </div>
 
     </div>
     <div style="margin-top:16px">
-      <button class="scan-btn" onclick="saveAlertConfig()" style="color:#3fb950;border-color:#30363d">Save Alert Settings</button>
+      <button class="scan-btn" onclick="saveAlertConfig()" style="color:#16A34A;border-color:#E5E7EB">Save Alert Settings</button>
     </div>
   </div>
 
-  <div class="content-panel" style="background:#161b22;border:1px solid #21262d;border-radius:8px;padding:20px;margin-bottom:28px">
-    <div class="panel-sub-hdr" style="font-size:12px;color:#8b949e;font-weight:600;text-transform:uppercase;letter-spacing:.06em;margin-bottom:14px">System</div>
+  <div class="content-panel" style="background:#ffffff;border:1px solid #F3F4F6;border-radius:8px;padding:20px;margin-bottom:28px">
+    <div class="panel-sub-hdr" style="font-size:12px;color:#6B7280;font-weight:600;text-transform:uppercase;letter-spacing:.06em;margin-bottom:14px">System</div>
     <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px">
       <button class="scan-btn" id="btn-pull" onclick="pullUpdates()"
-              style="color:#e3b341;border-color:#30363d">&#8659; Pull Latest Updates</button>
+              style="color:#CA8A04;border-color:#E5E7EB">&#8659; Pull Latest Updates</button>
       <button class="scan-btn" id="btn-restart-agent" onclick="restartAgent()"
-              style="color:#58a6ff;border-color:#30363d">&#8635; Restart Agent</button>
+              style="color:#4F46E5;border-color:#E5E7EB">&#8635; Restart Agent</button>
       <button class="scan-btn" id="btn-restart-server" onclick="restartServer()"
-              style="color:#58a6ff;border-color:#30363d">&#8635; Restart Dashboard</button>
+              style="color:#4F46E5;border-color:#E5E7EB">&#8635; Restart Dashboard</button>
     </div>
-    <div id="sys-log" style="display:none;background:#0d1117;border:1px solid #30363d;border-radius:6px;
-         padding:12px;font-family:monospace;font-size:12px;color:#8b949e;white-space:pre-wrap;
+    <div id="sys-log" style="display:none;background:#F9FAFB;border:1px solid #E5E7EB;border-radius:6px;
+         padding:12px;font-family:monospace;font-size:12px;color:#6B7280;white-space:pre-wrap;
          max-height:200px;overflow-y:auto;line-height:1.6"></div>
   </div>
   </div>
@@ -3954,85 +3954,85 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
   <div class="page" id="page-reports">
   <div class="sec-hdr" style="margin-top:0;padding-top:0">Reports</div>
 
-  <div style="background:#161b22;border:1px solid #21262d;border-radius:8px;padding:18px 22px;margin-bottom:24px">
-    <div style="font-size:11px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:#6e7681;margin-bottom:12px">Compliance Profile Filter</div>
+  <div style="background:#ffffff;border:1px solid #F3F4F6;border-radius:8px;padding:18px 22px;margin-bottom:24px">
+    <div style="font-size:11px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:#6B7280;margin-bottom:12px">Compliance Profile Filter</div>
     <div style="display:flex;flex-wrap:wrap;gap:8px 20px;margin-bottom:4px">
-      <label style="font-size:13px;color:#c9d1d9;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="rpt-profile" value="default"> Base Scan</label>
-      <label style="font-size:13px;color:#c9d1d9;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="rpt-profile" value="fedramp"> FedRAMP / NIST 800-53</label>
-      <label style="font-size:13px;color:#c9d1d9;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="rpt-profile" value="cmmc"> CMMC 2.0</label>
-      <label style="font-size:13px;color:#c9d1d9;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="rpt-profile" value="financial"> Financial Services</label>
-      <label style="font-size:13px;color:#c9d1d9;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="rpt-profile" value="biotech"> Biotech</label>
-      <label style="font-size:13px;color:#c9d1d9;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="rpt-profile" value="healthcare"> Healthcare</label>
-      <label style="font-size:13px;color:#c9d1d9;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="rpt-profile" value="owasp_agentic"> OWASP Agentic AI</label>
-      <label style="font-size:13px;color:#c9d1d9;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="rpt-profile" value="eu_ai_act"> EU AI Act</label>
+      <label style="font-size:13px;color:#374151;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="rpt-profile" value="default"> Base Scan</label>
+      <label style="font-size:13px;color:#374151;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="rpt-profile" value="fedramp"> FedRAMP / NIST 800-53</label>
+      <label style="font-size:13px;color:#374151;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="rpt-profile" value="cmmc"> CMMC 2.0</label>
+      <label style="font-size:13px;color:#374151;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="rpt-profile" value="financial"> Financial Services</label>
+      <label style="font-size:13px;color:#374151;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="rpt-profile" value="biotech"> Biotech</label>
+      <label style="font-size:13px;color:#374151;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="rpt-profile" value="healthcare"> Healthcare</label>
+      <label style="font-size:13px;color:#374151;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="rpt-profile" value="owasp_agentic"> OWASP Agentic AI</label>
+      <label style="font-size:13px;color:#374151;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="rpt-profile" value="eu_ai_act"> EU AI Act</label>
     </div>
-    <div style="font-size:11px;color:#484f58;margin-top:8px">Select one or more profiles to filter report content. Leave all unchecked for the full base scan.</div>
+    <div style="font-size:11px;color:#9CA3AF;margin-top:8px">Select one or more profiles to filter report content. Leave all unchecked for the full base scan.</div>
   </div>
 
-  <div style="font-size:11px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:#6e7681;margin-bottom:12px">Fleet Reports</div>
+  <div style="font-size:11px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:#6B7280;margin-bottom:12px">Fleet Reports</div>
   <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:16px;margin-bottom:28px">
 
-    <div style="background:#161b22;border:1px solid #21262d;border-radius:8px;padding:20px">
-      <div style="font-size:15px;font-weight:700;color:#e6edf3;margin-bottom:6px">&#128200; Executive Summary</div>
-      <div style="font-size:12px;color:#6e7681;line-height:1.6;margin-bottom:16px">High-level posture for leadership. Fleet score, top risks, business context. No individual findings or technical detail.</div>
+    <div style="background:#ffffff;border:1px solid #F3F4F6;border-radius:8px;padding:20px">
+      <div style="font-size:15px;font-weight:700;color:#111827;margin-bottom:6px">&#128200; Executive Summary</div>
+      <div style="font-size:12px;color:#6B7280;line-height:1.6;margin-bottom:16px">High-level posture for leadership. Fleet score, top risks, business context. No individual findings or technical detail.</div>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
-        <button class="scan-btn" onclick="rptDownloadPdf('executive',this)" style="color:#3fb950;border-color:#238636;font-size:12px">&#8659; Download PDF</button>
-        <button class="scan-btn" onclick="rptPreview('executive')" style="color:#8b949e;font-size:12px">&#128065; Preview</button>
+        <button class="scan-btn" onclick="rptDownloadPdf('executive',this)" style="color:#16A34A;border-color:#238636;font-size:12px">&#8659; Download PDF</button>
+        <button class="scan-btn" onclick="rptPreview('executive')" style="color:#6B7280;font-size:12px">&#128065; Preview</button>
       </div>
     </div>
 
-    <div style="background:#161b22;border:1px solid #21262d;border-radius:8px;padding:20px">
-      <div style="font-size:15px;font-weight:700;color:#e6edf3;margin-bottom:6px">&#128203; CISO Report</div>
-      <div style="font-size:12px;color:#6e7681;line-height:1.6;margin-bottom:16px">Per-device FAIL and WARN findings grouped by severity. Risk exposure and compliance posture. No remediation steps.</div>
+    <div style="background:#ffffff;border:1px solid #F3F4F6;border-radius:8px;padding:20px">
+      <div style="font-size:15px;font-weight:700;color:#111827;margin-bottom:6px">&#128203; CISO Report</div>
+      <div style="font-size:12px;color:#6B7280;line-height:1.6;margin-bottom:16px">Per-device FAIL and WARN findings grouped by severity. Risk exposure and compliance posture. No remediation steps.</div>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
-        <button class="scan-btn" onclick="rptDownloadPdf('ciso',this)" style="color:#3fb950;border-color:#238636;font-size:12px">&#8659; Download PDF</button>
-        <button class="scan-btn" onclick="rptPreview('ciso')" style="color:#8b949e;font-size:12px">&#128065; Preview</button>
+        <button class="scan-btn" onclick="rptDownloadPdf('ciso',this)" style="color:#16A34A;border-color:#238636;font-size:12px">&#8659; Download PDF</button>
+        <button class="scan-btn" onclick="rptPreview('ciso')" style="color:#6B7280;font-size:12px">&#128065; Preview</button>
       </div>
     </div>
 
-    <div style="background:#161b22;border:1px solid #21262d;border-radius:8px;padding:20px">
-      <div style="font-size:15px;font-weight:700;color:#e6edf3;margin-bottom:6px">&#128295; Technical Report</div>
-      <div style="font-size:12px;color:#6e7681;line-height:1.6;margin-bottom:16px">All findings including pass/fail/warn with full details and step-by-step remediation for each check. For security engineers.</div>
+    <div style="background:#ffffff;border:1px solid #F3F4F6;border-radius:8px;padding:20px">
+      <div style="font-size:15px;font-weight:700;color:#111827;margin-bottom:6px">&#128295; Technical Report</div>
+      <div style="font-size:12px;color:#6B7280;line-height:1.6;margin-bottom:16px">All findings including pass/fail/warn with full details and step-by-step remediation for each check. For security engineers.</div>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
         {_btn_technical_pdf}
       </div>
     </div>
   </div>
 
-  <div style="font-size:11px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:#6e7681;margin-bottom:12px">MCP &amp; Agent Governance Reports</div>
+  <div style="font-size:11px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:#6B7280;margin-bottom:12px">MCP &amp; Agent Governance Reports</div>
   <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:16px;margin-bottom:28px">
 
-    <div style="background:#161b22;border:1px solid #21262d;border-radius:8px;padding:20px">
-      <div style="font-size:15px;font-weight:700;color:#e6edf3;margin-bottom:6px">&#128279; Executive — Agent Risk</div>
-      <div style="font-size:12px;color:#6e7681;line-height:1.6;margin-bottom:16px">Business risk summary of AI agent tool exposure. No server inventory or technical detail. Safe for board-level distribution.</div>
+    <div style="background:#ffffff;border:1px solid #F3F4F6;border-radius:8px;padding:20px">
+      <div style="font-size:15px;font-weight:700;color:#111827;margin-bottom:6px">&#128279; Executive — Agent Risk</div>
+      <div style="font-size:12px;color:#6B7280;line-height:1.6;margin-bottom:16px">Business risk summary of AI agent tool exposure. No server inventory or technical detail. Safe for board-level distribution.</div>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
-        <button class="scan-btn" onclick="rptPreviewMcp('executive')" style="color:#8b949e;font-size:12px">&#128065; Preview</button>
+        <button class="scan-btn" onclick="rptPreviewMcp('executive')" style="color:#6B7280;font-size:12px">&#128065; Preview</button>
       </div>
     </div>
 
-    <div style="background:#161b22;border:1px solid #21262d;border-radius:8px;padding:20px">
-      <div style="font-size:15px;font-weight:700;color:#e6edf3;margin-bottom:6px">&#128279; CISO — Agent Governance</div>
-      <div style="font-size:12px;color:#6e7681;line-height:1.6;margin-bottom:16px">Full MCP server inventory, auth status, OWASP Agentic AI risks, and EU AI Act exposure mapping. No remediation steps.</div>
+    <div style="background:#ffffff;border:1px solid #F3F4F6;border-radius:8px;padding:20px">
+      <div style="font-size:15px;font-weight:700;color:#111827;margin-bottom:6px">&#128279; CISO — Agent Governance</div>
+      <div style="font-size:12px;color:#6B7280;line-height:1.6;margin-bottom:16px">Full MCP server inventory, auth status, OWASP Agentic AI risks, and EU AI Act exposure mapping. No remediation steps.</div>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
-        <button class="scan-btn" onclick="rptPreviewMcp('ciso')" style="color:#8b949e;font-size:12px">&#128065; Preview</button>
+        <button class="scan-btn" onclick="rptPreviewMcp('ciso')" style="color:#6B7280;font-size:12px">&#128065; Preview</button>
       </div>
     </div>
 
-    <div style="background:#161b22;border:1px solid #21262d;border-radius:8px;padding:20px">
-      <div style="font-size:15px;font-weight:700;color:#e6edf3;margin-bottom:6px">&#128279; Technical — Per-Server Detail</div>
-      <div style="font-size:12px;color:#6e7681;line-height:1.6;margin-bottom:16px">Per-server auth status, exposed tools, high-risk tool flags, and remediation steps for each unauthenticated server.</div>
+    <div style="background:#ffffff;border:1px solid #F3F4F6;border-radius:8px;padding:20px">
+      <div style="font-size:15px;font-weight:700;color:#111827;margin-bottom:6px">&#128279; Technical — Per-Server Detail</div>
+      <div style="font-size:12px;color:#6B7280;line-height:1.6;margin-bottom:16px">Per-server auth status, exposed tools, high-risk tool flags, and remediation steps for each unauthenticated server.</div>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
-        <button class="scan-btn" onclick="rptPreviewMcp('technical')" style="color:#8b949e;font-size:12px">&#128065; Preview</button>
+        <button class="scan-btn" onclick="rptPreviewMcp('technical')" style="color:#6B7280;font-size:12px">&#128065; Preview</button>
       </div>
     </div>
   </div>
 
-  <div style="font-size:11px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:#6e7681;margin-bottom:12px">Evidence &amp; Compliance</div>
-  <div style="background:#161b22;border:1px solid #21262d;border-radius:8px;padding:20px;max-width:520px">
-    <div style="font-size:15px;font-weight:700;color:#e6edf3;margin-bottom:6px">&#128230; Evidence Package</div>
-    <div style="font-size:12px;color:#6e7681;line-height:1.6;margin-bottom:6px">Complete audit bundle for compliance review: cover letter, findings CSV, signed fleet PDF, per-device JSON reports, and cryptographic manifest.</div>
-    <div style="font-size:12px;color:#6e7681;margin-bottom:16px">Contents are cryptographically signed with HMAC-SHA256 — tamper-evident for auditor submission.</div>
-    {'<button id="btn-evidence-export-rpt" class="scan-btn" onclick="downloadEvidencePackage(this)" style="color:#a371f7;border-color:#6e40c9;font-size:12px">&#8659; Download ZIP</button>' if _has_evidence_package() else '<button class="scan-btn" disabled style="color:#6e7681;border-color:#30363d;font-size:12px;cursor:not-allowed;opacity:.55">&#128274; Plus Plan Required</button><div style="font-size:11px;color:#f0a500;margin-top:8px">{"&#9888; Available in evaluation — upgrade to Plus for production use." if _is_demo() else "&#9888; Evidence Package is a Plus plan feature. Contact sales@markai.io to upgrade."}</div>'}
+  <div style="font-size:11px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:#6B7280;margin-bottom:12px">Evidence &amp; Compliance</div>
+  <div style="background:#ffffff;border:1px solid #F3F4F6;border-radius:8px;padding:20px;max-width:520px">
+    <div style="font-size:15px;font-weight:700;color:#111827;margin-bottom:6px">&#128230; Evidence Package</div>
+    <div style="font-size:12px;color:#6B7280;line-height:1.6;margin-bottom:6px">Complete audit bundle for compliance review: cover letter, findings CSV, signed fleet PDF, per-device JSON reports, and cryptographic manifest.</div>
+    <div style="font-size:12px;color:#6B7280;margin-bottom:16px">Contents are cryptographically signed with HMAC-SHA256 — tamper-evident for auditor submission.</div>
+    {'<button id="btn-evidence-export-rpt" class="scan-btn" onclick="downloadEvidencePackage(this)" style="color:#a371f7;border-color:#6e40c9;font-size:12px">&#8659; Download ZIP</button>' if _has_evidence_package() else '<button class="scan-btn" disabled style="color:#6B7280;border-color:#E5E7EB;font-size:12px;cursor:not-allowed;opacity:.55">&#128274; Plus Plan Required</button><div style="font-size:11px;color:#f0a500;margin-top:8px">{"&#9888; Available in evaluation — upgrade to Plus for production use." if _is_demo() else "&#9888; Evidence Package is a Plus plan feature. Contact sales@markai.io to upgrade."}</div>'}
   </div>
   </div>
 
@@ -4044,21 +4044,21 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
 function _applyTheme(light) {{
   document.documentElement.classList.toggle('light', light);
   document.body.classList.toggle('light', light);
-  document.body.style.background = light ? '#f6f8fa' : '#0d1117';
-  document.body.style.color = light ? '#24292f' : '#c9d1d9';
+  document.body.style.background = light ? '#f6f8fa' : '#F9FAFB';
+  document.body.style.color = light ? '#24292f' : '#374151';
   const btn = document.getElementById('theme-toggle');
   if (btn) {{
     btn.textContent = light ? '⬛ Dark' : '☀ Light';
-    btn.style.background = light ? '#f6f8fa' : '#161b22';
-    btn.style.color = light ? '#24292f' : '#8b949e';
+    btn.style.background = light ? '#f6f8fa' : '#ffffff';
+    btn.style.color = light ? '#24292f' : '#6B7280';
   }}
   const tb = document.querySelector('.toolbar');
   if (tb) {{
-    tb.style.background = light ? '#f6f8fa' : '#161b22';
+    tb.style.background = light ? '#f6f8fa' : '#ffffff';
     tb.querySelectorAll('button:not(#theme-toggle)').forEach(n => {{
-      n.style.background   = light ? '#eef1f4' : '#21262d';
-      n.style.color        = light ? '#24292f' : '#c9d1d9';
-      n.style.borderColor  = light ? '#c8ccd0' : '#30363d';
+      n.style.background   = light ? '#eef1f4' : '#F3F4F6';
+      n.style.color        = light ? '#24292f' : '#374151';
+      n.style.borderColor  = light ? '#c8ccd0' : '#E5E7EB';
     }});
     tb.querySelectorAll('span, label').forEach(n => {{
       n.style.color = light ? '#57606a' : null;
@@ -4066,36 +4066,36 @@ function _applyTheme(light) {{
   }}
   // content panels (Settings, System, Discovery)
   document.querySelectorAll('.content-panel').forEach(n => {{
-    n.style.background  = light ? '#f6f8fa' : '#161b22';
-    n.style.borderColor = light ? '#d0d7de' : '#21262d';
+    n.style.background  = light ? '#f6f8fa' : '#ffffff';
+    n.style.borderColor = light ? '#d0d7de' : '#F3F4F6';
   }});
   // sub-headers inside panels (Configuration, System labels)
   document.querySelectorAll('.panel-sub-hdr').forEach(n => {{
-    n.style.color = light ? '#57606a' : '#8b949e';
+    n.style.color = light ? '#57606a' : '#6B7280';
   }});
   // form inputs (scan interval, extra subnets)
   document.querySelectorAll('.form-input').forEach(n => {{
-    n.style.background  = light ? '#ffffff' : '#0d1117';
-    n.style.color       = light ? '#24292f' : '#c9d1d9';
-    n.style.borderColor = light ? '#d0d7de' : '#30363d';
+    n.style.background  = light ? '#ffffff' : '#F9FAFB';
+    n.style.color       = light ? '#24292f' : '#374151';
+    n.style.borderColor = light ? '#d0d7de' : '#E5E7EB';
   }});
   // subnet discovery text input
   const _sni = document.getElementById('discover-subnets');
   if (_sni) {{
-    _sni.style.background  = light ? '#ffffff' : '#0d1117';
-    _sni.style.color       = light ? '#24292f' : '#e6edf3';
-    _sni.style.borderColor = light ? '#d0d7de' : '#30363d';
+    _sni.style.background  = light ? '#ffffff' : '#F9FAFB';
+    _sni.style.color       = light ? '#24292f' : '#111827';
+    _sni.style.borderColor = light ? '#d0d7de' : '#E5E7EB';
   }}
   // system log panel
   const _sl = document.getElementById('sys-log');
   if (_sl) {{
-    _sl.style.background  = light ? '#f6f8fa' : '#0d1117';
-    _sl.style.borderColor = light ? '#d0d7de' : '#30363d';
-    _sl.style.color       = light ? '#57606a' : '#8b949e';
+    _sl.style.background  = light ? '#f6f8fa' : '#F9FAFB';
+    _sl.style.borderColor = light ? '#d0d7de' : '#E5E7EB';
+    _sl.style.color       = light ? '#57606a' : '#6B7280';
   }}
   // compliance profile checkbox labels
   document.querySelectorAll('#cfg-profile-group label').forEach(n => {{
-    n.style.color = light ? '#24292f' : '#e6edf3';
+    n.style.color = light ? '#24292f' : '#111827';
   }});
 }}
 function toggleTheme() {{
@@ -4192,7 +4192,7 @@ function _syncFilterUI() {{
   if (banner) {{
     if (_activeFilter) {{
       bannerText.textContent = 'Showing: ' + (labelMap[_activeFilter] || _activeFilter);
-      bannerText.style.color = _activeFilter === 'fail' ? '#f85149' : _activeFilter === 'warn' ? '#d29922' : '#58a6ff';
+      bannerText.style.color = _activeFilter === 'fail' ? '#DC2626' : _activeFilter === 'warn' ? '#CA8A04' : '#4F46E5';
       banner.style.display = 'flex';
       document.title = 'Sentinel — ' + (labelMap[_activeFilter] || _activeFilter);
     }} else {{
@@ -4231,13 +4231,13 @@ function renderDevicePage() {{
   const pgEl    = document.getElementById('device-pagination');
   const visible = _visibleDevices();
   if (!_allDevices.length) {{
-    tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:32px;color:#484f58">No agents have reported yet.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:32px;color:#9CA3AF">No agents have reported yet.</td></tr>';
     pgEl.style.display = 'none';
     return;
   }}
   if (!visible.length) {{
     const msg = _activeFilter === 'fail' ? 'No high risk devices.' : _activeFilter === 'warn' ? 'No medium risk devices.' : 'No info items.';
-    tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:32px;color:#484f58">' + msg + '</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:32px;color:#9CA3AF">' + msg + '</td></tr>';
     pgEl.style.display = 'none';
     return;
   }}
@@ -4262,14 +4262,14 @@ function renderDevicePage() {{
       <td onclick="event.stopPropagation()" style="white-space:nowrap">
         <button class="scan-btn" id="sb-${{esc(did)}}" onclick="openScanModal('${{esc(did)}}',this)">Scan ▾</button>
         <button class="scan-btn" id="ub-${{esc(did)}}" onclick="updateDevice('${{esc(did)}}')"
-                style="margin-left:4px;color:#e3b341;border-color:#30363d">Update</button>
+                style="margin-left:4px;color:#CA8A04;border-color:#E5E7EB">Update</button>
         <a href="/fleet/device/${{esc(did)}}/dashboard" target="_blank"
-           style="margin-left:8px;background:#161b22;border:1px solid #30363d;color:#8b949e;
+           style="margin-left:8px;background:#ffffff;border:1px solid #E5E7EB;color:#6B7280;
                   border-radius:4px;padding:3px 10px;font-size:12px;text-decoration:none;display:inline-block"
-           onmouseover="this.style.borderColor='#58a6ff';this.style.color='#c9d1d9'"
-           onmouseout="this.style.borderColor='#30363d';this.style.color='#8b949e'">Full Report</a>
+           onmouseover="this.style.borderColor='#4F46E5';this.style.color='#374151'"
+           onmouseout="this.style.borderColor='#E5E7EB';this.style.color='#6B7280'">Full Report</a>
         <button class="scan-btn" onclick="removeDevice('${{esc(did)}}','${{esc(d.hostname||'')}}')"
-                style="margin-left:4px;color:#f85149;border-color:#30363d;font-size:11px">Remove</button>
+                style="margin-left:4px;color:#DC2626;border-color:#E5E7EB;font-size:11px">Remove</button>
       </td>
     </tr>`;
   }}).join('');
@@ -4292,8 +4292,8 @@ function renderPagination() {{
   const nums = _pageNums(pages, _currentPage);
   let prev = null;
   for (const p of nums) {{
-    if (prev !== null && p > prev + 1) html += `<span style="color:#484f58;padding:0 2px;line-height:24px">&#8230;</span>`;
-    const active = p === _currentPage ? 'color:#58a6ff;border-color:#58a6ff;' : '';
+    if (prev !== null && p > prev + 1) html += `<span style="color:#9CA3AF;padding:0 2px;line-height:24px">&#8230;</span>`;
+    const active = p === _currentPage ? 'color:#4F46E5;border-color:#4F46E5;' : '';
     html += `<button class="scan-btn" onclick="goToPage(${{p}})" style="${{btnStyle}}${{active}}">${{p}}</button>`;
     prev = p;
   }}
@@ -4367,17 +4367,17 @@ async function runDiscovery() {{
         if (!models || !models.length) {{
           const svc = (service || '').toLowerCase();
           if (svc.includes('sentinel') || svc.includes('hash'))
-            return '<span style="color:#484f58;font-size:11px">n/a — monitoring tool</span>';
+            return '<span style="color:#9CA3AF;font-size:11px">n/a — monitoring tool</span>';
           if (svc.includes('jupyter') || svc.includes('streamlit') || svc.includes('gradio'))
-            return '<span style="color:#484f58;font-size:11px">n/a — notebook/UI server</span>';
+            return '<span style="color:#9CA3AF;font-size:11px">n/a — notebook/UI server</span>';
           if (svc.includes('unknown'))
-            return '<span style="color:#e3b341;font-size:11px">⚠ unable to identify — check device</span>';
-          return '<span style="color:#6e7681;font-size:11px;font-style:italic">no models loaded</span>';
+            return '<span style="color:#CA8A04;font-size:11px">⚠ unable to identify — check device</span>';
+          return '<span style="color:#6B7280;font-size:11px;font-style:italic">no models loaded</span>';
         }}
         const badges = models.slice(0, 6).map(m =>
-          `<span style="background:#21262d;border-radius:3px;padding:1px 6px;font-size:11px;font-family:monospace;white-space:nowrap">${{esc(m)}}</span>`
+          `<span style="background:#F3F4F6;border-radius:3px;padding:1px 6px;font-size:11px;font-family:monospace;white-space:nowrap">${{esc(m)}}</span>`
         ).join(' ');
-        return badges + (models.length > 6 ? ` <span style="color:#6e7681;font-size:11px">+${{models.length - 6}} more</span>` : '');
+        return badges + (models.length > 6 ? ` <span style="color:#6B7280;font-size:11px">+${{models.length - 6}} more</span>` : '');
       }};
 
       // Group network probes by host IP
@@ -4396,13 +4396,13 @@ async function runDiscovery() {{
       // ── Per-host cards ────────────────────────────────────────────────────
       for (const host of Object.keys(byHost).sort()) {{
         const hostSvcs = byHost[host];
-        html += `<div style="margin-bottom:14px;border:1px solid #21262d;border-radius:6px;overflow:hidden">
-          <div style="background:#161b22;padding:7px 12px;display:flex;align-items:center;gap:10px;border-bottom:1px solid #21262d">
-            <span style="font-family:monospace;font-size:13px;font-weight:600;color:#e6edf3">${{esc(host)}}</span>
-            <span style="font-size:11px;color:#6e7681">${{hostSvcs.length}} service${{hostSvcs.length !== 1 ? 's' : ''}} found</span>
+        html += `<div style="margin-bottom:14px;border:1px solid #F3F4F6;border-radius:6px;overflow:hidden">
+          <div style="background:#ffffff;padding:7px 12px;display:flex;align-items:center;gap:10px;border-bottom:1px solid #F3F4F6">
+            <span style="font-family:monospace;font-size:13px;font-weight:600;color:#111827">${{esc(host)}}</span>
+            <span style="font-size:11px;color:#6B7280">${{hostSvcs.length}} service${{hostSvcs.length !== 1 ? 's' : ''}} found</span>
           </div>
           <table style="width:100%;border-collapse:collapse">
-            <thead><tr style="font-size:10px;color:#6e7681;text-transform:uppercase;letter-spacing:.4px;background:#0d1117">
+            <thead><tr style="font-size:10px;color:#6B7280;text-transform:uppercase;letter-spacing:.4px;background:#F9FAFB">
               <th style="text-align:left;padding:5px 12px;width:22%">Service</th>
               <th style="text-align:left;padding:5px 8px;width:6%">Port</th>
               <th style="text-align:left;padding:5px 8px">Models Detected</th>
@@ -4410,12 +4410,12 @@ async function runDiscovery() {{
             </tr></thead>
             <tbody>`;
         for (const s of hostSvcs) {{
-          const httpStatus = s.status ? ` <span style="color:#484f58;font-size:10px">(HTTP ${{s.status}})</span>` : '';
-          html += `<tr style="border-top:1px solid #161b22">
-            <td style="padding:7px 12px;font-weight:600;color:#e6edf3;white-space:nowrap">${{esc(s.service)}}</td>
-            <td style="padding:7px 8px;color:#6e7681;font-family:monospace;font-size:12px">${{s.port}}</td>
+          const httpStatus = s.status ? ` <span style="color:#9CA3AF;font-size:10px">(HTTP ${{s.status}})</span>` : '';
+          html += `<tr style="border-top:1px solid #F3F4F6">
+            <td style="padding:7px 12px;font-weight:600;color:#111827;white-space:nowrap">${{esc(s.service)}}</td>
+            <td style="padding:7px 8px;color:#6B7280;font-family:monospace;font-size:12px">${{s.port}}</td>
             <td style="padding:7px 8px">${{modelBadges(s.models, s.service)}}</td>
-            <td style="padding:7px 8px;font-size:11px"><a href="${{esc(s.url)}}" target="_blank" style="color:#58a6ff;text-decoration:none;font-family:monospace">${{esc(s.url)}}</a>${{httpStatus}}</td>
+            <td style="padding:7px 8px;font-size:11px"><a href="${{esc(s.url)}}" target="_blank" style="color:#4F46E5;text-decoration:none;font-family:monospace">${{esc(s.url)}}</a>${{httpStatus}}</td>
           </tr>`;
         }}
         html += '</tbody></table></div>';
@@ -4423,21 +4423,21 @@ async function runDiscovery() {{
 
       // ── Local machine: running processes ──────────────────────────────────
       if (procs.length) {{
-        html += `<div style="margin-bottom:14px;border:1px solid #21262d;border-radius:6px;overflow:hidden">
-          <div style="background:#161b22;padding:7px 12px;display:flex;align-items:center;gap:10px;border-bottom:1px solid #21262d">
-            <span style="font-size:12px;font-weight:600;color:#e3b341">⚙ Running Processes</span>
-            <span style="font-size:11px;color:#6e7681">detected on this machine</span>
+        html += `<div style="margin-bottom:14px;border:1px solid #F3F4F6;border-radius:6px;overflow:hidden">
+          <div style="background:#ffffff;padding:7px 12px;display:flex;align-items:center;gap:10px;border-bottom:1px solid #F3F4F6">
+            <span style="font-size:12px;font-weight:600;color:#CA8A04">⚙ Running Processes</span>
+            <span style="font-size:11px;color:#6B7280">detected on this machine</span>
           </div>
           <table style="width:100%;border-collapse:collapse">
-            <thead><tr style="font-size:10px;color:#6e7681;text-transform:uppercase;letter-spacing:.4px;background:#0d1117">
+            <thead><tr style="font-size:10px;color:#6B7280;text-transform:uppercase;letter-spacing:.4px;background:#F9FAFB">
               <th style="text-align:left;padding:5px 12px">Service</th>
               <th style="text-align:left;padding:5px 8px">Process Signature</th>
             </tr></thead>
             <tbody>`;
         for (const p of procs) {{
-          html += `<tr style="border-top:1px solid #161b22">
-            <td style="padding:7px 12px;font-weight:600;color:#e6edf3">${{esc(p.service)}}</td>
-            <td style="padding:7px 8px;font-family:monospace;font-size:11px;color:#6e7681"><code style="background:#21262d;padding:1px 5px;border-radius:2px">${{esc(p.process_sig || '')}}</code></td>
+          html += `<tr style="border-top:1px solid #F3F4F6">
+            <td style="padding:7px 12px;font-weight:600;color:#111827">${{esc(p.service)}}</td>
+            <td style="padding:7px 8px;font-family:monospace;font-size:11px;color:#6B7280"><code style="background:#F3F4F6;padding:1px 5px;border-radius:2px">${{esc(p.process_sig || '')}}</code></td>
           </tr>`;
         }}
         html += '</tbody></table></div>';
@@ -4445,21 +4445,21 @@ async function runDiscovery() {{
 
       // ── Local machine: API keys in environment ────────────────────────────
       if (envs.length) {{
-        html += `<div style="margin-bottom:14px;border:1px solid #21262d;border-radius:6px;overflow:hidden">
-          <div style="background:#161b22;padding:7px 12px;display:flex;align-items:center;gap:10px;border-bottom:1px solid #21262d">
+        html += `<div style="margin-bottom:14px;border:1px solid #F3F4F6;border-radius:6px;overflow:hidden">
+          <div style="background:#ffffff;padding:7px 12px;display:flex;align-items:center;gap:10px;border-bottom:1px solid #F3F4F6">
             <span style="font-size:12px;font-weight:600;color:#bc8cff">🔑 Cloud API Keys</span>
-            <span style="font-size:11px;color:#6e7681">found in environment on this machine</span>
+            <span style="font-size:11px;color:#6B7280">found in environment on this machine</span>
           </div>
           <table style="width:100%;border-collapse:collapse">
-            <thead><tr style="font-size:10px;color:#6e7681;text-transform:uppercase;letter-spacing:.4px;background:#0d1117">
+            <thead><tr style="font-size:10px;color:#6B7280;text-transform:uppercase;letter-spacing:.4px;background:#F9FAFB">
               <th style="text-align:left;padding:5px 12px">Provider</th>
               <th style="text-align:left;padding:5px 8px">Environment Variable</th>
             </tr></thead>
             <tbody>`;
         for (const e of envs) {{
-          html += `<tr style="border-top:1px solid #161b22">
-            <td style="padding:7px 12px;font-weight:600;color:#e6edf3">${{esc(e.service)}}</td>
-            <td style="padding:7px 8px;font-family:monospace;font-size:11px;color:#6e7681"><code style="background:#21262d;padding:1px 5px;border-radius:2px">${{esc(e.env_var || '')}}</code></td>
+          html += `<tr style="border-top:1px solid #F3F4F6">
+            <td style="padding:7px 12px;font-weight:600;color:#111827">${{esc(e.service)}}</td>
+            <td style="padding:7px 8px;font-family:monospace;font-size:11px;color:#6B7280"><code style="background:#F3F4F6;padding:1px 5px;border-radius:2px">${{esc(e.env_var || '')}}</code></td>
           </tr>`;
         }}
         html += '</tbody></table></div>';
@@ -4467,13 +4467,13 @@ async function runDiscovery() {{
 
       const totalHosts = hostCount;
       const totalSvcs  = svcs.filter(s => s.source === 'network_probe').length;
-      panel.innerHTML = html + `<div style="font-size:11px;color:#484f58;margin-top:2px;display:flex;align-items:center;gap:12px">
+      panel.innerHTML = html + `<div style="font-size:11px;color:#9CA3AF;margin-top:2px;display:flex;align-items:center;gap:12px">
         <span>${{totalHosts}} host${{totalHosts !== 1 ? 's' : ''}} · ${{totalSvcs}} network service${{totalSvcs !== 1 ? 's' : ''}}${{procs.length ? ' · ' + procs.length + ' process' + (procs.length !== 1 ? 'es' : '') : ''}}${{envs.length ? ' · ' + envs.length + ' API key' + (envs.length !== 1 ? 's' : '') : ''}} · <span style="color:#30363d">v2025-c</span></span>
-        <button onclick="this.closest('div').parentElement.innerHTML='<div class=\\'empty\\'style=\\'padding:12px\\'>Click Scan Network to detect AI services.</div>'" style="background:none;border:1px solid #30363d;color:#6e7681;border-radius:3px;padding:2px 8px;font-size:11px;cursor:pointer">Clear</button>
+        <button onclick="this.closest('div').parentElement.innerHTML='<div class=\\'empty\\'style=\\'padding:12px\\'>Click Scan Network to detect AI services.</div>'" style="background:none;border:1px solid #E5E7EB;color:#6B7280;border-radius:3px;padding:2px 8px;font-size:11px;cursor:pointer">Clear</button>
       </div>`;
     }}
   }} catch (e) {{
-    panel.innerHTML = '<div class="empty" style="padding:12px;color:#f85149">Discovery failed: ' + esc(String(e)) + '</div>';
+    panel.innerHTML = '<div class="empty" style="padding:12px;color:#DC2626">Discovery failed: ' + esc(String(e)) + '</div>';
   }} finally {{
     btn.disabled = false;
     btn.textContent = 'Scan Network';
@@ -4502,26 +4502,26 @@ function openScanModal(id, triggerBtn) {{
   overlay.style.cssText = 'position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center';
 
   const modal = document.createElement('div');
-  modal.style.cssText = 'background:#161b22;border:1px solid #30363d;border-radius:8px;padding:20px 24px;min-width:280px;max-width:340px;box-shadow:0 8px 32px rgba(0,0,0,.6)';
+  modal.style.cssText = 'background:#ffffff;border:1px solid #E5E7EB;border-radius:8px;padding:20px 24px;min-width:280px;max-width:340px;box-shadow:0 8px 32px rgba(0,0,0,.6)';
 
   const hostname = triggerBtn.closest('tr')?.querySelector('.dev-host')?.textContent || id.slice(0,12);
 
   modal.innerHTML = `
-    <div style="font-size:13px;font-weight:600;color:#e6edf3;margin-bottom:4px">Select Profiles to Scan</div>
-    <div style="font-size:11px;color:#6e7681;margin-bottom:14px">${{esc(hostname)}}</div>
+    <div style="font-size:13px;font-weight:600;color:#111827;margin-bottom:4px">Select Profiles to Scan</div>
+    <div style="font-size:11px;color:#6B7280;margin-bottom:14px">${{esc(hostname)}}</div>
     <div id="smp-list" style="display:flex;flex-direction:column;gap:8px;margin-bottom:16px">
       ${{_SCAN_PROFILES.map(p => `
-        <label style="display:flex;align-items:flex-start;gap:10px;cursor:pointer;padding:7px 10px;border:1px solid #21262d;border-radius:5px;transition:border-color .15s"
-               onmouseover="this.style.borderColor='#30363d'" onmouseout="this.style.borderColor='#21262d'">
-          <input type="checkbox" value="${{p.id}}" style="margin-top:2px;accent-color:#58a6ff;cursor:pointer">
+        <label style="display:flex;align-items:flex-start;gap:10px;cursor:pointer;padding:7px 10px;border:1px solid #F3F4F6;border-radius:5px;transition:border-color .15s"
+               onmouseover="this.style.borderColor='#E5E7EB'" onmouseout="this.style.borderColor='#F3F4F6'">
+          <input type="checkbox" value="${{p.id}}" style="margin-top:2px;accent-color:#4F46E5;cursor:pointer">
           <span>
-            <span style="font-size:12px;font-weight:600;color:#e6edf3;display:block">${{p.label}}</span>
-            <span style="font-size:11px;color:#6e7681">${{p.desc}}</span>
+            <span style="font-size:12px;font-weight:600;color:#111827;display:block">${{p.label}}</span>
+            <span style="font-size:11px;color:#6B7280">${{p.desc}}</span>
           </span>
         </label>`).join('')}}
     </div>
     <div style="display:flex;gap:8px;justify-content:flex-end">
-      <button id="smp-cancel" style="background:none;border:1px solid #30363d;color:#6e7681;border-radius:4px;padding:5px 14px;font-size:12px;cursor:pointer">Cancel</button>
+      <button id="smp-cancel" style="background:none;border:1px solid #E5E7EB;color:#6B7280;border-radius:4px;padding:5px 14px;font-size:12px;cursor:pointer">Cancel</button>
       <button id="smp-run" style="background:#1f6feb;border:1px solid #1f6feb;color:#fff;border-radius:4px;padding:5px 14px;font-size:12px;cursor:pointer;font-weight:600" disabled>Run Scans</button>
     </div>`;
 
@@ -4673,9 +4673,9 @@ async function dismissAllShadow() {{
 
 const _SHADOW_SRC = {{
   network:   {{icon:'&#127760;', color:'#a371f7', label:'Network'}},
-  cloud_api: {{icon:'&#9729;',   color:'#58a6ff', label:'Cloud API'}},
+  cloud_api: {{icon:'&#9729;',   color:'#4F46E5', label:'Cloud API'}},
   process:   {{icon:'&#9881;',   color:'#f0883e', label:'Process'}},
-  docker:    {{icon:'&#128051;', color:'#3fb950', label:'Container'}},
+  docker:    {{icon:'&#128051;', color:'#16A34A', label:'Container'}},
 }};
 
 async function refreshShadow() {{
@@ -4689,13 +4689,13 @@ async function refreshShadow() {{
     if (!container) return;
     const devs = data.devices || [];
     if (!devs.length) {{
-      container.innerHTML = '<div class="empty" style="padding:20px;text-align:center;color:#484f58">No Shadow AI detected yet. Click <strong style="color:#a371f7">Find Shadow AI</strong> above to scan your network through all installed agents.</div>';
+      container.innerHTML = '<div class="empty" style="padding:20px;text-align:center;color:#9CA3AF">No Shadow AI detected yet. Click <strong style="color:#a371f7">Find Shadow AI</strong> above to scan your network through all installed agents.</div>';
       return;
     }}
     const _modelTags = (models) => {{
       const shown = (models||[]).slice(0,5);
-      const extra = (models||[]).length > 5 ? ` <span style="font-size:11px;color:#6e7681">+${{(models||[]).length-5}} more</span>` : '';
-      return shown.map(m => `<span style="background:#0d1117;border:1px solid #30363d;border-radius:3px;padding:1px 8px;font-size:11px;font-family:monospace;color:#c9d1d9">${{esc(m)}}</span>`).join(' ') + extra;
+      const extra = (models||[]).length > 5 ? ` <span style="font-size:11px;color:#6B7280">+${{(models||[]).length-5}} more</span>` : '';
+      return shown.map(m => `<span style="background:#F9FAFB;border:1px solid #E5E7EB;border-radius:3px;padding:1px 8px;font-size:11px;font-family:monospace;color:#374151">${{esc(m)}}</span>`).join(' ') + extra;
     }};
 
     const dockerItems = devs.filter(d => d.source === 'docker');
@@ -4705,14 +4705,14 @@ async function refreshShadow() {{
       const src = _SHADOW_SRC[d.source] || _SHADOW_SRC.network;
       const age = _age(d.last_seen);
       const locationHtml = d.source === 'network'
-        ? `<span style="font-weight:700;color:#e6edf3;font-size:14px">${{esc(d.host)}}:${{d.port}}</span>`
-        : `<span style="font-weight:700;color:#e6edf3;font-size:14px">${{esc(d.service)}}</span>`;
+        ? `<span style="font-weight:700;color:#111827;font-size:14px">${{esc(d.host)}}:${{d.port}}</span>`
+        : `<span style="font-weight:700;color:#111827;font-size:14px">${{esc(d.service)}}</span>`;
       const subHtml = d.source === 'network'
         ? `<div style="font-size:12px;color:${{src.color}};margin-bottom:8px">${{esc(d.service)}}</div>`
-        : d.detail ? `<div style="font-size:12px;color:#6e7681;margin-bottom:8px">${{esc(d.detail)}}</div>` : '';
+        : d.detail ? `<div style="font-size:12px;color:#6B7280;margin-bottom:8px">${{esc(d.detail)}}</div>` : '';
       const modelSection = (d.models||[]).length
         ? `<div style="display:flex;flex-wrap:wrap;gap:5px;align-items:center">${{_modelTags(d.models)}}</div>`
-        : `<div style="font-size:11px;color:#484f58">No model details available</div>`;
+        : `<div style="font-size:11px;color:#9CA3AF">No model details available</div>`;
       return `<div class="shadow-card" style="border-left-color:${{src.color}}">
         <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px">
           <div style="flex:1;min-width:0">
@@ -4725,9 +4725,9 @@ async function refreshShadow() {{
             ${{modelSection}}
           </div>
           <div style="text-align:right;flex-shrink:0">
-            <div style="font-size:11px;color:#484f58;margin-bottom:3px">Detected ${{age}}</div>
-            <div style="font-size:11px;color:#6e7681;margin-bottom:8px">via ${{esc(d.reporter_hostname)}}</div>
-            <button class="scan-btn" onclick="dismissShadow(${{d.id}})" style="font-size:11px;color:#6e7681;border-color:#30363d">Dismiss</button>
+            <div style="font-size:11px;color:#9CA3AF;margin-bottom:3px">Detected ${{age}}</div>
+            <div style="font-size:11px;color:#6B7280;margin-bottom:8px">via ${{esc(d.reporter_hostname)}}</div>
+            <button class="scan-btn" onclick="dismissShadow(${{d.id}})" style="font-size:11px;color:#6B7280;border-color:#E5E7EB">Dismiss</button>
           </div>
         </div>
       </div>`;
@@ -4744,33 +4744,33 @@ async function refreshShadow() {{
       const latestTs = Math.max(...items.map(i => i.last_seen || 0));
       const cntLabel = `${{items.length}} container${{items.length !== 1 ? 's' : ''}}`;
       const rowsHtml = items.map(d => {{
-        const portHtml   = d.port   ? `<span style="font-size:11px;color:#484f58;font-family:monospace">:${{d.port}}</span>` : '';
-        const detailHtml = d.detail ? `<span style="font-size:11px;color:#6e7681;font-family:monospace">${{esc(d.detail)}}</span>` : '';
+        const portHtml   = d.port   ? `<span style="font-size:11px;color:#9CA3AF;font-family:monospace">:${{d.port}}</span>` : '';
+        const detailHtml = d.detail ? `<span style="font-size:11px;color:#6B7280;font-family:monospace">${{esc(d.detail)}}</span>` : '';
         const modelSection = (d.models||[]).length
           ? `<div style="display:flex;flex-wrap:wrap;gap:4px;align-items:center">${{_modelTags(d.models)}}</div>`
-          : `<div style="font-size:11px;color:#484f58">No model details available</div>`;
-        return `<div style="background:#0d1117;border:1px solid #21262d;border-radius:6px;padding:10px 14px;margin-bottom:8px">
+          : `<div style="font-size:11px;color:#9CA3AF">No model details available</div>`;
+        return `<div style="background:#F9FAFB;border:1px solid #F3F4F6;border-radius:6px;padding:10px 14px;margin-bottom:8px">
           <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px">
             <div style="flex:1;min-width:0">
               <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:5px">
-                <span style="font-size:13px;color:#e6edf3;font-weight:600">${{esc(d.service)}}</span>
+                <span style="font-size:13px;color:#111827;font-weight:600">${{esc(d.service)}}</span>
                 ${{detailHtml}}${{portHtml}}
               </div>
               ${{modelSection}}
             </div>
             <div style="text-align:right;flex-shrink:0;min-width:80px">
-              <div style="font-size:11px;color:#484f58;margin-bottom:6px">${{_age(d.last_seen)}}</div>
-              <button class="scan-btn" onclick="dismissShadow(${{d.id}})" style="font-size:11px;color:#6e7681;border-color:#30363d">Dismiss</button>
+              <div style="font-size:11px;color:#9CA3AF;margin-bottom:6px">${{_age(d.last_seen)}}</div>
+              <button class="scan-btn" onclick="dismissShadow(${{d.id}})" style="font-size:11px;color:#6B7280;border-color:#E5E7EB">Dismiss</button>
             </div>
           </div>
         </div>`;
       }}).join('');
-      return `<div class="shadow-card" style="border-left-color:#3fb950;padding:0;overflow:hidden">
+      return `<div class="shadow-card" style="border-left-color:#16A34A;padding:0;overflow:hidden">
         <div style="display:flex;align-items:center;gap:8px;padding:12px 14px 10px;background:#0f1f14;border-bottom:1px solid #1a3020;margin-bottom:10px">
           <span style="font-size:18px">&#128051;</span>
-          <span style="font-weight:700;color:#e6edf3;font-size:14px">${{esc(reporter)}}</span>
-          <span style="font-size:10px;font-weight:700;padding:1px 7px;border-radius:3px;background:#1a3020;color:#3fb950;border:1px solid #3fb950;text-transform:uppercase">Docker Host</span>
-          <span style="font-size:11px;color:#484f58;margin-left:auto">${{cntLabel}} &nbsp;&middot;&nbsp; last seen ${{_age(latestTs)}}</span>
+          <span style="font-weight:700;color:#111827;font-size:14px">${{esc(reporter)}}</span>
+          <span style="font-size:10px;font-weight:700;padding:1px 7px;border-radius:3px;background:#DCFCE7;color:#16A34A;border:1px solid #3fb950;text-transform:uppercase">Docker Host</span>
+          <span style="font-size:11px;color:#9CA3AF;margin-left:auto">${{cntLabel}} &nbsp;&middot;&nbsp; last seen ${{_age(latestTs)}}</span>
         </div>
         <div style="padding:0 14px 12px">${{rowsHtml}}</div>
       </div>`;
@@ -4809,9 +4809,9 @@ async function dismissAllMcp() {{
 }}
 
 const _MCP_AUTH = {{
-  none:     {{color:'#f85149', label:'No Auth',  risk: true}},
+  none:     {{color:'#DC2626', label:'No Auth',  risk: true}},
   unknown:  {{color:'#e3b341', label:'Auth?',    risk: false}},
-  required: {{color:'#3fb950', label:'Auth OK',  risk: false}},
+  required: {{color:'#16A34A', label:'Auth OK',  risk: false}},
 }};
 
 async function refreshMcp() {{
@@ -4825,26 +4825,26 @@ async function refreshMcp() {{
     if (!container) return;
     const servers = data.servers || [];
     if (!servers.length) {{
-      container.innerHTML = '<div class="empty" style="padding:20px;text-align:center;color:#484f58">No MCP servers detected yet. Click <strong style="color:#58a6ff">Scan MCP Servers</strong> above to scan your network through all installed agents.</div>';
+      container.innerHTML = '<div class="empty" style="padding:20px;text-align:center;color:#9CA3AF">No MCP servers detected yet. Click <strong style="color:#4F46E5">Scan MCP Servers</strong> above to scan your network through all installed agents.</div>';
       return;
     }}
     container.innerHTML = servers.map(s => {{
       const auth = _MCP_AUTH[s.auth_status] || _MCP_AUTH.unknown;
       const isProcess = s.source === 'process';
       const locationHtml = isProcess
-        ? `<span style="font-weight:700;color:#e6edf3;font-size:14px">MCP Server Process</span>`
-        : `<span style="font-weight:700;color:#e6edf3;font-size:14px">${{esc(s.host)}}:${{s.port}}</span>`;
+        ? `<span style="font-weight:700;color:#111827;font-size:14px">MCP Server Process</span>`
+        : `<span style="font-weight:700;color:#111827;font-size:14px">${{esc(s.host)}}:${{s.port}}</span>`;
       const subHtml = isProcess
-        ? (s.process_info ? `<div style="font-size:11px;color:#6e7681;font-family:monospace;margin-bottom:6px">${{esc(s.process_info.substring(0,80))}}</div>` : '')
-        : `<div style="font-size:12px;color:#58a6ff;margin-bottom:6px">${{esc(s.server_name || 'MCP Server')}}</div>`;
+        ? (s.process_info ? `<div style="font-size:11px;color:#6B7280;font-family:monospace;margin-bottom:6px">${{esc(s.process_info.substring(0,80))}}</div>` : '')
+        : `<div style="font-size:12px;color:#4F46E5;margin-bottom:6px">${{esc(s.server_name || 'MCP Server')}}</div>`;
       const tools = (s.tools||[]).slice(0,6);
-      const toolTags = tools.map(t => `<span style="background:#0d1117;border:1px solid #30363d;border-radius:3px;padding:1px 8px;font-size:11px;font-family:monospace;color:#c9d1d9">${{esc(t)}}</span>`).join(' ');
-      const toolExtra = (s.tools||[]).length > 6 ? `<span style="font-size:11px;color:#6e7681">+${{(s.tools||[]).length-6}} more</span>` : '';
+      const toolTags = tools.map(t => `<span style="background:#F9FAFB;border:1px solid #E5E7EB;border-radius:3px;padding:1px 8px;font-size:11px;font-family:monospace;color:#374151">${{esc(t)}}</span>`).join(' ');
+      const toolExtra = (s.tools||[]).length > 6 ? `<span style="font-size:11px;color:#6B7280">+${{(s.tools||[]).length-6}} more</span>` : '';
       const toolSection = (s.tools||[]).length
         ? `<div style="display:flex;flex-wrap:wrap;gap:5px;align-items:center">${{toolTags}}${{toolExtra}}</div>`
-        : `<div style="font-size:11px;color:#484f58">No tools enumerated</div>`;
+        : `<div style="font-size:11px;color:#9CA3AF">No tools enumerated</div>`;
       const riskNote = auth.risk
-        ? `<div style="font-size:11px;color:#f85149;margin-top:4px;font-weight:600">&#9888; Unauthenticated — any AI agent can connect to this server</div>` : '';
+        ? `<div style="font-size:11px;color:#DC2626;margin-top:4px;font-weight:600">&#9888; Unauthenticated — any AI agent can connect to this server</div>` : '';
       return `<div class="shadow-card" style="border-left-color:${{auth.color}}">
         <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px">
           <div style="flex:1;min-width:0">
@@ -4852,16 +4852,16 @@ async function refreshMcp() {{
               <span style="font-size:16px">&#128279;</span>
               ${{locationHtml}}
               <span style="font-size:10px;font-weight:700;padding:1px 7px;border-radius:3px;background:#1a1f2e;color:${{auth.color}};border:1px solid ${{auth.color}};text-transform:uppercase">${{auth.label}}</span>
-              <span style="font-size:10px;padding:1px 7px;border-radius:3px;background:#0d1117;color:#6e7681;border:1px solid #30363d;text-transform:uppercase">${{isProcess ? 'Process' : 'Network'}}</span>
+              <span style="font-size:10px;padding:1px 7px;border-radius:3px;background:#F9FAFB;color:#6B7280;border:1px solid #E5E7EB;text-transform:uppercase">${{isProcess ? 'Process' : 'Network'}}</span>
             </div>
             ${{subHtml}}
             ${{toolSection}}
             ${{riskNote}}
           </div>
           <div style="text-align:right;flex-shrink:0">
-            <div style="font-size:11px;color:#484f58;margin-bottom:3px">Found ${{_age(s.last_seen)}}</div>
-            <div style="font-size:11px;color:#6e7681;margin-bottom:8px">via ${{esc(s.reporter_hostname)}}</div>
-            <button class="scan-btn" onclick="dismissMcp(${{s.id}})" style="font-size:11px;color:#6e7681;border-color:#30363d">Dismiss</button>
+            <div style="font-size:11px;color:#9CA3AF;margin-bottom:3px">Found ${{_age(s.last_seen)}}</div>
+            <div style="font-size:11px;color:#6B7280;margin-bottom:8px">via ${{esc(s.reporter_hostname)}}</div>
+            <button class="scan-btn" onclick="dismissMcp(${{s.id}})" style="font-size:11px;color:#6B7280;border-color:#E5E7EB">Dismiss</button>
           </div>
         </div>
       </div>`;
@@ -4878,24 +4878,24 @@ async function selectDevice(id) {{
   panel.style.minHeight = 'unset';
   panel.innerHTML = `
     <div style="display:flex;align-items:center;justify-content:space-between;
-                padding:0 16px 0 0;background:#161b22;border-radius:8px 8px 0 0;
-                border-bottom:1px solid #30363d">
+                padding:0 16px 0 0;background:#ffffff;border-radius:8px 8px 0 0;
+                border-bottom:1px solid #E5E7EB">
       <div style="display:flex;align-items:center;gap:0">
         <button id="tab-btn-dash" onclick="showDashTab('${{id}}')"
-          style="background:none;border:none;border-bottom:2px solid #58a6ff;color:#e6edf3;
+          style="background:none;border:none;border-bottom:2px solid #58a6ff;color:#111827;
                  font-size:13px;font-weight:600;padding:10px 16px 8px;cursor:pointer">Dashboard</button>
         <button id="tab-btn-trend" onclick="showTrendTab('${{id}}')"
-          style="background:none;border:none;border-bottom:2px solid transparent;color:#6e7681;
+          style="background:none;border:none;border-bottom:2px solid transparent;color:#6B7280;
                  font-size:13px;font-weight:400;padding:10px 16px 8px;cursor:pointer">Trend</button>
       </div>
       <div style="display:flex;gap:8px;align-items:center">
-        <span id="dash-title" style="font-size:12px;color:#8b949e"></span>
+        <span id="dash-title" style="font-size:12px;color:#6B7280"></span>
         <a id="dash-ext" href="/fleet/device/${{id}}/dashboard" target="_blank"
-           style="font-size:11px;color:#58a6ff;text-decoration:none">open in new tab ↗</a>
+           style="font-size:11px;color:#4F46E5;text-decoration:none">open in new tab ↗</a>
         <a href="/fleet/device/${{id}}/report.pdf"
-           style="font-size:11px;color:#3fb950;text-decoration:none">&#8659; Download PDF</a>
+           style="font-size:11px;color:#16A34A;text-decoration:none">&#8659; Download PDF</a>
         <button onclick="closeDevice()"
-                style="background:none;border:1px solid #30363d;color:#6e7681;
+                style="background:none;border:1px solid #E5E7EB;color:#6B7280;
                        border-radius:4px;padding:2px 9px;font-size:12px;cursor:pointer">✕</button>
       </div>
     </div>
@@ -4906,7 +4906,7 @@ async function selectDevice(id) {{
       </iframe>
     </div>
     <div id="device-trend-pane" style="display:none;padding:20px 16px;min-height:300px">
-      <div id="trend-chart" style="color:#8b949e;font-size:13px">Loading trend data…</div>
+      <div id="trend-chart" style="color:#6B7280;font-size:13px">Loading trend data…</div>
     </div>`;
   try {{
     const r = await fetch('/api/devices/' + id);
@@ -4927,8 +4927,8 @@ function showDashTab(id) {{
   if (dp) dp.style.display = '';
   if (tp) tp.style.display = 'none';
   const b1 = document.getElementById('tab-btn-dash'), b2 = document.getElementById('tab-btn-trend');
-  if (b1) {{ b1.style.borderBottomColor = '#58a6ff'; b1.style.color = '#e6edf3'; b1.style.fontWeight = '600'; }}
-  if (b2) {{ b2.style.borderBottomColor = 'transparent'; b2.style.color = '#6e7681'; b2.style.fontWeight = '400'; }}
+  if (b1) {{ b1.style.borderBottomColor = '#4F46E5'; b1.style.color = '#111827'; b1.style.fontWeight = '600'; }}
+  if (b2) {{ b2.style.borderBottomColor = 'transparent'; b2.style.color = '#6B7280'; b2.style.fontWeight = '400'; }}
 }}
 
 async function showTrendTab(id) {{
@@ -4937,8 +4937,8 @@ async function showTrendTab(id) {{
   if (dp) dp.style.display = 'none';
   if (tp) tp.style.display = '';
   const b1 = document.getElementById('tab-btn-dash'), b2 = document.getElementById('tab-btn-trend');
-  if (b1) {{ b1.style.borderBottomColor = 'transparent'; b1.style.color = '#6e7681'; b1.style.fontWeight = '400'; }}
-  if (b2) {{ b2.style.borderBottomColor = '#58a6ff'; b2.style.color = '#e6edf3'; b2.style.fontWeight = '600'; }}
+  if (b1) {{ b1.style.borderBottomColor = 'transparent'; b1.style.color = '#6B7280'; b1.style.fontWeight = '400'; }}
+  if (b2) {{ b2.style.borderBottomColor = '#4F46E5'; b2.style.color = '#111827'; b2.style.fontWeight = '600'; }}
   const chart = document.getElementById('trend-chart');
   if (!chart) return;
   chart.textContent = 'Loading…';
@@ -4947,14 +4947,14 @@ async function showTrendTab(id) {{
     const data = await r.json();
     chart.innerHTML = renderTrendChart(data.points || []);
   }} catch (e) {{
-    chart.innerHTML = '<div style="color:#f85149;padding:20px">Failed to load trend data: ' + e + '</div>';
+    chart.innerHTML = '<div style="color:#DC2626;padding:20px">Failed to load trend data: ' + e + '</div>';
   }}
 }}
 
 function renderTrendChart(points) {{
   if (!points.length) {{
-    return '<div style="padding:48px;text-align:center;color:#484f58">No historical data yet.<br>'
-      + '<small style="color:#363d47">The trend view populates after the device completes multiple scans.</small></div>';
+    return '<div style="padding:48px;text-align:center;color:#9CA3AF">No historical data yet.<br>'
+      + '<small style="color:#9CA3AF">The trend view populates after the device completes multiple scans.</small></div>';
   }}
   const W = 680, H = 220, padL = 50, padR = 20, padT = 22, padB = 44;
   const cW = W - padL - padR, cH = H - padT - padB;
@@ -4968,15 +4968,15 @@ function renderTrendChart(points) {{
   }}
   function mkdots(ser, col) {{
     return points.map(function(p,i) {{
-      return '<circle cx="'+xp(i)+'" cy="'+yp(p[ser]||0)+'" r="3.5" fill="'+col+'" stroke="#0d1117" stroke-width="1"/>';
+      return '<circle cx="'+xp(i)+'" cy="'+yp(p[ser]||0)+'" r="3.5" fill="'+col+'" stroke="#F9FAFB" stroke-width="1"/>';
     }}).join('');
   }}
   let grid = '';
   for (let k = 0; k <= 4; k++) {{
     const yy = padT + (k/4)*cH;
     const v = Math.round(maxVal*(1 - k/4));
-    grid += '<line x1="'+padL+'" y1="'+yy+'" x2="'+(padL+cW)+'" y2="'+yy+'" stroke="#21262d" stroke-width="1"/>'
-          + '<text x="'+(padL-6)+'" y="'+(yy+4)+'" text-anchor="end" font-size="10" fill="#6e7681">'+v+'</text>';
+    grid += '<line x1="'+padL+'" y1="'+yy+'" x2="'+(padL+cW)+'" y2="'+yy+'" stroke="#E5E7EB" stroke-width="1"/>'
+          + '<text x="'+(padL-6)+'" y="'+(yy+4)+'" text-anchor="end" font-size="10" fill="#6B7280">'+v+'</text>';
   }}
   let xlabels = '';
   const step = Math.max(1, Math.floor((n-1)/5));
@@ -4984,19 +4984,19 @@ function renderTrendChart(points) {{
     if (i % step !== 0 && i !== n-1) continue;
     const d = new Date(points[i].t * 1000);
     const lbl = String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
-    xlabels += '<text x="'+xp(i)+'" y="'+(padT+cH+16)+'" text-anchor="middle" font-size="10" fill="#6e7681">'+lbl+'</text>';
+    xlabels += '<text x="'+xp(i)+'" y="'+(padT+cH+16)+'" text-anchor="middle" font-size="10" fill="#6B7280">'+lbl+'</text>';
   }}
   return '<div style="overflow-x:auto">'
     + '<svg viewBox="0 0 '+W+' '+H+'" style="width:100%;max-width:'+W+'px;display:block" xmlns="http://www.w3.org/2000/svg">'
     + grid
-    + '<line x1="'+padL+'" y1="'+padT+'" x2="'+padL+'" y2="'+(padT+cH)+'" stroke="#30363d" stroke-width="1"/>'
-    + '<line x1="'+padL+'" y1="'+(padT+cH)+'" x2="'+(padL+cW)+'" y2="'+(padT+cH)+'" stroke="#30363d" stroke-width="1"/>'
-    + mkline('fail','#f85149') + mkline('warn','#d29922') + mkline('pass','#3fb950')
-    + mkdots('fail','#f85149') + mkdots('warn','#d29922') + mkdots('pass','#3fb950')
+    + '<line x1="'+padL+'" y1="'+padT+'" x2="'+padL+'" y2="'+(padT+cH)+'" stroke="#E5E7EB" stroke-width="1"/>'
+    + '<line x1="'+padL+'" y1="'+(padT+cH)+'" x2="'+(padL+cW)+'" y2="'+(padT+cH)+'" stroke="#E5E7EB" stroke-width="1"/>'
+    + mkline('fail','#DC2626') + mkline('warn','#CA8A04') + mkline('pass','#16A34A')
+    + mkdots('fail','#DC2626') + mkdots('warn','#CA8A04') + mkdots('pass','#16A34A')
     + xlabels
-    + '<circle cx="'+(padL+10)+'" cy="12" r="4" fill="#f85149"/><text x="'+(padL+18)+'" y="16" font-size="11" fill="#8b949e">HIGH</text>'
-    + '<circle cx="'+(padL+58)+'" cy="12" r="4" fill="#d29922"/><text x="'+(padL+66)+'" y="16" font-size="11" fill="#8b949e">MEDIUM</text>'
-    + '<circle cx="'+(padL+106)+'" cy="12" r="4" fill="#58a6ff"/><text x="'+(padL+114)+'" y="16" font-size="11" fill="#8b949e">INFO</text>'
+    + '<circle cx="'+(padL+10)+'" cy="12" r="4" fill="#f85149"/><text x="'+(padL+18)+'" y="16" font-size="11" fill="#6B7280">HIGH</text>'
+    + '<circle cx="'+(padL+58)+'" cy="12" r="4" fill="#d29922"/><text x="'+(padL+66)+'" y="16" font-size="11" fill="#6B7280">MEDIUM</text>'
+    + '<circle cx="'+(padL+106)+'" cy="12" r="4" fill="#4F46E5"/><text x="'+(padL+114)+'" y="16" font-size="11" fill="#6B7280">INFO</text>'
     + '</svg></div>';
 }}
 
@@ -5011,7 +5011,7 @@ function _sysLog(msg, color) {{
   const el = document.getElementById('sys-log');
   if (!el) return;
   el.style.display = 'block';
-  el.style.color = color || '#8b949e';
+  el.style.color = color || '#6B7280';
   el.textContent = msg;
 }}
 
@@ -5089,12 +5089,12 @@ async function loadInventory() {{
     _invData = d.items || [];
     const c = d.counts || {{}};
     document.getElementById('inv-counts').innerHTML =
-      `<div class="inv-count-card"><div class="inv-count-n" style="color:#f85149">${{c.unapproved||0}}</div><div style="color:#8b949e">Unapproved</div></div>` +
-      `<div class="inv-count-card"><div class="inv-count-n" style="color:#d29922">${{c.under_review||0}}</div><div style="color:#8b949e">Under Review</div></div>` +
-      `<div class="inv-count-card"><div class="inv-count-n" style="color:#3fb950">${{c.approved||0}}</div><div style="color:#8b949e">Approved</div></div>`;
+      `<div class="inv-count-card"><div class="inv-count-n" style="color:#DC2626">${{c.unapproved||0}}</div><div style="color:#6B7280">Unapproved</div></div>` +
+      `<div class="inv-count-card"><div class="inv-count-n" style="color:#CA8A04">${{c.under_review||0}}</div><div style="color:#6B7280">Under Review</div></div>` +
+      `<div class="inv-count-card"><div class="inv-count-n" style="color:#16A34A">${{c.approved||0}}</div><div style="color:#6B7280">Approved</div></div>`;
     renderInventory();
   }} catch(e) {{
-    document.getElementById('inv-body').innerHTML = '<div style="color:#f85149;font-size:13px;padding:8px 0">Failed to load inventory.</div>';
+    document.getElementById('inv-body').innerHTML = '<div style="color:#DC2626;font-size:13px;padding:8px 0">Failed to load inventory.</div>';
   }}
 }}
 
@@ -5109,7 +5109,7 @@ function renderInventory() {{
   const rows = _invStatus === 'all' ? _invData : _invData.filter(i => i.approval_status === _invStatus);
   const el = document.getElementById('inv-body');
   if (!rows.length) {{
-    el.innerHTML = '<div style="color:#6e7681;font-size:13px;padding:16px 0">' +
+    el.innerHTML = '<div style="color:#6B7280;font-size:13px;padding:16px 0">' +
       (_invData.length ? 'No assets at this status.' : 'No AI assets discovered yet. Run Shadow AI discovery first.') + '</div>';
     return;
   }}
@@ -5134,10 +5134,10 @@ function renderInventory() {{
     }}
     return `<tr>
       <td style="font-size:16px">${{icon}}</td>
-      <td style="color:#e6edf3;font-weight:600">${{esc(item.host)}}${{item.port ? ':'+item.port : ''}}</td>
-      <td style="color:#8b949e">${{esc(item.service||item.source)}}</td>
-      <td style="color:#8b949e;font-size:12px">${{esc(models)}}</td>
-      <td style="color:#6e7681;font-size:11px">${{esc(item.reporter_hostname||'')}}</td>
+      <td style="color:#111827;font-weight:600">${{esc(item.host)}}${{item.port ? ':'+item.port : ''}}</td>
+      <td style="color:#6B7280">${{esc(item.service||item.source)}}</td>
+      <td style="color:#6B7280;font-size:12px">${{esc(models)}}</td>
+      <td style="color:#6B7280;font-size:11px">${{esc(item.reporter_hostname||'')}}</td>
       <td>${{badge}}</td>
       <td style="white-space:nowrap;display:flex;gap:4px">${{actions}}</td>
     </tr>`;
@@ -5145,7 +5145,7 @@ function renderInventory() {{
   el.innerHTML = `<table class="rr-table">
     <thead><tr><th></th><th>Host</th><th>Service</th><th>Models</th><th>Reported by</th><th>Status</th><th>Actions</th></tr></thead>
     <tbody>${{trs}}</tbody>
-  </table><div style="font-size:11px;color:#484f58;margin-bottom:8px">${{rows.length}} asset${{rows.length!==1?'s':''}} · approvals are timestamped and attributed in the evidence export</div>`;
+  </table><div style="font-size:11px;color:#9CA3AF;margin-bottom:8px">${{rows.length}} asset${{rows.length!==1?'s':''}} · approvals are timestamped and attributed in the evidence export</div>`;
 }}
 
 async function invSetStatus(id, status, btn) {{
@@ -5170,14 +5170,14 @@ async function loadSchedules() {{
     const d = await r.json();
     renderSchedules(d.schedules || []);
   }} catch(e) {{
-    document.getElementById('sched-list').innerHTML = '<div style="color:#f85149;font-size:13px">Failed to load schedules.</div>';
+    document.getElementById('sched-list').innerHTML = '<div style="color:#DC2626;font-size:13px">Failed to load schedules.</div>';
   }}
 }}
 
 function renderSchedules(scheds) {{
   const el = document.getElementById('sched-list');
   if (!scheds.length) {{
-    el.innerHTML = '<div style="color:#6e7681;font-size:13px;padding:8px 0">No schedules configured. Use "+ Add schedule" below to create one.</div>';
+    el.innerHTML = '<div style="color:#6B7280;font-size:13px;padding:8px 0">No schedules configured. Use "+ Add schedule" below to create one.</div>';
     return;
   }}
   const rows = scheds.map(s => {{
@@ -5187,15 +5187,15 @@ function renderSchedules(scheds) {{
     if (s.cadence==='monthly') when = 'Day ' + (s.monthday||1) + ' ' + when;
     const enabled = s.enabled ? '🟢' : '⚫';
     const fired = s.last_fired ? new Date(s.last_fired*1000).toLocaleDateString() : 'Never';
-    return `<div style="display:flex;align-items:center;gap:12px;padding:6px 0;border-bottom:1px solid #21262d;font-size:13px;flex-wrap:wrap">
+    return `<div style="display:flex;align-items:center;gap:12px;padding:6px 0;border-bottom:1px solid #F3F4F6;font-size:13px;flex-wrap:wrap">
       <span style="min-width:16px">${{enabled}}</span>
-      <span style="font-weight:600;color:#e6edf3;min-width:160px">${{esc(lbl)}}</span>
+      <span style="font-weight:600;color:#111827;min-width:160px">${{esc(lbl)}}</span>
       <span class="tag">${{CADENCE_LABELS[s.cadence]||s.cadence}}</span>
       <span class="tag">${{PROFILE_LABELS[s.profile]||s.profile}}</span>
-      <span style="color:#8b949e;font-size:12px">${{when}}</span>
-      <span style="color:#484f58;font-size:11px;margin-left:auto">Last ran: ${{fired}}</span>
+      <span style="color:#6B7280;font-size:12px">${{when}}</span>
+      <span style="color:#9CA3AF;font-size:11px;margin-left:auto">Last ran: ${{fired}}</span>
       <button class="inv-action" onclick="toggleSchedule(${{s.id}},this)">${{s.enabled?'Disable':'Enable'}}</button>
-      <button class="inv-action" style="color:#f85149" onclick="deleteSchedule(${{s.id}},this)">Delete</button>
+      <button class="inv-action" style="color:#DC2626" onclick="deleteSchedule(${{s.id}},this)">Delete</button>
     </div>`;
   }}).join('');
   el.innerHTML = rows;
@@ -5273,7 +5273,7 @@ async function loadRiskRegister() {{
     _rrData = d.entries || [];
     renderRiskRegister();
   }} catch(e) {{
-    document.getElementById('rr-body').innerHTML = '<div style="color:#f85149;font-size:13px;padding:8px 0">Failed to load risk register.</div>';
+    document.getElementById('rr-body').innerHTML = '<div style="color:#DC2626;font-size:13px;padding:8px 0">Failed to load risk register.</div>';
   }}
 }}
 
@@ -5288,7 +5288,7 @@ function renderRiskRegister() {{
   const rows = _rrSev === 'all' ? _rrData : _rrData.filter(e => e.severity === _rrSev);
   const el = document.getElementById('rr-body');
   if (!rows.length) {{
-    el.innerHTML = '<div style="color:#6e7681;font-size:13px;padding:16px 0">' +
+    el.innerHTML = '<div style="color:#6B7280;font-size:13px;padding:16px 0">' +
       (_rrData.length ? 'No findings at this severity.' : 'No open findings — fleet is clean.') + '</div>';
     return;
   }}
@@ -5300,32 +5300,32 @@ function renderRiskRegister() {{
     const devTip = e.affected_devices.join(', ');
     return `<tr>
       <td><span class="badge ${{SEV_CLS[e.severity]||'low'}}">${{esc(e.severity)}}</span></td>
-      <td style="font-family:monospace;font-size:12px;color:#8b949e">${{esc(e.check_id)}}</td>
-      <td style="color:#c9d1d9">${{esc(e.title)}}</td>
-      <td title="${{esc(devTip)}}" style="cursor:default;color:#e6edf3;font-weight:600">${{e.affected_count}}</td>
+      <td style="font-family:monospace;font-size:12px;color:#6B7280">${{esc(e.check_id)}}</td>
+      <td style="color:#374151">${{esc(e.title)}}</td>
+      <td title="${{esc(devTip)}}" style="cursor:default;color:#111827;font-weight:600">${{e.affected_count}}</td>
       <td>${{badge}}</td>
-      <td style="color:#8b949e">${{e.days_open}}d</td>
+      <td style="color:#6B7280">${{e.days_open}}d</td>
     </tr>`;
   }}).join('');
   el.innerHTML = `<table class="rr-table">
     <thead><tr><th>Severity</th><th>Check ID</th><th>Finding</th><th title="Hover for device list">Devices</th><th>Trend</th><th>Open</th></tr></thead>
     <tbody>${{trs}}</tbody>
-  </table><div style="font-size:11px;color:#484f58;margin-bottom:8px">${{rows.length}} open finding${{rows.length!==1?'s':''}} · hover device count for affected hostnames</div>`;
+  </table><div style="font-size:11px;color:#9CA3AF;margin-bottom:8px">${{rows.length}} open finding${{rows.length!==1?'s':''}} · hover device count for affected hostnames</div>`;
 }}
 
 async function pullUpdates() {{
   const btn = document.getElementById('btn-pull');
   btn.disabled = true;
-  _sysLog('Checking for updates…', '#8b949e');
+  _sysLog('Checking for updates…', '#6B7280');
   try {{
     const r = await fetch('/api/system/update', {{method:'POST'}});
     const d = await r.json();
-    _sysLog(d.output || '(no output)', d.status === 'error' ? '#f85149' : '#3fb950');
+    _sysLog(d.output || '(no output)', d.status === 'error' ? '#DC2626' : '#16A34A');
     if (d.status === 'restarting') {{
       btn.textContent = '↻ Restarting…';
       _sysLog('Server restarting with new code — reconnecting…', '#e3b341');
       await _waitForRestart();
-      _sysLog('Server is back online. Page will reload.', '#3fb950');
+      _sysLog('Server is back online. Page will reload.', '#16A34A');
       setTimeout(() => location.reload(), 800);
     }} else if (d.status === 'ok') {{
       btn.textContent = '⇓ Already up to date';
@@ -5335,7 +5335,7 @@ async function pullUpdates() {{
       setTimeout(() => {{ btn.disabled = false; btn.innerHTML = '&#8659; Pull Latest Updates'; }}, 5000);
     }}
   }} catch(e) {{
-    _sysLog('Error: ' + e, '#f85149');
+    _sysLog('Error: ' + e, '#DC2626');
     btn.disabled = false; btn.innerHTML = '&#8659; Pull Latest Updates';
   }}
 }}
@@ -5354,7 +5354,7 @@ async function _waitForRestart() {{
 async function restartAgent() {{
   const btn = document.getElementById('btn-restart-agent');
   btn.disabled = true; btn.textContent = 'Restarting…';
-  _sysLog('Restarting agent service…', '#8b949e');
+  _sysLog('Restarting agent service…', '#6B7280');
   try {{
     await fetch('/api/system/restart-agent', {{method:'POST'}});
     _sysLog('Agent restart queued — waiting for check-in…', '#e3b341');
@@ -5364,7 +5364,7 @@ async function restartAgent() {{
       try {{
         const r = await fetch('/api/fleet/devices');
         if (r.ok) {{
-          _sysLog('Agent back online ✓', '#3fb950');
+          _sysLog('Agent back online ✓', '#16A34A');
           clearInterval(poll);
           btn.disabled = false; btn.innerHTML = '&#8635; Restart Agent';
           refreshDevices();
@@ -5373,12 +5373,12 @@ async function restartAgent() {{
       }} catch (_) {{}}
       if (waited >= 60) {{
         clearInterval(poll);
-        _sysLog('Agent did not check in within 60s — check logs.', '#f85149');
+        _sysLog('Agent did not check in within 60s — check logs.', '#DC2626');
         btn.disabled = false; btn.innerHTML = '&#8635; Restart Agent';
       }}
     }}, 5000);
   }} catch(e) {{
-    _sysLog('Error: ' + e, '#f85149');
+    _sysLog('Error: ' + e, '#DC2626');
     btn.disabled = false; btn.innerHTML = '&#8635; Restart Agent';
   }}
 }}
@@ -5492,7 +5492,7 @@ async function saveAlertConfig() {{
 
 async function testAlert(channel) {{
   const el = document.getElementById('alert-test-result');
-  if (el) {{ el.style.display = 'block'; el.style.color = '#8b949e'; el.textContent = 'Sending test…'; }}
+  if (el) {{ el.style.display = 'block'; el.style.color = '#6B7280'; el.textContent = 'Sending test…'; }}
   try {{
     const r = await fetch('/api/alerts/test', {{
       method: 'POST', headers: {{'Content-Type': 'application/json'}},
@@ -5500,12 +5500,12 @@ async function testAlert(channel) {{
     }});
     const d = await r.json();
     if (el) {{
-      el.style.color = d.ok ? '#3fb950' : '#f85149';
+      el.style.color = d.ok ? '#16A34A' : '#DC2626';
       el.textContent = (d.ok ? '✓ ' : '✗ ') + d.message;
       setTimeout(() => el.style.display = 'none', 6000);
     }}
   }} catch (e) {{
-    if (el) {{ el.style.color = '#f85149'; el.textContent = '✗ Request failed: ' + e; }}
+    if (el) {{ el.style.color = '#DC2626'; el.textContent = '✗ Request failed: ' + e; }}
   }}
 }}
 
