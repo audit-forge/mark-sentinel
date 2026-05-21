@@ -88,7 +88,7 @@ def _get_store():
         with _store_lock:
             if _store is None:
                 from storage import AgentStore
-                _store = AgentStore(ROOT / 'output' / 'agents.db')
+                _store = AgentStore(ROOT / 'data' / 'agents.db')
     return _store
 
 
@@ -852,7 +852,7 @@ def _run_scan(mode: str, target: str, profile: str, providers: list[str]):
                 cmd += ['--profile', profile]
         else:
             provider = providers[0] if providers else 'config'
-            db_path = str(ROOT / 'output' / 'agents.db')
+            db_path = str(ROOT / 'data' / 'agents.db')
             cmd = [sys.executable, str(ROOT / 'audit.py'),
                    '--target', target,
                    '--mode', provider, '--profile', profile, '--output', 'json',

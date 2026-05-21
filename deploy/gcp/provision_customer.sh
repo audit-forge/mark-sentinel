@@ -33,7 +33,7 @@ docker run -d \
   --label "sentinel.tier=${TIER}" \
   -e "SENTINEL_AGENT_TOKEN=${AGENT_TOKEN}" \
   -v "${LICENSE_FILE}:/opt/sentinel/license.json:ro" \
-  -v "${DATA_DIR}:/app/output" \
+  -v "${DATA_DIR}:/app/data" \
   mark-sentinel:latest \
   python3 server.py --no-browser --port 7331
 
