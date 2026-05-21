@@ -41,6 +41,54 @@ def send_alert(subject: str, body_text: str, body_html: str | None = None) -> bo
     return _send(ALERT_TO, subject, body_text, body_html)
 
 
+def send_password_reset_email(to: str, reset_url: str) -> bool:
+    subject = "[M.A.R.K. Sentinel] Password reset request"
+    body_text = f"""Someone requested a password reset for your M.A.R.K. Sentinel account.
+
+Click the link below to set a new password. This link expires in 1 hour.
+
+{reset_url}
+
+If you did not request this, you can safely ignore this email.
+
+— M.A.R.K. AI Systems
+"""
+    body_html = f"""
+<div style="font-family:'Segoe UI',system-ui,sans-serif;background:#f0f4ff;padding:40px 0;min-height:100vh">
+  <div style="max-width:520px;margin:0 auto;background:#ffffff;border-radius:12px;overflow:hidden;border:1px solid #ccd3e8;box-shadow:0 4px 24px rgba(26,47,90,0.12)">
+    <div style="background:#0f1e3d;padding:28px 32px">
+      <div style="font-size:22px;font-weight:800;color:#ffffff;letter-spacing:4px">
+        M.A.R.K. <span style="color:#f5a623">SENTINEL</span>
+      </div>
+      <div style="font-size:12px;color:#8a9abf;letter-spacing:2px;margin-top:6px;text-transform:uppercase">
+        Security Intelligence Platform
+      </div>
+    </div>
+    <div style="padding:32px">
+      <div style="font-size:20px;font-weight:700;color:#0a1428;margin-bottom:8px">Password Reset Request</div>
+      <div style="font-size:15px;color:#1e3060;margin-bottom:24px">
+        Click the button below to set a new password. This link expires in <strong>1 hour</strong>.
+      </div>
+      <a href="{reset_url}" style="display:inline-block;background:#f5a623;color:#1a2f5a;font-weight:700;font-size:16px;padding:14px 28px;border-radius:8px;text-decoration:none;letter-spacing:.5px">
+        Reset My Password
+      </a>
+      <div style="margin-top:24px;font-size:13px;color:#5a6a8a">
+        If the button doesn't work, copy and paste this link into your browser:<br>
+        <a href="{reset_url}" style="color:#f5a623;word-break:break-all">{reset_url}</a>
+      </div>
+      <div style="margin-top:20px;padding:12px 16px;background:#f7f9ff;border-radius:6px;font-size:13px;color:#1e3060">
+        If you did not request a password reset, you can safely ignore this email.
+      </div>
+    </div>
+    <div style="padding:20px 32px;border-top:1px solid #ccd3e8;font-size:12px;color:#5a6a8a">
+      This message was sent by M.A.R.K. AI Systems. Do not reply to this email.
+    </div>
+  </div>
+</div>
+"""
+    return _send(to, subject, body_text, body_html)
+
+
 def send_welcome_email(to: str, customer_name: str, login_url: str, temp_password: str) -> bool:
     subject = "[M.A.R.K. Sentinel] Your account is ready"
     body_text = f"""Welcome to M.A.R.K. Sentinel, {customer_name}!

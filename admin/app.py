@@ -288,6 +288,82 @@ async def remove_customer(request: Request, customer_id: str = Form(...)):
     return RedirectResponse("/customers", status_code=303)
 
 
+# ── Forgot / Reset password ───────────────────────────────────────────────────
+
+@app.get("/forgot-password", response_class=HTMLResponse)
+async def forgot_password_page(request: Request):
+    return templates.TemplateResponse("forgot_password.html", {"request": request, "sent": False})
+
+
+@app.post("/forgot-password", response_class=HTMLResponse)
+async def forgot_password_submit(request: Request, email: str = Form(...)):
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT id FROM users WHERE email=? AND active=1", (email.strip().lower(),)
+        ).fetchone()
+        if row:
+            token = secrets.token_urlsafe(32)
+            expires = (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
+            conn.execute(
+                "INSERT INTO password_resets (id, user_id, token, expires_at) VALUES (?,?,?,?)",
+                (str(uuid.uuid4()), row["id"], token, expires)
+            )
+            reset_url = f"http://{PUBLIC_IP}/reset-password?token={token}"
+            from mailer import send_password_reset_email
+            send_password_reset_email(email.strip().lower(), reset_url)
+    return templates.TemplateResponse("forgot_password.html", {"request": request, "sent": True})
+
+
+@app.get("/reset-password", response_class=HTMLResponse)
+async def reset_password_page(request: Request, token: str = ""):
+    valid = False
+    if token:
+        with get_conn() as conn:
+            row = conn.execute(
+                "SELECT * FROM password_resets WHERE token=? AND used=0", (token,)
+            ).fetchone()
+            if row:
+                expires = datetime.fromisoformat(row["expires_at"])
+                if expires > datetime.now(timezone.utc):
+                    valid = True
+    return templates.TemplateResponse("reset_password.html", {
+        "request": request, "token": token, "valid": valid, "done": False, "error": None
+    })
+
+
+@app.post("/reset-password", response_class=HTMLResponse)
+async def reset_password_submit(
+    request: Request,
+    token: str = Form(...),
+    new_password: str = Form(...),
+    confirm_password: str = Form(...),
+):
+    if new_password != confirm_password:
+        return templates.TemplateResponse("reset_password.html", {
+            "request": request, "token": token, "valid": True,
+            "done": False, "error": "Passwords do not match"
+        })
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT * FROM password_resets WHERE token=? AND used=0", (token,)
+        ).fetchone()
+        if not row:
+            return templates.TemplateResponse("reset_password.html", {
+                "request": request, "token": token, "valid": False, "done": False, "error": None
+            })
+        expires = datetime.fromisoformat(row["expires_at"])
+        if expires <= datetime.now(timezone.utc):
+            return templates.TemplateResponse("reset_password.html", {
+                "request": request, "token": token, "valid": False, "done": False, "error": None
+            })
+        conn.execute("UPDATE users SET password_hash=? WHERE id=?",
+                     (hash_password(new_password), row["user_id"]))
+        conn.execute("UPDATE password_resets SET used=1 WHERE token=?", (token,))
+    return templates.TemplateResponse("reset_password.html", {
+        "request": request, "token": "", "valid": False, "done": True, "error": None
+    })
+
+
 # ── Account ───────────────────────────────────────────────────────────────────
 
 @app.get("/account", response_class=HTMLResponse)

@@ -36,6 +36,13 @@ def init_db():
                 max_seats INTEGER NOT NULL,
                 created_at TEXT NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS password_resets (
+                id TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                token TEXT UNIQUE NOT NULL,
+                expires_at TEXT NOT NULL,
+                used INTEGER NOT NULL DEFAULT 0
+            );
         """)
         for col, defn in [
             ('tier',                "TEXT NOT NULL DEFAULT 'standard'"),
