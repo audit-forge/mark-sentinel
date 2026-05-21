@@ -236,15 +236,20 @@ async def add_customer(
         )
         if customer_email.strip():
             email = customer_email.strip().lower()
-            temp_password = _generate_temp_password()
-            conn.execute(
-                "INSERT INTO users (id, email, password_hash, role, customer_id, created_at) VALUES (?,?,?,?,?,?)",
-                (str(uuid.uuid4()), email, hash_password(temp_password),
-                 "customer_admin", cid, datetime.now(timezone.utc).isoformat())
-            )
-            login_url = f"http://{PUBLIC_IP}/login"
-            from mailer import send_welcome_email
-            send_welcome_email(email, customer_name.strip(), login_url, temp_password)
+            existing = conn.execute("SELECT id FROM users WHERE email=?", (email,)).fetchone()
+            if existing:
+                conn.execute("UPDATE users SET active=1, customer_id=?, role='customer_admin' WHERE email=?",
+                             (cid, email))
+            else:
+                temp_password = _generate_temp_password()
+                conn.execute(
+                    "INSERT INTO users (id, email, password_hash, role, customer_id, created_at) VALUES (?,?,?,?,?,?)",
+                    (str(uuid.uuid4()), email, hash_password(temp_password),
+                     "customer_admin", cid, datetime.now(timezone.utc).isoformat())
+                )
+                login_url = f"http://{PUBLIC_IP}/login"
+                from mailer import send_welcome_email
+                send_welcome_email(email, customer_name.strip(), login_url, temp_password)
     _write_license_file(cid, customer_name.strip(), tier, expires, max_seats)
     _run_script("provision_customer.sh", cid, PUBLIC_IP, tier, expires, str(max_seats), customer_name.strip(), str(port))
     return RedirectResponse("/customers", status_code=303)
