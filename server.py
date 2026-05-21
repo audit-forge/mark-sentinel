@@ -994,6 +994,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             '/command':        lambda: self._redirect('/'),
             '/api/config':        self._api_get_config,
             '/api/alerts/config': self._api_get_alert_config,
+            '/api/fleet/live-stats': self._api_fleet_live_stats,
             '/api/fleet/shadow':  self._api_fleet_shadow,
             '/api/fleet/mcp':        self._api_fleet_mcp,
             '/api/fleet/mcp/report': self._api_fleet_mcp_report,
@@ -1775,6 +1776,88 @@ button:hover{{background:#2ea043}}
             return
         store.enqueue_command(device_id, 'discover_network')
         self._json({'status': 'queued', 'device_id': device_id})
+
+    def _api_fleet_live_stats(self):
+        """GET /api/fleet/live-stats — lightweight poll: stat counts + device rows HTML."""
+        try:
+            store   = _get_store()
+            devices = store.list_devices()
+            shadow  = [s for s in store.list_shadow_devices() if not s.get('dismissed')]
+            mcp     = [m for m in store.list_mcp_servers()    if not m.get('dismissed')]
+
+            ts_now = int(time.time())
+
+            def _age(ts):
+                if not ts: return 'never'
+                s = ts_now - ts
+                if s < 120:   return f'{s}s ago'
+                if s < 3600:  return f'{s // 60}m ago'
+                if s < 86400: return f'{s // 3600}h ago'
+                return f'{s // 86400}d ago'
+
+            rows = ''
+            for d in devices:
+                fail = d.get('fail_count', 0) or 0
+                warn = d.get('warn_count', 0) or 0
+                pas  = d.get('pass_count', 0) or 0
+                age  = _age(d.get('last_seen'))
+                rc   = 'r-fail' if fail > 0 else ('r-warn' if warn > 0 else 'r-pass')
+                did  = d.get('device_id', '')
+                rows += f"""
+        <tr class="dev-row" onclick="selectDevice('{did}')">
+          <td class="dev-host">{d.get('hostname','unknown')}</td>
+          <td>{d.get('platform','')}</td>
+          <td class="c-red">{fail}</td>
+          <td class="c-yellow">{warn}</td>
+          <td class="c-green">{pas}</td>
+          <td>{d.get('profile','')}</td>
+          <td>{age}</td>
+          <td><span class="risk-dot {rc}"></span></td>
+          <td onclick="event.stopPropagation()" style="white-space:nowrap">
+            <button class="scan-btn" id="sb-{did}" onclick="openScanModal('{did}',this)">Scan &#9662;</button>
+            <button class="scan-btn" id="ub-{did}" onclick="updateDevice('{did}')"
+                    style="margin-left:4px;color:#e3b341;border-color:#30363d">Update</button>
+            <a href="/fleet/device/{did}/dashboard" target="_blank"
+               style="margin-left:8px;background:#161b22;border:1px solid #30363d;color:#8b949e;
+                      border-radius:4px;padding:3px 10px;font-size:12px;text-decoration:none;
+                      display:inline-block;white-space:nowrap"
+               onmouseover="this.style.borderColor='#58a6ff';this.style.color='#c9d1d9'"
+               onmouseout="this.style.borderColor='#30363d';this.style.color='#8b949e'">Full Report</a>
+            <button class="scan-btn" onclick="removeDevice('{did}','{d.get('hostname','')}')"
+                    style="margin-left:4px;color:#f85149;border-color:#30363d;font-size:11px">Remove</button>
+          </td>
+        </tr>"""
+
+            if not rows:
+                rows = '<tr><td colspan="8" style="text-align:center;padding:32px;color:#484f58">No agents have reported yet.</td></tr>'
+
+            ch = med = li = 0
+            try:
+                for rpt in store.get_all_latest_reports():
+                    rjson = rpt if isinstance(rpt, dict) else {}
+                    for f in rjson.get('findings', rjson.get('results', [])):
+                        if f.get('status') == 'SKIP': continue
+                        sev = f.get('severity', 'INFO')
+                        if sev in ('CRITICAL', 'HIGH'): ch += 1
+                        elif sev == 'MEDIUM':           med += 1
+                        else:                           li += 1
+            except Exception:
+                ch  = sum((d.get('fail_count') or 0) for d in devices)
+                med = sum((d.get('warn_count') or 0) for d in devices)
+                li  = sum((d.get('pass_count') or 0) for d in devices)
+
+            self._json({
+                'count':     len(devices),
+                'ch':        ch,
+                'med':       med,
+                'li':        li,
+                'shadow':    len(shadow),
+                'mcp':       len(mcp),
+                'rows_html': rows,
+                'ts':        ts_now,
+            })
+        except Exception as e:
+            self._json({'error': str(e)}, 500)
 
     def _api_fleet_shadow(self):
         """GET /api/fleet/shadow — list discovered unmanaged AI devices."""
@@ -5482,17 +5565,45 @@ async function testAlert(channel) {{
 
 loadAlertConfig();
 
-// ── Auto-refresh ──
+// ── Auto-refresh (lightweight poll — no full page reload) ──
 (function() {{
   var INTERVAL = 60;
   var remaining = INTERVAL;
   var el = document.getElementById('auto-refresh-countdown');
+
+  function setText(t) {{ if (el) el.textContent = t; }}
+
+  function patch(data) {{
+    var cards = {{
+      'sc-count': data.count, 'sc-fail': data.ch,
+      'sc-warn':  data.med,   'sc-pass': data.li,
+      'sc-shadow': data.shadow, 'sc-mcp': data.mcp
+    }};
+    Object.keys(cards).forEach(function(id) {{
+      var e = document.getElementById(id);
+      if (e != null) e.textContent = cards[id];
+    }});
+    var tbody = document.getElementById('device-tbody');
+    if (tbody && data.rows_html != null) tbody.innerHTML = data.rows_html;
+    remaining = INTERVAL;
+    setText('Updated just now');
+  }}
+
+  function refresh() {{
+    setText('Updating…');
+    fetch('/api/fleet/live-stats')
+      .then(function(r) {{ return r.ok ? r.json() : null; }})
+      .then(function(data) {{ if (data && !data.error) patch(data); else setText('Refreshing in ' + INTERVAL + 's'); }})
+      .catch(function() {{ setText('Refreshing in ' + INTERVAL + 's'); }});
+  }}
+
   function tick() {{
     remaining--;
-    if (remaining <= 0) {{ location.reload(); return; }}
-    if (el) el.textContent = 'Refreshing in ' + remaining + 's';
+    if (remaining <= 0) {{ remaining = INTERVAL; refresh(); return; }}
+    setText('Refreshing in ' + remaining + 's');
   }}
-  if (el) el.textContent = 'Refreshing in ' + remaining + 's';
+
+  setText('Refreshing in ' + remaining + 's');
   setInterval(tick, 1000);
 }})();
 </script>
