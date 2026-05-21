@@ -108,7 +108,7 @@
       <td><span class="url">http://[customer-id].{{ ip }}.nip.io</span></td>
     </tr>
   </table>
-  <div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--border);display:flex;align-items:center;gap:16px">
+  <div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--border);display:flex;align-items:center;gap:16px;flex-wrap:wrap">
     <form method="post" action="/admin/test-email" style="display:inline">
       <button type="submit" class="btn btn-sm" style="background:var(--bg-input);color:var(--accent);border:1px solid var(--accent)30">
         Send Test Email
@@ -118,6 +118,21 @@
       <span style="font-size:12px;color:var(--accent)">&#10003; Test email sent successfully</span>
     {% elif request.query_params.get('email_test') == 'fail' %}
       <span style="font-size:12px;color:var(--danger-txt)">&#10005; Send failed — check SMTP settings in .env</span>
+    {% endif %}
+  </div>
+  <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border);display:flex;align-items:center;gap:16px;flex-wrap:wrap">
+    <form method="post" action="/admin/deploy" style="display:inline">
+      <button type="submit" class="btn btn-sm" style="background:var(--bg-input);color:var(--text);border:1px solid var(--border-in)">
+        &#8635; Deploy Update
+      </button>
+    </form>
+    <span style="font-size:11px;color:var(--text-muted)">Pulls latest code from GitHub and rebuilds the admin panel (~60 sec)</span>
+    {% if request.query_params.get('deploy') == 'started' %}
+      <span style="font-size:12px;color:var(--accent)">&#10003; Deploy started — refresh in ~60 seconds</span>
+    {% elif request.query_params.get('deploy') == 'busy' %}
+      <span style="font-size:12px;color:#ffbb33">&#9888; A deploy is already running — try again in a moment</span>
+    {% elif request.query_params.get('deploy') == 'failed' %}
+      <span style="font-size:12px;color:var(--danger-txt)">&#10005; Deploy failed — deployer container may not be running</span>
     {% endif %}
   </div>
 </div>

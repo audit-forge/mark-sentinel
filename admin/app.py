@@ -131,6 +131,25 @@ async def dashboard(request: Request):
     })
 
 
+# ── Deploy ────────────────────────────────────────────────────────────────────
+
+@app.post("/admin/deploy")
+async def deploy(request: Request):
+    try:
+        require_super_admin(request)
+    except HTTPException:
+        return RedirectResponse("/login")
+    import urllib.request as urlreq
+    try:
+        req = urlreq.Request("http://sentinel-deployer:9000/deploy", method="POST", data=b"")
+        with urlreq.urlopen(req, timeout=5) as r:
+            code = r.status
+        result = "started" if code == 202 else "busy" if code == 409 else "failed"
+    except Exception:
+        result = "failed"
+    return RedirectResponse(f"/dashboard?deploy={result}", status_code=303)
+
+
 # ── Test email ────────────────────────────────────────────────────────────────
 
 @app.post("/admin/test-email")

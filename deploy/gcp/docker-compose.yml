@@ -43,6 +43,19 @@ services:
       - sentinel-net
     restart: always
 
+  deployer:
+    build:
+      context: ./deployer
+    container_name: sentinel-deployer
+    environment:
+      - REPO_DIR=${REPO_DIR:-/opt/sentinel}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ${REPO_DIR:-/opt/sentinel}:${REPO_DIR:-/opt/sentinel}
+    networks:
+      - sentinel-net
+    restart: always
+
 volumes:
   user-manager-data:
 
