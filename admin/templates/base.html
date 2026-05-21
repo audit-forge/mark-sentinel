@@ -123,7 +123,7 @@ input:focus, select:focus { outline: none; border-color: var(--focus-bdr); }
   <span class="spacer"></span>
   <a href="/account" style="font-size:14px;color:var(--text-muted)">{{ user.email }}</a>
   <button class="theme-toggle" onclick="toggleTheme()" id="theme-btn">Light</button>
-  <a href="/logout">Logout</a>
+  <a href="/logout" style="font-size:14px;padding:6px 14px;border:1px solid var(--danger)40;border-radius:4px;color:var(--danger-txt);background:var(--danger)10">Logout</a>
 </nav>
 <main>
 {% block content %}{% endblock %}
