@@ -278,11 +278,24 @@ function showDTab(t) {
   });
 }
 function dCopy(id, btn) {
-  navigator.clipboard.writeText(document.getElementById(id).textContent).then(function() {
-    var orig = btn.textContent;
+  var text = document.getElementById(id).textContent;
+  var orig = btn.textContent;
+  function flash() {
     btn.textContent = 'Copied!';
     setTimeout(function(){ btn.textContent = orig; }, 2000);
-  });
+  }
+  if (navigator.clipboard && window.isSecureContext) {
+    navigator.clipboard.writeText(text).then(flash);
+  } else {
+    var ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.cssText = 'position:fixed;left:-9999px;top:-9999px;opacity:0';
+    document.body.appendChild(ta);
+    ta.focus();
+    ta.select();
+    try { document.execCommand('copy'); flash(); } catch(e) {}
+    document.body.removeChild(ta);
+  }
 }
 document.getElementById('deployModal').addEventListener('click', function(e) {
   if (e.target === this) closeDeploy();
