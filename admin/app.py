@@ -1,6 +1,8 @@
 import os
 import uuid
 import json
+import secrets
+import string
 import subprocess
 from datetime import datetime, date, timezone, timedelta
 from fastapi import FastAPI, Request, Form, HTTPException
@@ -184,6 +186,7 @@ async def add_customer(
     request: Request,
     customer_id: str = Form(...),
     customer_name: str = Form(...),
+    customer_email: str = Form(""),
     tier: str = Form("standard"),
     max_seats: int = Form(5),
 ):
@@ -209,6 +212,17 @@ async def add_customer(
             "INSERT INTO customers (id, name, created_at, active, tier, license_expires_at, max_seats) VALUES (?,?,?,1,?,?,?)",
             (cid, customer_name.strip(), datetime.now(timezone.utc).isoformat(), tier, expires, max_seats)
         )
+        if customer_email.strip():
+            email = customer_email.strip().lower()
+            temp_password = _generate_temp_password()
+            conn.execute(
+                "INSERT INTO users (id, email, password_hash, role, customer_id, created_at) VALUES (?,?,?,?,?,?)",
+                (str(uuid.uuid4()), email, hash_password(temp_password),
+                 "customer_admin", cid, datetime.now(timezone.utc).isoformat())
+            )
+            login_url = f"http://{PUBLIC_IP}/login"
+            from mailer import send_welcome_email
+            send_welcome_email(email, customer_name.strip(), login_url, temp_password)
     _write_license_file(cid, customer_name.strip(), tier, expires, max_seats)
     _run_script("provision_customer.sh", cid, PUBLIC_IP, tier, expires, str(max_seats), customer_name.strip())
     return RedirectResponse("/customers", status_code=303)
@@ -331,6 +345,15 @@ async def remove_user(request: Request, user_id: str = Form(...)):
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
+
+def _generate_temp_password(length: int = 14) -> str:
+    alphabet = string.ascii_letters + string.digits + "!@#$%"
+    while True:
+        pw = "".join(secrets.choice(alphabet) for _ in range(length))
+        if (any(c.isupper() for c in pw) and any(c.islower() for c in pw)
+                and any(c.isdigit() for c in pw)):
+            return pw
+
 
 def _run_script(name: str, *args: str):
     script = f"/app/{name}"

@@ -14,6 +14,10 @@
         <label>Display Name</label>
         <input type="text" name="customer_name" placeholder="Acme Corporation" required>
       </div>
+      <div class="form-group">
+        <label>Contact Email <span style="font-weight:400;color:var(--text-muted)">(sends welcome + temp password)</span></label>
+        <input type="email" name="customer_email" placeholder="admin@customer.com">
+      </div>
       <div class="form-group" style="max-width:140px">
         <label>Plan</label>
         <select name="tier">
@@ -28,7 +32,7 @@
       <button type="submit" class="btn btn-primary">Provision</button>
     </div>
     <div style="font-size:11px;color:var(--text-muted);margin-top:10px">
-      License expires 1 year from today. Standard = findings only. Pro = findings + remediation steps.
+      License expires 1 year from today. Standard = findings only. Pro = findings + remediation steps. Contact email creates a customer_admin account and sends login credentials.
     </div>
   </form>
 </div>
