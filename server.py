@@ -4351,15 +4351,46 @@ async function runDiscovery() {{
   const panel = document.getElementById('discover-panel');
   const subnetInput = (document.getElementById('discover-subnets').value || '').trim();
   btn.disabled = true;
-  btn.textContent = 'Scanning…';
-  const subnetHint = subnetInput ? ` (${{subnetInput}})` : ' (auto-detect)';
-  panel.innerHTML = `<div class="empty" style="padding:12px">Probing subnet${{subnetHint}} for AI services — this may take 10–30 seconds…</div>`;
+  btn.textContent = 'Queuing…';
+
+  // Step 1: queue discovery on all registered agents
+  let agentCount = 0;
   try {{
-    const url = subnetInput ? `/api/discover?subnets=${{encodeURIComponent(subnetInput)}}` : '/api/discover';
-    const resp = await fetch(url);
-    const data = await resp.json();
-    if (!resp.ok) throw new Error(data.error || 'HTTP ' + resp.status);
-    const svcs = data.services || [];
+    const qr = await fetch('/api/fleet/discover/all', {{method: 'POST'}});
+    const qd = await qr.json();
+    agentCount = qd.count || 0;
+  }} catch (_) {{}}
+
+  if (agentCount === 0) {{
+    panel.innerHTML = '<div class="empty" style="padding:12px;color:#CA8A04">⚠ No agents registered — nothing to scan. Deploy an agent first.</div>';
+    btn.disabled = false;
+    btn.textContent = 'Scan Network';
+    return;
+  }}
+
+  // Step 2: poll /api/discover every 5s until results stabilise or 60s timeout
+  const POLL_INTERVAL = 5000;
+  const TIMEOUT_MS    = 60000;
+  const started       = Date.now();
+  let lastCount       = -1;
+  let stableRounds    = 0;
+
+  function countdown() {{
+    const elapsed = Math.round((Date.now() - started) / 1000);
+    const left    = Math.max(0, Math.round((TIMEOUT_MS - (Date.now() - started)) / 1000));
+    btn.textContent = `Scanning… ${{left}}s`;
+    panel.innerHTML = `<div class="empty" style="padding:12px">Queued ${{agentCount}} agent${{agentCount !== 1 ? 's' : ''}} — waiting for scan results${{elapsed > 5 ? ' (' + elapsed + 's)' : ''}}…</div>`;
+  }}
+  countdown();
+
+  const url = subnetInput ? `/api/discover?subnets=${{encodeURIComponent(subnetInput)}}` : '/api/discover';
+
+  async function poll() {{
+    try {{
+      const resp = await fetch(url);
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.error || 'HTTP ' + resp.status);
+      const svcs = data.services || [];
     if (svcs.length === 0) {{
       panel.innerHTML = '<div class="empty" style="padding:12px">No AI services detected (network, processes, or environment).</div>';
     }} else {{
@@ -4468,16 +4499,44 @@ async function runDiscovery() {{
       const totalHosts = hostCount;
       const totalSvcs  = svcs.filter(s => s.source === 'network_probe').length;
       panel.innerHTML = html + `<div style="font-size:11px;color:#9CA3AF;margin-top:2px;display:flex;align-items:center;gap:12px">
-        <span>${{totalHosts}} host${{totalHosts !== 1 ? 's' : ''}} · ${{totalSvcs}} network service${{totalSvcs !== 1 ? 's' : ''}}${{procs.length ? ' · ' + procs.length + ' process' + (procs.length !== 1 ? 'es' : '') : ''}}${{envs.length ? ' · ' + envs.length + ' API key' + (envs.length !== 1 ? 's' : '') : ''}} · <span style="color:#30363d">v2025-c</span></span>
+        <span>${{totalHosts}} host${{totalHosts !== 1 ? 's' : ''}} · ${{totalSvcs}} network service${{totalSvcs !== 1 ? 's' : ''}}${{procs.length ? ' · ' + procs.length + ' process' + (procs.length !== 1 ? 'es' : '') : ''}}${{envs.length ? ' · ' + envs.length + ' API key' + (envs.length !== 1 ? 's' : '') : ''}} · scanned just now</span>
         <button onclick="this.closest('div').parentElement.innerHTML='<div class=\\'empty\\'style=\\'padding:12px\\'>Click Scan Network to detect AI services.</div>'" style="background:none;border:1px solid #E5E7EB;color:#6B7280;border-radius:3px;padding:2px 8px;font-size:11px;cursor:pointer">Clear</button>
       </div>`;
+      btn.disabled = false;
+      btn.textContent = 'Scan Network';
+      return; // done
     }}
+
+    // no results yet — keep polling if not timed out
+    if (svcs.length !== lastCount) {{
+      lastCount    = svcs.length;
+      stableRounds = 0;
+    }} else {{
+      stableRounds++;
+    }}
+
+    const timedOut = (Date.now() - started) >= TIMEOUT_MS;
+    const stable   = stableRounds >= 2 && svcs.length > 0;
+
+    if (timedOut || stable) {{
+      if (svcs.length === 0) {{
+        panel.innerHTML = '<div class="empty" style="padding:12px">No AI services detected. The agent scanned the subnet but found nothing new.</div>';
+      }}
+      btn.disabled = false;
+      btn.textContent = 'Scan Network';
+      return;
+    }}
+
+    countdown();
+    setTimeout(poll, POLL_INTERVAL);
   }} catch (e) {{
     panel.innerHTML = '<div class="empty" style="padding:12px;color:#DC2626">Discovery failed: ' + esc(String(e)) + '</div>';
-  }} finally {{
     btn.disabled = false;
     btn.textContent = 'Scan Network';
   }}
+  }}
+
+  setTimeout(poll, POLL_INTERVAL);
 }}
 
 const _SCAN_PROFILES = [
