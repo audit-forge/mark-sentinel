@@ -31,14 +31,24 @@
       </div>
       <button type="submit" class="btn btn-primary">Provision</button>
     </div>
-    <div style="font-size:11px;color:var(--text-muted);margin-top:10px">
-      License expires 1 year from today. Standard = findings only. Pro = findings + remediation steps. Contact email creates a customer_admin account and sends login credentials.
+    <div style="font-size:13px;color:var(--text-muted);margin-top:10px">
+      License expires 1 year from today. Standard = findings only. Pro = findings + remediation steps.
     </div>
   </form>
 </div>
 
 <div class="card">
-  <div class="card-title">All Customers ({{ customers|length }})</div>
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px">
+    <div class="card-title" style="margin-bottom:0">Customers ({{ customers|length }})</div>
+    <div style="display:flex;gap:8px;align-items:center">
+      <label style="font-size:14px;color:var(--text-muted);margin-bottom:0">Show:</label>
+      <select onchange="window.location='/customers?status='+this.value" style="width:auto;padding:6px 12px;font-size:14px">
+        <option value="active"   {% if status == 'active'   %}selected{% endif %}>Active</option>
+        <option value="inactive" {% if status == 'inactive' %}selected{% endif %}>Inactive</option>
+        <option value="all"      {% if status == 'all'      %}selected{% endif %}>All</option>
+      </select>
+    </div>
+  </div>
   {% if customers %}
   <table>
     <thead>
@@ -68,7 +78,7 @@
       </td>
       <td style="color:var(--text-muted)">{{ c.max_seats }}</td>
       <td>
-        {% if c.port %}
+        {% if c.port and c.active %}
           <a class="url" href="http://{{ ip }}:{{ c.port }}" target="_blank">{{ ip }}:{{ c.port }}</a>
         {% else %}
           <span style="color:var(--text-muted)">—</span>
@@ -89,7 +99,7 @@
       </td>
       <td>
         {% if not c.active %}
-          <span class="badge badge-red">inactive</span>
+          <span class="badge badge-red">archived</span>
         {% elif days is not none and days < 0 %}
           <span class="badge badge-red">expired</span>
         {% elif days is not none and days <= 30 %}
@@ -99,15 +109,24 @@
         {% endif %}
       </td>
       <td style="display:flex;gap:6px;flex-wrap:wrap">
-        <form method="post" action="/customers/renew" style="display:inline">
-          <input type="hidden" name="customer_id" value="{{ c.id }}">
-          <button type="submit" class="btn btn-sm" style="background:var(--bg-input);color:var(--accent);border:1px solid var(--accent)30">Renew</button>
-        </form>
         {% if c.active %}
-        <form method="post" action="/customers/remove" style="display:inline" onsubmit="return confirm('Remove {{ c.name }}?')">
-          <input type="hidden" name="customer_id" value="{{ c.id }}">
-          <button type="submit" class="btn btn-danger btn-sm">Remove</button>
-        </form>
+          <form method="post" action="/customers/renew" style="display:inline">
+            <input type="hidden" name="customer_id" value="{{ c.id }}">
+            <button type="submit" class="btn btn-sm" style="background:var(--bg-input);color:var(--accent);border:1px solid var(--accent)40">Renew</button>
+          </form>
+          <form method="post" action="/customers/remove" style="display:inline" onsubmit="return confirm('Archive {{ c.name }}? Their container will be stopped but data is kept.')">
+            <input type="hidden" name="customer_id" value="{{ c.id }}">
+            <button type="submit" class="btn btn-sm" style="background:var(--bg-input);color:#ffbb33;border:1px solid #ffbb3340">Archive</button>
+          </form>
+        {% else %}
+          <form method="post" action="/customers/restore" style="display:inline">
+            <input type="hidden" name="customer_id" value="{{ c.id }}">
+            <button type="submit" class="btn btn-sm" style="background:var(--bg-input);color:var(--accent);border:1px solid var(--accent)40">Restore</button>
+          </form>
+          <form method="post" action="/customers/delete" style="display:inline" onsubmit="return confirm('Permanently delete {{ c.name }}? This cannot be undone.')">
+            <input type="hidden" name="customer_id" value="{{ c.id }}">
+            <button type="submit" class="btn btn-danger btn-sm">Delete</button>
+          </form>
         {% endif %}
       </td>
     </tr>
@@ -115,7 +134,7 @@
     </tbody>
   </table>
   {% else %}
-  <div class="empty">No customers yet. Provision your first one above.</div>
+  <div class="empty">No customers found.</div>
   {% endif %}
 </div>
 {% endblock %}

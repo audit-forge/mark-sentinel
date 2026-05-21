@@ -182,11 +182,14 @@ async def customers_page(request: Request):
         user = require_super_admin(request)
     except HTTPException:
         return RedirectResponse("/login")
+    status = request.query_params.get("status", "active")
     with get_conn() as conn:
-        rows = conn.execute(
-            "SELECT * FROM customers ORDER BY created_at DESC"
-        ).fetchall()
-
+        if status == "inactive":
+            rows = conn.execute("SELECT * FROM customers WHERE active=0 ORDER BY created_at DESC").fetchall()
+        elif status == "all":
+            rows = conn.execute("SELECT * FROM customers ORDER BY created_at DESC").fetchall()
+        else:
+            rows = conn.execute("SELECT * FROM customers WHERE active=1 ORDER BY created_at DESC").fetchall()
     customers = []
     for r in rows:
         c = dict(r)
@@ -197,7 +200,7 @@ async def customers_page(request: Request):
         customers.append(c)
     return templates.TemplateResponse("customers.html", {
         "request": request, "user": user,
-        "customers": customers, "ip": PUBLIC_IP,
+        "customers": customers, "ip": PUBLIC_IP, "status": status,
     })
 
 
@@ -294,6 +297,31 @@ async def remove_customer(request: Request, customer_id: str = Form(...)):
         conn.execute("UPDATE users SET active=0 WHERE customer_id=?", (customer_id,))
     _run_script("remove_customer.sh", customer_id)
     return RedirectResponse("/customers", status_code=303)
+
+
+@app.post("/customers/restore")
+async def restore_customer(request: Request, customer_id: str = Form(...)):
+    try:
+        require_super_admin(request)
+    except HTTPException:
+        return RedirectResponse("/login")
+    with get_conn() as conn:
+        conn.execute("UPDATE customers SET active=1 WHERE id=?", (customer_id,))
+    _run_script("provision_customer.sh", customer_id, PUBLIC_IP)
+    return RedirectResponse("/customers", status_code=303)
+
+
+@app.post("/customers/delete")
+async def delete_customer(request: Request, customer_id: str = Form(...)):
+    try:
+        require_super_admin(request)
+    except HTTPException:
+        return RedirectResponse("/login")
+    with get_conn() as conn:
+        conn.execute("DELETE FROM customers WHERE id=? AND active=0", (customer_id,))
+        conn.execute("DELETE FROM users WHERE customer_id=?", (customer_id,))
+    _run_script("remove_customer.sh", customer_id)
+    return RedirectResponse("/customers?status=inactive", status_code=303)
 
 
 # ── Forgot / Reset password ───────────────────────────────────────────────────
@@ -434,9 +462,16 @@ async def users_page(request: Request):
                 ORDER BY u.created_at DESC
             """, (user["customer_id"],)).fetchall()
             customers = []
+    with get_conn() as conn:
+        all_users = conn.execute("""
+            SELECT u.*, c.name as customer_name
+            FROM users u LEFT JOIN customers c ON u.customer_id = c.id
+            WHERE u.active=1 ORDER BY u.email
+        """).fetchall()
     return templates.TemplateResponse("users.html", {
         "request": request, "user": user,
         "users": [dict(r) for r in rows],
+        "all_users": [dict(r) for r in all_users],
         "customers": [dict(r) for r in customers],
     })
 
@@ -464,6 +499,29 @@ async def add_user(
              role, customer_id or None, datetime.now(timezone.utc).isoformat())
         )
     return RedirectResponse("/users", status_code=303)
+
+
+@app.post("/users/edit")
+async def edit_user(
+    request: Request,
+    user_id: str = Form(...),
+    role: str = Form(...),
+    customer_id: str = Form(None),
+):
+    try:
+        user = get_current_user(request)
+    except HTTPException:
+        return RedirectResponse("/login")
+    if user["role"] != "super_admin":
+        return RedirectResponse("/users?error=forbidden", status_code=303)
+    if role not in ("super_admin", "customer_admin", "user"):
+        role = "user"
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE users SET role=?, customer_id=? WHERE id=?",
+            (role, customer_id or None, user_id)
+        )
+    return RedirectResponse("/users?edited=1", status_code=303)
 
 
 @app.post("/users/password")

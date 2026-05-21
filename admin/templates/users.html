@@ -4,6 +4,8 @@
 
 {% if request.query_params.get('pw_changed') %}
 <div class="error" style="background:var(--accent)18;border-color:var(--accent)40;color:var(--accent)">&#10003; Password updated successfully</div>
+{% elif request.query_params.get('edited') %}
+<div class="error" style="background:var(--accent)18;border-color:var(--accent)40;color:var(--accent)">&#10003; User updated successfully</div>
 {% elif request.query_params.get('error') == 'forbidden' %}
 <div class="error">Permission denied.</div>
 {% elif request.query_params.get('error') == 'notfound' %}
@@ -92,6 +94,43 @@
 </div>
 
 <div class="card">
+  <div class="card-title">Edit User</div>
+  <form method="post" action="/users/edit">
+    <div class="form-row">
+      <div class="form-group">
+        <label>User</label>
+        <select name="user_id" required>
+          <option value="">— select user —</option>
+          {% for u in all_users %}
+          <option value="{{ u.id }}">{{ u.email }} ({{ u.role }}{% if u.customer_name %} · {{ u.customer_name }}{% endif %})</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="form-group" style="max-width:200px">
+        <label>Role</label>
+        <select name="role">
+          <option value="super_admin">super_admin</option>
+          <option value="customer_admin">customer_admin</option>
+          <option value="user">user</option>
+        </select>
+      </div>
+      {% if user.role == 'super_admin' %}
+      <div class="form-group" style="max-width:220px">
+        <label>Assign to Customer</label>
+        <select name="customer_id">
+          <option value="">— none —</option>
+          {% for c in customers %}
+          <option value="{{ c.id }}">{{ c.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      {% endif %}
+      <button type="submit" class="btn btn-primary">Save Changes</button>
+    </div>
+  </form>
+</div>
+
+<div class="card">
   <div class="card-title">Reset Password</div>
   <form method="post" action="/users/password">
     <div class="form-row">
@@ -99,7 +138,7 @@
         <label>User</label>
         <select name="user_id" required>
           <option value="">— select user —</option>
-          {% for u in users %}
+          {% for u in all_users %}
           <option value="{{ u.id }}">{{ u.email }} ({{ u.role }}{% if u.customer_name %} · {{ u.customer_name }}{% endif %})</option>
           {% endfor %}
         </select>
