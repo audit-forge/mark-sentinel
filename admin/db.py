@@ -16,7 +16,8 @@ def init_db():
                 active INTEGER NOT NULL DEFAULT 1,
                 tier TEXT NOT NULL DEFAULT 'standard',
                 license_expires_at TEXT,
-                max_seats INTEGER NOT NULL DEFAULT 5
+                max_seats INTEGER NOT NULL DEFAULT 5,
+                current_agents INTEGER NOT NULL DEFAULT 0
             );
             CREATE TABLE IF NOT EXISTS users (
                 id TEXT PRIMARY KEY,
@@ -27,11 +28,23 @@ def init_db():
                 created_at TEXT NOT NULL,
                 active INTEGER NOT NULL DEFAULT 1
             );
+            CREATE TABLE IF NOT EXISTS license_alerts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                customer_id TEXT NOT NULL,
+                alert_type TEXT NOT NULL,
+                agent_count INTEGER NOT NULL,
+                max_seats INTEGER NOT NULL,
+                created_at TEXT NOT NULL
+            );
         """)
-        # Migrate existing rows that pre-date licensing columns
-        for col, default in [('tier', "'standard'"), ('license_expires_at', 'NULL'), ('max_seats', '5')]:
+        for col, defn in [
+            ('tier',                "TEXT NOT NULL DEFAULT 'standard'"),
+            ('license_expires_at',  "TEXT"),
+            ('max_seats',           "INTEGER NOT NULL DEFAULT 5"),
+            ('current_agents',      "INTEGER NOT NULL DEFAULT 0"),
+        ]:
             try:
-                conn.execute(f"ALTER TABLE customers ADD COLUMN {col} TEXT NOT NULL DEFAULT {default}")
+                conn.execute(f"ALTER TABLE customers ADD COLUMN {col} {defn}")
             except Exception:
                 pass
 

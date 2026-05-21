@@ -24,6 +24,13 @@ services:
       - DB_PATH=/data/sentinel.db
       - MAX_CUSTOMERS=${MAX_CUSTOMERS:-0}
       - LICENSES_DIR=/licenses
+      - SMTP_HOST=${SMTP_HOST:-}
+      - SMTP_PORT=${SMTP_PORT:-587}
+      - SMTP_USER=${SMTP_USER:-}
+      - SMTP_PASS=${SMTP_PASS:-}
+      - ALERT_FROM=${ALERT_FROM:-}
+      - ALERT_TO=${ALERT_TO:-}
+      - MONITOR_INTERVAL_H=${MONITOR_INTERVAL_H:-24}
     volumes:
       - user-manager-data:/data
       - /opt/licenses:/licenses

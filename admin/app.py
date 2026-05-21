@@ -9,6 +9,7 @@ from fastapi.templating import Jinja2Templates
 
 from db import init_db, get_conn
 from auth import hash_password, verify_password, create_token, get_current_user, require_super_admin
+from monitor import start_monitor
 
 app = FastAPI(docs_url=None, redoc_url=None)
 templates = Jinja2Templates(directory="templates")
@@ -23,6 +24,7 @@ PUBLIC_IP = os.environ.get("PUBLIC_IP", "35.255.19.236")
 def startup():
     init_db()
     _ensure_super_admin()
+    start_monitor()
 
 
 def _ensure_super_admin():
@@ -84,10 +86,23 @@ async def dashboard(request: Request):
         user_count = conn.execute(
             "SELECT COUNT(*) FROM users WHERE active=1 AND role != 'super_admin'"
         ).fetchone()[0]
+        seat_rows = conn.execute(
+            "SELECT id, name, tier, max_seats, current_agents FROM customers WHERE active=1 ORDER BY name"
+        ).fetchall()
+        alert_rows = conn.execute(
+            "SELECT a.*, c.name as customer_name FROM license_alerts a "
+            "JOIN customers c ON a.customer_id = c.id "
+            "ORDER BY a.created_at DESC LIMIT 20"
+        ).fetchall()
+    seats = [dict(r) for r in seat_rows]
+    overages = sum(1 for s in seats if s["current_agents"] > s["max_seats"])
     return templates.TemplateResponse("dashboard.html", {
         "request": request, "user": user,
         "customer_count": customer_count, "user_count": user_count,
         "ip": PUBLIC_IP,
+        "seats": seats,
+        "overages": overages,
+        "alerts": [dict(r) for r in alert_rows],
     })
 
 

@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% block content %}
-<h1>DASHBOARD</h1>
+<h1>DASHBOARD{% if overages > 0 %} <span style="font-size:13px;color:#ff5555;font-weight:normal;margin-left:12px">&#9888; {{ overages }} overage{{ 's' if overages != 1 }}</span>{% endif %}</h1>
 
 <div class="grid-stats">
   <div class="stat-card">
@@ -11,17 +11,100 @@
     <div class="stat-num">{{ user_count }}</div>
     <div class="stat-label">Total Users</div>
   </div>
+  <div class="stat-card">
+    <div class="stat-num" style="color:{% if overages > 0 %}#ff5555{% else %}var(--stat-num){% endif %}">{{ overages }}</div>
+    <div class="stat-label">Seat Overages</div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-title">Seat Usage</div>
+  {% if seats %}
+  <table>
+    <thead>
+      <tr>
+        <th>Customer</th>
+        <th>Plan</th>
+        <th>Agents</th>
+        <th>Licensed</th>
+        <th>Usage</th>
+        <th>Status</th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for s in seats %}
+    {% set over = s.current_agents > s.max_seats %}
+    {% set pct = ((s.current_agents / s.max_seats) * 100) | int if s.max_seats > 0 else 0 %}
+    <tr>
+      <td>{{ s.name }}</td>
+      <td>
+        {% if s.tier == 'plus' %}
+          <span class="badge badge-blue">Pro</span>
+        {% else %}
+          <span class="badge badge-yellow">Standard</span>
+        {% endif %}
+      </td>
+      <td style="color:{% if over %}#ff5555{% else %}var(--text-td){% endif %};font-weight:{% if over %}bold{% else %}normal{% endif %}">
+        {{ s.current_agents }}
+      </td>
+      <td style="color:var(--text-muted)">{{ s.max_seats }}</td>
+      <td style="min-width:120px">
+        <div style="background:var(--bg);border:1px solid var(--border);border-radius:2px;height:8px;overflow:hidden">
+          <div style="height:100%;width:{{ [pct, 100]|min }}%;background:{% if over %}#ff5555{% elif pct >= 80 %}#ffbb33{% else %}var(--accent){% endif %};transition:width .3s"></div>
+        </div>
+        <span style="font-size:10px;color:var(--text-muted)">{{ pct }}%</span>
+      </td>
+      <td>
+        {% if over %}
+          <span class="badge badge-red">over limit</span>
+        {% elif pct >= 80 %}
+          <span class="badge badge-yellow">near limit</span>
+        {% else %}
+          <span class="badge badge-green">ok</span>
+        {% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty">No customers yet.</div>
+  {% endif %}
+</div>
+
+<div class="card">
+  <div class="card-title">Recent Alerts</div>
+  {% if alerts %}
+  <table>
+    <thead>
+      <tr><th>Time</th><th>Customer</th><th>Type</th><th>Agents</th><th>Licensed</th></tr>
+    </thead>
+    <tbody>
+    {% for a in alerts %}
+    <tr>
+      <td style="color:var(--text-muted);font-size:11px">{{ a.created_at[:16].replace('T',' ') }}</td>
+      <td>{{ a.customer_name }}</td>
+      <td><span class="badge badge-red">{{ a.alert_type }}</span></td>
+      <td style="color:#ff5555;font-weight:bold">{{ a.agent_count }}</td>
+      <td style="color:var(--text-muted)">{{ a.max_seats }}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty">No alerts. All customers within seat limits.</div>
+  {% endif %}
 </div>
 
 <div class="card">
   <div class="card-title">Quick Access</div>
   <table>
     <tr>
-      <td style="color:#666;width:160px">Admin Panel</td>
+      <td style="color:var(--text-muted);width:160px">Admin Panel</td>
       <td><span class="url">http://admin.{{ ip }}.nip.io</span></td>
     </tr>
     <tr>
-      <td style="color:#666">Customer URL pattern</td>
+      <td style="color:var(--text-muted)">Customer URL pattern</td>
       <td><span class="url">http://[customer-id].{{ ip }}.nip.io</span></td>
     </tr>
   </table>
