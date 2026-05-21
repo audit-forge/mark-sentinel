@@ -9,8 +9,20 @@ MAX_SEATS="${5:-5}"
 CUSTOMER_NAME="${6:-$CUSTOMER_ID}"
 PORT="${7:-7001}"
 CONTAINER_NAME="sentinel-${CUSTOMER_ID}"
-NGINX_CONF_DIR="/app/nginx/customers"
+NGINX_CONF_DIR="/opt/sentinel/deploy/gcp/nginx"
 LICENSE_FILE="/licenses/${CUSTOMER_ID}/license.json"
+DATA_DIR="/opt/sentinel-data/${CUSTOMER_ID}"
+
+mkdir -p "$DATA_DIR"
+
+AGENT_TOKEN="${8:-}"
+if [ -z "$AGENT_TOKEN" ] && [ -f "${DATA_DIR}/agent_token.txt" ]; then
+  AGENT_TOKEN=$(cat "${DATA_DIR}/agent_token.txt")
+fi
+if [ -z "$AGENT_TOKEN" ]; then
+  AGENT_TOKEN=$(python3 -c "import secrets; print(secrets.token_urlsafe(32))")
+  echo "$AGENT_TOKEN" > "${DATA_DIR}/agent_token.txt"
+fi
 
 docker run -d \
   --name "$CONTAINER_NAME" \
@@ -18,7 +30,9 @@ docker run -d \
   --restart always \
   --label "sentinel.customer=${CUSTOMER_ID}" \
   --label "sentinel.tier=${TIER}" \
+  -e "SENTINEL_AGENT_TOKEN=${AGENT_TOKEN}" \
   -v "${LICENSE_FILE}:/opt/sentinel/license.json:ro" \
+  -v "${DATA_DIR}:/app/output" \
   mark-sentinel:latest \
   python3 server.py --no-browser --port 7331
 
