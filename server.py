@@ -1816,13 +1816,13 @@ button:hover{{background:#2ea043}}
           <td onclick="event.stopPropagation()" style="white-space:nowrap">
             <button class="scan-btn" id="sb-{did}" onclick="openScanModal('{did}',this)">Scan &#9662;</button>
             <button class="scan-btn" id="ub-{did}" onclick="updateDevice('{did}')"
-                    style="margin-left:4px;color:#e3b341;border-color:#30363d">Update</button>
+                    style="margin-left:4px;color:#CA8A04;border-color:#D1D5DB">Update</button>
             <a href="/fleet/device/{did}/dashboard" target="_blank"
-               style="margin-left:8px;background:#161b22;border:1px solid #30363d;color:#8b949e;
-                      border-radius:4px;padding:3px 10px;font-size:12px;text-decoration:none;
-                      display:inline-block;white-space:nowrap"
-               onmouseover="this.style.borderColor='#58a6ff';this.style.color='#c9d1d9'"
-               onmouseout="this.style.borderColor='#30363d';this.style.color='#8b949e'">Full Report</a>
+               style="margin-left:8px;background:#fff;border:1px solid #D1D5DB;color:#6B7280;
+                      border-radius:6px;padding:3px 10px;font-size:12px;text-decoration:none;
+                      display:inline-block;white-space:nowrap;font-weight:500"
+               onmouseover="this.style.borderColor='#4F46E5';this.style.color='#4F46E5'"
+               onmouseout="this.style.borderColor='#D1D5DB';this.style.color='#6B7280'">Full Report</a>
             <button class="scan-btn" onclick="removeDevice('{did}','{d.get('hostname','')}')"
                     style="margin-left:4px;color:#f85149;border-color:#30363d;font-size:11px">Remove</button>
           </td>
@@ -3400,13 +3400,13 @@ def _build_fleet_html(devices: list[dict], shadow: list[dict] | None = None,
           <td onclick="event.stopPropagation()" style="white-space:nowrap">
             <button class="scan-btn" id="sb-{did}" onclick="openScanModal('{did}',this)">Scan ▾</button>
             <button class="scan-btn" id="ub-{did}" onclick="updateDevice('{did}')"
-                    style="margin-left:4px;color:#e3b341;border-color:#30363d">Update</button>
+                    style="margin-left:4px;color:#CA8A04;border-color:#D1D5DB">Update</button>
             <a href="/fleet/device/{did}/dashboard" target="_blank"
-               style="margin-left:8px;background:#161b22;border:1px solid #30363d;color:#8b949e;
-                      border-radius:4px;padding:3px 10px;font-size:12px;text-decoration:none;
-                      display:inline-block;white-space:nowrap"
-               onmouseover="this.style.borderColor='#58a6ff';this.style.color='#c9d1d9'"
-               onmouseout="this.style.borderColor='#30363d';this.style.color='#8b949e'">Full Report</a>
+               style="margin-left:8px;background:#fff;border:1px solid #D1D5DB;color:#6B7280;
+                      border-radius:6px;padding:3px 10px;font-size:12px;text-decoration:none;
+                      display:inline-block;white-space:nowrap;font-weight:500"
+               onmouseover="this.style.borderColor='#4F46E5';this.style.color='#4F46E5'"
+               onmouseout="this.style.borderColor='#D1D5DB';this.style.color='#6B7280'">Full Report</a>
             <button class="scan-btn" onclick="removeDevice('{did}','{d.get('hostname','')}')"
                     style="margin-left:4px;color:#f85149;border-color:#30363d;font-size:11px">Remove</button>
           </td>
@@ -3464,156 +3464,103 @@ def _build_fleet_html(devices: list[dict], shadow: list[dict] | None = None,
 <title>M.A.R.K. Sentinel — Command Center</title>
 <style>
 *{{box-sizing:border-box;margin:0;padding:0}}
-body{{background:#0d1117;color:#c9d1d9;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:14px;height:100vh;overflow:hidden}}
+body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-serif,"Apple Color Emoji","Segoe UI Emoji";font-size:14px;height:100vh;overflow:hidden}}
 #app{{display:flex;height:100vh;overflow:hidden}}
-#sidebar{{width:216px;flex-shrink:0;background:#0d1117;border-right:1px solid #21262d;display:flex;flex-direction:column;height:100vh;overflow-y:auto}}
-#main{{flex:1;overflow-y:auto;padding:24px 32px;min-width:0}}
-.sb-logo{{padding:18px 18px 14px;border-bottom:1px solid #21262d}}
-.sb-logo-mark{{font-size:9px;letter-spacing:3px;color:#58a6ff;font-weight:700;text-transform:uppercase}}
-.sb-logo-name{{font-size:16px;font-weight:800;color:#e6edf3;letter-spacing:1px;line-height:1.2}}
-.sb-logo-sub{{font-size:10px;color:#484f58;margin-top:2px}}
-.sb-nav{{flex:1;padding:6px 0}}
-.sb-group{{font-size:9px;font-weight:700;letter-spacing:1.2px;text-transform:uppercase;color:#484f58;padding:12px 18px 4px}}
-.sb-item{{display:block;width:100%;padding:7px 18px;font-size:13px;color:#8b949e;cursor:pointer;text-decoration:none;user-select:none;border:none;border-left:2px solid transparent;background:none;text-align:left;transition:color .1s,background .1s}}
-.sb-item:hover{{color:#c9d1d9;background:#161b22}}
-.sb-item.sb-active{{color:#e6edf3;background:#1a2332;border-left-color:#58a6ff}}
-.sb-footer{{padding:14px 18px;border-top:1px solid #21262d;display:flex;flex-direction:column;gap:7px}}
-.sb-footer a{{font-size:11px;color:#484f58;text-decoration:none}}
-.sb-footer a:hover{{color:#8b949e}}
+#sidebar{{width:240px;flex-shrink:0;background:#111827;border-right:1px solid rgba(255,255,255,0.06);display:flex;flex-direction:column;height:100vh;overflow-y:auto}}
+#main{{flex:1;overflow-y:auto;padding:28px 36px;min-width:0;background:#F9FAFB}}
+.sb-logo{{padding:20px 16px 16px;border-bottom:1px solid rgba(255,255,255,0.07)}}
+.sb-logo-mark{{font-size:9px;letter-spacing:3px;color:#6366F1;font-weight:700;text-transform:uppercase}}
+.sb-logo-name{{font-size:15px;font-weight:800;color:#F9FAFB;letter-spacing:.5px;line-height:1.2;margin-top:3px}}
+.sb-logo-sub{{font-size:10px;color:#6B7280;margin-top:2px}}
+.sb-nav{{flex:1;padding:8px 0}}
+.sb-group{{font-size:10px;font-weight:700;letter-spacing:.15em;text-transform:uppercase;color:#6B7280;padding:12px 16px 5px}}
+.sb-item{{display:block;width:100%;padding:8px 16px;font-size:13px;color:#D1D5DB;cursor:pointer;text-decoration:none;user-select:none;border:none;border-left:2px solid transparent;background:none;text-align:left;transition:background .12s,color .12s}}
+.sb-item:hover{{color:#F9FAFB;background:rgba(255,255,255,0.06)}}
+.sb-item.sb-active{{color:#fff;background:#4F46E5;border-left-color:#4F46E5}}
+.sb-footer{{padding:14px 16px;border-top:1px solid rgba(255,255,255,0.07);display:flex;flex-direction:column;gap:7px}}
+.sb-footer a{{font-size:11px;color:#6B7280;text-decoration:none}}
+.sb-footer a:hover{{color:#D1D5DB}}
 .page{{display:none}}
 .page.active{{display:block}}
 #kpi-bar{{margin-bottom:20px}}
-.brand-bar{{display:flex;align-items:baseline;gap:14px;margin-bottom:28px;border-bottom:1px solid #21262d;padding-bottom:18px}}
-.brand-mark{{font-size:10px;letter-spacing:3px;color:#58a6ff;font-weight:700;text-transform:uppercase}}
-.brand-name{{font-size:22px;font-weight:800;color:#e6edf3;letter-spacing:1px}}
-.brand-sub{{font-size:12px;color:#484f58}}
-.hlink{{margin-left:auto;font-size:12px;color:#58a6ff;text-decoration:none}}
+.brand-bar{{display:flex;align-items:baseline;gap:14px;margin-bottom:24px;border-bottom:1px solid #E5E7EB;padding-bottom:16px}}
+.brand-mark{{font-size:10px;letter-spacing:3px;color:#4F46E5;font-weight:700;text-transform:uppercase}}
+.brand-name{{font-size:24px;font-weight:700;color:#111827}}
+.brand-sub{{font-size:12px;color:#9CA3AF}}
+.hlink{{margin-left:auto;font-size:12px;color:#4F46E5;text-decoration:none}}
 .hlink:hover{{text-decoration:underline}}
 .stat-row{{display:flex;gap:12px;margin-bottom:24px;flex-wrap:wrap}}
-.scard{{background:#161b22;border:1px solid #21262d;border-radius:8px;padding:16px 22px;min-width:120px;text-align:center;cursor:pointer;transition:border-color .15s,background .15s;user-select:none}}
-.scard:hover{{background:#1c2128}}
-.scard.sf-active{{border-color:#58a6ff;background:#1a2332}}
-.scard.sf-active-red{{border-color:#f85149;background:#2a1010}}
-.scard.sf-active-yellow{{border-color:#d29922;background:#2a2010}}
-.scard.sf-active-green{{border-color:#3fb950;background:#102a18}}
-.scard-n{{font-size:36px;font-weight:800;line-height:1}}
-.scard-l{{font-size:11px;color:#8b949e;margin-top:5px;text-transform:uppercase;letter-spacing:.5px}}
-.c-red{{color:#f85149}}.c-yellow{{color:#d29922}}.c-green{{color:#3fb950}}.c-blue{{color:#58a6ff}}.c-gray{{color:#6e7681}}
-.sec-hdr{{font-size:12px;font-weight:600;color:#6e7681;text-transform:uppercase;letter-spacing:1px;margin-bottom:12px;display:flex;align-items:center;gap:8px}}
-.dev-table{{width:100%;border-collapse:collapse;margin-bottom:28px}}
-.dev-table th{{background:#161b22;color:#8b949e;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;padding:10px 12px;text-align:left;border-bottom:2px solid #30363d}}
-.dev-table td{{padding:10px 12px;border-bottom:1px solid #21262d;font-size:13px}}
+.scard{{background:#fff;border:1px solid #E5E7EB;border-radius:8px;padding:16px 20px;min-width:110px;text-align:center;cursor:pointer;transition:border-color .15s,box-shadow .15s;user-select:none;box-shadow:0 1px 3px rgba(0,0,0,0.06)}}
+.scard:hover{{border-color:#C7D2FE;box-shadow:0 2px 6px rgba(79,70,229,0.1)}}
+.scard.sf-active{{border-color:#4F46E5;box-shadow:0 0 0 3px rgba(79,70,229,0.12)}}
+.scard.sf-active-red{{border-color:#DC2626;box-shadow:0 0 0 3px rgba(220,38,38,0.1)}}
+.scard.sf-active-yellow{{border-color:#CA8A04;box-shadow:0 0 0 3px rgba(202,138,4,0.1)}}
+.scard.sf-active-green{{border-color:#16A34A;box-shadow:0 0 0 3px rgba(22,163,74,0.1)}}
+.scard-n{{font-size:30px;font-weight:700;line-height:1;color:#111827}}
+.scard-l{{font-size:11px;color:#6B7280;margin-top:5px;text-transform:uppercase;letter-spacing:.06em;font-weight:500}}
+.c-red{{color:#DC2626}}.c-yellow{{color:#CA8A04}}.c-green{{color:#16A34A}}.c-blue{{color:#2563EB}}.c-gray{{color:#6B7280}}
+.sec-hdr{{font-size:13px;font-weight:600;color:#374151;margin-bottom:12px;display:flex;align-items:center;gap:8px}}
+.dev-table{{width:100%;border-collapse:collapse;margin-bottom:24px;background:#fff;border-radius:8px;overflow:hidden;border:1px solid #E5E7EB;box-shadow:0 1px 3px rgba(0,0,0,0.06)}}
+.dev-table th{{background:#F9FAFB;color:#6B7280;font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;padding:10px 14px;text-align:left;border-bottom:1px solid #E5E7EB}}
+.dev-table td{{padding:12px 14px;border-bottom:1px solid #F3F4F6;font-size:14px;color:#374151}}
 .dev-row{{cursor:pointer;transition:background .1s}}
-.dev-row:hover{{background:#161b22}}
-.dev-host{{font-weight:600;color:#e6edf3}}
+.dev-row:hover td{{background:#F5F3FF}}
+.dev-host{{font-weight:600;color:#111827}}
 .risk-dot{{display:inline-block;width:10px;height:10px;border-radius:50%}}
-.risk-dot.r-fail{{background:#f85149}}.risk-dot.r-warn{{background:#d29922}}.risk-dot.r-pass{{background:#3fb950}}
-.scan-btn{{background:#161b22;border:1px solid #30363d;color:#58a6ff;border-radius:4px;padding:3px 10px;font-size:12px;cursor:pointer;white-space:nowrap}}
-.rr-fil{{background:#161b22;border:1px solid #30363d;color:#8b949e;border-radius:4px;padding:3px 12px;font-size:12px;cursor:pointer}}
-.rr-fil.rr-active{{color:#e6edf3;border-color:#58a6ff}}
-.rr-table{{width:100%;border-collapse:collapse;margin-bottom:8px;font-size:13px}}
-.rr-table th{{background:#161b22;color:#8b949e;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;padding:8px 12px;text-align:left;border-bottom:2px solid #30363d}}
-.rr-table td{{padding:8px 12px;border-bottom:1px solid #21262d;vertical-align:middle}}
-.rr-new{{background:#0f2a1a;color:#3fb950;border:1px solid #238636;border-radius:10px;padding:2px 8px;font-size:11px;font-weight:600}}
-.rr-recurring{{background:#2a1a0f;color:#d29922;border:1px solid #9e6a03;border-radius:10px;padding:2px 8px;font-size:11px;font-weight:600}}
-.inv-badge-approved{{background:#0f2a1a;color:#3fb950;border:1px solid #238636;border-radius:10px;padding:2px 8px;font-size:11px;font-weight:600}}
-.inv-badge-review{{background:#2a1a0f;color:#d29922;border:1px solid #9e6a03;border-radius:10px;padding:2px 8px;font-size:11px;font-weight:600}}
-.inv-badge-unapp{{background:#2a1010;color:#f85149;border:1px solid #8b1a1a;border-radius:10px;padding:2px 8px;font-size:11px;font-weight:600}}
-.inv-action{{background:#161b22;border:1px solid #30363d;border-radius:4px;padding:2px 8px;font-size:11px;cursor:pointer;color:#8b949e}}
-.inv-action:hover{{color:#e6edf3;border-color:#58a6ff}}
-.inv-count-card{{background:#161b22;border:1px solid #21262d;border-radius:6px;padding:10px 18px;font-size:12px;display:flex;flex-direction:column;gap:2px}}
-.inv-count-n{{font-size:22px;font-weight:800}}
-.scan-btn:hover{{background:#1c2128;border-color:#58a6ff}}
-.scan-btn:disabled{{color:#484f58;border-color:#21262d;cursor:default}}
-#detail-panel{{background:#161b22;border:1px solid #21262d;border-radius:8px;padding:22px;min-height:200px}}
+.risk-dot.r-fail{{background:#DC2626}}.risk-dot.r-warn{{background:#F97316}}.risk-dot.r-pass{{background:#16A34A}}
+.scan-btn{{background:#fff;border:1px solid #D1D5DB;color:#4F46E5;border-radius:6px;padding:4px 10px;font-size:12px;cursor:pointer;white-space:nowrap;font-family:inherit;font-weight:500;transition:background .1s,border-color .1s}}
+.scan-btn:hover{{background:#EEF2FF;border-color:#4F46E5}}
+.scan-btn:disabled{{color:#9CA3AF;border-color:#E5E7EB;cursor:default;background:#F9FAFB}}
+.rr-fil{{background:#fff;border:1px solid #D1D5DB;color:#6B7280;border-radius:6px;padding:3px 12px;font-size:12px;cursor:pointer;font-family:inherit}}
+.rr-fil.rr-active{{color:#4F46E5;border-color:#4F46E5;background:#EEF2FF}}
+.rr-table{{width:100%;border-collapse:collapse;margin-bottom:8px;font-size:14px}}
+.rr-table th{{background:#F9FAFB;color:#6B7280;font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;padding:8px 12px;text-align:left;border-bottom:1px solid #E5E7EB}}
+.rr-table td{{padding:9px 12px;border-bottom:1px solid #F3F4F6;vertical-align:middle}}
+.rr-new{{background:#DCFCE7;color:#16A34A;border:1px solid #BBF7D0;border-radius:10px;padding:2px 8px;font-size:11px;font-weight:600}}
+.rr-recurring{{background:#FEF9C3;color:#CA8A04;border:1px solid #FDE047;border-radius:10px;padding:2px 8px;font-size:11px;font-weight:600}}
+.inv-badge-approved{{background:#DCFCE7;color:#16A34A;border:1px solid #BBF7D0;border-radius:10px;padding:2px 8px;font-size:11px;font-weight:600}}
+.inv-badge-review{{background:#FEF9C3;color:#CA8A04;border:1px solid #FDE047;border-radius:10px;padding:2px 8px;font-size:11px;font-weight:600}}
+.inv-badge-unapp{{background:#FEE2E2;color:#DC2626;border:1px solid #FECACA;border-radius:10px;padding:2px 8px;font-size:11px;font-weight:600}}
+.inv-action{{background:#fff;border:1px solid #D1D5DB;border-radius:4px;padding:2px 8px;font-size:11px;cursor:pointer;color:#6B7280;font-family:inherit}}
+.inv-action:hover{{color:#111827;border-color:#4F46E5}}
+.inv-count-card{{background:#fff;border:1px solid #E5E7EB;border-radius:6px;padding:10px 18px;font-size:12px;display:flex;flex-direction:column;gap:2px;box-shadow:0 1px 2px rgba(0,0,0,0.05)}}
+.inv-count-n{{font-size:22px;font-weight:700;color:#111827}}
+#detail-panel{{background:#fff;border:1px solid #E5E7EB;border-radius:8px;padding:22px;min-height:200px;box-shadow:0 1px 3px rgba(0,0,0,0.06)}}
 .detail-hdr{{display:flex;align-items:center;gap:12px;margin-bottom:18px}}
-.detail-host{{font-size:18px;font-weight:700;color:#e6edf3}}
-.detail-meta{{font-size:12px;color:#6e7681}}
-.finding{{background:#0d1117;border:1px solid #21262d;border-radius:6px;margin-bottom:6px;overflow:hidden}}
-.fhdr{{display:flex;align-items:center;gap:10px;padding:10px 14px;cursor:pointer}}
-.fhdr:hover{{background:#161b22}}
+.detail-host{{font-size:18px;font-weight:700;color:#111827}}
+.detail-meta{{font-size:12px;color:#6B7280}}
+.finding{{background:#fff;border:1px solid #E5E7EB;border-radius:6px;margin-bottom:6px;overflow:hidden}}
+.fhdr{{display:flex;align-items:center;gap:10px;padding:10px 14px;cursor:pointer;transition:background .1s}}
+.fhdr:hover{{background:#F9FAFB}}
 .find-ind{{width:3px;height:28px;border-radius:2px;flex-shrink:0}}
-.find-ind.critical,.find-ind.fail{{background:#f85149}}
-.find-ind.high{{background:#f0883e}}.find-ind.medium{{background:#d29922}}
-.find-ind.pass{{background:#58a6ff}}.find-ind.warn{{background:#d29922}}.find-ind.skip{{background:#363d47}}
+.find-ind.critical,.find-ind.fail{{background:#DC2626}}
+.find-ind.high{{background:#F97316}}.find-ind.medium{{background:#EAB308}}
+.find-ind.pass{{background:#60A5FA}}.find-ind.warn{{background:#EAB308}}.find-ind.skip{{background:#D1D5DB}}
 .sev-badge,.stat-badge{{font-size:10px;font-weight:700;padding:2px 7px;border-radius:3px;text-transform:uppercase;flex-shrink:0}}
-.sev-badge.critical{{background:#3d1212;color:#f85149;border:1px solid #f85149}}
-.sev-badge.high{{background:#3d1f00;color:#f0883e;border:1px solid #f0883e}}
-.sev-badge.medium{{background:#2d2000;color:#d29922;border:1px solid #d29922}}
-.sev-badge.low{{background:#0d1f3d;color:#388bfd;border:1px solid #388bfd}}
-.stat-badge.fail{{background:#3d1212;color:#f85149}}
-.stat-badge.warn{{background:#2d2000;color:#d29922}}
-.stat-badge.pass{{background:#0d1a2d;color:#58a6ff}}
-.stat-badge.skip{{background:#1a1f27;color:#6e7681}}
-.find-id{{font-size:11px;color:#6e7681;font-family:monospace;flex-shrink:0}}
-.find-title{{font-size:13px;font-weight:500;color:#c9d1d9;flex:1}}
-.find-chev{{color:#363d47;font-size:11px;transition:transform .2s;flex-shrink:0}}
+.sev-badge.critical{{background:#FEE2E2;color:#DC2626;border:1px solid #FECACA}}
+.sev-badge.high{{background:#FFF7ED;color:#F97316;border:1px solid #FED7AA}}
+.sev-badge.medium{{background:#FEFCE8;color:#CA8A04;border:1px solid #FEF08A}}
+.sev-badge.low{{background:#EFF6FF;color:#2563EB;border:1px solid #BFDBFE}}
+.stat-badge.fail{{background:#FEE2E2;color:#DC2626}}
+.stat-badge.warn{{background:#FEFCE8;color:#CA8A04}}
+.stat-badge.pass{{background:#EFF6FF;color:#2563EB}}
+.stat-badge.skip{{background:#F3F4F6;color:#6B7280}}
+.find-id{{font-size:11px;color:#9CA3AF;font-family:monospace;flex-shrink:0}}
+.find-title{{font-size:13px;font-weight:500;color:#111827;flex:1}}
+.find-chev{{color:#9CA3AF;font-size:11px;transition:transform .2s;flex-shrink:0}}
 .finding.open .find-chev{{transform:rotate(90deg)}}
-.fbody{{display:none;padding:4px 14px 14px;border-top:1px solid #21262d;color:#8b949e;font-size:13px;line-height:1.7}}
+.fbody{{display:none;padding:4px 14px 14px;border-top:1px solid #F3F4F6;color:#6B7280;font-size:13px;line-height:1.7}}
 .finding.open .fbody{{display:block}}
-.empty{{text-align:center;padding:48px;color:#484f58}}
-.refresh-note{{font-size:11px;color:#484f58;text-align:right;margin-bottom:8px}}
-.shadow-card{{background:#161b22;border:1px solid #30363d;border-left:3px solid #a371f7;border-radius:6px;padding:14px 16px;margin-bottom:8px}}
-.shadow-card:hover{{background:#1a1f2e}}
-::-webkit-scrollbar{{width:6px}}::-webkit-scrollbar-track{{background:#0d1117}}
-::-webkit-scrollbar-thumb{{background:#30363d;border-radius:3px}}
-/* ── Light mode ── */
-body.light,html.light body{{background:#ffffff;color:#24292f}}
-body.light .brand-bar,html.light .brand-bar{{border-color:#d0d7de}}
-body.light .brand-name,html.light .brand-name{{color:#1f2328}}
-body.light .brand-sub,html.light .brand-sub{{color:#57606a}}
-body.light .brand-mark,html.light .brand-mark{{color:#0969da}}
-body.light .hlink,html.light .hlink{{color:#0969da}}
-body.light .scard,html.light .scard{{background:#f6f8fa;border-color:#d0d7de}}
-body.light .scard:hover,html.light .scard:hover{{background:#eaeef2}}
-body.light .scard.sf-active,html.light .scard.sf-active{{background:#ddf4ff;border-color:#0969da}}
-body.light .scard.sf-active-red,html.light .scard.sf-active-red{{background:#ffebe9;border-color:#cf222e}}
-body.light .scard.sf-active-yellow,html.light .scard.sf-active-yellow{{background:#fff8c5;border-color:#9a6700}}
-body.light .scard.sf-active-green,html.light .scard.sf-active-green{{background:#dafbe1;border-color:#1a7f37}}
-body.light .scard-l,html.light .scard-l{{color:#57606a}}
-body.light .sec-hdr,html.light .sec-hdr{{color:#57606a}}
-body.light .dev-table th,html.light .dev-table th{{background:#f6f8fa;color:#57606a;border-color:#d0d7de}}
-body.light .dev-table td,html.light .dev-table td{{border-color:#eaeef2}}
-body.light .dev-row:hover,html.light .dev-row:hover{{background:#f6f8fa}}
-body.light .dev-host,html.light .dev-host{{color:#1f2328}}
-body.light .detail-host,html.light .detail-host{{color:#1f2328}}
-body.light .detail-meta,html.light .detail-meta{{color:#57606a}}
-body.light #detail-panel,html.light #detail-panel{{background:#f6f8fa;border-color:#d0d7de}}
-body.light .finding,html.light .finding{{background:#f6f8fa;border-color:#d0d7de}}
-body.light .fhdr:hover,html.light .fhdr:hover{{background:#eaeef2}}
-body.light .fbody,html.light .fbody{{color:#57606a;border-color:#d0d7de}}
-body.light .find-title,html.light .find-title{{color:#24292f}}
-body.light .find-id,html.light .find-id{{color:#57606a}}
-body.light .find-chev,html.light .find-chev{{color:#8c959f}}
-body.light .shadow-card,html.light .shadow-card{{background:#f6f8fa;border-color:#d0d7de;border-left-color:#8250df}}
-body.light .shadow-card:hover,html.light .shadow-card:hover{{background:#eaeef2}}
-body.light .scan-btn,html.light .scan-btn{{background:#f6f8fa;border-color:#d0d7de;color:#0969da}}
-body.light .scan-btn:hover,html.light .scan-btn:hover{{background:#eaeef2;border-color:#0969da}}
-body.light .refresh-note,html.light .refresh-note{{color:#8c959f}}
-body.light .empty,html.light .empty{{color:#8c959f}}
-body.light .c-red,html.light .c-red{{color:#cf222e}}
-body.light .c-yellow,html.light .c-yellow{{color:#9a6700}}
-body.light .c-blue,html.light .c-blue{{color:#0969da}}
-body.light .c-green,html.light .c-green{{color:#1a7f37}}
-body.light .c-gray,html.light .c-gray{{color:#57606a}}
-body.light ::-webkit-scrollbar-track,html.light ::-webkit-scrollbar-track{{background:#ffffff}}
-body.light ::-webkit-scrollbar-thumb,html.light ::-webkit-scrollbar-thumb{{background:#d0d7de}}
-body.light #theme-toggle,html.light #theme-toggle{{background:#f6f8fa;border-color:#d0d7de;color:#24292f}}
-html.light #sidebar,body.light #sidebar{{background:#f6f8fa;border-right-color:#d0d7de}}
-html.light .sb-logo,body.light .sb-logo{{border-bottom-color:#d0d7de}}
-html.light .sb-logo-name,body.light .sb-logo-name{{color:#1f2328}}
-html.light .sb-logo-mark,body.light .sb-logo-mark{{color:#0969da}}
-html.light .sb-logo-sub,body.light .sb-logo-sub{{color:#57606a}}
-html.light .sb-group,body.light .sb-group{{color:#8c959f}}
-html.light .sb-item,body.light .sb-item{{color:#57606a}}
-html.light .sb-item:hover,body.light .sb-item:hover{{background:#eaeef2;color:#24292f}}
-html.light .sb-item.sb-active,body.light .sb-item.sb-active{{background:#ddf4ff;color:#0969da;border-left-color:#0969da}}
-html.light .sb-footer,body.light .sb-footer{{border-top-color:#d0d7de}}
-html.light .sb-footer a,body.light .sb-footer a{{color:#8c959f}}
+.empty{{text-align:center;padding:48px;color:#9CA3AF}}
+.refresh-note{{font-size:11px;color:#9CA3AF;text-align:right;margin-bottom:8px}}
+.shadow-card{{background:#fff;border:1px solid #E5E7EB;border-left:3px solid #7C3AED;border-radius:6px;padding:14px 16px;margin-bottom:8px;box-shadow:0 1px 2px rgba(0,0,0,0.05)}}
+.shadow-card:hover{{background:#FAFAFA}}
+::-webkit-scrollbar{{width:6px}}::-webkit-scrollbar-track{{background:#F3F4F6}}
+::-webkit-scrollbar-thumb{{background:#D1D5DB;border-radius:3px}}
 </style>
 </head>
 <body>
-<script>if(localStorage.getItem('sentinel_theme')==='light')document.documentElement.classList.add('light');</script>
+<script>if(localStorage.getItem('sentinel_theme')==='dark')document.documentElement.classList.add('dark');</script>
 <div id="app">
   <aside id="sidebar">
     <div class="sb-logo">
@@ -5607,9 +5554,9 @@ loadAlertConfig();
   setInterval(tick, 1000);
 }})();
 </script>
-<div style="margin-top:48px;padding:16px 0 24px;border-top:1px solid #21262d;text-align:center;font-size:11px;color:#484f58">
+<div style="margin-top:48px;padding:16px 0 24px;border-top:1px solid #E5E7EB;text-align:center;font-size:11px;color:#9CA3AF">
   © 2026 M.A.R.K. AI Systems. All rights reserved. Patent Pending.
-  &nbsp;·&nbsp; <span id="auto-refresh-countdown" style="color:#388bfd"></span>
+  &nbsp;·&nbsp; <span id="auto-refresh-countdown" style="color:#4F46E5"></span>
 </div>
 </body>
 </html>"""
