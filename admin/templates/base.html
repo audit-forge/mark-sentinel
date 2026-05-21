@@ -121,7 +121,7 @@ input:focus, select:focus { outline: none; border-color: var(--focus-bdr); }
   {% if user.role == 'super_admin' %}<a href="/customers">Customers</a>{% endif %}
   <a href="/users">Users</a>
   <span class="spacer"></span>
-  <span class="nav-user">{{ user.role }}</span>
+  <a href="/account" style="font-size:14px;color:var(--text-muted)">{{ user.email }}</a>
   <button class="theme-toggle" onclick="toggleTheme()" id="theme-btn">Light</button>
   <a href="/logout">Logout</a>
 </nav>

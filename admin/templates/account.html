@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>MY ACCOUNT</h1>
+
+{% if request.query_params.get('pw_changed') %}
+<div class="error" style="background:var(--accent)18;border-color:var(--accent)40;color:var(--accent)">&#10003; Password updated successfully</div>
+{% elif request.query_params.get('error') == 'wrong_password' %}
+<div class="error">Current password is incorrect.</div>
+{% elif request.query_params.get('error') == 'mismatch' %}
+<div class="error">New passwords do not match.</div>
+{% endif %}
+
+<div class="card" style="max-width:480px">
+  <div class="card-title">Change Password</div>
+  <form method="post" action="/account/password" onsubmit="return checkMatch()">
+    <div class="form-group" style="margin-bottom:20px">
+      <label>Current Password</label>
+      <input type="password" name="current_password" required autofocus>
+    </div>
+    <div class="form-group" style="margin-bottom:20px">
+      <label>New Password</label>
+      <input type="password" name="new_password" id="new_password" required minlength="8">
+    </div>
+    <div class="form-group" style="margin-bottom:28px">
+      <label>Confirm New Password</label>
+      <input type="password" name="confirm_password" id="confirm_password" required minlength="8">
+      <span id="mismatch-msg" style="font-size:13px;color:var(--err-txt);display:none">Passwords do not match</span>
+    </div>
+    <button type="submit" class="btn btn-primary" style="width:100%">Update Password</button>
+  </form>
+</div>
+
+<div class="card" style="max-width:480px">
+  <div class="card-title">Account Info</div>
+  <table>
+    <tr>
+      <td style="color:var(--text-muted);width:140px">Email</td>
+      <td>{{ user.email }}</td>
+    </tr>
+    <tr>
+      <td style="color:var(--text-muted)">Role</td>
+      <td><span class="badge {% if user.role == 'super_admin' %}badge-green{% elif user.role == 'customer_admin' %}badge-blue{% else %}badge-yellow{% endif %}">{{ user.role }}</span></td>
+    </tr>
+  </table>
+</div>
+
+<script>
+function checkMatch() {
+  var np = document.getElementById('new_password').value;
+  var cp = document.getElementById('confirm_password').value;
+  if (np !== cp) {
+    document.getElementById('mismatch-msg').style.display = 'block';
+    return false;
+  }
+  return true;
+}
+document.getElementById('confirm_password').addEventListener('input', function() {
+  var match = this.value === document.getElementById('new_password').value;
+  document.getElementById('mismatch-msg').style.display = match ? 'none' : 'block';
+});
+</script>
+{% endblock %}

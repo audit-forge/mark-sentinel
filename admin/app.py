@@ -288,6 +288,41 @@ async def remove_customer(request: Request, customer_id: str = Form(...)):
     return RedirectResponse("/customers", status_code=303)
 
 
+# ── Account ───────────────────────────────────────────────────────────────────
+
+@app.get("/account", response_class=HTMLResponse)
+async def account_page(request: Request):
+    try:
+        user = get_current_user(request)
+    except HTTPException:
+        return RedirectResponse("/login")
+    return templates.TemplateResponse("account.html", {"request": request, "user": user})
+
+
+@app.post("/account/password")
+async def account_change_password(
+    request: Request,
+    current_password: str = Form(...),
+    new_password: str = Form(...),
+    confirm_password: str = Form(...),
+):
+    try:
+        user = get_current_user(request)
+    except HTTPException:
+        return RedirectResponse("/login")
+    if new_password != confirm_password:
+        return RedirectResponse("/account?error=mismatch", status_code=303)
+    with get_conn() as conn:
+        row = conn.execute("SELECT * FROM users WHERE id=?", (user["sub"],)).fetchone()
+        if not row or not verify_password(current_password, row["password_hash"]):
+            return RedirectResponse("/account?error=wrong_password", status_code=303)
+        conn.execute(
+            "UPDATE users SET password_hash=? WHERE id=?",
+            (hash_password(new_password), user["sub"])
+        )
+    return RedirectResponse("/account?pw_changed=1", status_code=303)
+
+
 # ── Users ─────────────────────────────────────────────────────────────────────
 
 @app.get("/users", response_class=HTMLResponse)
