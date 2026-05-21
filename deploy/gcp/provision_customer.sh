@@ -14,6 +14,7 @@ LICENSE_FILE="/licenses/${CUSTOMER_ID}/license.json"
 DATA_DIR="/opt/sentinel-data/${CUSTOMER_ID}"
 
 mkdir -p "$DATA_DIR"
+chown -R 999:999 "$DATA_DIR"
 
 AGENT_TOKEN="${8:-}"
 if [ -z "$AGENT_TOKEN" ] && [ -f "${DATA_DIR}/agent_token.txt" ]; then
