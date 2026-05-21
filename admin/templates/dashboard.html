@@ -108,5 +108,17 @@
       <td><span class="url">http://[customer-id].{{ ip }}.nip.io</span></td>
     </tr>
   </table>
+  <div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--border);display:flex;align-items:center;gap:16px">
+    <form method="post" action="/admin/test-email" style="display:inline">
+      <button type="submit" class="btn btn-sm" style="background:var(--bg-input);color:var(--accent);border:1px solid var(--accent)30">
+        Send Test Email
+      </button>
+    </form>
+    {% if request.query_params.get('email_test') == 'ok' %}
+      <span style="font-size:12px;color:var(--accent)">&#10003; Test email sent successfully</span>
+    {% elif request.query_params.get('email_test') == 'fail' %}
+      <span style="font-size:12px;color:var(--danger-txt)">&#10005; Send failed — check SMTP settings in .env</span>
+    {% endif %}
+  </div>
 </div>
 {% endblock %}
