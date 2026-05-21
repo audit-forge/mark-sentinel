@@ -128,7 +128,18 @@
     </form>
     <span style="font-size:11px;color:var(--text-muted)">Pulls latest code from GitHub and rebuilds the admin panel (~60 sec)</span>
     {% if request.query_params.get('deploy') == 'started' %}
-      <span style="font-size:12px;color:var(--accent)">&#10003; Deploy started — refresh in ~60 seconds</span>
+      <span style="font-size:12px;color:var(--accent)">&#10003; Deploy started — refreshing in <strong id="deploy-countdown">65</strong>s</span>
+      <script>
+        (function() {
+          var n = 65;
+          var el = document.getElementById('deploy-countdown');
+          var t = setInterval(function() {
+            n--;
+            if (el) el.textContent = n;
+            if (n <= 0) { clearInterval(t); window.location.href = '/dashboard'; }
+          }, 1000);
+        })();
+      </script>
     {% elif request.query_params.get('deploy') == 'busy' %}
       <span style="font-size:12px;color:#ffbb33">&#9888; A deploy is already running — try again in a moment</span>
     {% elif request.query_params.get('deploy') == 'failed' %}
