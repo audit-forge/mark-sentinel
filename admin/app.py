@@ -174,6 +174,21 @@ async def test_email(request: Request):
     return RedirectResponse(f"/dashboard?email_test={result}", status_code=303)
 
 
+# ── Installer scripts (served publicly — no secrets embedded) ─────────────────
+
+@app.get("/install/{filename}")
+async def serve_installer(filename: str):
+    from fastapi.responses import FileResponse
+    allowed = {"install.sh", "install.ps1", "install.bat"}
+    if filename not in allowed:
+        raise HTTPException(404)
+    path = f"/app/{filename}"
+    if not os.path.exists(path):
+        raise HTTPException(404)
+    media_type = "text/plain"
+    return FileResponse(path, media_type=media_type, filename=filename)
+
+
 # ── Customers ─────────────────────────────────────────────────────────────────
 
 @app.get("/customers", response_class=HTMLResponse)
@@ -221,6 +236,7 @@ async def add_customer(
     if tier not in ("standard", "plus"):
         tier = "standard"
     expires = (date.today() + timedelta(days=365)).isoformat()
+    agent_token = secrets.token_urlsafe(32)
     with get_conn() as conn:
         if MAX_CUSTOMERS > 0:
             active_count = conn.execute(
@@ -234,8 +250,8 @@ async def add_customer(
         max_port = conn.execute("SELECT MAX(port) FROM customers").fetchone()[0]
         port = (max_port or 7000) + 1
         conn.execute(
-            "INSERT INTO customers (id, name, created_at, active, tier, license_expires_at, max_seats, port) VALUES (?,?,?,1,?,?,?,?)",
-            (cid, customer_name.strip(), datetime.now(timezone.utc).isoformat(), tier, expires, max_seats, port)
+            "INSERT INTO customers (id, name, created_at, active, tier, license_expires_at, max_seats, port, agent_token) VALUES (?,?,?,1,?,?,?,?,?)",
+            (cid, customer_name.strip(), datetime.now(timezone.utc).isoformat(), tier, expires, max_seats, port, agent_token)
         )
         if customer_email.strip():
             email = customer_email.strip().lower()
@@ -254,7 +270,7 @@ async def add_customer(
                 from mailer import send_welcome_email
                 send_welcome_email(email, customer_name.strip(), login_url, temp_password)
     _write_license_file(cid, customer_name.strip(), tier, expires, max_seats)
-    _run_script("provision_customer.sh", cid, PUBLIC_IP, tier, expires, str(max_seats), customer_name.strip(), str(port))
+    _run_script("provision_customer.sh", cid, PUBLIC_IP, tier, expires, str(max_seats), customer_name.strip(), str(port), agent_token)
     return RedirectResponse("/customers", status_code=303)
 
 

@@ -50,6 +50,7 @@ def init_db():
             ('max_seats',           "INTEGER NOT NULL DEFAULT 5"),
             ('current_agents',      "INTEGER NOT NULL DEFAULT 0"),
             ('port',                "INTEGER"),
+            ('agent_token',         "TEXT"),
         ]:
             try:
                 conn.execute(f"ALTER TABLE customers ADD COLUMN {col} {defn}")

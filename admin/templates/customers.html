@@ -123,6 +123,9 @@
       </td>
       <td style="display:flex;gap:6px;flex-wrap:wrap">
         {% if c.active %}
+          <button type="button" class="btn btn-sm"
+                  onclick="openDeploy('{{ c.id }}','{{ c.name | replace("'","\\x27") }}',{{ c.port or 7001 }},'{{ c.agent_token or '' }}')"
+                  style="background:var(--bg-input);color:#4488ff;border:1px solid #4488ff40">Deploy</button>
           <form method="post" action="/customers/renew" style="display:inline">
             <input type="hidden" name="customer_id" value="{{ c.id }}">
             <button type="submit" class="btn btn-sm" style="background:var(--bg-input);color:var(--accent);border:1px solid var(--accent)40">Renew</button>
@@ -150,4 +153,139 @@
   <div class="empty">No customers found.</div>
   {% endif %}
 </div>
+
+<style>
+.dtab{background:none;border:none;border-bottom:2px solid transparent;color:var(--text-muted);font-family:inherit;font-size:14px;padding:13px 22px;cursor:pointer;transition:color .15s,border-color .15s;font-weight:500}
+.dtab:hover{color:var(--text)}
+.dtab.on{color:var(--accent);border-bottom-color:var(--accent)}
+</style>
+
+<div id="deployModal" style="display:none;position:fixed;inset:0;z-index:9999;background:#000000cc;overflow-y:auto">
+  <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:8px;max-width:700px;margin:60px auto 40px;overflow:hidden">
+
+    <div style="padding:20px 24px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between">
+      <div>
+        <div style="font-size:12px;color:var(--text-muted);letter-spacing:1px;text-transform:uppercase;font-weight:600">Deploy Agent</div>
+        <div id="dm-name" style="font-size:18px;color:var(--text);margin-top:4px"></div>
+      </div>
+      <button onclick="closeDeploy()" style="background:none;border:none;color:var(--text-muted);font-size:26px;cursor:pointer;padding:2px 10px;line-height:1">&times;</button>
+    </div>
+
+    <div style="display:flex;border-bottom:1px solid var(--border)">
+      <button class="dtab on"  id="dtab-mac" onclick="showDTab('mac')">macOS / Linux</button>
+      <button class="dtab"     id="dtab-win" onclick="showDTab('win')">Windows</button>
+      <button class="dtab"     id="dtab-av"  onclick="showDTab('av')">AV Exclusions</button>
+    </div>
+
+    <div style="padding:24px">
+
+      <div id="dm-no-token" style="display:none;margin-bottom:16px;padding:12px 16px;background:#ffaa0012;border:1px solid #ffaa0035;border-radius:4px;font-size:13px;color:#ffbb33">
+        Token not stored for this customer (provisioned before this feature). Retrieve it from <code style="color:#ffdd88">/opt/sentinel-data/<span class="dm-cid"></span>/agent_token.txt</code> on the server and paste it in place of <code style="color:#ffdd88">TOKEN</code> below.
+      </div>
+
+      <!-- Mac / Linux pane -->
+      <div id="dpane-mac">
+        <p style="font-size:14px;color:var(--text-muted);margin-bottom:14px">Run as <strong>root</strong> or with <code>sudo</code> on the target device. Works on macOS and any systemd-based Linux distro.</p>
+        <div style="position:relative">
+          <pre id="dm-mac-cmd" style="background:var(--bg);border:1px solid var(--border-in);border-radius:6px;padding:16px 16px 16px 16px;font-size:12.5px;font-family:'Menlo','Consolas',monospace;color:var(--accent);white-space:pre-wrap;word-break:break-all;line-height:1.6;padding-right:70px"></pre>
+          <button onclick="dCopy('dm-mac-cmd',this)" style="position:absolute;top:10px;right:10px;background:var(--bg-input);border:1px solid var(--border-in);color:var(--text-muted);font-size:12px;padding:4px 10px;border-radius:4px;cursor:pointer;font-family:inherit">Copy</button>
+        </div>
+        <p style="font-size:13px;color:var(--text-muted);margin-top:14px">Requires Python 3.11+. Installs to <code>/opt/sentinel/</code> and registers as a persistent system service (launchd on macOS, systemd on Linux).</p>
+      </div>
+
+      <!-- Windows pane -->
+      <div id="dpane-win" style="display:none">
+        <p style="font-size:14px;color:var(--text-muted);margin-bottom:14px">Open <strong>PowerShell as Administrator</strong> and run:</p>
+        <div style="position:relative">
+          <pre id="dm-win-cmd" style="background:var(--bg);border:1px solid var(--border-in);border-radius:6px;padding:16px;font-size:12.5px;font-family:'Menlo','Consolas',monospace;color:var(--accent);white-space:pre-wrap;word-break:break-all;line-height:1.6;padding-right:70px"></pre>
+          <button onclick="dCopy('dm-win-cmd',this)" style="position:absolute;top:10px;right:10px;background:var(--bg-input);border:1px solid var(--border-in);color:var(--text-muted);font-size:12px;padding:4px 10px;border-radius:4px;cursor:pointer;font-family:inherit">Copy</button>
+        </div>
+        <p style="font-size:13px;color:var(--text-muted);margin-top:14px">Requires Python 3.11+. Installs to <code>C:\Program Files\Sentinel\</code> and registers as a Windows Service. Uses NSSM if installed; falls back to sc.exe.</p>
+      </div>
+
+      <!-- AV Exclusions pane -->
+      <div id="dpane-av" style="display:none">
+        <p style="font-size:14px;color:var(--text-muted);margin-bottom:18px">Add these exclusions in the customer's AV / EDR console <em>before</em> running the installer. Forward this tab to their IT admin.</p>
+
+        <div style="margin-bottom:18px">
+          <div style="font-size:12px;font-weight:600;color:var(--text-muted);letter-spacing:.8px;text-transform:uppercase;margin-bottom:8px">Windows</div>
+          <pre style="background:var(--bg);border:1px solid var(--border-in);border-radius:6px;padding:14px;font-size:13px;font-family:'Menlo','Consolas',monospace;color:var(--text-td);line-height:1.7">Paths:    C:\Program Files\Sentinel\
+          C:\ProgramData\Sentinel\
+Process:  python.exe  (parent: C:\Program Files\Sentinel\)
+Service:  SentinelAgent</pre>
+        </div>
+
+        <div style="margin-bottom:18px">
+          <div style="font-size:12px;font-weight:600;color:var(--text-muted);letter-spacing:.8px;text-transform:uppercase;margin-bottom:8px">macOS</div>
+          <pre style="background:var(--bg);border:1px solid var(--border-in);border-radius:6px;padding:14px;font-size:13px;font-family:'Menlo','Consolas',monospace;color:var(--text-td);line-height:1.7">Paths:    /opt/sentinel/
+          /etc/sentinel/
+          /Library/LaunchDaemons/io.hash.sentinel-agent.plist
+Process:  python3  (parent: /opt/sentinel/venv/)</pre>
+        </div>
+
+        <div style="margin-bottom:18px">
+          <div style="font-size:12px;font-weight:600;color:var(--text-muted);letter-spacing:.8px;text-transform:uppercase;margin-bottom:8px">Linux</div>
+          <pre style="background:var(--bg);border:1px solid var(--border-in);border-radius:6px;padding:14px;font-size:13px;font-family:'Menlo','Consolas',monospace;color:var(--text-td);line-height:1.7">Paths:    /opt/sentinel/
+          /etc/sentinel/
+Process:  python3  (parent: /opt/sentinel/venv/)
+Service:  sentinel-agent  (systemd unit)</pre>
+        </div>
+
+        <div style="background:var(--bg);border:1px solid #4488ff30;border-radius:6px;padding:14px;font-size:13px;color:#6699ff">
+          <strong>Outbound network:</strong> Allow outbound TCP to <code id="dm-av-server" style="color:#88aaff"></code>. No inbound ports are required on the endpoint.
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<script>
+function openDeploy(cid, name, port, token) {
+  var ip   = '{{ ip }}';
+  var srv  = 'http://' + ip + ':' + port;
+  var base = 'http://' + ip;
+
+  document.getElementById('dm-name').textContent = name;
+  document.querySelectorAll('.dm-cid').forEach(function(el){ el.textContent = cid; });
+
+  var noTok = document.getElementById('dm-no-token');
+  noTok.style.display = token ? 'none' : 'block';
+
+  document.getElementById('dm-mac-cmd').textContent =
+    'curl -fsSL ' + base + '/install/install.sh | \\\n' +
+    '  sudo bash -s -- \\\n' +
+    '  --server ' + srv + ' \\\n' +
+    '  --token  ' + (token || 'TOKEN');
+
+  document.getElementById('dm-win-cmd').textContent =
+    'Set-ExecutionPolicy Bypass -Scope Process -Force\n' +
+    "$s = (Invoke-WebRequest '" + base + "/install/install.ps1' -UseBasicParsing).Content\n" +
+    "& ([scriptblock]::Create($s)) -Server '" + srv + "' -Token '" + (token || 'TOKEN') + "'";
+
+  document.getElementById('dm-av-server').textContent = srv;
+
+  showDTab('mac');
+  document.getElementById('deployModal').style.display = 'block';
+}
+function closeDeploy() {
+  document.getElementById('deployModal').style.display = 'none';
+}
+function showDTab(t) {
+  ['mac','win','av'].forEach(function(n) {
+    document.getElementById('dpane-' + n).style.display = n === t ? 'block' : 'none';
+    document.getElementById('dtab-'  + n).classList.toggle('on', n === t);
+  });
+}
+function dCopy(id, btn) {
+  navigator.clipboard.writeText(document.getElementById(id).textContent).then(function() {
+    var orig = btn.textContent;
+    btn.textContent = 'Copied!';
+    setTimeout(function(){ btn.textContent = orig; }, 2000);
+  });
+}
+document.getElementById('deployModal').addEventListener('click', function(e) {
+  if (e.target === this) closeDeploy();
+});
+</script>
 {% endblock %}
