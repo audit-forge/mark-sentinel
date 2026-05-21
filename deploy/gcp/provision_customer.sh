@@ -7,6 +7,7 @@ TIER="${3:-standard}"
 EXPIRES="${4:-}"
 MAX_SEATS="${5:-5}"
 CUSTOMER_NAME="${6:-$CUSTOMER_ID}"
+PORT="${7:-7001}"
 CONTAINER_NAME="sentinel-${CUSTOMER_ID}"
 NGINX_CONF_DIR="/app/nginx/customers"
 LICENSE_FILE="/licenses/${CUSTOMER_ID}/license.json"
@@ -24,8 +25,8 @@ docker run -d \
 mkdir -p "$NGINX_CONF_DIR"
 cat > "${NGINX_CONF_DIR}/${CUSTOMER_ID}.conf" <<EOF
 server {
-    listen 80;
-    server_name ${CUSTOMER_ID}.${PUBLIC_IP}.nip.io;
+    listen ${PORT};
+    server_name _;
 
     location = /_auth {
         internal;
@@ -45,13 +46,14 @@ server {
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
         proxy_read_timeout 300;
+        proxy_buffering off;
     }
 
     location @login_redirect {
-        return 302 http://admin.${PUBLIC_IP}.nip.io/login?next=http://\$host\$request_uri;
+        return 302 http://${PUBLIC_IP}/login?next=http://\$host:\$server_port\$request_uri;
     }
 }
 EOF
 
 docker exec sentinel-nginx nginx -s reload
-echo "Provisioned: http://${CUSTOMER_ID}.${PUBLIC_IP}.nip.io (${TIER})"
+echo "Provisioned: http://${PUBLIC_IP}:${PORT} (${TIER})"

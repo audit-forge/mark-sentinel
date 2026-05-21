@@ -67,7 +67,13 @@
         {% endif %}
       </td>
       <td style="color:var(--text-muted)">{{ c.max_seats }}</td>
-      <td><a class="url" href="http://{{ c.id }}.{{ ip }}.nip.io" target="_blank">{{ c.id }}.{{ ip }}.nip.io</a></td>
+      <td>
+        {% if c.port %}
+          <a class="url" href="http://{{ ip }}:{{ c.port }}" target="_blank">{{ ip }}:{{ c.port }}</a>
+        {% else %}
+          <span style="color:var(--text-muted)">—</span>
+        {% endif %}
+      </td>
       <td>
         {% if c.license_expires_at %}
           {% if days is not none and days < 0 %}

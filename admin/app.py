@@ -186,6 +186,7 @@ async def customers_page(request: Request):
         rows = conn.execute(
             "SELECT * FROM customers ORDER BY created_at DESC"
         ).fetchall()
+
     customers = []
     for r in rows:
         c = dict(r)
@@ -227,9 +228,11 @@ async def add_customer(
         exists = conn.execute("SELECT id FROM customers WHERE id=?", (cid,)).fetchone()
         if exists:
             return RedirectResponse("/customers?error=exists", status_code=303)
+        max_port = conn.execute("SELECT MAX(port) FROM customers").fetchone()[0]
+        port = (max_port or 7000) + 1
         conn.execute(
-            "INSERT INTO customers (id, name, created_at, active, tier, license_expires_at, max_seats) VALUES (?,?,?,1,?,?,?)",
-            (cid, customer_name.strip(), datetime.now(timezone.utc).isoformat(), tier, expires, max_seats)
+            "INSERT INTO customers (id, name, created_at, active, tier, license_expires_at, max_seats, port) VALUES (?,?,?,1,?,?,?,?)",
+            (cid, customer_name.strip(), datetime.now(timezone.utc).isoformat(), tier, expires, max_seats, port)
         )
         if customer_email.strip():
             email = customer_email.strip().lower()
@@ -243,7 +246,7 @@ async def add_customer(
             from mailer import send_welcome_email
             send_welcome_email(email, customer_name.strip(), login_url, temp_password)
     _write_license_file(cid, customer_name.strip(), tier, expires, max_seats)
-    _run_script("provision_customer.sh", cid, PUBLIC_IP, tier, expires, str(max_seats), customer_name.strip())
+    _run_script("provision_customer.sh", cid, PUBLIC_IP, tier, expires, str(max_seats), customer_name.strip(), str(port))
     return RedirectResponse("/customers", status_code=303)
 
 
