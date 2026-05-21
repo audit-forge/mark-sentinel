@@ -16,10 +16,10 @@
   --bg-card:     #ffffff;
   --bg-input:    #f7f9ff;
   --border:      #ccd3e8;
-  --border-in:   #9aaacf;
-  --text:        #0f1e3d;
-  --text-sub:    #3a4f7a;
-  --placeholder: #7a8aaa;
+  --border-in:   #8a9abf;
+  --text:        #0a1428;
+  --text-sub:    #1e3060;
+  --placeholder: #5a6a8a;
   --accent:      #f5a623;
   --accent-hov:  #e09410;
   --accent-btn:  #1a2f5a;
@@ -27,7 +27,7 @@
   --err-bg:      #fff0f0;
   --err-bdr:     #fca5a5;
   --focus-bdr:   #f5a62380;
-  --toggle-c:    #3a4f7a;
+  --toggle-c:    #1e3060;
   --shadow:      0 4px 24px rgba(26,47,90,0.12);
 }
 [data-theme="dark"] {
@@ -35,9 +35,9 @@
   --bg-card:   #162040;
   --bg-input:  #0e1525;
   --border:    #1e2d50;
-  --border-in: #253a6a;
-  --text:      #e8edf8;
-  --text-sub:  #6a7fa8;
+  --border-in: #3d5585;
+  --text:      #f0f4ff;
+  --text-sub:  #b0c4e8;
   --accent:    #f5a623;
   --accent-hov:#e09410;
   --accent-btn:#0e1525;
@@ -45,7 +45,7 @@
   --err-bg:    #3a1010;
   --err-bdr:   #6a2020;
   --focus-bdr: #f5a62360;
-  --toggle-c:  #4a5a80;
+  --toggle-c:  #b0c4e8;
   --shadow:    0 4px 24px rgba(0,0,0,0.40);
 }
 * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -69,7 +69,7 @@ body {
   margin-bottom: 32px;
 }
 .brand-name {
-  font-size: 28px;
+  font-size: 32px;
   font-weight: 800;
   color: var(--text);
   letter-spacing: 4px;
@@ -77,10 +77,10 @@ body {
 }
 .brand-name span { color: var(--accent); }
 .brand-sub {
-  font-size: 13px;
+  font-size: 14px;
   color: var(--text-sub);
   letter-spacing: 2px;
-  margin-top: 6px;
+  margin-top: 8px;
   text-transform: uppercase;
 }
 .card {
@@ -93,8 +93,8 @@ body {
 .form-group { margin-bottom: 20px; }
 label {
   display: block;
-  font-size: 13px;
-  font-weight: 600;
+  font-size: 15px;
+  font-weight: 700;
   color: var(--text);
   margin-bottom: 8px;
   letter-spacing: .3px;
@@ -103,10 +103,10 @@ input {
   background: var(--bg-input);
   border: 1.5px solid var(--border-in);
   color: var(--text);
-  padding: 12px 16px;
+  padding: 13px 16px;
   border-radius: 8px;
   font-family: inherit;
-  font-size: 15px;
+  font-size: 16px;
   width: 100%;
   transition: border-color .15s;
 }
@@ -114,12 +114,12 @@ input:focus { outline: none; border-color: var(--focus-bdr); }
 input::placeholder { color: var(--placeholder); opacity: 1; }
 .btn {
   width: 100%;
-  padding: 14px;
+  padding: 15px;
   background: var(--accent);
   color: var(--accent-btn);
   font-weight: 700;
   font-family: inherit;
-  font-size: 15px;
+  font-size: 16px;
   border: none;
   border-radius: 8px;
   cursor: pointer;
@@ -129,7 +129,7 @@ input::placeholder { color: var(--placeholder); opacity: 1; }
 }
 .btn:hover { background: var(--accent-hov); }
 .error {
-  font-size: 13px;
+  font-size: 14px;
   margin-bottom: 18px;
   padding: 10px 14px;
   background: var(--err-bg);
@@ -147,8 +147,9 @@ input::placeholder { color: var(--placeholder); opacity: 1; }
   border: 1px solid var(--border-in);
   color: var(--toggle-c);
   font-family: inherit;
-  font-size: 12px;
-  padding: 4px 12px;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 5px 14px;
   border-radius: 20px;
   cursor: pointer;
   transition: color .15s, border-color .15s;
