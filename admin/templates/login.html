@@ -12,22 +12,23 @@
 </script>
 <style>
 :root {
-  --bg:        #f0f4ff;
-  --bg-card:   #ffffff;
-  --bg-input:  #f7f9ff;
-  --border:    #dde3f0;
-  --border-in: #c8d0e8;
-  --text:      #1a2f5a;
-  --text-sub:  #7a8aaa;
-  --accent:    #f5a623;
-  --accent-hov:#e09410;
-  --accent-btn:#1a2f5a;
-  --err-txt:   #cc2222;
-  --err-bg:    #fff0f0;
-  --err-bdr:   #ffcccc;
-  --focus-bdr: #f5a62380;
-  --toggle-c:  #aab0c8;
-  --shadow:    0 4px 24px rgba(26,47,90,0.10);
+  --bg:          #f0f4ff;
+  --bg-card:     #ffffff;
+  --bg-input:    #f7f9ff;
+  --border:      #ccd3e8;
+  --border-in:   #9aaacf;
+  --text:        #0f1e3d;
+  --text-sub:    #3a4f7a;
+  --placeholder: #7a8aaa;
+  --accent:      #f5a623;
+  --accent-hov:  #e09410;
+  --accent-btn:  #1a2f5a;
+  --err-txt:     #b91c1c;
+  --err-bg:      #fff0f0;
+  --err-bdr:     #fca5a5;
+  --focus-bdr:   #f5a62380;
+  --toggle-c:    #3a4f7a;
+  --shadow:      0 4px 24px rgba(26,47,90,0.12);
 }
 [data-theme="dark"] {
   --bg:        #0e1525;
@@ -110,6 +111,7 @@ input {
   transition: border-color .15s;
 }
 input:focus { outline: none; border-color: var(--focus-bdr); }
+input::placeholder { color: var(--placeholder); opacity: 1; }
 .btn {
   width: 100%;
   padding: 14px;
