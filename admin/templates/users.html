@@ -2,6 +2,16 @@
 {% block content %}
 <h1>USERS</h1>
 
+{% if request.query_params.get('pw_changed') %}
+<div class="error" style="background:var(--accent)18;border-color:var(--accent)40;color:var(--accent)">&#10003; Password updated successfully</div>
+{% elif request.query_params.get('error') == 'forbidden' %}
+<div class="error">Permission denied.</div>
+{% elif request.query_params.get('error') == 'notfound' %}
+<div class="error">User not found.</div>
+{% elif request.query_params.get('error') == 'exists' %}
+<div class="error">A user with that email already exists.</div>
+{% endif %}
+
 <div class="card">
   <div class="card-title">Add User</div>
   <form method="post" action="/users/add">
@@ -14,10 +24,11 @@
         <label>Password</label>
         <input type="password" name="password" required>
       </div>
-      <div class="form-group" style="max-width:160px">
+      <div class="form-group" style="max-width:180px">
         <label>Role</label>
         <select name="role">
           {% if user.role == 'super_admin' %}
+          <option value="super_admin">super_admin</option>
           <option value="customer_admin">customer_admin</option>
           {% endif %}
           <option value="user">user</option>
@@ -78,5 +89,27 @@
   {% else %}
   <div class="empty">No users yet.</div>
   {% endif %}
+</div>
+
+<div class="card">
+  <div class="card-title">Reset Password</div>
+  <form method="post" action="/users/password">
+    <div class="form-row">
+      <div class="form-group">
+        <label>User</label>
+        <select name="user_id" required>
+          <option value="">— select user —</option>
+          {% for u in users %}
+          <option value="{{ u.id }}">{{ u.email }} ({{ u.role }}{% if u.customer_name %} · {{ u.customer_name }}{% endif %})</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="form-group">
+        <label>New Password</label>
+        <input type="password" name="new_password" placeholder="New password" required minlength="8">
+      </div>
+      <button type="submit" class="btn btn-primary">Save Password</button>
+    </div>
+  </form>
 </div>
 {% endblock %}

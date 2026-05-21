@@ -347,6 +347,32 @@ async def add_user(
     return RedirectResponse("/users", status_code=303)
 
 
+@app.post("/users/password")
+async def change_password(
+    request: Request,
+    user_id: str = Form(...),
+    new_password: str = Form(...),
+):
+    try:
+        user = get_current_user(request)
+    except HTTPException:
+        return RedirectResponse("/login")
+    with get_conn() as conn:
+        target = conn.execute("SELECT * FROM users WHERE id=? AND active=1", (user_id,)).fetchone()
+        if not target:
+            return RedirectResponse("/users?error=notfound", status_code=303)
+        if user["role"] != "super_admin":
+            if target["customer_id"] != user["customer_id"]:
+                return RedirectResponse("/users?error=forbidden", status_code=303)
+            if target["role"] == "super_admin":
+                return RedirectResponse("/users?error=forbidden", status_code=303)
+        conn.execute(
+            "UPDATE users SET password_hash=? WHERE id=?",
+            (hash_password(new_password), user_id)
+        )
+    return RedirectResponse("/users?pw_changed=1", status_code=303)
+
+
 @app.post("/users/remove")
 async def remove_user(request: Request, user_id: str = Form(...)):
     try:
