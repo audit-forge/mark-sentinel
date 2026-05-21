@@ -737,9 +737,14 @@ def main() -> None:
         device_id = _device_id()
         hostname  = socket.gethostname()
 
-        log.info('Daemon mode — scan interval %ds, poll every %ds', interval, POLL_INTERVAL)
+        # Startup jitter: stagger first scan across fleet so mass reboots don't
+        # create a thundering herd. Capped at half the scan interval.
+        STARTUP_JITTER = min(interval // 2, 300)  # up to 5 min, never > half interval
+        startup_delay  = _random.uniform(0, STARTUP_JITTER)
+        log.info('Daemon mode — scan interval %ds, poll every %ds, startup delay %.0fs',
+                 interval, POLL_INTERVAL, startup_delay)
 
-        last_scan = 0.0
+        last_scan = time.time() - interval + startup_delay  # first scan fires after delay
         last_success = 0.0
         while True:
             now = time.time()
