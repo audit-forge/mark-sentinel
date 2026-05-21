@@ -286,6 +286,26 @@ async def renew_customer(request: Request, customer_id: str = Form(...)):
     return RedirectResponse("/customers", status_code=303)
 
 
+@app.post("/customers/seats")
+async def update_seats(request: Request, customer_id: str = Form(...), max_seats: int = Form(...)):
+    try:
+        require_super_admin(request)
+    except HTTPException:
+        return RedirectResponse("/login")
+    if max_seats < 1:
+        return RedirectResponse("/customers?error=invalid_seats", status_code=303)
+    with get_conn() as conn:
+        row = conn.execute("SELECT * FROM customers WHERE id=?", (customer_id,)).fetchone()
+        if not row:
+            return RedirectResponse("/customers?error=notfound", status_code=303)
+        conn.execute("UPDATE customers SET max_seats=? WHERE id=?", (max_seats, customer_id))
+        name    = row["name"]
+        tier    = row["tier"]
+        expires = row["license_expires_at"]
+    _write_license_file(customer_id, name, tier, expires, max_seats)
+    return RedirectResponse("/customers?seats_updated=" + customer_id, status_code=303)
+
+
 @app.post("/customers/remove")
 async def remove_customer(request: Request, customer_id: str = Form(...)):
     try:

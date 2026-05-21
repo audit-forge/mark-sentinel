@@ -2,6 +2,12 @@
 {% block content %}
 <h1>CUSTOMERS</h1>
 
+{% if request.query_params.get('seats_updated') %}
+<div class="error" style="background:var(--accent)18;border-color:var(--accent)40;color:var(--accent)">&#10003; Seat count updated successfully</div>
+{% elif request.query_params.get('error') == 'invalid_seats' %}
+<div class="error">Seat count must be at least 1.</div>
+{% endif %}
+
 <div class="card">
   <div class="card-title">Add Customer</div>
   <form method="post" action="/customers/add">
@@ -76,7 +82,14 @@
           <span class="badge badge-yellow">Standard</span>
         {% endif %}
       </td>
-      <td style="color:var(--text-muted)">{{ c.max_seats }}</td>
+      <td>
+        <form method="post" action="/customers/seats" style="display:flex;align-items:center;gap:6px">
+          <input type="hidden" name="customer_id" value="{{ c.id }}">
+          <input type="number" name="max_seats" value="{{ c.max_seats }}" min="1" max="500"
+                 style="width:60px;padding:3px 6px;font-size:13px;background:var(--bg-input);border:1px solid var(--border-in);border-radius:4px;color:var(--text);text-align:center">
+          <button type="submit" class="btn btn-sm" style="padding:3px 8px;font-size:12px">Save</button>
+        </form>
+      </td>
       <td>
         {% if c.port and c.active %}
           <a class="url" href="http://{{ ip }}:{{ c.port }}" target="_blank">{{ ip }}:{{ c.port }}</a>
