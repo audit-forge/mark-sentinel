@@ -5481,9 +5481,24 @@ async function testAlert(channel) {{
 }}
 
 loadAlertConfig();
+
+// ── Auto-refresh ──
+(function() {{
+  var INTERVAL = 60;
+  var remaining = INTERVAL;
+  var el = document.getElementById('auto-refresh-countdown');
+  function tick() {{
+    remaining--;
+    if (remaining <= 0) {{ location.reload(); return; }}
+    if (el) el.textContent = 'Refreshing in ' + remaining + 's';
+  }}
+  if (el) el.textContent = 'Refreshing in ' + remaining + 's';
+  setInterval(tick, 1000);
+}})();
 </script>
 <div style="margin-top:48px;padding:16px 0 24px;border-top:1px solid #21262d;text-align:center;font-size:11px;color:#484f58">
   © 2026 M.A.R.K. AI Systems. All rights reserved. Patent Pending.
+  &nbsp;·&nbsp; <span id="auto-refresh-countdown" style="color:#388bfd"></span>
 </div>
 </body>
 </html>"""
