@@ -27,12 +27,28 @@ server {
     listen 80;
     server_name ${CUSTOMER_ID}.${PUBLIC_IP}.nip.io;
 
+    location = /_auth {
+        internal;
+        proxy_pass http://user-manager:8000/auth/verify;
+        proxy_pass_request_body off;
+        proxy_set_header Content-Length "";
+        proxy_set_header X-Customer-ID ${CUSTOMER_ID};
+        proxy_set_header Cookie \$http_cookie;
+    }
+
     location / {
+        auth_request /_auth;
+        error_page 401 403 = @login_redirect;
+
         proxy_pass http://${CONTAINER_NAME}:7331;
         proxy_set_header Host \$host;
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
         proxy_read_timeout 300;
+    }
+
+    location @login_redirect {
+        return 302 http://admin.${PUBLIC_IP}.nip.io/login?next=http://\$host\$request_uri;
     }
 }
 EOF

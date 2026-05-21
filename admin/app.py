@@ -47,19 +47,28 @@ async def root():
 
 @app.get("/login", response_class=HTMLResponse)
 async def login_page(request: Request):
-    return templates.TemplateResponse("login.html", {"request": request, "error": None})
+    next_url = request.query_params.get("next", "")
+    return templates.TemplateResponse("login.html", {"request": request, "error": None, "next": next_url})
 
 
 @app.post("/login")
-async def login(request: Request, email: str = Form(...), password: str = Form(...)):
+async def login(
+    request: Request,
+    email: str = Form(...),
+    password: str = Form(...),
+    next: str = Form(""),
+):
     with get_conn() as conn:
         row = conn.execute(
             "SELECT * FROM users WHERE email=? AND active=1", (email,)
         ).fetchone()
     if not row or not verify_password(password, row["password_hash"]):
-        return templates.TemplateResponse("login.html", {"request": request, "error": "Invalid credentials"})
+        return templates.TemplateResponse("login.html", {
+            "request": request, "error": "Invalid credentials", "next": next
+        })
     token = create_token(row["id"], row["role"], row["customer_id"])
-    resp = RedirectResponse("/dashboard", status_code=303)
+    destination = next if next else "/dashboard"
+    resp = RedirectResponse(destination, status_code=303)
     resp.set_cookie("token", token, httponly=True, max_age=28800, samesite="lax")
     return resp
 
@@ -69,6 +78,20 @@ async def logout():
     resp = RedirectResponse("/login", status_code=303)
     resp.delete_cookie("token")
     return resp
+
+
+@app.get("/auth/verify")
+async def auth_verify(request: Request):
+    from fastapi.responses import Response
+    try:
+        user = get_current_user(request)
+    except HTTPException:
+        return Response(status_code=401)
+    customer_id = request.headers.get("X-Customer-ID", "")
+    if customer_id and user["role"] != "super_admin":
+        if user.get("customer_id") != customer_id:
+            return Response(status_code=403)
+    return Response(status_code=200)
 
 
 # ── Dashboard ─────────────────────────────────────────────────────────────────
