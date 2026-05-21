@@ -1,12 +1,12 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="dark">
+<html lang="en" data-theme="light">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>M.A.R.K. Sentinel — Login</title>
 <script>
   (function() {
-    var t = localStorage.getItem('theme') || 'dark';
+    var t = localStorage.getItem('theme') || 'light';
     document.documentElement.setAttribute('data-theme', t);
   })();
 </script>
@@ -95,7 +95,7 @@ input:focus { outline: none; border-color: var(--focus-bdr); }
     document.getElementById('theme-btn').textContent = next === 'dark' ? 'Light' : 'Dark';
   }
   document.getElementById('theme-btn').textContent =
-    document.documentElement.getAttribute('data-theme') === 'dark' ? 'Light' : 'Dark';
+    document.documentElement.getAttribute('data-theme') === 'light' ? 'Dark' : 'Light';
 </script>
 </body>
 </html>
