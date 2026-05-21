@@ -3464,7 +3464,7 @@ def _build_fleet_html(devices: list[dict], shadow: list[dict] | None = None,
 <title>M.A.R.K. Sentinel — Command Center</title>
 <style>
 *{{box-sizing:border-box;margin:0;padding:0}}
-body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-serif,"Apple Color Emoji","Segoe UI Emoji";font-size:14px;height:100vh;overflow:hidden}}
+body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-serif,"Apple Color Emoji","Segoe UI Emoji";font-size:15px;height:100vh;overflow:hidden}}
 #app{{display:flex;height:100vh;overflow:hidden}}
 #sidebar{{width:240px;flex-shrink:0;background:#111827;border-right:1px solid rgba(255,255,255,0.06);display:flex;flex-direction:column;height:100vh;overflow-y:auto}}
 #main{{flex:1;overflow-y:auto;padding:28px 36px;min-width:0;background:#F9FAFB}}
@@ -3474,7 +3474,7 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
 .sb-logo-sub{{font-size:10px;color:#6B7280;margin-top:2px}}
 .sb-nav{{flex:1;padding:8px 0}}
 .sb-group{{font-size:10px;font-weight:700;letter-spacing:.15em;text-transform:uppercase;color:#6B7280;padding:12px 16px 5px}}
-.sb-item{{display:block;width:100%;padding:8px 16px;font-size:13px;color:#D1D5DB;cursor:pointer;text-decoration:none;user-select:none;border:none;border-left:2px solid transparent;background:none;text-align:left;transition:background .12s,color .12s}}
+.sb-item{{display:block;width:100%;padding:8px 16px;font-size:14px;color:#D1D5DB;cursor:pointer;text-decoration:none;user-select:none;border:none;border-left:2px solid transparent;background:none;text-align:left;transition:background .12s,color .12s}}
 .sb-item:hover{{color:#F9FAFB;background:rgba(255,255,255,0.06)}}
 .sb-item.sb-active{{color:#fff;background:#4F46E5;border-left-color:#4F46E5}}
 .sb-footer{{padding:14px 16px;border-top:1px solid rgba(255,255,255,0.07);display:flex;flex-direction:column;gap:7px}}
@@ -3501,8 +3501,8 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
 .c-red{{color:#DC2626}}.c-yellow{{color:#CA8A04}}.c-green{{color:#16A34A}}.c-blue{{color:#2563EB}}.c-gray{{color:#6B7280}}
 .sec-hdr{{font-size:13px;font-weight:600;color:#374151;margin-bottom:12px;display:flex;align-items:center;gap:8px}}
 .dev-table{{width:100%;border-collapse:collapse;margin-bottom:24px;background:#fff;border-radius:8px;overflow:hidden;border:1px solid #E5E7EB;box-shadow:0 1px 3px rgba(0,0,0,0.06)}}
-.dev-table th{{background:#F9FAFB;color:#6B7280;font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;padding:10px 14px;text-align:left;border-bottom:1px solid #E5E7EB}}
-.dev-table td{{padding:12px 14px;border-bottom:1px solid #F3F4F6;font-size:14px;color:#374151}}
+.dev-table th{{background:#F9FAFB;color:#6B7280;font-size:13px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;padding:10px 14px;text-align:left;border-bottom:1px solid #E5E7EB}}
+.dev-table td{{padding:12px 14px;border-bottom:1px solid #F3F4F6;font-size:15px;color:#374151}}
 .dev-row{{cursor:pointer;transition:background .1s}}
 .dev-row:hover td{{background:#F5F3FF}}
 .dev-host{{font-weight:600;color:#111827}}
@@ -3590,7 +3590,6 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
     <div class="sb-footer">
       <a href="/academy" target="_blank">Academy</a>
       <a href="/probe" target="_blank">&#128272; API Tester</a>
-      <button id="theme-toggle" onclick="toggleTheme()" style="background:none;border:none;font-size:11px;color:#484f58;cursor:pointer;text-align:left;padding:0;margin-top:2px">&#9728; Theme</button>
     </div>
   </aside>
   <div id="main">
