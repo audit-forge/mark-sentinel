@@ -12,63 +12,153 @@
 </script>
 <style>
 :root {
-  --bg:        #0a0a0a;
-  --bg-card:   #111;
-  --bg-input:  #0d0d0d;
-  --border:    #1c1c1c;
-  --border-in: #252525;
-  --text:      #e0e0e0;
-  --text-sub:  #444;
-  --accent:    #00ff88;
-  --accent-hov:#00dd77;
-  --accent-btn:#000;
-  --err-txt:   #ff5555;
-  --err-bg:    #ff444410;
-  --err-bdr:   #ff444430;
-  --focus-bdr: #00ff8860;
-  --toggle-c:  #555;
-}
-[data-theme="light"] {
-  --bg:        #f4f4f4;
+  --bg:        #f0f4ff;
   --bg-card:   #ffffff;
-  --bg-input:  #f9f9f9;
-  --border:    #e0e0e0;
-  --border-in: #d0d0d0;
-  --text:      #1a1a1a;
-  --text-sub:  #aaa;
-  --accent:    #00aa55;
-  --accent-hov:#008844;
-  --accent-btn:#ffffff;
+  --bg-input:  #f7f9ff;
+  --border:    #dde3f0;
+  --border-in: #c8d0e8;
+  --text:      #1a2f5a;
+  --text-sub:  #7a8aaa;
+  --accent:    #f5a623;
+  --accent-hov:#e09410;
+  --accent-btn:#1a2f5a;
   --err-txt:   #cc2222;
-  --err-bg:    #ff000008;
-  --err-bdr:   #cc222220;
-  --focus-bdr: #00aa5560;
-  --toggle-c:  #aaa;
+  --err-bg:    #fff0f0;
+  --err-bdr:   #ffcccc;
+  --focus-bdr: #f5a62380;
+  --toggle-c:  #aab0c8;
+  --shadow:    0 4px 24px rgba(26,47,90,0.10);
+}
+[data-theme="dark"] {
+  --bg:        #0e1525;
+  --bg-card:   #162040;
+  --bg-input:  #0e1525;
+  --border:    #1e2d50;
+  --border-in: #253a6a;
+  --text:      #e8edf8;
+  --text-sub:  #6a7fa8;
+  --accent:    #f5a623;
+  --accent-hov:#e09410;
+  --accent-btn:#0e1525;
+  --err-txt:   #ff6666;
+  --err-bg:    #3a1010;
+  --err-bdr:   #6a2020;
+  --focus-bdr: #f5a62360;
+  --toggle-c:  #4a5a80;
+  --shadow:    0 4px 24px rgba(0,0,0,0.40);
 }
 * { box-sizing: border-box; margin: 0; padding: 0; }
-body { font-family: 'Courier New', monospace; background: var(--bg); color: var(--text); min-height: 100vh; display: flex; align-items: center; justify-content: center; transition: background .2s, color .2s; }
-.login-box { width: 360px; }
-.brand { color: var(--accent); font-size: 12px; letter-spacing: 4px; text-align: center; margin-bottom: 4px; }
-.subtitle { color: var(--text-sub); font-size: 11px; text-align: center; margin-bottom: 36px; letter-spacing: 1px; }
-.card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 3px; padding: 32px; }
-.form-group { margin-bottom: 16px; }
-label { display: block; font-size: 10px; color: var(--text-sub); letter-spacing: 1px; text-transform: uppercase; margin-bottom: 6px; }
-input { background: var(--bg-input); border: 1px solid var(--border-in); color: var(--text); padding: 10px 14px; border-radius: 2px; font-family: 'Courier New', monospace; font-size: 13px; width: 100%; }
+body {
+  font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background .2s, color .2s;
+}
+.login-wrap {
+  width: 100%;
+  max-width: 420px;
+  padding: 24px;
+}
+.brand {
+  text-align: center;
+  margin-bottom: 32px;
+}
+.brand-name {
+  font-size: 28px;
+  font-weight: 800;
+  color: var(--text);
+  letter-spacing: 4px;
+  line-height: 1;
+}
+.brand-name span { color: var(--accent); }
+.brand-sub {
+  font-size: 13px;
+  color: var(--text-sub);
+  letter-spacing: 2px;
+  margin-top: 6px;
+  text-transform: uppercase;
+}
+.card {
+  background: var(--bg-card);
+  border-radius: 12px;
+  padding: 36px 32px;
+  box-shadow: var(--shadow);
+  border: 1px solid var(--border);
+}
+.form-group { margin-bottom: 20px; }
+label {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 8px;
+  letter-spacing: .3px;
+}
+input {
+  background: var(--bg-input);
+  border: 1.5px solid var(--border-in);
+  color: var(--text);
+  padding: 12px 16px;
+  border-radius: 8px;
+  font-family: inherit;
+  font-size: 15px;
+  width: 100%;
+  transition: border-color .15s;
+}
 input:focus { outline: none; border-color: var(--focus-bdr); }
-.btn { width: 100%; padding: 11px; background: var(--accent); color: var(--accent-btn); font-weight: bold; font-family: 'Courier New', monospace; font-size: 13px; border: none; border-radius: 2px; cursor: pointer; margin-top: 8px; letter-spacing: 1px; }
+.btn {
+  width: 100%;
+  padding: 14px;
+  background: var(--accent);
+  color: var(--accent-btn);
+  font-weight: 700;
+  font-family: inherit;
+  font-size: 15px;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  margin-top: 8px;
+  letter-spacing: .5px;
+  transition: background .15s;
+}
 .btn:hover { background: var(--accent-hov); }
-.error { color: var(--err-txt); font-size: 11px; margin-bottom: 16px; padding: 8px 12px; background: var(--err-bg); border: 1px solid var(--err-bdr); border-radius: 2px; }
-.toggle-wrap { text-align: right; margin-bottom: 12px; }
-.theme-toggle { background: none; border: none; color: var(--toggle-c); font-family: 'Courier New', monospace; font-size: 11px; cursor: pointer; padding: 0; }
-.theme-toggle:hover { color: var(--accent); }
+.error {
+  font-size: 13px;
+  margin-bottom: 18px;
+  padding: 10px 14px;
+  background: var(--err-bg);
+  border: 1px solid var(--err-bdr);
+  border-radius: 6px;
+  color: var(--err-txt);
+}
+.bottom-row {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 20px;
+}
+.theme-toggle {
+  background: none;
+  border: 1px solid var(--border-in);
+  color: var(--toggle-c);
+  font-family: inherit;
+  font-size: 12px;
+  padding: 4px 12px;
+  border-radius: 20px;
+  cursor: pointer;
+  transition: color .15s, border-color .15s;
+}
+.theme-toggle:hover { color: var(--accent); border-color: var(--accent); }
 </style>
 </head>
 <body>
-<div class="login-box">
-  <div class="brand">M.A.R.K. SENTINEL</div>
-  <div class="subtitle">ADMIN PANEL</div>
-  <div class="toggle-wrap">
-    <button class="theme-toggle" onclick="toggleTheme()" id="theme-btn">Light</button>
+<div class="login-wrap">
+  <div class="brand">
+    <div class="brand-name">M.A.R.K. <span>SENTINEL</span></div>
+    <div class="brand-sub">Security Intelligence Platform</div>
   </div>
   <div class="card">
     {% if error %}<div class="error">{{ error }}</div>{% endif %}
@@ -76,26 +166,29 @@ input:focus { outline: none; border-color: var(--focus-bdr); }
       <input type="hidden" name="next" value="{{ next }}">
       <div class="form-group">
         <label>Email</label>
-        <input type="email" name="email" required autofocus>
+        <input type="email" name="email" placeholder="you@example.com" required autofocus>
       </div>
       <div class="form-group">
         <label>Password</label>
-        <input type="password" name="password" required>
+        <input type="password" name="password" placeholder="••••••••" required>
       </div>
-      <button type="submit" class="btn">LOGIN</button>
+      <button type="submit" class="btn">Sign In</button>
     </form>
+  </div>
+  <div class="bottom-row" style="margin-top:16px;margin-bottom:0">
+    <button class="theme-toggle" onclick="toggleTheme()" id="theme-btn">Dark mode</button>
   </div>
 </div>
 <script>
   function toggleTheme() {
     var current = document.documentElement.getAttribute('data-theme');
-    var next = current === 'dark' ? 'light' : 'dark';
+    var next = current === 'light' ? 'dark' : 'light';
     document.documentElement.setAttribute('data-theme', next);
     localStorage.setItem('theme', next);
-    document.getElementById('theme-btn').textContent = next === 'dark' ? 'Light' : 'Dark';
+    document.getElementById('theme-btn').textContent = next === 'light' ? 'Dark mode' : 'Light mode';
   }
   document.getElementById('theme-btn').textContent =
-    document.documentElement.getAttribute('data-theme') === 'light' ? 'Dark' : 'Light';
+    document.documentElement.getAttribute('data-theme') === 'light' ? 'Dark mode' : 'Light mode';
 </script>
 </body>
 </html>
