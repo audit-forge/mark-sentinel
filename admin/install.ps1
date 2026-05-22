@@ -29,7 +29,7 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-$InstallDir  = "C:\Program Files\Sentinel"
+$InstallDir  = "C:\Sentinel"
 $ConfigDir   = "C:\ProgramData\Sentinel"
 $ConfigFile  = "$ConfigDir\agent_config.json"
 $InstallLog  = "$ConfigDir\install.log"
