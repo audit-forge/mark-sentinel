@@ -152,6 +152,11 @@ class AgentStore:
                 conn.execute(
                     "ALTER TABLE shadow_devices ADD COLUMN approval_status TEXT NOT NULL DEFAULT 'unapproved'"
                 )
+            sc_cols = {r[1] for r in conn.execute("PRAGMA table_info(scan_schedules)")}
+            if 'interval_hours' not in sc_cols:
+                conn.execute(
+                    "ALTER TABLE scan_schedules ADD COLUMN interval_hours INTEGER NOT NULL DEFAULT 0"
+                )
 
         # Prune old reports per retention policy (env var or default 90 days)
         self.prune_old_reports(int(os.environ.get('SENTINEL_RETAIN_DAYS', '90')))
@@ -578,14 +583,15 @@ class AgentStore:
 
     def add_schedule(self, device_id: str, cadence: str, hour: int,
                      profile: str, label: str = '',
-                     weekday: int | None = None, monthday: int | None = None) -> int:
+                     weekday: int | None = None, monthday: int | None = None,
+                     interval_hours: int = 0) -> int:
         now = int(time.time())
         with self._lock, self._conn() as conn:
             cur = conn.execute("""
                 INSERT INTO scan_schedules
-                    (device_id, cadence, hour, weekday, monthday, profile, label, enabled, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?)
-            """, (device_id, cadence, hour, weekday, monthday, profile, label, now))
+                    (device_id, cadence, hour, weekday, monthday, profile, label, enabled, created_at, interval_hours)
+                VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+            """, (device_id, cadence, hour, weekday, monthday, profile, label, now, interval_hours))
             return cur.lastrowid
 
     def list_schedules(self) -> list[dict]:
@@ -622,14 +628,22 @@ class AgentStore:
             r = dict(row)
             last = r.get('last_fired') or 0
             cadence = r['cadence']
-            if cadence == 'daily':
-                if r['hour'] == h and (now_ts - last) >= 82800:  # 23h gap
+            elapsed = now_ts - last
+            if cadence == 'hourly':
+                if elapsed >= 3540:  # 59 min — fire every hour
+                    due.append(r)
+            elif cadence == 'interval':
+                ih = max(1, int(r.get('interval_hours') or 1))
+                if elapsed >= (ih * 3600 - 300):  # 5-min tolerance
+                    due.append(r)
+            elif cadence == 'daily':
+                if r['hour'] == h and elapsed >= 82800:
                     due.append(r)
             elif cadence == 'weekly':
-                if r['hour'] == h and r.get('weekday') == wd and (now_ts - last) >= 604800 - 3600:
+                if r['hour'] == h and r.get('weekday') == wd and elapsed >= 604800 - 3600:
                     due.append(r)
             elif cadence == 'monthly':
-                if r['hour'] == h and r.get('monthday') == md and (now_ts - last) >= 2419200 - 3600:
+                if r['hour'] == h and r.get('monthday') == md and elapsed >= 2419200 - 3600:
                     due.append(r)
         return due
 

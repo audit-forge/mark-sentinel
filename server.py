@@ -2255,8 +2255,9 @@ button:hover{{background:#2ea043}}
             device_id = body.get('device_id', 'all')
             weekday = int(body['weekday']) if 'weekday' in body else None
             monthday = int(body['monthday']) if 'monthday' in body else None
+            interval_hours = int(body.get('interval_hours', 0))
             store = _get_store()
-            new_id = store.add_schedule(device_id, cadence, hour, profile, label, weekday, monthday)
+            new_id = store.add_schedule(device_id, cadence, hour, profile, label, weekday, monthday, interval_hours)
             self._json({'ok': True, 'id': new_id})
         except Exception as e:
             log.error('schedule create error: %s', e)
@@ -3759,9 +3760,21 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
       <div style="display:flex;flex-direction:column;gap:4px">
         <label style="font-size:11px;color:#6B7280">Cadence</label>
         <select id="sched-cadence" onchange="schedCadenceChange()" style="background:#F9FAFB;border:1px solid #E5E7EB;border-radius:4px;color:#111827;font-size:12px;padding:4px 8px">
-          <option value="daily">Daily</option>
+          <option value="hourly">Hourly</option>
+          <option value="interval">Every N hours</option>
+          <option value="daily" selected>Daily</option>
           <option value="weekly">Weekly</option>
           <option value="monthly">Monthly</option>
+        </select>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:4px" id="sched-interval-wrap" style="display:none">
+        <label style="font-size:11px;color:#6B7280">Every</label>
+        <select id="sched-interval-hours" style="background:#F9FAFB;border:1px solid #E5E7EB;border-radius:4px;color:#111827;font-size:12px;padding:4px 8px">
+          <option value="2">2 hours</option>
+          <option value="4">4 hours</option>
+          <option value="6">6 hours</option>
+          <option value="8">8 hours</option>
+          <option value="12">12 hours</option>
         </select>
       </div>
       <div style="display:flex;flex-direction:column;gap:4px" id="sched-weekday-wrap" style="display:none">
@@ -3777,7 +3790,7 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
           {' '.join(f'<option value="{d}">{d}</option>' for d in range(1,29))}
         </select>
       </div>
-      <div style="display:flex;flex-direction:column;gap:4px">
+      <div style="display:flex;flex-direction:column;gap:4px" id="sched-hour-wrap">
         <label style="font-size:11px;color:#6B7280">Time (UTC)</label>
         <select id="sched-hour" style="background:#F9FAFB;border:1px solid #E5E7EB;border-radius:4px;color:#111827;font-size:12px;padding:4px 8px">
           {' '.join(f'<option value="{h}"{" selected" if h==2 else ""}>{h:02d}:00 UTC</option>' for h in range(24))}
@@ -5241,9 +5254,16 @@ function renderSchedules(scheds) {{
   }}
   const rows = scheds.map(s => {{
     const lbl = s.label || (PROFILE_LABELS[s.profile]||s.profile) + ' ' + (CADENCE_LABELS[s.cadence]||s.cadence);
-    let when = `${{String(s.hour).padStart(2,'0')}}:00 UTC`;
-    if (s.cadence==='weekly') when = WEEKDAY_LABELS[s.weekday||0] + ' ' + when;
-    if (s.cadence==='monthly') when = 'Day ' + (s.monthday||1) + ' ' + when;
+    let when;
+    if (s.cadence === 'hourly') {{
+      when = 'every hour';
+    }} else if (s.cadence === 'interval') {{
+      when = 'every ' + (s.interval_hours || 1) + 'h';
+    }} else {{
+      when = `${{String(s.hour).padStart(2,'0')}}:00 UTC`;
+      if (s.cadence==='weekly')  when = WEEKDAY_LABELS[s.weekday||0] + ' at ' + when;
+      if (s.cadence==='monthly') when = 'Day ' + (s.monthday||1) + ' at ' + when;
+    }}
     const enabled = s.enabled ? '🟢' : '⚫';
     const fired = s.last_fired ? new Date(s.last_fired*1000).toLocaleDateString() : 'Never';
     return `<div style="display:flex;align-items:center;gap:12px;padding:6px 0;border-bottom:1px solid #F3F4F6;font-size:13px;flex-wrap:wrap">
@@ -5262,8 +5282,11 @@ function renderSchedules(scheds) {{
 
 function schedCadenceChange() {{
   const c = document.getElementById('sched-cadence').value;
-  document.getElementById('sched-weekday-wrap').style.display = c==='weekly' ? '' : 'none';
-  document.getElementById('sched-monthday-wrap').style.display = c==='monthly' ? '' : 'none';
+  const interval = c === 'hourly' || c === 'interval';
+  document.getElementById('sched-interval-wrap').style.display  = c === 'interval' ? '' : 'none';
+  document.getElementById('sched-weekday-wrap').style.display   = c === 'weekly'   ? '' : 'none';
+  document.getElementById('sched-monthday-wrap').style.display  = c === 'monthly'  ? '' : 'none';
+  document.getElementById('sched-hour-wrap').style.display      = interval         ? 'none' : '';
 }}
 
 async function addSchedule() {{
@@ -5275,8 +5298,9 @@ async function addSchedule() {{
     device_id:'all',
   }};
   const c = body.cadence;
-  if (c==='weekly') body.weekday = parseInt(document.getElementById('sched-weekday').value);
-  if (c==='monthly') body.monthday = parseInt(document.getElementById('sched-monthday').value);
+  if (c==='interval') body.interval_hours = parseInt(document.getElementById('sched-interval-hours').value);
+  if (c==='weekly')   body.weekday        = parseInt(document.getElementById('sched-weekday').value);
+  if (c==='monthly')  body.monthday       = parseInt(document.getElementById('sched-monthday').value);
   try {{
     const r = await fetch('/api/schedules', {{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify(body)}});
     const d = await r.json();
