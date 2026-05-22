@@ -39,6 +39,10 @@ $ScriptDir   = if ($PSScriptRoot -and $PSScriptRoot -ne "") { $PSScriptRoot } el
 if (-not (Test-Path $ConfigDir)) { New-Item -ItemType Directory -Path $ConfigDir -Force | Out-Null }
 Start-Transcript -Path $InstallLog -Append -Force | Out-Null
 
+$Utf8NoBom = New-Object System.Text.UTF8Encoding $false
+function Write-FileNoBOM { param([string]$Path, [string]$Content)
+    [System.IO.File]::WriteAllText($Path, $Content, $Utf8NoBom) }
+
 function Write-Step {
     param([string]$Msg)
     Write-Host "  $Msg" -ForegroundColor Cyan
@@ -160,16 +164,16 @@ if (-not (Test-Path $ConfigFile)) {
             target   = "."
             profile  = "default"
             interval = 3600
-        } | ConvertTo-Json -Depth 5 | Set-Content -Path $ConfigFile -Encoding UTF8
+        } | ConvertTo-Json -Depth 5 | ForEach-Object { Write-FileNoBOM $ConfigFile $_ }
     }
     Write-OK "Created default config"
 }
 
 if ($Server -ne "" -or $Token -ne "") {
-    $cfg = Get-Content $ConfigFile -Raw | ConvertFrom-Json
+    $cfg = [System.IO.File]::ReadAllText($ConfigFile, $Utf8NoBom).TrimStart([char]0xFEFF) | ConvertFrom-Json
     if ($Server -ne "")  { $cfg.server = $Server }
     if ($Token  -ne "")  { $cfg.token  = $Token  }
-    $cfg | ConvertTo-Json -Depth 5 | Set-Content -Path $ConfigFile -Encoding UTF8
+    Write-FileNoBOM $ConfigFile ($cfg | ConvertTo-Json -Depth 5)
     Write-OK "Config updated"
 }
 
@@ -238,7 +242,7 @@ Set-Location '$InstallDir'
 `$env:PYTHONUTF8 = '1'
 & '$PythonExe' '$InstallDir\agent.py' --daemon --config '$ConfigFile' 2>&1 |
     Tee-Object -FilePath '$ConfigDir\sentinel-agent.log' -Append
-"@ | Set-Content -Path $WrapperScript -Encoding UTF8
+"@ | ForEach-Object { Write-FileNoBOM $WrapperScript $_ }
 
         $existingSvc = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
         if ($existingSvc) {
