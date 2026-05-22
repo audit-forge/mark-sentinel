@@ -167,7 +167,7 @@ Set-Acl -Path $ConfigFile -AclObject $acl
 if (-not $NoService) {
     Write-Step "Registering Windows Service '$ServiceName' ..."
 
-    $nssmPath = (Get-Command "nssm" -ErrorAction SilentlyContinue)?.Source
+    $nssmCmd = Get-Command "nssm" -ErrorAction SilentlyContinue; $nssmPath = if ($nssmCmd) { $nssmCmd.Source } else { $null }
 
     if ($nssmPath) {
         Write-Step "Using NSSM to create service ..."
@@ -212,7 +212,7 @@ Set-Location '$InstallDir'
             Start-Sleep -Seconds 2
         }
 
-        $pwshExe = (Get-Command "pwsh" -ErrorAction SilentlyContinue)?.Source
+        $pwshCmd = Get-Command "pwsh" -ErrorAction SilentlyContinue; $pwshExe = if ($pwshCmd) { $pwshCmd.Source } else { $null }
         if (-not $pwshExe) {
             $pwshExe = (Get-Command "powershell" -ErrorAction SilentlyContinue).Source
         }
