@@ -253,15 +253,12 @@ function openDeploy(cid, name, port, token) {
   noTok.style.display = token ? 'none' : 'block';
 
   document.getElementById('dm-mac-cmd').textContent =
-    'curl -fsSL ' + base + '/install/install.sh | \\\n' +
-    '  sudo bash -s -- \\\n' +
-    '  --server ' + srv + ' \\\n' +
-    '  --token  ' + (token || 'TOKEN');
+    'curl -fsSL ' + base + '/install/install.sh | sudo bash -s -- --server ' + srv + ' --token ' + (token || 'TOKEN');
 
   document.getElementById('dm-win-cmd').textContent =
-    'Set-ExecutionPolicy Bypass -Scope Process -Force\n' +
-    "$s = (Invoke-WebRequest '" + base + "/install/install.ps1' -UseBasicParsing).Content\n" +
-    "& ([scriptblock]::Create($s)) -Server '" + srv + "' -Token '" + (token || 'TOKEN') + "'";
+    "Set-ExecutionPolicy Bypass -Scope Process -Force; " +
+    "$s=(Invoke-WebRequest '" + base + "/install/install.ps1' -UseBasicParsing).Content; " +
+    "&([scriptblock]::Create($s)) -Server '" + srv + "' -Token '" + (token || 'TOKEN') + "'";
 
   document.getElementById('dm-av-server').textContent = srv;
 
