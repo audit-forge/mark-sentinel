@@ -62,7 +62,7 @@ server {
     }
 
     location /install/ {
-        proxy_pass http://${CONTAINER_NAME}:7331;
+        proxy_pass http://user-manager:8000;
         proxy_set_header Host \$host;
         proxy_set_header X-Real-IP \$remote_addr;
     }
