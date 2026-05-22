@@ -3,7 +3,7 @@
 <h1>CUSTOMERS</h1>
 
 {% if request.query_params.get('seats_updated') %}
-<div class="error" style="background:var(--accent)18;border-color:var(--accent)40;color:var(--accent)">&#10003; Seat count updated successfully</div>
+<div class="error" style="background:#4F46E518;border-color:#4F46E540;color:#4F46E5">&#10003; Seat count updated successfully</div>
 {% elif request.query_params.get('error') == 'invalid_seats' %}
 <div class="error">Seat count must be at least 1.</div>
 {% endif %}
@@ -21,7 +21,7 @@
         <input type="text" name="customer_name" placeholder="Acme Corporation" required>
       </div>
       <div class="form-group">
-        <label>Contact Email <span style="font-weight:400;color:var(--text-muted)">(sends welcome + temp password)</span></label>
+        <label>Contact Email <span style="font-weight:400;color:#6B7280">(sends welcome + temp password)</span></label>
         <input type="email" name="customer_email" placeholder="admin@customer.com">
       </div>
       <div class="form-group" style="max-width:140px">
@@ -37,7 +37,7 @@
       </div>
       <button type="submit" class="btn btn-primary">Provision</button>
     </div>
-    <div style="font-size:13px;color:var(--text-muted);margin-top:10px">
+    <div style="font-size:13px;color:#6B7280;margin-top:10px">
       License expires 1 year from today. Standard = findings only. Pro = findings + remediation steps.
     </div>
   </form>
@@ -47,7 +47,7 @@
   <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px">
     <div class="card-title" style="margin-bottom:0">Customers ({{ customers|length }})</div>
     <div style="display:flex;gap:8px;align-items:center">
-      <label style="font-size:14px;color:var(--text-muted);margin-bottom:0">Show:</label>
+      <label style="font-size:14px;color:#6B7280;margin-bottom:0">Show:</label>
       <select onchange="window.location='/customers?status='+this.value" style="width:auto;padding:6px 12px;font-size:14px">
         <option value="active"   {% if status == 'active'   %}selected{% endif %}>Active</option>
         <option value="inactive" {% if status == 'inactive' %}selected{% endif %}>Inactive</option>
@@ -86,7 +86,7 @@
         <form method="post" action="/customers/seats" style="display:flex;align-items:center;gap:6px">
           <input type="hidden" name="customer_id" value="{{ c.id }}">
           <input type="number" name="max_seats" value="{{ c.max_seats }}" min="1" max="500"
-                 style="width:60px;padding:3px 6px;font-size:13px;background:var(--bg-input);border:1px solid var(--border-in);border-radius:4px;color:var(--text);text-align:center">
+                 style="width:60px;padding:3px 6px;font-size:13px;background:#F9FAFB;border:1px solid #E5E7EB;border-radius:4px;color:#111827;text-align:center">
           <button type="submit" class="btn btn-sm" style="padding:3px 8px;font-size:12px">Save</button>
         </form>
       </td>
@@ -94,20 +94,20 @@
         {% if c.port and c.active %}
           <a class="url" href="http://{{ ip }}:{{ c.port }}" target="_blank">{{ ip }}:{{ c.port }}</a>
         {% else %}
-          <span style="color:var(--text-muted)">—</span>
+          <span style="color:#6B7280">—</span>
         {% endif %}
       </td>
       <td>
         {% if c.license_expires_at %}
           {% if days is not none and days < 0 %}
-            <span style="color:var(--danger-txt)">{{ c.license_expires_at[:10] }} (expired)</span>
+            <span style="color:#DC2626">{{ c.license_expires_at[:10] }} (expired)</span>
           {% elif days is not none and days <= 30 %}
             <span style="color:#ffbb33">{{ c.license_expires_at[:10] }} ({{ days }}d left)</span>
           {% else %}
-            <span style="color:var(--text-muted)">{{ c.license_expires_at[:10] }}</span>
+            <span style="color:#6B7280">{{ c.license_expires_at[:10] }}</span>
           {% endif %}
         {% else %}
-          <span style="color:var(--text-dim)">—</span>
+          <span style="color:#9CA3AF">—</span>
         {% endif %}
       </td>
       <td>
@@ -125,19 +125,19 @@
         {% if c.active %}
           <button type="button" class="btn btn-sm"
                   onclick="openDeploy('{{ c.id }}','{{ c.name | replace("'","\\x27") }}',{{ c.port or 7001 }},'{{ c.agent_token or '' }}')"
-                  style="background:var(--bg-input);color:#4488ff;border:1px solid #4488ff40">Deploy</button>
+                  style="background:#F9FAFB;color:#4488ff;border:1px solid #4488ff40">Deploy</button>
           <form method="post" action="/customers/renew" style="display:inline">
             <input type="hidden" name="customer_id" value="{{ c.id }}">
-            <button type="submit" class="btn btn-sm" style="background:var(--bg-input);color:var(--accent);border:1px solid var(--accent)40">Renew</button>
+            <button type="submit" class="btn btn-sm" style="background:#F9FAFB;color:#4F46E5;border:1px solid #4F46E540">Renew</button>
           </form>
           <form method="post" action="/customers/remove" style="display:inline" onsubmit="return confirm('Archive {{ c.name }}? Their container will be stopped but data is kept.')">
             <input type="hidden" name="customer_id" value="{{ c.id }}">
-            <button type="submit" class="btn btn-sm" style="background:var(--bg-input);color:#ffbb33;border:1px solid #ffbb3340">Archive</button>
+            <button type="submit" class="btn btn-sm" style="background:#F9FAFB;color:#ffbb33;border:1px solid #ffbb3340">Archive</button>
           </form>
         {% else %}
           <form method="post" action="/customers/restore" style="display:inline">
             <input type="hidden" name="customer_id" value="{{ c.id }}">
-            <button type="submit" class="btn btn-sm" style="background:var(--bg-input);color:var(--accent);border:1px solid var(--accent)40">Restore</button>
+            <button type="submit" class="btn btn-sm" style="background:#F9FAFB;color:#4F46E5;border:1px solid #4F46E540">Restore</button>
           </form>
           <form method="post" action="/customers/delete" style="display:inline" onsubmit="return confirm('Permanently delete {{ c.name }}? This cannot be undone.')">
             <input type="hidden" name="customer_id" value="{{ c.id }}">
@@ -155,23 +155,23 @@
 </div>
 
 <style>
-.dtab{background:none;border:none;border-bottom:2px solid transparent;color:var(--text-muted);font-family:inherit;font-size:14px;padding:13px 22px;cursor:pointer;transition:color .15s,border-color .15s;font-weight:500}
-.dtab:hover{color:var(--text)}
-.dtab.on{color:var(--accent);border-bottom-color:var(--accent)}
+.dtab{background:none;border:none;border-bottom:2px solid transparent;color:#6B7280;font-family:inherit;font-size:14px;padding:13px 22px;cursor:pointer;transition:color .15s,border-color .15s;font-weight:500}
+.dtab:hover{color:#111827}
+.dtab.on{color:#4F46E5;border-bottom-color:#4F46E5}
 </style>
 
 <div id="deployModal" style="display:none;position:fixed;inset:0;z-index:9999;background:#000000cc;overflow-y:auto">
-  <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:8px;max-width:700px;margin:60px auto 40px;overflow:hidden">
+  <div style="background:#ffffff;border:1px solid #E5E7EB;border-radius:8px;max-width:700px;margin:60px auto 40px;overflow:hidden">
 
-    <div style="padding:20px 24px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between">
+    <div style="padding:20px 24px;border-bottom:1px solid #E5E7EB;display:flex;align-items:center;justify-content:space-between">
       <div>
-        <div style="font-size:12px;color:var(--text-muted);letter-spacing:1px;text-transform:uppercase;font-weight:600">Deploy Agent</div>
-        <div id="dm-name" style="font-size:18px;color:var(--text);margin-top:4px"></div>
+        <div style="font-size:12px;color:#6B7280;letter-spacing:1px;text-transform:uppercase;font-weight:600">Deploy Agent</div>
+        <div id="dm-name" style="font-size:18px;color:#111827;margin-top:4px"></div>
       </div>
-      <button onclick="closeDeploy()" style="background:none;border:none;color:var(--text-muted);font-size:26px;cursor:pointer;padding:2px 10px;line-height:1">&times;</button>
+      <button onclick="closeDeploy()" style="background:none;border:none;color:#6B7280;font-size:26px;cursor:pointer;padding:2px 10px;line-height:1">&times;</button>
     </div>
 
-    <div style="display:flex;border-bottom:1px solid var(--border)">
+    <div style="display:flex;border-bottom:1px solid #E5E7EB">
       <button class="dtab on"  id="dtab-mac" onclick="showDTab('mac')">macOS / Linux</button>
       <button class="dtab"     id="dtab-win" onclick="showDTab('win')">Windows</button>
       <button class="dtab"     id="dtab-av"  onclick="showDTab('av')">AV Exclusions</button>
@@ -185,53 +185,53 @@
 
       <!-- Mac / Linux pane -->
       <div id="dpane-mac">
-        <p style="font-size:14px;color:var(--text-muted);margin-bottom:14px">Run as <strong>root</strong> or with <code>sudo</code> on the target device. Works on macOS and any systemd-based Linux distro.</p>
+        <p style="font-size:14px;color:#6B7280;margin-bottom:14px">Run as <strong>root</strong> or with <code>sudo</code> on the target device. Works on macOS and any systemd-based Linux distro.</p>
         <div style="position:relative">
-          <pre id="dm-mac-cmd" style="background:var(--bg);border:1px solid var(--border-in);border-radius:6px;padding:16px 16px 16px 16px;font-size:12.5px;font-family:'Menlo','Consolas',monospace;color:var(--accent);white-space:pre-wrap;word-break:break-all;line-height:1.6;padding-right:70px"></pre>
-          <button onclick="dCopy('dm-mac-cmd',this)" style="position:absolute;top:10px;right:10px;background:var(--bg-input);border:1px solid var(--border-in);color:var(--text-muted);font-size:12px;padding:4px 10px;border-radius:4px;cursor:pointer;font-family:inherit">Copy</button>
+          <pre id="dm-mac-cmd" style="background:#F9FAFB;border:1px solid #E5E7EB;border-radius:6px;padding:16px 16px 16px 16px;font-size:12.5px;font-family:'Menlo','Consolas',monospace;color:#4F46E5;white-space:pre-wrap;word-break:break-all;line-height:1.6;padding-right:70px"></pre>
+          <button onclick="dCopy('dm-mac-cmd',this)" style="position:absolute;top:10px;right:10px;background:#F9FAFB;border:1px solid #E5E7EB;color:#6B7280;font-size:12px;padding:4px 10px;border-radius:4px;cursor:pointer;font-family:inherit">Copy</button>
         </div>
-        <p style="font-size:13px;color:var(--text-muted);margin-top:14px">Requires Python 3.11+. Installs to <code>/opt/sentinel/</code> and registers as a persistent system service (launchd on macOS, systemd on Linux).</p>
+        <p style="font-size:13px;color:#6B7280;margin-top:14px">Requires Python 3.11+. Installs to <code>/opt/sentinel/</code> and registers as a persistent system service (launchd on macOS, systemd on Linux).</p>
       </div>
 
       <!-- Windows pane -->
       <div id="dpane-win" style="display:none">
-        <p style="font-size:14px;color:var(--text-muted);margin-bottom:14px">Open <strong>PowerShell as Administrator</strong> and run:</p>
+        <p style="font-size:14px;color:#6B7280;margin-bottom:14px">Open <strong>PowerShell as Administrator</strong> and run:</p>
         <div style="position:relative">
-          <pre id="dm-win-cmd" style="background:var(--bg);border:1px solid var(--border-in);border-radius:6px;padding:16px;font-size:12.5px;font-family:'Menlo','Consolas',monospace;color:var(--accent);white-space:pre-wrap;word-break:break-all;line-height:1.6;padding-right:70px"></pre>
-          <button onclick="dCopy('dm-win-cmd',this)" style="position:absolute;top:10px;right:10px;background:var(--bg-input);border:1px solid var(--border-in);color:var(--text-muted);font-size:12px;padding:4px 10px;border-radius:4px;cursor:pointer;font-family:inherit">Copy</button>
+          <pre id="dm-win-cmd" style="background:#F9FAFB;border:1px solid #E5E7EB;border-radius:6px;padding:16px;font-size:12.5px;font-family:'Menlo','Consolas',monospace;color:#4F46E5;white-space:pre-wrap;word-break:break-all;line-height:1.6;padding-right:70px"></pre>
+          <button onclick="dCopy('dm-win-cmd',this)" style="position:absolute;top:10px;right:10px;background:#F9FAFB;border:1px solid #E5E7EB;color:#6B7280;font-size:12px;padding:4px 10px;border-radius:4px;cursor:pointer;font-family:inherit">Copy</button>
         </div>
-        <p style="font-size:13px;color:var(--text-muted);margin-top:14px">Requires Python 3.11+. Installs to <code>C:\Program Files\Sentinel\</code> and registers as a Windows Service. Uses NSSM if installed; falls back to sc.exe.</p>
+        <p style="font-size:13px;color:#6B7280;margin-top:14px">Requires Python 3.11+. Installs to <code>C:\Program Files\Sentinel\</code> and registers as a Windows Service. Uses NSSM if installed; falls back to sc.exe.</p>
       </div>
 
       <!-- AV Exclusions pane -->
       <div id="dpane-av" style="display:none">
-        <p style="font-size:14px;color:var(--text-muted);margin-bottom:18px">Add these exclusions in the customer's AV / EDR console <em>before</em> running the installer. Forward this tab to their IT admin.</p>
+        <p style="font-size:14px;color:#6B7280;margin-bottom:18px">Add these exclusions in the customer's AV / EDR console <em>before</em> running the installer. Forward this tab to their IT admin.</p>
 
         <div style="margin-bottom:18px">
-          <div style="font-size:12px;font-weight:600;color:var(--text-muted);letter-spacing:.8px;text-transform:uppercase;margin-bottom:8px">Windows</div>
-          <pre style="background:var(--bg);border:1px solid var(--border-in);border-radius:6px;padding:14px;font-size:13px;font-family:'Menlo','Consolas',monospace;color:var(--text-td);line-height:1.7">Paths:    C:\Program Files\Sentinel\
+          <div style="font-size:12px;font-weight:600;color:#6B7280;letter-spacing:.8px;text-transform:uppercase;margin-bottom:8px">Windows</div>
+          <pre style="background:#F9FAFB;border:1px solid #E5E7EB;border-radius:6px;padding:14px;font-size:13px;font-family:'Menlo','Consolas',monospace;color:#374151;line-height:1.7">Paths:    C:\Program Files\Sentinel\
           C:\ProgramData\Sentinel\
 Process:  python.exe  (parent: C:\Program Files\Sentinel\)
 Service:  SentinelAgent</pre>
         </div>
 
         <div style="margin-bottom:18px">
-          <div style="font-size:12px;font-weight:600;color:var(--text-muted);letter-spacing:.8px;text-transform:uppercase;margin-bottom:8px">macOS</div>
-          <pre style="background:var(--bg);border:1px solid var(--border-in);border-radius:6px;padding:14px;font-size:13px;font-family:'Menlo','Consolas',monospace;color:var(--text-td);line-height:1.7">Paths:    /opt/sentinel/
+          <div style="font-size:12px;font-weight:600;color:#6B7280;letter-spacing:.8px;text-transform:uppercase;margin-bottom:8px">macOS</div>
+          <pre style="background:#F9FAFB;border:1px solid #E5E7EB;border-radius:6px;padding:14px;font-size:13px;font-family:'Menlo','Consolas',monospace;color:#374151;line-height:1.7">Paths:    /opt/sentinel/
           /etc/sentinel/
           /Library/LaunchDaemons/io.hash.sentinel-agent.plist
 Process:  python3  (parent: /opt/sentinel/venv/)</pre>
         </div>
 
         <div style="margin-bottom:18px">
-          <div style="font-size:12px;font-weight:600;color:var(--text-muted);letter-spacing:.8px;text-transform:uppercase;margin-bottom:8px">Linux</div>
-          <pre style="background:var(--bg);border:1px solid var(--border-in);border-radius:6px;padding:14px;font-size:13px;font-family:'Menlo','Consolas',monospace;color:var(--text-td);line-height:1.7">Paths:    /opt/sentinel/
+          <div style="font-size:12px;font-weight:600;color:#6B7280;letter-spacing:.8px;text-transform:uppercase;margin-bottom:8px">Linux</div>
+          <pre style="background:#F9FAFB;border:1px solid #E5E7EB;border-radius:6px;padding:14px;font-size:13px;font-family:'Menlo','Consolas',monospace;color:#374151;line-height:1.7">Paths:    /opt/sentinel/
           /etc/sentinel/
 Process:  python3  (parent: /opt/sentinel/venv/)
 Service:  sentinel-agent  (systemd unit)</pre>
         </div>
 
-        <div style="background:var(--bg);border:1px solid #4488ff30;border-radius:6px;padding:14px;font-size:13px;color:#6699ff">
+        <div style="background:#F9FAFB;border:1px solid #4488ff30;border-radius:6px;padding:14px;font-size:13px;color:#6699ff">
           <strong>Outbound network:</strong> Allow outbound TCP to <code id="dm-av-server" style="color:#88aaff"></code>. No inbound ports are required on the endpoint.
         </div>
       </div>

@@ -52,8 +52,8 @@
 body {
   font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
   font-size: 18px;
-  background: var(--bg);
-  color: var(--text);
+  background: #F9FAFB;
+  color: #111827;
   min-height: 100vh;
   display: flex;
   align-items: center;
@@ -72,38 +72,38 @@ body {
 .brand-name {
   font-size: 42px;
   font-weight: 800;
-  color: var(--text);
+  color: #111827;
   letter-spacing: 4px;
   line-height: 1;
 }
-.brand-name span { color: var(--accent); }
+.brand-name span { color: #4F46E5; }
 .brand-sub {
   font-size: 16px;
-  color: var(--text-sub);
+  color: #6B7280;
   letter-spacing: 2px;
   margin-top: 10px;
   text-transform: uppercase;
 }
 .card {
-  background: var(--bg-card);
+  background: #ffffff;
   border-radius: 12px;
   padding: 40px 36px;
-  box-shadow: var(--shadow);
-  border: 1px solid var(--border);
+  box-shadow: rgba(0,0,0,0.06);
+  border: 1px solid #E5E7EB;
 }
 .form-group { margin-bottom: 24px; }
 label {
   display: block;
   font-size: 17px;
   font-weight: 700;
-  color: var(--text);
+  color: #111827;
   margin-bottom: 10px;
   letter-spacing: .3px;
 }
 input {
-  background: var(--bg-input);
-  border: 2px solid var(--border-in);
-  color: var(--text);
+  background: #F9FAFB;
+  border: 2px solid #E5E7EB;
+  color: #111827;
   padding: 15px 18px;
   border-radius: 8px;
   font-family: inherit;
@@ -111,13 +111,13 @@ input {
   width: 100%;
   transition: border-color .15s;
 }
-input:focus { outline: none; border-color: var(--focus-bdr); }
-input::placeholder { color: var(--placeholder); opacity: 1; }
+input:focus { outline: none; border-color: #4F46E5; }
+input::placeholder { color: #9CA3AF; opacity: 1; }
 .btn {
   width: 100%;
   padding: 17px;
-  background: var(--accent);
-  color: var(--accent-btn);
+  background: #4F46E5;
+  color: #4F46E5;
   font-weight: 700;
   font-family: inherit;
   font-size: 18px;
@@ -128,15 +128,15 @@ input::placeholder { color: var(--placeholder); opacity: 1; }
   letter-spacing: .5px;
   transition: background .15s;
 }
-.btn:hover { background: var(--accent-hov); }
+.btn:hover { background: #4338CA; }
 .error {
   font-size: 16px;
   margin-bottom: 20px;
   padding: 12px 16px;
-  background: var(--err-bg);
-  border: 1px solid var(--err-bdr);
+  background: #FEF2F2;
+  border: 1px solid #FECACA;
   border-radius: 6px;
-  color: var(--err-txt);
+  color: #DC2626;
 }
 .bottom-row {
   display: flex;
@@ -145,8 +145,8 @@ input::placeholder { color: var(--placeholder); opacity: 1; }
 }
 .theme-toggle {
   background: none;
-  border: 1px solid var(--border-in);
-  color: var(--toggle-c);
+  border: 1px solid #E5E7EB;
+  color: #6B7280;
   font-family: inherit;
   font-size: 15px;
   font-weight: 600;
@@ -155,7 +155,7 @@ input::placeholder { color: var(--placeholder); opacity: 1; }
   cursor: pointer;
   transition: color .15s, border-color .15s;
 }
-.theme-toggle:hover { color: var(--accent); border-color: var(--accent); }
+.theme-toggle:hover { color: #4F46E5; border-color: #4F46E5; }
 </style>
 </head>
 <body>
@@ -178,7 +178,7 @@ input::placeholder { color: var(--placeholder); opacity: 1; }
       </div>
       <button type="submit" class="btn">Sign In</button>
       <div style="text-align:center;margin-top:18px">
-        <a href="/forgot-password" style="font-size:15px;color:var(--text-sub);text-decoration:none">Forgot your password?</a>
+        <a href="/forgot-password" style="font-size:15px;color:#6B7280;text-decoration:none">Forgot your password?</a>
       </div>
     </form>
   </div>

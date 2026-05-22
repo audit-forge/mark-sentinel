@@ -12,7 +12,7 @@
     <div class="stat-label">Total Users</div>
   </div>
   <div class="stat-card">
-    <div class="stat-num" style="color:{% if overages > 0 %}#ff5555{% else %}var(--stat-num){% endif %}">{{ overages }}</div>
+    <div class="stat-num" style="color:{% if overages > 0 %}#ff5555{% else %}#111827{% endif %}">{{ overages }}</div>
     <div class="stat-label">Seat Overages</div>
   </div>
 </div>
@@ -44,15 +44,15 @@
           <span class="badge badge-yellow">Standard</span>
         {% endif %}
       </td>
-      <td style="color:{% if over %}#ff5555{% else %}var(--text-td){% endif %};font-weight:{% if over %}bold{% else %}normal{% endif %}">
+      <td style="color:{% if over %}#ff5555{% else %}#374151{% endif %};font-weight:{% if over %}bold{% else %}normal{% endif %}">
         {{ s.current_agents }}
       </td>
-      <td style="color:var(--text-muted)">{{ s.max_seats }}</td>
+      <td style="color:#6B7280">{{ s.max_seats }}</td>
       <td style="min-width:120px">
-        <div style="background:var(--bg);border:1px solid var(--border);border-radius:2px;height:8px;overflow:hidden">
-          <div style="height:100%;width:{{ [pct, 100]|min }}%;background:{% if over %}#ff5555{% elif pct >= 80 %}#ffbb33{% else %}var(--accent){% endif %};transition:width .3s"></div>
+        <div style="background:#F9FAFB;border:1px solid #E5E7EB;border-radius:2px;height:8px;overflow:hidden">
+          <div style="height:100%;width:{{ [pct, 100]|min }}%;background:{% if over %}#ff5555{% elif pct >= 80 %}#ffbb33{% else %}#4F46E5{% endif %};transition:width .3s"></div>
         </div>
-        <span style="font-size:10px;color:var(--text-muted)">{{ pct }}%</span>
+        <span style="font-size:10px;color:#6B7280">{{ pct }}%</span>
       </td>
       <td>
         {% if over %}
@@ -82,11 +82,11 @@
     <tbody>
     {% for a in alerts %}
     <tr>
-      <td style="color:var(--text-muted);font-size:11px">{{ a.created_at[:16].replace('T',' ') }}</td>
+      <td style="color:#6B7280;font-size:11px">{{ a.created_at[:16].replace('T',' ') }}</td>
       <td>{{ a.customer_name }}</td>
       <td><span class="badge badge-red">{{ a.alert_type }}</span></td>
       <td style="color:#ff5555;font-weight:bold">{{ a.agent_count }}</td>
-      <td style="color:var(--text-muted)">{{ a.max_seats }}</td>
+      <td style="color:#6B7280">{{ a.max_seats }}</td>
     </tr>
     {% endfor %}
     </tbody>
@@ -100,35 +100,35 @@
   <div class="card-title">Quick Access</div>
   <table>
     <tr>
-      <td style="color:var(--text-muted);width:160px">Admin Panel</td>
+      <td style="color:#6B7280;width:160px">Admin Panel</td>
       <td><span class="url">http://admin.{{ ip }}.nip.io</span></td>
     </tr>
     <tr>
-      <td style="color:var(--text-muted)">Customer URL pattern</td>
+      <td style="color:#6B7280">Customer URL pattern</td>
       <td><span class="url">http://{{ ip }}:[port]  (see Customers page for each customer's port)</span></td>
     </tr>
   </table>
-  <div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--border);display:flex;align-items:center;gap:16px;flex-wrap:wrap">
+  <div style="margin-top:16px;padding-top:16px;border-top:1px solid #E5E7EB;display:flex;align-items:center;gap:16px;flex-wrap:wrap">
     <form method="post" action="/admin/test-email" style="display:inline">
-      <button type="submit" class="btn btn-sm" style="background:var(--bg-input);color:var(--accent);border:1px solid var(--accent)30">
+      <button type="submit" class="btn btn-sm" style="background:#F9FAFB;color:#4F46E5;border:1px solid #4F46E530">
         Send Test Email
       </button>
     </form>
     {% if request.query_params.get('email_test') == 'ok' %}
-      <span style="font-size:12px;color:var(--accent)">&#10003; Test email sent successfully</span>
+      <span style="font-size:12px;color:#4F46E5">&#10003; Test email sent successfully</span>
     {% elif request.query_params.get('email_test') == 'fail' %}
-      <span style="font-size:12px;color:var(--danger-txt)">&#10005; Send failed — check SMTP settings in .env</span>
+      <span style="font-size:12px;color:#DC2626">&#10005; Send failed — check SMTP settings in .env</span>
     {% endif %}
   </div>
-  <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border);display:flex;align-items:center;gap:16px;flex-wrap:wrap">
+  <div style="margin-top:12px;padding-top:12px;border-top:1px solid #E5E7EB;display:flex;align-items:center;gap:16px;flex-wrap:wrap">
     <form method="post" action="/admin/deploy" style="display:inline">
-      <button type="submit" class="btn btn-sm" style="background:var(--bg-input);color:var(--text);border:1px solid var(--border-in)">
+      <button type="submit" class="btn btn-sm" style="background:#F9FAFB;color:#111827;border:1px solid #E5E7EB">
         &#8635; Deploy Update
       </button>
     </form>
-    <span style="font-size:11px;color:var(--text-muted)">Pulls latest code from GitHub and rebuilds the admin panel (~60 sec)</span>
+    <span style="font-size:11px;color:#6B7280">Pulls latest code from GitHub and rebuilds the admin panel (~60 sec)</span>
     {% if request.query_params.get('deploy') == 'started' %}
-      <span style="font-size:12px;color:var(--accent)">&#10003; Deploy started — refreshing in <strong id="deploy-countdown">65</strong>s</span>
+      <span style="font-size:12px;color:#4F46E5">&#10003; Deploy started — refreshing in <strong id="deploy-countdown">65</strong>s</span>
       <script>
         (function() {
           var n = 65;
@@ -143,7 +143,7 @@
     {% elif request.query_params.get('deploy') == 'busy' %}
       <span style="font-size:12px;color:#ffbb33">&#9888; A deploy is already running — try again in a moment</span>
     {% elif request.query_params.get('deploy') == 'failed' %}
-      <span style="font-size:12px;color:var(--danger-txt)">&#10005; Deploy failed — deployer container may not be running</span>
+      <span style="font-size:12px;color:#DC2626">&#10005; Deploy failed — deployer container may not be running</span>
     {% endif %}
   </div>
 </div>

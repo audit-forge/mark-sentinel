@@ -3,7 +3,7 @@
 <h1>MY ACCOUNT</h1>
 
 {% if request.query_params.get('pw_changed') %}
-<div class="error" style="background:var(--accent)18;border-color:var(--accent)40;color:var(--accent)">&#10003; Password updated successfully</div>
+<div class="error" style="background:#4F46E518;border-color:#4F46E540;color:#4F46E5">&#10003; Password updated successfully</div>
 {% elif request.query_params.get('error') == 'wrong_password' %}
 <div class="error">Current password is incorrect.</div>
 {% elif request.query_params.get('error') == 'mismatch' %}
@@ -24,7 +24,7 @@
     <div class="form-group" style="margin-bottom:28px">
       <label>Confirm New Password</label>
       <input type="password" name="confirm_password" id="confirm_password" required minlength="8">
-      <span id="mismatch-msg" style="font-size:13px;color:var(--err-txt);display:none">Passwords do not match</span>
+      <span id="mismatch-msg" style="font-size:13px;color:#DC2626;display:none">Passwords do not match</span>
     </div>
     <button type="submit" class="btn btn-primary" style="width:100%">Update Password</button>
   </form>
@@ -34,11 +34,11 @@
   <div class="card-title">Account Info</div>
   <table>
     <tr>
-      <td style="color:var(--text-muted);width:140px">Email</td>
+      <td style="color:#6B7280;width:140px">Email</td>
       <td>{{ user.email }}</td>
     </tr>
     <tr>
-      <td style="color:var(--text-muted)">Role</td>
+      <td style="color:#6B7280">Role</td>
       <td><span class="badge {% if user.role == 'super_admin' %}badge-green{% elif user.role == 'customer_admin' %}badge-blue{% else %}badge-yellow{% endif %}">{{ user.role }}</span></td>
     </tr>
   </table>
