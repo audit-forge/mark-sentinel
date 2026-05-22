@@ -419,6 +419,15 @@ class AgentStore:
         with self._lock, self._conn() as conn:
             return conn.execute("SELECT COUNT(*) FROM devices").fetchone()[0]
 
+    def touch_device(self, device_id: str) -> None:
+        """Update last_seen for a device without changing any other fields (heartbeat)."""
+        now = int(time.time())
+        with self._lock, self._conn() as conn:
+            conn.execute(
+                "UPDATE devices SET last_seen = ? WHERE device_id = ?",
+                (now, device_id),
+            )
+
     def get_stale_devices(self, stale_after_seconds: int) -> list[dict]:
         """Return devices that have not reported since stale_after_seconds ago."""
         cutoff = int(time.time()) - stale_after_seconds

@@ -1581,7 +1581,9 @@ button:hover{{background:#2ea043}}
             if auth != f'Bearer {expected}':
                 self._send(401, b'Unauthorized', 'text/plain')
                 return
-        command = _get_store().claim_command(device_id)
+        store = _get_store()
+        store.touch_device(device_id)
+        command = store.claim_command(device_id)
         self._json({'command': command})
 
     def _api_fleet_scan(self, device_id: str):
