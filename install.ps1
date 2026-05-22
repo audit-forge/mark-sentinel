@@ -248,12 +248,55 @@ Set-Location '$InstallDir'
         Write-Warn "For production use, install NSSM (https://nssm.cc) for better service management."
     }
 
-    $svc = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
-    if ($svc -and $svc.Status -eq "Running") {
+    # ── Verify service is running (retry up to 3x) ───────────────────────────
+    $started = $false
+    for ($attempt = 1; $attempt -le 3; $attempt++) {
+        Start-Sleep -Seconds 5
+        $svc = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
+        if ($svc -and $svc.Status -eq "Running") {
+            $started = $true
+            break
+        }
+        if ($attempt -lt 3) {
+            Write-Warn "Service not yet running (attempt $attempt/3) — retrying ..."
+            try { Start-Service -Name $ServiceName -ErrorAction SilentlyContinue } catch {}
+        }
+    }
+
+    if ($started) {
         Write-OK "Service is running"
     } else {
-        Write-Warn "Service may not have started — check Event Viewer or $ConfigDir\sentinel-agent.log"
+        Write-Host ""
+        Write-Host "  [FAIL] Service failed to start." -ForegroundColor Red
+        $logFile = "$ConfigDir\sentinel-agent.log"
+        if (Test-Path $logFile) {
+            Write-Host "  Last log entries:" -ForegroundColor Yellow
+            Get-Content $logFile -Tail 20 | ForEach-Object { Write-Host "    $_" -ForegroundColor DarkYellow }
+        } else {
+            Write-Host "  No log file found at $logFile" -ForegroundColor Yellow
+        }
+        Write-Host ""
+        Write-Host "  To diagnose: Get-Content '$logFile' -Tail 50" -ForegroundColor DarkGray
+        exit 1
     }
+
+    # ── Verify server connectivity ────────────────────────────────────────────
+    if ($Server -ne "") {
+        Write-Step "Verifying agent can reach server ..."
+        $healthUrl = $Server.TrimEnd('/') + '/health'
+        try {
+            $resp = Invoke-WebRequest -Uri $healthUrl -UseBasicParsing -TimeoutSec 10 -ErrorAction Stop
+            if ($resp.StatusCode -eq 200) {
+                Write-OK "Server reachable at $Server"
+            } else {
+                Write-Warn "Server returned HTTP $($resp.StatusCode) — agent may not connect"
+            }
+        } catch {
+            Write-Host "  [WARN] Cannot reach $healthUrl — check firewall or server URL" -ForegroundColor Yellow
+            Write-Host "         Error: $_" -ForegroundColor DarkYellow
+        }
+    }
+
 } else {
     Write-Host "  Skipping service registration (--NoService)." -ForegroundColor DarkGray
     Write-Host "  To start manually: & '$PythonExe' '$InstallDir\agent.py' --config '$ConfigFile' --daemon" -ForegroundColor DarkGray
