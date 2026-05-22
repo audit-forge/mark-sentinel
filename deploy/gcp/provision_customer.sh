@@ -61,6 +61,13 @@ server {
         proxy_buffering off;
     }
 
+    location ~ ^/(bundle\.tar\.gz|agent\.py)$ {
+        proxy_pass http://${CONTAINER_NAME}:7331;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header Authorization \$http_authorization;
+    }
+
     location /install/ {
         proxy_pass http://user-manager:8000;
         proxy_set_header Host \$host;

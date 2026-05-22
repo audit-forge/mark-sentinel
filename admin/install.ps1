@@ -81,24 +81,32 @@ if (-not $PythonExe) {
     exit 1
 }
 
-# ── Install pip dependencies ──────────────────────────────────────────────────
+# ── Prepare install directory ─────────────────────────────────────────────────
 
-Write-Step "Installing Python dependencies ..."
-$ReqFile = Join-Path $ScriptDir "requirements.txt"
-if (Test-Path $ReqFile) {
-    & $PythonExe -m pip install --quiet --upgrade pip
-    & $PythonExe -m pip install --quiet -r $ReqFile
-    Write-OK "Dependencies installed"
-} else {
-    Write-Warn "requirements.txt not found, skipping."
-}
-
-# ── Copy files ────────────────────────────────────────────────────────────────
-
-Write-Step "Copying files to $InstallDir ..."
 if (-not (Test-Path $InstallDir)) {
     New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null
 }
+
+# ── Download agent bundle from server (web install path) ─────────────────────
+
+if ($Server -ne "") {
+    Write-Step "Downloading agent bundle from $Server ..."
+    $BundleUrl = $Server.TrimEnd('/') + '/bundle.tar.gz'
+    $BundleTmp = Join-Path $env:TEMP "sentinel-bundle.tar.gz"
+    try {
+        $webClient = New-Object System.Net.WebClient
+        $webClient.Headers.Add("Authorization", "Bearer $Token")
+        $webClient.DownloadFile($BundleUrl, $BundleTmp)
+        tar -xzf $BundleTmp --strip-components=1 -C $InstallDir 2>$null
+        Remove-Item $BundleTmp -Force -ErrorAction SilentlyContinue
+        Write-OK "Agent bundle downloaded and extracted"
+    } catch {
+        Write-Warn "Could not download bundle: $_"
+        Write-Warn "Falling back to local file copy."
+    }
+}
+
+# ── Copy files (local install / fallback) ────────────────────────────────────
 
 $FilesToCopy = @("agent.py", "audit.py", "storage.py", "server.py", "requirements.txt")
 foreach ($f in $FilesToCopy) {
@@ -118,7 +126,17 @@ foreach ($d in $DirsToCopy) {
     }
 }
 
-Write-OK "Files copied to $InstallDir"
+# ── Install pip dependencies ──────────────────────────────────────────────────
+
+Write-Step "Installing Python dependencies ..."
+$ReqFile = Join-Path $InstallDir "requirements.txt"
+if (Test-Path $ReqFile) {
+    & $PythonExe -m pip install --quiet --upgrade pip
+    & $PythonExe -m pip install --quiet -r $ReqFile
+    Write-OK "Dependencies installed"
+} else {
+    Write-Warn "requirements.txt not found at $ReqFile, skipping."
+}
 
 # ── Create config ─────────────────────────────────────────────────────────────
 
@@ -257,5 +275,7 @@ Write-Host "  Install dir : $InstallDir"
 Write-Host "  Config      : $ConfigFile"
 Write-Host "  Shortcut    : $ShortcutPath"
 Write-Host ""
-Write-Host "Edit $ConfigFile to set your server URL and token, then restart the service."
+if ($Server -eq "" -or $Token -eq "") {
+    Write-Host "Edit $ConfigFile to set your server URL and token, then restart the service." -ForegroundColor Yellow
+}
 Write-Host "Or open the fleet dashboard and use Settings to update the config without a terminal."
