@@ -33,7 +33,7 @@ $InstallDir  = "C:\Program Files\Sentinel"
 $ConfigDir   = "C:\ProgramData\Sentinel"
 $ConfigFile  = "$ConfigDir\agent_config.json"
 $ServiceName = "SentinelAgent"
-$ScriptDir   = $PSScriptRoot
+$ScriptDir   = if ($PSScriptRoot -and $PSScriptRoot -ne "") { $PSScriptRoot } else { $PWD.Path }
 
 function Write-Step {
     param([string]$Msg)
