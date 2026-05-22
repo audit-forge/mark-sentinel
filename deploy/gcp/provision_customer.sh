@@ -52,6 +52,21 @@ server {
         proxy_set_header Cookie \$http_cookie;
     }
 
+    location /api/agent/ {
+        proxy_pass http://${CONTAINER_NAME}:7331;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_read_timeout 300;
+        proxy_buffering off;
+    }
+
+    location /install/ {
+        proxy_pass http://${CONTAINER_NAME}:7331;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+    }
+
     location / {
         auth_request /_auth;
         error_page 401 403 = @login_redirect;
