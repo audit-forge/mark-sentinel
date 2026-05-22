@@ -32,8 +32,12 @@ $ErrorActionPreference = "Stop"
 $InstallDir  = "C:\Program Files\Sentinel"
 $ConfigDir   = "C:\ProgramData\Sentinel"
 $ConfigFile  = "$ConfigDir\agent_config.json"
+$InstallLog  = "$ConfigDir\install.log"
 $ServiceName = "SentinelAgent"
 $ScriptDir   = if ($PSScriptRoot -and $PSScriptRoot -ne "") { $PSScriptRoot } else { $PWD.Path }
+
+if (-not (Test-Path $ConfigDir)) { New-Item -ItemType Directory -Path $ConfigDir -Force | Out-Null }
+Start-Transcript -Path $InstallLog -Append -Force | Out-Null
 
 function Write-Step {
     param([string]$Msg)
@@ -180,6 +184,19 @@ $acl.AddAccessRule($rule1)
 $acl.AddAccessRule($rule2)
 Set-Acl -Path $ConfigFile -AclObject $acl
 
+# ── Verify agent files are present ────────────────────────────────────────────
+
+$AgentScript = "$InstallDir\agent.py"
+if (-not (Test-Path $AgentScript)) {
+    Write-Host ""
+    Write-Host "  [FAIL] agent.py not found at $AgentScript" -ForegroundColor Red
+    Write-Host "         Bundle download may have failed. Check network connectivity and token." -ForegroundColor Yellow
+    Stop-Transcript | Out-Null
+    if ([Environment]::UserInteractive) { Read-Host "`n  Press Enter to close" }
+    exit 1
+}
+Write-OK "Agent files present at $InstallDir"
+
 # ── Windows Service registration ──────────────────────────────────────────────
 
 if (-not $NoService) {
@@ -277,6 +294,8 @@ Set-Location '$InstallDir'
         }
         Write-Host ""
         Write-Host "  To diagnose: Get-Content '$logFile' -Tail 50" -ForegroundColor DarkGray
+        Stop-Transcript | Out-Null
+        if ([Environment]::UserInteractive) { Read-Host "`n  Press Enter to close" }
         exit 1
     }
 
@@ -322,3 +341,7 @@ if ($Server -eq "" -or $Token -eq "") {
     Write-Host "Edit $ConfigFile to set your server URL and token, then restart the service." -ForegroundColor Yellow
 }
 Write-Host "Or open the fleet dashboard and use Settings to update the config without a terminal."
+Write-Host "  Install log : $InstallLog"
+
+Stop-Transcript | Out-Null
+if ([Environment]::UserInteractive) { Read-Host "`n  Press Enter to close" }
