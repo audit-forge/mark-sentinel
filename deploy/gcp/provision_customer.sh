@@ -10,7 +10,9 @@ CUSTOMER_NAME="${6:-$CUSTOMER_ID}"
 PORT="${7:-7001}"
 CONTAINER_NAME="sentinel-${CUSTOMER_ID}"
 NGINX_CONF_DIR="/opt/sentinel/deploy/gcp/nginx"
-LICENSE_FILE="/licenses/${CUSTOMER_ID}/license.json"
+# Use the host-side path (admin container maps /opt/licenses → /licenses internally)
+HOST_LICENSES_DIR="${HOST_LICENSES_DIR:-/opt/licenses}"
+LICENSE_FILE="${HOST_LICENSES_DIR}/${CUSTOMER_ID}/license.json"
 DATA_DIR="/opt/sentinel-data/${CUSTOMER_ID}"
 
 mkdir -p "$DATA_DIR"
@@ -32,7 +34,7 @@ docker run -d \
   --label "sentinel.customer=${CUSTOMER_ID}" \
   --label "sentinel.tier=${TIER}" \
   -e "SENTINEL_AGENT_TOKEN=${AGENT_TOKEN}" \
-  -v "${LICENSE_FILE}:/opt/sentinel/license.json:ro" \
+  -v "${LICENSE_FILE}:/app/license.json:ro" \
   -v "${DATA_DIR}:/app/data" \
   mark-sentinel:latest \
   python3 server.py --no-browser --port 7331

@@ -1,3 +1,6 @@
+# Never bake per-install license into the image — mounted per-customer at runtime
+license.json
+
 # Ignore agent/dev files
 CLAUDE.md
 .claude/
