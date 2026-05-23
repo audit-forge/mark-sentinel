@@ -22,7 +22,6 @@ def start_monitor():
 
 
 def _loop():
-    time.sleep(90)
     while True:
         try:
             _check_all_customers()
@@ -47,14 +46,21 @@ def _check_all_customers():
 
 
 def _query_agent_count(customer_id: str) -> int | None:
-    url = f"http://sentinel-{customer_id}:7331/api/devices"
-    req = urllib.request.Request(url, headers={"Accept": "application/json"})
+    import subprocess
+    container = f"sentinel-{customer_id}"
     try:
-        with urllib.request.urlopen(req, timeout=_SENTINEL_TIMEOUT) as resp:
-            data = json.loads(resp.read())
-            return int(data.get("count", 0))
+        result = subprocess.run(
+            ["docker", "exec", container, "python3", "-c",
+             "import sqlite3,time; conn=sqlite3.connect('/app/data/agents.db'); "
+             "cutoff=int(time.time())-1800; "
+             "print(conn.execute('SELECT COUNT(*) FROM devices WHERE last_seen>=?',(cutoff,)).fetchone()[0])"],
+            capture_output=True, text=True, timeout=10
+        )
+        if result.returncode == 0:
+            return int(result.stdout.strip())
     except Exception:
-        return None
+        pass
+    return None
 
 
 def _store_agent_count(customer_id: str, count: int):
