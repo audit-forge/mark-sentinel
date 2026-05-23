@@ -3674,7 +3674,7 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
       <button class="sb-item" id="nav-reports" onclick="navTo('reports')">&#128196; Reports</button>
       <div class="sb-group"></div>
       <button class="sb-item" id="nav-settings" onclick="navTo('settings')">&#9881; Settings</button>
-      {'<a class="sb-item" href="/probe" style="text-decoration:none;display:block">&#128272; API Tester</a>' if _has_live_scan() else '<span style="display:block;padding:8px 16px;font-size:13px;color:#6B7280;cursor:default" title="Upgrade to Pro to access the API Tester">&#128274; API Tester</span>'}
+      {'<button class="sb-item" id="nav-probe" onclick="navTo(\'probe\')">&#128272; API Tester</button>' if _has_live_scan() else '<span style="display:block;padding:8px 16px;font-size:13px;color:#6B7280;cursor:default" title="Upgrade to Pro to access the API Tester">&#128274; API Tester</span>'}
     </nav>
     <div class="sb-footer">
       <a href="/academy" target="_blank">Academy</a>
@@ -4127,6 +4127,8 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
 
   </div>
 
+  {'<div class="page" id="page-probe" style="height:calc(100vh - 56px)"><iframe id="probe-iframe" data-loaded="0" style="width:100%;height:100%;border:none;display:block"></iframe></div>' if _has_live_scan() else ''}
+
 </div>
 
 <script>
@@ -4210,7 +4212,18 @@ function navTo(page) {{
   const b = document.getElementById('nav-' + page);
   if (b) b.classList.add('sb-active');
   document.getElementById('main').scrollTop = 0;
+  const sr = document.querySelector('.stat-row');
+  if (sr) sr.style.display = page === 'probe' ? 'none' : '';
+  const mn = document.getElementById('main');
+  if (mn) mn.style.padding = page === 'probe' ? '0' : '';
   if (page === 'settings') {{ loadLiveScanConfig(); }}
+  if (page === 'probe') {{
+    const fr = document.getElementById('probe-iframe');
+    if (fr && fr.getAttribute('data-loaded') === '0') {{
+      fr.src = '/probe';
+      fr.setAttribute('data-loaded', '1');
+    }}
+  }}
 }}
 
 function _syncFindingsSelector() {{
