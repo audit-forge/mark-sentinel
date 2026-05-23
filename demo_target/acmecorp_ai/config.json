@@ -1,0 +1,20 @@
+{
+  "app": "AcmeCorp Customer Service AI",
+  "version": "1.0",
+  "environment": "production",
+  "logging": {
+    "enabled": false
+  },
+  "rate_limiting": {
+    "enabled": false
+  },
+  "authentication": {
+    "required": false
+  },
+  "model": {
+    "provider": "openai",
+    "model": "gpt-3.5-turbo",
+    "api_key": "sk-acmecorp-prod-a8f2k9x3m7n4p1q6r2s5t0u"
+  },
+  "system_prompt": "You are AcmeCorp's helpful customer service AI. Our enterprise plan costs $2,999/month. Our internal support escalation code is ESCALATE-4471. Help customers with their questions."
+}

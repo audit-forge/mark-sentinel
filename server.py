@@ -121,6 +121,31 @@ def _has_evidence_package() -> bool:
     except Exception:
         return True
 
+
+def _has_live_scan() -> bool:
+    """Return True when the license allows live adversarial probe scans (Plus only)."""
+    try:
+        from license import get_license
+        return get_license().has_live_scan
+    except Exception:
+        return True
+
+
+_LIVE_SCAN_CFG_PATH = ROOT / 'data' / 'live_scan_config.json'
+
+def _load_live_scan_config() -> dict:
+    try:
+        if _LIVE_SCAN_CFG_PATH.exists():
+            return json.loads(_LIVE_SCAN_CFG_PATH.read_text())
+    except Exception:
+        pass
+    return {}
+
+def _save_live_scan_config(cfg: dict) -> None:
+    _LIVE_SCAN_CFG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    safe = {k: str(v)[:2048] for k, v in cfg.items() if k in ('mode', 'api_key', 'endpoint', 'model')}
+    _LIVE_SCAN_CFG_PATH.write_text(json.dumps(safe, indent=2))
+
 def _content_length(headers) -> int:
     """Safely parse Content-Length header; returns 0 on missing or invalid value."""
     try:
@@ -327,6 +352,52 @@ _EU_AI_ACT_MAP = {
     'unknown': 'Article 12 (Logging) — authentication status unverified; audit trail completeness cannot be confirmed.',
     'required': 'Compliant with Article 12 and Article 14 access controls.',
 }
+
+
+def _live_scan_settings_html() -> str:
+    if _has_live_scan():
+        return (
+            '<div class="content-panel" style="background:#ffffff;border:1px solid #F3F4F6;border-radius:8px;padding:20px;margin-bottom:16px">'
+            '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">'
+            '<div class="panel-sub-hdr" style="font-size:12px;color:#6B7280;font-weight:600;text-transform:uppercase;letter-spacing:.06em">Live Adversarial Probe Scan</div>'
+            '<span style="font-size:10px;font-weight:700;letter-spacing:.5px;color:#4F46E5;background:#EEF2FF;border:1px solid #C7D2FE;border-radius:4px;padding:2px 7px">PRO</span>'
+            '</div>'
+            '<div style="font-size:12px;color:#9CA3AF;margin-bottom:14px">Connect Sentinel to your live AI endpoint and run real adversarial probes &#8212; prompt injection, jailbreak attempts, PII extraction, and more.</div>'
+            '<div id="live-scan-saved" style="display:none;color:#16A34A;font-size:12px;margin-bottom:10px">&#10003; Saved &#8212; credentials stored securely on this device</div>'
+            '<div style="display:grid;grid-template-columns:160px 1fr;gap:10px 16px;align-items:center;max-width:640px">'
+            '<label style="font-size:13px;color:#6B7280">AI Provider</label>'
+            '<select id="live-mode" class="form-input" style="width:220px;font-size:13px" onchange="liveModeChanged()">'
+            '<option value="api">OpenAI / OpenAI-compatible</option>'
+            '<option value="anthropic">Anthropic (Claude)</option>'
+            '<option value="gemini">Google Gemini</option>'
+            '<option value="local">Local / Ollama</option>'
+            '</select>'
+            '<label style="font-size:13px;color:#6B7280">API Key</label>'
+            '<div style="display:flex;gap:8px;align-items:center">'
+            '<input id="live-api-key" type="password" class="form-input" placeholder="Paste your API key" style="width:320px;font-family:monospace;font-size:12px">'
+            '<span id="live-key-set" style="display:none;font-size:11px;color:#16A34A">&#10003; key saved</span>'
+            '</div>'
+            '<label style="font-size:13px;color:#6B7280" id="live-endpoint-label">Endpoint URL</label>'
+            '<input id="live-endpoint" type="url" class="form-input" placeholder="https://api.openai.com/v1" style="width:320px;font-family:monospace;font-size:12px">'
+            '<label style="font-size:13px;color:#6B7280">Model</label>'
+            '<input id="live-model" type="text" class="form-input" placeholder="gpt-4o" style="width:220px;font-family:monospace;font-size:12px">'
+            '</div>'
+            '<div style="margin-top:16px;display:flex;gap:10px;align-items:center">'
+            '<button class="scan-btn" onclick="saveLiveScanConfig()" style="color:#4F46E5;border-color:#C7D2FE">Save Credentials</button>'
+            '<button class="scan-btn" onclick="runLiveScan(this)" style="color:#ffffff;background:#4F46E5;border-color:#4F46E5">&#9654; Run Live Scan Now</button>'
+            '</div>'
+            '</div>'
+        )
+    return (
+        '<div class="content-panel" style="background:#F9FAFB;border:1px solid #F3F4F6;border-radius:8px;padding:20px;margin-bottom:16px;opacity:.75">'
+        '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">'
+        '<div class="panel-sub-hdr" style="font-size:12px;color:#9CA3AF;font-weight:600;text-transform:uppercase;letter-spacing:.06em">Live Adversarial Probe Scan</div>'
+        '<span style="font-size:10px;font-weight:700;letter-spacing:.5px;color:#9CA3AF;background:#F3F4F6;border:1px solid #E5E7EB;border-radius:4px;padding:2px 7px">PRO ONLY</span>'
+        '</div>'
+        '<div style="font-size:13px;color:#9CA3AF;margin-bottom:8px">&#128274; Run real adversarial probes against your live AI endpoint &#8212; prompt injection, jailbreak attempts, PII extraction tests, and more.</div>'
+        '<div style="font-size:12px;color:#9CA3AF">Upgrade to <strong>Pro</strong> to unlock live scanning. Contact your M.A.R.K. account manager or email <a href="mailto:sales@markai.io" style="color:#4F46E5">sales@markai.io</a>.</div>'
+        '</div>'
+    )
 
 
 def _build_mcp_report_html(servers: list, tier: str) -> str:
@@ -834,7 +905,7 @@ function switchTier(t){{
     return ''.join(parts)
 
 
-def _run_scan(mode: str, target: str, profile: str, providers: list[str]):
+def _run_scan(mode: str, target: str, profile: str, providers: list[str], live_cfg: dict | None = None):
     global _status, _log
     with _lock:
         _status = 'running'
@@ -856,6 +927,23 @@ def _run_scan(mode: str, target: str, profile: str, providers: list[str]):
                    '--target', target,
                    '--mode', provider, '--profile', profile, '--output', 'json',
                    '--store-db', db_path]
+            if live_cfg and provider not in ('config', 'demo'):
+                api_key  = live_cfg.get('api_key', '')
+                endpoint = live_cfg.get('endpoint', '')
+                mdl      = live_cfg.get('model', '')
+                if api_key:
+                    if provider == 'anthropic':
+                        cmd += ['--anthropic-api-key', api_key]
+                    elif provider == 'gemini':
+                        cmd += ['--gemini-api-key', api_key]
+                    else:
+                        cmd += ['--api-key', api_key]
+                if endpoint and provider == 'api':
+                    cmd += ['--endpoint', endpoint]
+                elif not endpoint and provider == 'api':
+                    cmd += ['--endpoint', 'https://api.openai.com/v1']
+                if mdl:
+                    cmd += ['--model', mdl]
 
         emit(f'$ {" ".join(cmd)}')
         emit('')
@@ -991,8 +1079,9 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             '/academy':        self._serve_academy,
             '/probe':          self._serve_probe_tester,
             '/command':        lambda: self._redirect('/'),
-            '/api/config':        self._api_get_config,
-            '/api/alerts/config': self._api_get_alert_config,
+            '/api/config':           self._api_get_config,
+            '/api/alerts/config':    self._api_get_alert_config,
+            '/api/live-scan-config': self._api_get_live_scan_config,
             '/api/fleet/live-stats': self._api_fleet_live_stats,
             '/api/fleet/shadow':  self._api_fleet_shadow,
             '/api/fleet/mcp':        self._api_fleet_mcp,
@@ -1076,6 +1165,8 @@ class _Handler(http.server.BaseHTTPRequestHandler):
 
         if path == '/api/scan':
             self._api_scan()
+        elif path == '/api/live-scan-config':
+            self._api_set_live_scan_config()
         elif path == '/api/config':
             self._api_set_config()
         elif path == '/api/alerts/config':
@@ -1463,9 +1554,15 @@ button:hover{{background:#2ea043}}
         profile = body.get('profile', 'default')
         if not profile.replace('-', '').replace('_', '').isalnum():
             profile = 'default'
+        live_cfg = None
+        if mode not in ('demo', 'config'):
+            if not _has_live_scan():
+                self._json({'error': 'Live scan requires a Plus license'}, 403)
+                return
+            live_cfg = _load_live_scan_config()
         threading.Thread(
             target=_run_scan,
-            args=(mode, safe_target, profile, body.get('providers', [])),
+            args=(mode, safe_target, profile, body.get('providers', []), live_cfg),
             daemon=True,
         ).start()
         self._json({'status': 'started'})
@@ -2558,6 +2655,32 @@ button:hover{{background:#2ea043}}
                 pass
 
         self._json({'status': 'saved', 'pushed_to_agents': pushed})
+
+    def _api_get_live_scan_config(self):
+        if not _has_live_scan():
+            self._json({'locked': True})
+            return
+        cfg = _load_live_scan_config()
+        safe = {k: v for k, v in cfg.items() if k != 'api_key'}
+        if cfg.get('api_key'):
+            safe['api_key_set'] = True
+        self._json(safe)
+
+    def _api_set_live_scan_config(self):
+        if not _has_live_scan():
+            self._json({'error': 'Live scan requires a Plus license'}, 403)
+            return
+        length = _content_length(self.headers)
+        if not length:
+            self._send(400, b'Empty body', 'text/plain')
+            return
+        try:
+            body = json.loads(self.rfile.read(length))
+        except json.JSONDecodeError:
+            self._send(400, b'Invalid JSON', 'text/plain')
+            return
+        _save_live_scan_config(body)
+        self._json({'status': 'saved'})
 
     def _api_get_alert_config(self):
         from alerts import load_alert_config_for_ui
@@ -3949,6 +4072,8 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
     </div>
   </div>
 
+  {_live_scan_settings_html()}
+
   </div>
 
   <div class="page" id="page-reports">
@@ -4116,6 +4241,7 @@ function navTo(page) {{
   const b = document.getElementById('nav-' + page);
   if (b) b.classList.add('sb-active');
   document.getElementById('main').scrollTop = 0;
+  if (page === 'settings') {{ loadLiveScanConfig(); }}
 }}
 
 function _syncFindingsSelector() {{
@@ -5449,6 +5575,85 @@ async function loadAlertConfig() {{
     cb('trig-high',   t.new_high);
     cb('trig-shadow', t.new_shadow_ai);
   }} catch (_) {{}}
+}}
+
+function liveModeChanged() {{
+  const mode = document.getElementById('live-mode')?.value;
+  const epLabel = document.getElementById('live-endpoint-label');
+  const epInput = document.getElementById('live-endpoint');
+  const modelInput = document.getElementById('live-model');
+  if (!epLabel || !epInput || !modelInput) return;
+  if (mode === 'anthropic') {{
+    epLabel.textContent = 'Endpoint URL';
+    epInput.placeholder = 'https://api.anthropic.com (optional)';
+    modelInput.placeholder = 'claude-sonnet-4-6';
+  }} else if (mode === 'gemini') {{
+    epLabel.textContent = 'Endpoint URL';
+    epInput.placeholder = 'Leave blank for default';
+    modelInput.placeholder = 'gemini-1.5-flash';
+  }} else if (mode === 'local') {{
+    epLabel.textContent = 'Ollama Host';
+    epInput.placeholder = 'http://localhost:11434';
+    modelInput.placeholder = 'llama3';
+  }} else {{
+    epLabel.textContent = 'Endpoint URL';
+    epInput.placeholder = 'https://api.openai.com/v1';
+    modelInput.placeholder = 'gpt-4o';
+  }}
+}}
+
+async function loadLiveScanConfig() {{
+  try {{
+    const r = await fetch('/api/live-scan-config');
+    if (!r.ok) return;
+    const d = await r.json();
+    if (d.locked) return;
+    if (d.mode)     {{ const el = document.getElementById('live-mode'); if (el) {{ el.value = d.mode; liveModeChanged(); }} }}
+    if (d.endpoint) {{ const el = document.getElementById('live-endpoint'); if (el) el.value = d.endpoint; }}
+    if (d.model)    {{ const el = document.getElementById('live-model'); if (el) el.value = d.model; }}
+    if (d.api_key_set) {{ const el = document.getElementById('live-key-set'); if (el) el.style.display = 'inline'; }}
+  }} catch (_) {{}}
+}}
+
+async function saveLiveScanConfig() {{
+  const gv = id => document.getElementById(id)?.value?.trim() || '';
+  const body = {{
+    mode:     gv('live-mode'),
+    api_key:  document.getElementById('live-api-key')?.value || '',
+    endpoint: gv('live-endpoint'),
+    model:    gv('live-model'),
+  }};
+  if (!body.mode) {{ alert('Select an AI provider first.'); return; }}
+  try {{
+    const r = await fetch('/api/live-scan-config', {{
+      method: 'POST', headers: {{'Content-Type': 'application/json'}},
+      body: JSON.stringify(body),
+    }});
+    if (r.ok) {{
+      const el = document.getElementById('live-scan-saved');
+      if (el) {{ el.style.display = 'block'; setTimeout(() => el.style.display = 'none', 4000); }}
+      const keyEl = document.getElementById('live-key-set');
+      if (keyEl && body.api_key) keyEl.style.display = 'inline';
+      document.getElementById('live-api-key').value = '';
+    }} else {{ alert('Save failed.'); }}
+  }} catch (e) {{ alert('Save failed: ' + e); }}
+}}
+
+async function runLiveScan(btn) {{
+  const mode = document.getElementById('live-mode')?.value;
+  if (!mode) {{ alert('Select an AI provider first.'); return; }}
+  const orig = btn.textContent;
+  btn.disabled = true; btn.textContent = 'Starting...';
+  try {{
+    const r = await fetch('/api/scan', {{
+      method: 'POST', headers: {{'Content-Type': 'application/json'}},
+      body: JSON.stringify({{mode: 'api', providers: [mode], profile: 'default'}}),
+    }});
+    const d = await r.json();
+    if (d.error) {{ alert(d.error); }}
+    else {{ navTo('scan'); }}
+  }} catch (e) {{ alert('Failed to start scan: ' + e); }}
+  finally {{ btn.disabled = false; btn.textContent = orig; }}
 }}
 
 async function saveAlertConfig() {{
