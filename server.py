@@ -3675,7 +3675,7 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
     </nav>
     <div class="sb-footer">
       <a href="/academy" target="_blank">Academy</a>
-      {'<a href="/probe" target="_blank">&#128272; API Tester</a>' if _has_live_scan() else '<span style="color:#6B7280;cursor:default;font-size:13px" title="Upgrade to Pro to access the API Tester">&#128274; API Tester</span>'}
+      {'<a href="/probe">&#128272; API Tester</a>' if _has_live_scan() else '<span style="color:#6B7280;cursor:default;font-size:13px" title="Upgrade to Pro to access the API Tester">&#128274; API Tester</span>'}
     </div>
   </aside>
   <div id="main">
