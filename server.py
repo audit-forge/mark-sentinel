@@ -4125,7 +4125,7 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
 
   </div>
 
-  {'<div class="page" id="page-probe" style="padding:0;margin:-24px;height:calc(100vh - 56px)"><iframe id="probe-iframe" src="" style="width:100%;height:100%;border:none;display:block"></iframe></div>' if _has_live_scan() else ''}
+  {'<div class="page" id="page-probe" style="height:100vh"><iframe id="probe-iframe" src="" style="width:100%;height:100%;border:none;display:block"></iframe></div>' if _has_live_scan() else ''}
 </div>
 
 <script>
@@ -4211,6 +4211,8 @@ function navTo(page) {{
   document.getElementById('main').scrollTop = 0;
   const sr = document.querySelector('.stat-row');
   if (sr) sr.style.display = page === 'probe' ? 'none' : '';
+  const mn = document.getElementById('main');
+  if (mn) {{ mn.style.padding = page === 'probe' ? '0' : ''; mn.style.overflow = page === 'probe' ? 'hidden' : ''; }}
   if (page === 'settings') {{ loadLiveScanConfig(); }}
   if (page === 'probe') {{
     const fr = document.getElementById('probe-iframe');
