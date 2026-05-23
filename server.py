@@ -4127,7 +4127,7 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
 
   </div>
 
-  {'<div class="page" id="page-probe" style="height:calc(100vh - 56px)"><iframe id="probe-iframe" data-loaded="0" style="width:100%;height:100%;border:none;display:block"></iframe></div>' if _has_live_scan() else ''}
+  {'<div class="page" id="page-probe" style="position:fixed;top:0;left:240px;right:0;bottom:0;z-index:50"><iframe id="probe-iframe" data-loaded="0" style="width:100%;height:100%;border:none;display:block"></iframe></div>' if _has_live_scan() else ''}
 
 </div>
 
@@ -4212,10 +4212,6 @@ function navTo(page) {{
   const b = document.getElementById('nav-' + page);
   if (b) b.classList.add('sb-active');
   document.getElementById('main').scrollTop = 0;
-  const sr = document.querySelector('.stat-row');
-  if (sr) sr.style.display = page === 'probe' ? 'none' : '';
-  const mn = document.getElementById('main');
-  if (mn) mn.style.padding = page === 'probe' ? '0' : '';
   if (page === 'settings') {{ loadLiveScanConfig(); }}
   if (page === 'probe') {{
     const fr = document.getElementById('probe-iframe');
