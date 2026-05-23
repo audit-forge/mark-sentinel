@@ -233,7 +233,7 @@ def _rebuild_dashboard(out_dir: Path) -> bool:
 _SEV_ORDER_REPORT = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW', 'INFO']
 _SEV_COLOR_HTML = {'CRITICAL': '#f85149', 'HIGH': '#d29922', 'MEDIUM': '#58a6ff', 'LOW': '#3fb950', 'INFO': '#6e7681'}
 _STATUS_COLOR_HTML = {'FAIL': '#f85149', 'WARN': '#d29922', 'PASS': '#58a6ff', 'SKIP': '#6e7681', 'N/A': '#444c56'}
-_STATUS_LABEL_HTML = {'FAIL': 'HIGH RISK', 'WARN': 'MEDIUM RISK', 'PASS': 'INFO', 'SKIP': 'SKIP', 'N/A': 'N/A'}
+_STATUS_LABEL_HTML = {'FAIL': 'HIGH RISK', 'WARN': 'MEDIUM RISK', 'PASS': 'PASS', 'SKIP': 'SKIP', 'N/A': 'N/A'}
 
 # ── Shared theme constants injected into every HTML page ──────────────────────
 _LIGHT_MODE_CSS = (
@@ -808,8 +808,6 @@ function switchTier(t){{
         if status_filter:
             _target_st = {'fail': 'FAIL', 'warn': 'WARN', 'pass': 'PASS'}.get(status_filter, '')
             show = [r for r in results if r.get('status', '').upper() == _target_st]
-        elif tier == 'technical':
-            show = results
         else:
             show = [r for r in results if r.get('status') in ('FAIL', 'WARN')]
         show.sort(key=lambda x: _SEV_ORDER_REPORT.index(x.get('severity', 'INFO')) if x.get('severity') in _SEV_ORDER_REPORT else 99)
@@ -820,9 +818,10 @@ function switchTier(t){{
             sev = r.get('severity', 'INFO')
             sc2 = _STATUS_COLOR_HTML.get(st, '#c9d1d9')
             sv2 = _SEV_COLOR_HTML.get(sev, '#6e7681')
+            sev_span = f'<span style="color:{sv2}">[{esc(sev)}]</span> ' if st in ('FAIL', 'WARN') else ''
             parts.append(f'<div class="finding">'
                          f'<span style="color:{sc2};font-weight:700">[{esc(_STATUS_LABEL_HTML.get(st, st))}]</span> '
-                         f'<span style="color:{sv2}">[{esc(sev)}]</span> '
+                         f'{sev_span}'
                          f'<strong>{esc(r.get("title",""))}</strong>')
             if tier == 'technical' and r.get('details'):
                 parts.append(f'<div class="det">{esc(r["details"][:300])}</div>')
