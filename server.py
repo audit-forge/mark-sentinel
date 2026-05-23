@@ -355,49 +355,7 @@ _EU_AI_ACT_MAP = {
 
 
 def _live_scan_settings_html() -> str:
-    if _has_live_scan():
-        return (
-            '<div class="content-panel" style="background:#ffffff;border:1px solid #F3F4F6;border-radius:8px;padding:20px;margin-bottom:16px">'
-            '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">'
-            '<div class="panel-sub-hdr" style="font-size:12px;color:#6B7280;font-weight:600;text-transform:uppercase;letter-spacing:.06em">Live Adversarial Probe Scan</div>'
-            '<span style="font-size:10px;font-weight:700;letter-spacing:.5px;color:#4F46E5;background:#EEF2FF;border:1px solid #C7D2FE;border-radius:4px;padding:2px 7px">PRO</span>'
-            '</div>'
-            '<div style="font-size:12px;color:#9CA3AF;margin-bottom:14px">Connect Sentinel to your live AI endpoint and run real adversarial probes &#8212; prompt injection, jailbreak attempts, PII extraction, and more.</div>'
-            '<div id="live-scan-saved" style="display:none;color:#16A34A;font-size:12px;margin-bottom:10px">&#10003; Saved &#8212; credentials stored securely on this device</div>'
-            '<div style="display:grid;grid-template-columns:160px 1fr;gap:10px 16px;align-items:center;max-width:640px">'
-            '<label style="font-size:13px;color:#6B7280">AI Provider</label>'
-            '<select id="live-mode" class="form-input" style="width:220px;font-size:13px" onchange="liveModeChanged()">'
-            '<option value="api">OpenAI / OpenAI-compatible</option>'
-            '<option value="anthropic">Anthropic (Claude)</option>'
-            '<option value="gemini">Google Gemini</option>'
-            '<option value="local">Local / Ollama</option>'
-            '</select>'
-            '<label style="font-size:13px;color:#6B7280">API Key</label>'
-            '<div style="display:flex;gap:8px;align-items:center">'
-            '<input id="live-api-key" type="password" class="form-input" placeholder="Paste your API key" style="width:320px;font-family:monospace;font-size:12px">'
-            '<span id="live-key-set" style="display:none;font-size:11px;color:#16A34A">&#10003; key saved</span>'
-            '</div>'
-            '<label style="font-size:13px;color:#6B7280" id="live-endpoint-label">Endpoint URL</label>'
-            '<input id="live-endpoint" type="url" class="form-input" placeholder="https://api.openai.com/v1" style="width:320px;font-family:monospace;font-size:12px">'
-            '<label style="font-size:13px;color:#6B7280">Model</label>'
-            '<input id="live-model" type="text" class="form-input" placeholder="gpt-4o" style="width:220px;font-family:monospace;font-size:12px">'
-            '</div>'
-            '<div style="margin-top:16px;display:flex;gap:10px;align-items:center">'
-            '<button class="scan-btn" onclick="saveLiveScanConfig()" style="color:#4F46E5;border-color:#C7D2FE">Save Credentials</button>'
-            '<button class="scan-btn" onclick="runLiveScan(this)" style="color:#ffffff;background:#4F46E5;border-color:#4F46E5">&#9654; Run Live Scan Now</button>'
-            '</div>'
-            '</div>'
-        )
-    return (
-        '<div class="content-panel" style="background:#F9FAFB;border:1px solid #F3F4F6;border-radius:8px;padding:20px;margin-bottom:16px;opacity:.75">'
-        '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">'
-        '<div class="panel-sub-hdr" style="font-size:12px;color:#9CA3AF;font-weight:600;text-transform:uppercase;letter-spacing:.06em">Live Adversarial Probe Scan</div>'
-        '<span style="font-size:10px;font-weight:700;letter-spacing:.5px;color:#9CA3AF;background:#F3F4F6;border:1px solid #E5E7EB;border-radius:4px;padding:2px 7px">PRO ONLY</span>'
-        '</div>'
-        '<div style="font-size:13px;color:#9CA3AF;margin-bottom:8px">&#128274; Run real adversarial probes against your live AI endpoint &#8212; prompt injection, jailbreak attempts, PII extraction tests, and more.</div>'
-        '<div style="font-size:12px;color:#9CA3AF">Upgrade to <strong>Pro</strong> to unlock live scanning. Contact your M.A.R.K. account manager or email <a href="mailto:sales@markai.io" style="color:#4F46E5">sales@markai.io</a>.</div>'
-        '</div>'
-    )
+    return ''
 
 
 def _build_mcp_report_html(servers: list, tier: str) -> str:
@@ -1077,7 +1035,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             '/api/discover':   self._api_discover,
             '/fleet':          lambda: self._redirect('/'),
             '/academy':        self._serve_academy,
-            '/probe':          self._serve_probe_tester,
+            '/probe':          self._serve_probe_tester if _has_live_scan() else lambda: self._send(403, b'Live scanning requires a Pro license. Contact sales@markai.io to upgrade.', 'text/plain'),
             '/command':        lambda: self._redirect('/'),
             '/api/config':           self._api_get_config,
             '/api/alerts/config':    self._api_get_alert_config,
@@ -1194,6 +1152,9 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         elif path == '/api/probe-scan':
             self._api_probe_scan()
         elif path == '/probe':
+            if not _has_live_scan():
+                self._send(403, b'Live scanning requires a Pro license. Contact sales@markai.io to upgrade.', 'text/plain')
+                return
             self._probe_run()
         elif path == '/api/fleet/discover/all':
             self._api_fleet_discover_all()
@@ -3714,7 +3675,7 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
     </nav>
     <div class="sb-footer">
       <a href="/academy" target="_blank">Academy</a>
-      <a href="/probe" target="_blank">&#128272; API Tester</a>
+      {'<a href="/probe" target="_blank">&#128272; API Tester</a>' if _has_live_scan() else '<span style="color:#6B7280;cursor:default;font-size:13px" title="Upgrade to Pro to access the API Tester">&#128274; API Tester</span>'}
     </div>
   </aside>
   <div id="main">
