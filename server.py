@@ -4129,6 +4129,10 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
 </div>
 
 <script>
+// Force reload when restored from bfcache so nginx re-checks auth
+window.addEventListener('pageshow', function(e) {{
+  if (e.persisted) window.location.reload();
+}});
 // ── Theme ──
 function _applyTheme(light) {{
   document.documentElement.classList.toggle('light', light);
