@@ -305,8 +305,11 @@ def _finding_row(pdf: _PDF, f: dict, show_device: bool, verbose: bool):
     label = f'[{status}]'
     pdf.cell(14, 5, _safe(label), ln=False)
 
-    pdf.set_text_color(*_SEV_COLOR.get(sev, (110, 118, 129)))
-    pdf.cell(20, 5, _safe(f'[{sev}]'), ln=False)
+    if status in ('FAIL', 'WARN'):
+        pdf.set_text_color(*_SEV_COLOR.get(sev, (110, 118, 129)))
+        pdf.cell(20, 5, _safe(f'[{sev}]'), ln=False)
+    else:
+        pdf.cell(20, 5, '', ln=False)
 
     if show_device:
         pdf.set_text_color(110, 118, 129)

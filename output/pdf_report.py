@@ -150,8 +150,10 @@ def format_pdf(results: List, profile: dict, target: str, mode: str = 'config', 
         row_bottom = pdf.get_y()
         row_h = row_bottom - y
         pdf.set_xy(x + 110, y)
-        pdf.cell(25, row_h, _safe_text(str(getattr(r, 'status', ''))), border=1)
-        pdf.cell(25, row_h, _safe_text(str(getattr(r, 'severity', ''))), border=1)
+        st = str(getattr(r, 'status', ''))
+        pdf.cell(25, row_h, _safe_text(st), border=1)
+        sev_text = str(getattr(r, 'severity', '')) if st in ('FAIL', 'WARN') else '-'
+        pdf.cell(25, row_h, _safe_text(sev_text), border=1)
         pdf.set_xy(x, row_bottom)
 
     out = pdf.output()

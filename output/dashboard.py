@@ -582,13 +582,15 @@ function renderObservations(){
 
   const rows=findings.map((f,i)=>{
     const sl=f.severity.toLowerCase(),stl=f.status.toLowerCase();
+    const indCls=(f.status==='PASS'||f.status==='SKIP')?stl:sl;
+    const sevBadge=(f.status==='WARN')?`<span class="sev-badge ${sl}">${esc(f.severity)}</span>`:'';
     const evHtml=(f.evidence||[]).map(e=>`<li class="ev-item">${esc(e)}</li>`).join('');
     const remHtml=(f.remediation||'').split('\n').filter(Boolean).map(s=>`<div class="rem-step">${esc(s)}</div>`).join('');
     const fwHtml=Object.entries(f.frameworks||{}).map(([k,v])=>`<span class="fw-tag">${esc(k)}: ${esc(v)}</span>`).join('');
     return`<div class="finding" id="obs${i}">
       <div class="fhdr" onclick="togObs(${i})">
-        <div class="find-ind ${sl}"></div>
-        <span class="sev-badge ${sl}">${esc(f.severity)}</span>
+        <div class="find-ind ${indCls}"></div>
+        ${sevBadge}
         <span class="stat-badge ${stl}">${esc(f.status)}</span>
         <span class="find-id">${esc(f.check_id)}</span>
         <span class="find-title">${esc(f.title)}</span>

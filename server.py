@@ -121,6 +121,14 @@ def _has_evidence_package() -> bool:
     except Exception:
         return True
 
+def _has_live_scan() -> bool:
+    """Return True when the license allows live adversarial probe scans (Plus only)."""
+    try:
+        from license import get_license
+        return get_license().has_live_scan
+    except Exception:
+        return True
+
 def _content_length(headers) -> int:
     """Safely parse Content-Length header; returns 0 on missing or invalid value."""
     try:
@@ -990,7 +998,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             '/api/discover':   self._api_discover,
             '/fleet':          lambda: self._redirect('/'),
             '/academy':        self._serve_academy,
-            '/probe':          self._serve_probe_tester,
+            '/probe':          self._serve_probe_tester if _has_live_scan() else lambda: self._send(403, b'Live scanning requires a Pro license. Contact sales@markai.io to upgrade.', 'text/plain'),
             '/command':        lambda: self._redirect('/'),
             '/api/config':        self._api_get_config,
             '/api/alerts/config': self._api_get_alert_config,
@@ -1103,6 +1111,9 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         elif path == '/api/probe-scan':
             self._api_probe_scan()
         elif path == '/probe':
+            if not _has_live_scan():
+                self._send(403, b'Live scanning requires a Pro license. Contact sales@markai.io to upgrade.', 'text/plain')
+                return
             self._probe_run()
         elif path == '/api/fleet/discover/all':
             self._api_fleet_discover_all()
@@ -2884,7 +2895,9 @@ body{{background:#0d1117;color:#e6edf3;font-family:-apple-system,BlinkMacSystemF
             b'</style></head><body>'
             b'<div class="wrap">'
             b'<div class="bar"><span class="bm">M.A.R.K.</span><span class="bn">SENTINEL</span>'
-            b'<span class="bs">API Security Tester</span></div>'
+            b'<span class="bs">API Security Tester</span>'
+            b'<a href="/" style="margin-left:auto;font-size:12px;color:#8b949e;text-decoration:none;border:1px solid #30363d;border-radius:5px;padding:5px 10px">&#8592; Dashboard</a>'
+            b'</div>'
             b'<h1>AI API Security Tester</h1>'
             b'<p class="sub">Enter your API credentials to run live adversarial probes against your AI endpoint.<br>'
             b'Tests: prompt injection, jailbreaks, PII leakage, system prompt disclosure, harmful content refusals.<br>'
@@ -3507,10 +3520,11 @@ html.light .sb-footer a,body.light .sb-footer a{{color:#8c959f}}
       <button class="sb-item" id="nav-reports" onclick="navTo('reports')">&#128196; Reports</button>
       <div class="sb-group"></div>
       <button class="sb-item" id="nav-settings" onclick="navTo('settings')">&#9881; Settings</button>
+      {'<button class="sb-item" id="nav-probe" onclick="navTo(\'probe\')">&#128272; API Tester</button>' if _has_live_scan() else '<span style="display:block;padding:8px 16px;font-size:13px;color:#484f58;cursor:default" title="Upgrade to Pro to access the API Tester">&#128274; API Tester</span>'}
     </nav>
     <div class="sb-footer">
       <a href="/academy" target="_blank">Academy</a>
-      <a href="/probe" target="_blank">&#128272; API Tester</a>
+      <a href="/logout" style="color:#ef4444">&#x2192; Sign Out</a>
       <button id="theme-toggle" onclick="toggleTheme()" style="background:none;border:none;font-size:11px;color:#484f58;cursor:pointer;text-align:left;padding:0;margin-top:2px">&#9728; Theme</button>
     </div>
   </aside>
@@ -3959,9 +3973,16 @@ html.light .sb-footer a,body.light .sb-footer a{{color:#8c959f}}
   </div>
 
   </div>
+
+  {'<div class="page" id="page-probe" style="position:fixed;top:0;left:216px;right:0;bottom:0;z-index:50"><iframe id="probe-iframe" data-loaded="0" style="width:100%;height:100%;border:none;display:block"></iframe></div>' if _has_live_scan() else ''}
+
 </div>
 
 <script>
+// Force reload when restored from bfcache so auth is re-checked
+window.addEventListener('pageshow', function(e) {{
+  if (e.persisted) window.location.reload();
+}});
 // ── Theme ──
 function _applyTheme(light) {{
   document.documentElement.classList.toggle('light', light);
@@ -4038,6 +4059,13 @@ function navTo(page) {{
   const b = document.getElementById('nav-' + page);
   if (b) b.classList.add('sb-active');
   document.getElementById('main').scrollTop = 0;
+  if (page === 'probe') {{
+    const fr = document.getElementById('probe-iframe');
+    if (fr && fr.getAttribute('data-loaded') === '0') {{
+      fr.src = '/probe';
+      fr.setAttribute('data-loaded', '1');
+    }}
+  }}
 }}
 
 function _syncFindingsSelector() {{

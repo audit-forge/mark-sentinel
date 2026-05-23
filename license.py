@@ -72,6 +72,11 @@ class License:
         return self.plan == self.PLAN_PLUS
 
     @property
+    def has_live_scan(self) -> bool:
+        """True when the license allows live adversarial probe scans (Plus only)."""
+        return self.plan == self.PLAN_PLUS
+
+    @property
     def unlimited(self) -> bool:
         return self.max_agents == _UNLIMITED
 
