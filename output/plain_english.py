@@ -155,15 +155,6 @@ def format_report(results: list, profile: dict, target: str, mode: str = 'config
             for r in warns:
                 lines += _format_result(r, is_smb, show_fix=True, profile=profile)
 
-    # Passes (compact — title only)
-    if passes:
-        lines.append(sep)
-        lines.append(f"  PASSED ({len(passes)})")
-        lines.append(sep)
-        for r in passes:
-            lines.append(f"  ✅ {r.check_id}: {r.title}")
-        lines.append("")
-
     # Skipped — with descriptions so the reader knows what wasn't tested
     if skipped:
         lines.append(sep)
@@ -231,7 +222,8 @@ def _format_result(r: CheckResult, is_smb: bool, show_fix: bool = True,
     icon  = _STATUS_ICON[r.status]
     label = _STATUS_LABEL[r.status]
 
-    lines.append(f"  {icon} [{label}] [{r.severity}] {r.check_id}: {r.title}")
+    sev_tag = f" [{r.severity}]" if r.status in (FAIL, WARN) else ""
+    lines.append(f"  {icon} [{label}]{sev_tag} {r.check_id}: {r.title}")
 
     details = _SMB_DETAILS.get(r.check_id) if (is_smb and r.check_id in _SMB_DETAILS) else (r.details or "")
     lines += _wrap(details, indent="     ")
