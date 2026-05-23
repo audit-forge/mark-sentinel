@@ -322,6 +322,27 @@ async def update_seats(request: Request, customer_id: str = Form(...), max_seats
     return RedirectResponse("/customers?seats_updated=" + customer_id, status_code=303)
 
 
+@app.post("/customers/upgrade")
+async def upgrade_customer(request: Request, customer_id: str = Form(...), tier: str = Form(...)):
+    try:
+        require_super_admin(request)
+    except HTTPException:
+        return RedirectResponse("/login")
+    if tier not in ("standard", "plus"):
+        return RedirectResponse("/customers?error=invalid_tier", status_code=303)
+    with get_conn() as conn:
+        row = conn.execute("SELECT * FROM customers WHERE id=?", (customer_id,)).fetchone()
+        if not row:
+            return RedirectResponse("/customers?error=notfound", status_code=303)
+        conn.execute("UPDATE customers SET tier=? WHERE id=?", (tier, customer_id))
+        name    = row["name"]
+        expires = row["license_expires_at"]
+        max_seats = row["max_seats"]
+    _write_license_file(customer_id, name, tier, expires, max_seats)
+    _run_script("restart_customer.sh", customer_id)
+    return RedirectResponse("/customers?plan_updated=" + customer_id, status_code=303)
+
+
 @app.post("/customers/remove")
 async def remove_customer(request: Request, customer_id: str = Form(...)):
     try:

@@ -4,6 +4,8 @@
 
 {% if request.query_params.get('seats_updated') %}
 <div class="error" style="background:#4F46E518;border-color:#4F46E540;color:#4F46E5">&#10003; Seat count updated successfully</div>
+{% elif request.query_params.get('plan_updated') %}
+<div class="error" style="background:#4F46E518;border-color:#4F46E540;color:#4F46E5">&#10003; Plan updated successfully</div>
 {% elif request.query_params.get('error') == 'invalid_seats' %}
 <div class="error">Seat count must be at least 1.</div>
 {% endif %}
@@ -76,11 +78,14 @@
       <td>{{ c.id }}</td>
       <td>{{ c.name }}</td>
       <td>
-        {% if c.tier == 'plus' %}
-          <span class="badge badge-blue">Pro</span>
-        {% else %}
-          <span class="badge badge-yellow">Standard</span>
-        {% endif %}
+        <form method="post" action="/customers/upgrade" style="display:flex;align-items:center;gap:6px">
+          <input type="hidden" name="customer_id" value="{{ c.id }}">
+          <select name="tier" style="width:100px;padding:3px 6px;font-size:13px;background:#F9FAFB;border:1px solid #E5E7EB;border-radius:4px;color:#111827">
+            <option value="standard" {% if c.tier != 'plus' %}selected{% endif %}>Standard</option>
+            <option value="plus"     {% if c.tier == 'plus' %}selected{% endif %}>Pro</option>
+          </select>
+          <button type="submit" class="btn btn-sm" style="padding:3px 8px;font-size:12px">Save</button>
+        </form>
       </td>
       <td>
         <form method="post" action="/customers/seats" style="display:flex;align-items:center;gap:6px">
