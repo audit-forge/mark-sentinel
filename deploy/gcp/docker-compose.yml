@@ -4,6 +4,7 @@ services:
     container_name: sentinel-nginx
     ports:
       - "80:80"
+      - "7001-7100:7001-7100"
     volumes:
       - ./nginx:/etc/nginx/conf.d:ro
     networks:
