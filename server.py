@@ -3676,7 +3676,7 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
     </nav>
     <div class="sb-footer">
       <a href="/academy" target="_blank">Academy</a>
-      <a href="/logout" style="color:#ef4444;margin-top:4px;display:block">&#x2192; Sign Out</a>
+      <a href="#" onclick="window.location.href='//' + window.location.hostname + '/logout'" style="color:#ef4444;margin-top:4px;display:block">&#x2192; Sign Out</a>
     </div>
   </aside>
   <div id="main">
