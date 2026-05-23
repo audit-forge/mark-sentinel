@@ -78,25 +78,48 @@ echo "  Found: $PYTHON ($PYTHON_VER)"
 VENV_DIR="${INSTALL_PREFIX}/venv"
 echo "Creating virtualenv at ${VENV_DIR} ..."
 mkdir -p "${INSTALL_PREFIX}"
+
+if ! "$PYTHON" -m venv --help &>/dev/null 2>&1; then
+    echo "  venv module not found — attempting to install ..."
+    PY_VER="$("$PYTHON" -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')"
+    if command -v apt-get &>/dev/null; then
+        apt-get install -y "python${PY_VER}-venv" 2>/dev/null || apt-get install -y python3-venv 2>/dev/null || true
+    elif command -v dnf &>/dev/null; then
+        dnf install -y "python${PY_VER}" 2>/dev/null || true
+    elif command -v yum &>/dev/null; then
+        yum install -y "python3" 2>/dev/null || true
+    fi
+    if ! "$PYTHON" -m venv --help &>/dev/null 2>&1; then
+        echo "Error: venv module unavailable. Run: sudo apt-get install python${PY_VER}-venv" >&2
+        exit 1
+    fi
+    echo "  [OK] venv installed"
+fi
+
 "$PYTHON" -m venv "${VENV_DIR}"
 VENV_PYTHON="${VENV_DIR}/bin/python"
 
-# ── Install pip dependencies ─────────────────────────────────────────────────
-
-echo "Installing Python dependencies ..."
-if [[ -f "${SCRIPT_DIR}/requirements.txt" ]]; then
-    "${VENV_PYTHON}" -m pip install --quiet --upgrade pip
-    "${VENV_PYTHON}" -m pip install --quiet -r "${SCRIPT_DIR}/requirements.txt"
-else
-    echo "  Warning: requirements.txt not found, skipping pip install."
-fi
-
-PYTHON="${VENV_PYTHON}"
-
-# ── Copy files to install prefix ─────────────────────────────────────────────
+# ── Download agent bundle from server (web install path) ─────────────────────
 
 echo "Installing files to ${INSTALL_PREFIX} ..."
-mkdir -p "${INSTALL_PREFIX}"
+
+if [[ -n "$OPT_SERVER" ]]; then
+    echo "  Downloading agent bundle from ${OPT_SERVER} ..."
+    BUNDLE_TMP="$(mktemp /tmp/sentinel-bundle.XXXXXX.tar.gz)"
+    if curl -fsSL \
+        -H "Authorization: Bearer ${OPT_TOKEN}" \
+        "${OPT_SERVER%/}/bundle.tar.gz" \
+        -o "$BUNDLE_TMP" 2>/dev/null; then
+        tar -xzf "$BUNDLE_TMP" --strip-components=1 -C "${INSTALL_PREFIX}" 2>/dev/null || true
+        rm -f "$BUNDLE_TMP"
+        echo "  [OK] Agent bundle downloaded and extracted"
+    else
+        rm -f "$BUNDLE_TMP"
+        echo "  Warning: bundle download failed — falling back to local files"
+    fi
+fi
+
+# ── Copy files (local install / fallback) ────────────────────────────────────
 
 for f in agent.py audit.py audit_safe.py storage.py server.py requirements.txt; do
     if [[ -f "${SCRIPT_DIR}/${f}" ]]; then
@@ -110,7 +133,24 @@ for d in checks connectors profiles; do
     fi
 done
 
+if [[ ! -f "${INSTALL_PREFIX}/agent.py" ]]; then
+    echo "Error: agent.py not found at ${INSTALL_PREFIX}/agent.py — bundle download may have failed." >&2
+    exit 1
+fi
+
 chmod 755 "${INSTALL_PREFIX}/agent.py"
+
+# ── Install pip dependencies ─────────────────────────────────────────────────
+
+echo "Installing Python dependencies ..."
+if [[ -f "${INSTALL_PREFIX}/requirements.txt" ]]; then
+    "${VENV_PYTHON}" -m pip install --quiet --upgrade pip
+    "${VENV_PYTHON}" -m pip install --quiet -r "${INSTALL_PREFIX}/requirements.txt"
+else
+    echo "  Warning: requirements.txt not found, skipping pip install."
+fi
+
+PYTHON="${VENV_PYTHON}"
 
 # ── Create config ────────────────────────────────────────────────────────────
 
