@@ -111,7 +111,7 @@ if [[ -n "$OPT_SERVER" ]]; then
         -H "Authorization: Bearer ${OPT_TOKEN}" \
         "$BUNDLE_URL" \
         -o "$BUNDLE_TMP" \
-        -w "%{http_code}" 2>&1)
+        -w "%{http_code}" 2>/dev/null)
     if [[ "$HTTP_CODE" == "200" ]] && [[ -s "$BUNDLE_TMP" ]]; then
         tar -xzf "$BUNDLE_TMP" --strip-components=1 -C "${INSTALL_PREFIX}" 2>/dev/null || true
         rm -f "$BUNDLE_TMP"
