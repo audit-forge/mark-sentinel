@@ -3949,20 +3949,6 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
     </div>
   </div>
 
-  <div class="content-panel" style="background:#ffffff;border:1px solid #F3F4F6;border-radius:8px;padding:20px;margin-bottom:28px">
-    <div class="panel-sub-hdr" style="font-size:12px;color:#6B7280;font-weight:600;text-transform:uppercase;letter-spacing:.06em;margin-bottom:14px">System</div>
-    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px">
-      <button class="scan-btn" id="btn-pull" onclick="pullUpdates()"
-              style="color:#CA8A04;border-color:#E5E7EB">&#8659; Pull Latest Updates</button>
-      <button class="scan-btn" id="btn-restart-agent" onclick="restartAgent()"
-              style="color:#4F46E5;border-color:#E5E7EB">&#8635; Restart Agent</button>
-      <button class="scan-btn" id="btn-restart-server" onclick="restartServer()"
-              style="color:#4F46E5;border-color:#E5E7EB">&#8635; Restart Dashboard</button>
-    </div>
-    <div id="sys-log" style="display:none;background:#F9FAFB;border:1px solid #E5E7EB;border-radius:6px;
-         padding:12px;font-family:monospace;font-size:12px;color:#6B7280;white-space:pre-wrap;
-         max-height:200px;overflow-y:auto;line-height:1.6"></div>
-  </div>
   </div>
 
   <div class="page" id="page-reports">
@@ -5395,86 +5381,6 @@ function renderRiskRegister() {{
     <thead><tr><th>Severity</th><th>Check ID</th><th>Finding</th><th title="Hover for device list">Devices</th><th>Trend</th><th>Open</th></tr></thead>
     <tbody>${{trs}}</tbody>
   </table><div style="font-size:11px;color:#9CA3AF;margin-bottom:8px">${{rows.length}} open finding${{rows.length!==1?'s':''}} · hover device count for affected hostnames</div>`;
-}}
-
-async function pullUpdates() {{
-  const btn = document.getElementById('btn-pull');
-  btn.disabled = true;
-  _sysLog('Checking for updates…', '#6B7280');
-  try {{
-    const r = await fetch('/api/system/update', {{method:'POST'}});
-    const d = await r.json();
-    _sysLog(d.output || '(no output)', d.status === 'error' ? '#DC2626' : '#16A34A');
-    if (d.status === 'restarting') {{
-      btn.textContent = '↻ Restarting…';
-      _sysLog('Server restarting with new code — reconnecting…', '#e3b341');
-      await _waitForRestart();
-      _sysLog('Server is back online. Page will reload.', '#16A34A');
-      setTimeout(() => location.reload(), 800);
-    }} else if (d.status === 'ok') {{
-      btn.textContent = '⇓ Already up to date';
-      setTimeout(() => {{ btn.disabled = false; btn.innerHTML = '&#8659; Pull Latest Updates'; }}, 4000);
-    }} else {{
-      btn.textContent = '⇓ Pull failed';
-      setTimeout(() => {{ btn.disabled = false; btn.innerHTML = '&#8659; Pull Latest Updates'; }}, 5000);
-    }}
-  }} catch(e) {{
-    _sysLog('Error: ' + e, '#DC2626');
-    btn.disabled = false; btn.innerHTML = '&#8659; Pull Latest Updates';
-  }}
-}}
-
-async function _waitForRestart() {{
-  for (let i = 0; i < 30; i++) {{
-    await new Promise(r => setTimeout(r, 1000));
-    try {{
-      const r = await fetch('/api/status', {{cache:'no-store'}});
-      if (r.ok) return;
-    }} catch (_) {{}}
-  }}
-}}
-
-
-async function restartAgent() {{
-  const btn = document.getElementById('btn-restart-agent');
-  btn.disabled = true; btn.textContent = 'Restarting…';
-  _sysLog('Restarting agent service…', '#6B7280');
-  try {{
-    await fetch('/api/system/restart-agent', {{method:'POST'}});
-    _sysLog('Agent restart queued — waiting for check-in…', '#e3b341');
-    let waited = 0;
-    const poll = setInterval(async () => {{
-      waited += 5;
-      try {{
-        const r = await fetch('/api/fleet/devices');
-        if (r.ok) {{
-          _sysLog('Agent back online ✓', '#16A34A');
-          clearInterval(poll);
-          btn.disabled = false; btn.innerHTML = '&#8635; Restart Agent';
-          refreshDevices();
-          return;
-        }}
-      }} catch (_) {{}}
-      if (waited >= 60) {{
-        clearInterval(poll);
-        _sysLog('Agent did not check in within 60s — check logs.', '#DC2626');
-        btn.disabled = false; btn.innerHTML = '&#8635; Restart Agent';
-      }}
-    }}, 5000);
-  }} catch(e) {{
-    _sysLog('Error: ' + e, '#DC2626');
-    btn.disabled = false; btn.innerHTML = '&#8635; Restart Agent';
-  }}
-}}
-
-async function restartServer() {{
-  const btn = document.getElementById('btn-restart-server');
-  btn.disabled = true; btn.textContent = 'Restarting…';
-  _sysLog('Dashboard is restarting — page will reload in 5 seconds…', '#e3b341');
-  try {{
-    await fetch('/api/system/restart-server', {{method:'POST'}});
-  }} catch(_) {{}}
-  setTimeout(() => location.reload(), 5000);
 }}
 
 async function loadConfig() {{
