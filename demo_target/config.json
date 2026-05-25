@@ -5,8 +5,8 @@
   "api_url": "http://api.acmecorp.internal/v1",
   "openai_api_key": "${OPENAI_API_KEY}",
   "model": "gpt-4o-2024-11-20",
-  "openclaw_gateway": {
+  "hash_gateway": {
     "host": "http://127.0.0.1:8400",
-    "password": "${OPENCLAW_GATEWAY_PASSWORD}"
+    "password": "${HASH_GATEWAY_PASSWORD}"
   }
 }

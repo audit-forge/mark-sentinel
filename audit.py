@@ -272,7 +272,7 @@ examples:
         metavar='KEY',
         help='Anthropic API key (for --mode anthropic; or set ANTHROPIC_API_KEY env var)',
     )
-    # Hash/openclaw args
+    # Hash args
     parser.add_argument(
         '--hash-host',
         default='http://127.0.0.1:8400',

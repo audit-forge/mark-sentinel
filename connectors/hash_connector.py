@@ -1,6 +1,6 @@
 """
-M.A.R.K. Sentinel — Hash/openclaw Connector
-Connects to a local hash (openclaw) AI runtime via its /chat endpoint.
+M.A.R.K. Sentinel — Hash Connector
+Connects to a local Hash-AI runtime via its /chat endpoint.
 
 hash manages its own system prompt (set in system.md / hash.json) — probes that
 require per-request system_prompt injection are automatically skipped with a clear

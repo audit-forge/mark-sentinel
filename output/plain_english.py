@@ -63,7 +63,7 @@ _MODE_LABELS = {
     'anthropic': 'Live probes — Anthropic Claude API',
     'gemini':    'Live probes — Google Gemini API',
     'vertex':    'Live probes — Google Vertex AI',
-    'hash':      'Live probes — Hash/openclaw gateway',
+    'hash':      'Live probes — Hash-AI gateway',
 }
 
 
