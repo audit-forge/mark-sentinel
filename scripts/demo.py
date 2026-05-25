@@ -15,7 +15,7 @@ Providers auto-detected from:
   OPENAI_API_KEY      → ChatGPT
   ANTHROPIC_API_KEY   → Claude
   Ollama running      → local models (default: qwen2.5:7b)
-  hash-ai start       → Hash/openclaw gateway (port 8400)
+  hash-ai start       → Hash-AI gateway (port 8400)
 
 Keys are loaded automatically from ~/hash/.env if not set in the shell.
 """
@@ -408,7 +408,7 @@ def main():
         print(f"  ✗  Ollama — {ollama_host} not reachable")
 
     if _is_hash_up(hash_host):
-        providers.append({'label': 'hash-ai  (openclaw)', 'mode': 'hash',
+        providers.append({'label': 'hash-ai', 'mode': 'hash',
                           'host': hash_host, 'token': hash_token})
         print(f"  ✓  hash-ai — running  [{hash_host}]")
     else:

@@ -495,10 +495,10 @@ _AGENT_INSTRUCTION_FILES: dict[str, tuple[str, list[str]]] = {
             ".claude/commands",                 # directory marker
         ],
     ),
-    "openclaw": (
-        "OpenClaw",
+    "hash-ai": (
+        "Hash-AI",
         [
-            "openclaw.json", ".openclaw/openclaw.json",
+            "hash.json", ".hash/hash.json",
         ],
     ),
     "copilot": (

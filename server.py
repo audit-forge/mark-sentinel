@@ -236,7 +236,7 @@ def _rebuild_dashboard(out_dir: Path) -> bool:
             'openai':                'ChatGPT (gpt-4o)',
             'claude':                'Anthropic (claude-sonnet-4-6)',
             'ollama___qwen2.5-7b':   'Ollama (qwen2.5-7b)',
-            'hash-ai___openclaw':    'Hash-AI (openclaw)',
+            'hash-ai':               'Hash-AI',
         }
         reports = []
         for f in sorted(out_dir.glob('*.json')):

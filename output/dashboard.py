@@ -1063,7 +1063,7 @@ function renderScan(){
         <option value="openai">OpenAI / gpt-4o</option>
         <option value="claude">Anthropic / claude-opus-4-7</option>
         <option value="ollama">Ollama (local)</option>
-        <option value="hash-ai">Hash-AI / openclaw</option>
+        <option value="hash-ai">Hash-AI</option>
       </select>
     </div>`:'';
   document.getElementById('view-scan').innerHTML=`
