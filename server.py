@@ -1514,6 +1514,24 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         if not me:
             self._json({'error': 'unauthorized'}, 401)
             return
+        if os.environ.get('SENTINEL_TRUSTED_PROXY'):
+            # Cloud mode: each container is one customer.
+            # Agent token is the env var set at provision time.
+            agent_token = os.environ.get('SENTINEL_AGENT_TOKEN', '')
+            if not agent_token:
+                tok_file = ROOT / 'data' / 'agent_token.txt'
+                if tok_file.exists():
+                    agent_token = tok_file.read_text().strip()
+            # Company name: first (only) customer in registry, else env var
+            name = os.environ.get('SENTINEL_CUSTOMER_NAME', '')
+            if not name:
+                try:
+                    custs = _get_registry().list_customers()
+                    name = custs[0]['name'] if custs else ''
+                except Exception:
+                    pass
+            self._json({'id': 'default', 'name': name, 'agent_token': agent_token})
+            return
         cust = _get_registry().get_by_id(me['customer_id'])
         if not cust:
             self._json({'error': 'customer not found'}, 404)
