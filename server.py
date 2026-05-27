@@ -5852,7 +5852,7 @@ async function loadInventory() {{
     inv = await invRes.json();
   }} catch(e) {{
     console.error('loadInventory:', e);
-    document.getElementById('inv-body').innerHTML = '<div style="color:#DC2626;font-size:13px;padding:8px 0">Failed to load inventory: ' + esc(e.message) + '</div>';
+    document.getElementById('inv-body').innerHTML = '<div style="color:#f85149;font-size:13px;padding:8px 0">Failed to load inventory: ' + esc(e.message) + '</div>';
     return;
   }}
   _invData = inv.items || [];
