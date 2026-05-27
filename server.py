@@ -1107,6 +1107,8 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self._api_schedules_list()
         elif path == '/api/users':
             self._api_users_list()
+        elif path == '/api/customers/me':
+            self._api_customers_me()
         elif path == '/api/verify' or path.startswith('/api/verify?'):
             self._api_verify_signature()
         else:
@@ -1455,6 +1457,21 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self._json({'ok': ok})
         except Exception as e:
             self._json({'error': str(e)}, 500)
+
+    def _api_customers_me(self):
+        me = self._session_user()
+        if not me:
+            self._json({'error': 'unauthorized'}, 401)
+            return
+        cust = _get_registry().get_by_id(me['customer_id'])
+        if not cust:
+            self._json({'error': 'customer not found'}, 404)
+            return
+        self._json({
+            'id':          cust['id'],
+            'name':        cust['name'],
+            'agent_token': cust['agent_token'],
+        })
 
     # ── endpoints ─────────────────────────────────────────────────────────────
 
@@ -4440,6 +4457,21 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
       <div id="users-msg" style="font-size:12px;margin-top:8px"></div>
     </div>
   </div>
+  <div class="content-panel" style="background:#ffffff;border:1px solid #F3F4F6;border-radius:8px;padding:20px;margin-bottom:16px">
+    <div class="panel-sub-hdr" style="font-size:12px;color:#6B7280;font-weight:600;text-transform:uppercase;letter-spacing:.06em;margin-bottom:14px">Agent token</div>
+    <p style="font-size:13px;color:#6B7280;margin:0 0 14px">Paste this token into your agent&apos;s config file (<code style="font-size:12px;background:#F3F4F6;padding:1px 4px;border-radius:3px">SENTINEL_TOKEN</code>). Keep it secret — anyone with this token can submit reports to your account.</p>
+    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+      <input id="agent-token-display" type="password" readonly
+             style="flex:1;min-width:240px;max-width:480px;font-family:monospace;font-size:13px;
+                    background:#F9FAFB;border:1px solid #E5E7EB;border-radius:6px;padding:8px 12px;color:#111827"
+             value="" placeholder="Loading…">
+      <button class="scan-btn" onclick="toggleTokenVisibility()" id="token-show-btn"
+              style="white-space:nowrap">Show</button>
+      <button class="scan-btn" onclick="copyToken()"
+              style="white-space:nowrap;color:#4F46E5;border-color:#E5E7EB">Copy</button>
+    </div>
+    <div id="token-company" style="font-size:12px;color:#9CA3AF;margin-top:8px"></div>
+  </div>
   </div>
 
 </div>
@@ -4526,7 +4558,7 @@ function navTo(page) {{
   if (b) b.classList.add('sb-active');
   document.getElementById('main').scrollTop = 0;
   if (page === 'settings') {{ loadLiveScanConfig(); }}
-  if (page === 'users') {{ loadUsers(); }}
+  if (page === 'users') {{ loadUsers(); loadCustomerInfo(); }}
   if (page === 'probe') {{
     const fr = document.getElementById('probe-iframe');
     if (fr && fr.getAttribute('data-loaded') === '0') {{
@@ -5709,6 +5741,41 @@ async function invShowHistory(id, btn) {{
   }} catch(e) {{
     if (panel) panel.innerHTML = '<div style="color:#DC2626;font-size:12px">Failed to load history.</div>';
   }}
+}}
+
+async function loadCustomerInfo() {{
+  try {{
+    const r = await fetch('/api/customers/me');
+    if (!r.ok) return;
+    const d = await r.json();
+    const inp = document.getElementById('agent-token-display');
+    const lbl = document.getElementById('token-company');
+    if (inp) inp.value = d.agent_token || '';
+    if (lbl) lbl.textContent = 'Company: ' + (d.name || '');
+  }} catch(e) {{}}
+}}
+
+let _tokenVisible = false;
+function toggleTokenVisibility() {{
+  const inp = document.getElementById('agent-token-display');
+  const btn = document.getElementById('token-show-btn');
+  if (!inp) return;
+  _tokenVisible = !_tokenVisible;
+  inp.type = _tokenVisible ? 'text' : 'password';
+  btn.textContent = _tokenVisible ? 'Hide' : 'Show';
+}}
+
+async function copyToken() {{
+  const inp = document.getElementById('agent-token-display');
+  if (!inp || !inp.value) return;
+  try {{
+    await navigator.clipboard.writeText(inp.value);
+    const btn = event.target;
+    const orig = btn.textContent;
+    btn.textContent = 'Copied!';
+    btn.style.color = '#16A34A';
+    setTimeout(() => {{ btn.textContent = orig; btn.style.color = '#4F46E5'; }}, 1500);
+  }} catch(e) {{ alert('Copy failed — use Show then copy manually.'); }}
 }}
 
 async function loadUsers() {{
