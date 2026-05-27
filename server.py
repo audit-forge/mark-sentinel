@@ -1334,7 +1334,15 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         self.send_response(302)
         self.send_header('Set-Cookie',
             'sentinel_session=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0')
-        self.send_header('Location', '/login')
+        if os.environ.get('SENTINEL_TRUSTED_PROXY'):
+            # Cloud mode: also clear the admin-panel JWT by hitting its logout.
+            # Host header has no port (nginx strips it), so derive admin URL from host.
+            host = self.headers.get('Host', '').split(':')[0]
+            ext = os.environ.get('SENTINEL_EXTERNAL_URL', '')
+            next_qs = f'?next={ext}' if ext else ''
+            self.send_header('Location', f'http://{host}/logout{next_qs}')
+        else:
+            self.send_header('Location', '/login')
         self.end_headers()
 
     def _serve_setup(self):

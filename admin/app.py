@@ -76,8 +76,9 @@ async def login(
 
 
 @app.get("/logout")
-async def logout():
-    resp = RedirectResponse("/login", status_code=303)
+async def logout(request: Request, next: str = None):
+    dest = next if (next and next.startswith('http')) else "/login"
+    resp = RedirectResponse(dest, status_code=303)
     resp.delete_cookie("token")
     return resp
 
