@@ -1,0 +1,158 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>USERS</h1>
+
+{% if request.query_params.get('pw_changed') %}
+<div class="error" style="background:#4F46E518;border-color:#4F46E540;color:#4F46E5">&#10003; Password updated successfully</div>
+{% elif request.query_params.get('edited') %}
+<div class="error" style="background:#4F46E518;border-color:#4F46E540;color:#4F46E5">&#10003; User updated successfully</div>
+{% elif request.query_params.get('error') == 'forbidden' %}
+<div class="error">Permission denied.</div>
+{% elif request.query_params.get('error') == 'notfound' %}
+<div class="error">User not found.</div>
+{% elif request.query_params.get('error') == 'exists' %}
+<div class="error">A user with that email already exists.</div>
+{% endif %}
+
+<div class="card">
+  <div class="card-title">Add User</div>
+  <form method="post" action="/users/add">
+    <div class="form-row">
+      <div class="form-group">
+        <label>Email</label>
+        <input type="email" name="email" required>
+      </div>
+      <div class="form-group">
+        <label>Password</label>
+        <input type="password" name="password" required>
+      </div>
+      <div class="form-group" style="max-width:180px">
+        <label>Role</label>
+        <select name="role">
+          {% if user.role == 'super_admin' %}
+          <option value="super_admin">super_admin</option>
+          <option value="customer_admin">customer_admin</option>
+          {% endif %}
+          <option value="user">user</option>
+        </select>
+      </div>
+      {% if user.role == 'super_admin' %}
+      <div class="form-group" style="max-width:200px">
+        <label>Customer</label>
+        <select name="customer_id">
+          <option value="">— none —</option>
+          {% for c in customers %}
+          <option value="{{ c.id }}">{{ c.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      {% endif %}
+      <button type="submit" class="btn btn-primary">Add User</button>
+    </div>
+  </form>
+</div>
+
+<div class="card">
+  <div class="card-title">Users ({{ users|length }})</div>
+  {% if users %}
+  <table>
+    <thead>
+      <tr>
+        <th>Email</th>
+        <th>Role</th>
+        <th>Customer</th>
+        <th>Created</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for u in users %}
+    <tr>
+      <td>{{ u.email }}{% if u.id == current_user_id %} <span style="font-size:11px;color:#6B7280">(you)</span>{% endif %}</td>
+      <td>
+        {% if u.role == 'super_admin' %}
+          <span class="badge badge-green">internal</span>
+        {% elif u.role == 'customer_admin' %}
+          <span class="badge badge-blue">admin</span>
+        {% else %}
+          <span class="badge badge-yellow">user</span>
+        {% endif %}
+      </td>
+      <td style="color:#666">{{ u.customer_name or '—' }}</td>
+      <td style="color:#555">{{ u.created_at[:10] }}</td>
+      <td>
+        {% if u.id != current_user_id %}
+        <form method="post" action="/users/remove" style="display:inline" onsubmit="return confirm('Remove this user?')">
+          <input type="hidden" name="user_id" value="{{ u.id }}">
+          <button type="submit" class="btn btn-danger btn-sm">Remove</button>
+        </form>
+        {% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty">No users yet.</div>
+  {% endif %}
+</div>
+
+<div class="card">
+  <div class="card-title">Edit User</div>
+  <form method="post" action="/users/edit">
+    <div class="form-row">
+      <div class="form-group">
+        <label>User</label>
+        <select name="user_id" required>
+          <option value="">— select user —</option>
+          {% for u in all_users %}
+          <option value="{{ u.id }}">{{ u.email }} ({{ u.role }}{% if u.customer_name %} · {{ u.customer_name }}{% endif %})</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="form-group" style="max-width:200px">
+        <label>Role</label>
+        <select name="role">
+          <option value="super_admin">super_admin</option>
+          <option value="customer_admin">customer_admin</option>
+          <option value="user">user</option>
+        </select>
+      </div>
+      {% if user.role == 'super_admin' %}
+      <div class="form-group" style="max-width:220px">
+        <label>Assign to Customer</label>
+        <select name="customer_id">
+          <option value="">— none —</option>
+          {% for c in customers %}
+          <option value="{{ c.id }}">{{ c.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      {% endif %}
+      <button type="submit" class="btn btn-primary">Save Changes</button>
+    </div>
+  </form>
+</div>
+
+<div class="card">
+  <div class="card-title">Reset Password</div>
+  <form method="post" action="/users/password">
+    <div class="form-row">
+      <div class="form-group">
+        <label>User</label>
+        <select name="user_id" required>
+          <option value="">— select user —</option>
+          {% for u in all_users %}
+          <option value="{{ u.id }}">{{ u.email }} ({{ u.role }}{% if u.customer_name %} · {{ u.customer_name }}{% endif %})</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="form-group">
+        <label>New Password</label>
+        <input type="password" name="new_password" placeholder="New password" required minlength="8">
+      </div>
+      <button type="submit" class="btn btn-primary">Save Password</button>
+    </div>
+  </form>
+</div>
+{% endblock %}
