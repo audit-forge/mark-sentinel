@@ -978,8 +978,9 @@ class _Handler(http.server.BaseHTTPRequestHandler):
     def _require_dashboard_auth(self) -> bool:
         if self._check_dashboard_auth():
             return True
-        if self.command == 'POST':
-            self._send(401, b'Unauthorized', 'text/plain')
+        path = urlparse(self.path).path
+        if self.command == 'POST' or path.startswith('/api/'):
+            self._json({'error': 'unauthorized'}, 401)
         else:
             from urllib.parse import quote
             if not _get_registry().has_customers():
@@ -988,7 +989,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                 self.end_headers()
             else:
                 self.send_response(302)
-                self.send_header('Location', f'/login?next={quote(urlparse(self.path).path)}')
+                self.send_header('Location', f'/login?next={quote(path)}')
                 self.end_headers()
         return False
 
@@ -5681,24 +5682,38 @@ function _fmtTs(epoch) {{
 }}
 
 async function loadInventory() {{
+  let inv, email;
   try {{
-    const [inv, email] = await Promise.all([
-      fetch('/api/fleet/inventory').then(r => r.json()),
+    const [invRes, _email] = await Promise.all([
+      fetch('/api/fleet/inventory'),
       _loadSessionUser(),
     ]);
-    _invData = inv.items || [];
-    const c = inv.counts || {{}};
-    document.getElementById('inv-counts').innerHTML =
-      `<div class="inv-count-card"><div class="inv-count-n" style="color:#DC2626">${{c.unapproved||0}}</div><div style="color:#6B7280">Unapproved</div></div>` +
-      `<div class="inv-count-card"><div class="inv-count-n" style="color:#CA8A04">${{c.under_review||0}}</div><div style="color:#6B7280">Under Review</div></div>` +
-      `<div class="inv-count-card"><div class="inv-count-n" style="color:#16A34A">${{c.approved||0}}</div><div style="color:#6B7280">Approved</div></div>`;
-    document.getElementById('inv-reviewer-bar').innerHTML = email
-      ? `Approving as: <strong style="color:#111827">${{esc(email)}}</strong>`
-      : `<span style="color:#CA8A04">⚠ Not signed in</span>`;
-    renderInventory();
+    email = _email;
+    if (!invRes.ok) {{
+      let detail = '';
+      try {{ const j = await invRes.json(); detail = j.error || ''; }} catch(_) {{}}
+      throw new Error('HTTP ' + invRes.status + (detail ? ': ' + detail : '') + '. Session may have expired — try refreshing.');
+    }}
+    const ct = invRes.headers.get('Content-Type') || '';
+    if (!ct.includes('application/json')) {{
+      throw new Error('HTTP ' + invRes.status + ' — got ' + (ct.split(';')[0].trim() || 'non-JSON') + ' instead of JSON. Session may have expired.');
+    }}
+    inv = await invRes.json();
   }} catch(e) {{
-    document.getElementById('inv-body').innerHTML = '<div style="color:#DC2626;font-size:13px;padding:8px 0">Failed to load inventory.</div>';
+    console.error('loadInventory:', e);
+    document.getElementById('inv-body').innerHTML = '<div style="color:#DC2626;font-size:13px;padding:8px 0">Failed to load inventory: ' + esc(e.message) + '</div>';
+    return;
   }}
+  _invData = inv.items || [];
+  const c = inv.counts || {{}};
+  document.getElementById('inv-counts').innerHTML =
+    `<div class="inv-count-card"><div class="inv-count-n" style="color:#DC2626">${{c.unapproved||0}}</div><div style="color:#6B7280">Unapproved</div></div>` +
+    `<div class="inv-count-card"><div class="inv-count-n" style="color:#CA8A04">${{c.under_review||0}}</div><div style="color:#6B7280">Under Review</div></div>` +
+    `<div class="inv-count-card"><div class="inv-count-n" style="color:#16A34A">${{c.approved||0}}</div><div style="color:#6B7280">Approved</div></div>`;
+  document.getElementById('inv-reviewer-bar').innerHTML = email
+    ? `Approving as: <strong style="color:#111827">${{esc(email)}}</strong>`
+    : `<span style="color:#CA8A04">⚠ Not signed in</span>`;
+  renderInventory();
 }}
 
 function invFilter(status, btn) {{
