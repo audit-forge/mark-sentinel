@@ -68,9 +68,11 @@
     <tbody>
     {% for u in users %}
     <tr>
-      <td>{{ u.email }}</td>
+      <td>{{ u.email }}{% if u.id == current_user_id %} <span style="font-size:11px;color:#6B7280">(you)</span>{% endif %}</td>
       <td>
-        {% if u.role == 'customer_admin' %}
+        {% if u.role == 'super_admin' %}
+          <span class="badge badge-green">internal</span>
+        {% elif u.role == 'customer_admin' %}
           <span class="badge badge-blue">admin</span>
         {% else %}
           <span class="badge badge-yellow">user</span>
@@ -79,10 +81,12 @@
       <td style="color:#666">{{ u.customer_name or '—' }}</td>
       <td style="color:#555">{{ u.created_at[:10] }}</td>
       <td>
+        {% if u.id != current_user_id %}
         <form method="post" action="/users/remove" style="display:inline" onsubmit="return confirm('Remove this user?')">
           <input type="hidden" name="user_id" value="{{ u.id }}">
           <button type="submit" class="btn btn-danger btn-sm">Remove</button>
         </form>
+        {% endif %}
       </td>
     </tr>
     {% endfor %}

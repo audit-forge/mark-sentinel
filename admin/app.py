@@ -505,8 +505,8 @@ async def users_page(request: Request):
             rows = conn.execute("""
                 SELECT u.*, c.name as customer_name
                 FROM users u LEFT JOIN customers c ON u.customer_id = c.id
-                WHERE u.active=1 AND u.role != 'super_admin'
-                ORDER BY u.created_at DESC
+                WHERE u.active=1
+                ORDER BY u.role='super_admin' DESC, u.created_at DESC
             """).fetchall()
             customers = conn.execute(
                 "SELECT id, name FROM customers WHERE active=1 ORDER BY name"
@@ -527,6 +527,7 @@ async def users_page(request: Request):
         """).fetchall()
     return templates.TemplateResponse("users.html", {
         "request": request, "user": user,
+        "current_user_id": user["id"],
         "users": [dict(r) for r in rows],
         "all_users": [dict(r) for r in all_users],
         "customers": [dict(r) for r in customers],
@@ -617,7 +618,11 @@ async def remove_user(request: Request, user_id: str = Form(...)):
         target = conn.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone()
         if not target:
             return RedirectResponse("/users", status_code=303)
+        if target["id"] == user["id"]:
+            return RedirectResponse("/users?error=forbidden", status_code=303)
         if user["role"] == "customer_admin" and target["customer_id"] != user["customer_id"]:
+            return RedirectResponse("/users?error=forbidden", status_code=303)
+        if user["role"] != "super_admin" and target["role"] == "super_admin":
             return RedirectResponse("/users?error=forbidden", status_code=303)
         conn.execute("UPDATE users SET active=0 WHERE id=?", (user_id,))
     return RedirectResponse("/users", status_code=303)
