@@ -160,26 +160,6 @@ class AgentStore:
                     last_fired INTEGER
                 );
 
-                CREATE TABLE IF NOT EXISTS dashboard_users (
-                    id            TEXT PRIMARY KEY,
-                    email         TEXT UNIQUE NOT NULL,
-                    password_hash TEXT NOT NULL,
-                    role          TEXT NOT NULL DEFAULT 'admin',
-                    created_at    INTEGER NOT NULL,
-                    active        INTEGER NOT NULL DEFAULT 1
-                );
-
-                CREATE TABLE IF NOT EXISTS dashboard_sessions (
-                    token      TEXT PRIMARY KEY,
-                    user_id    TEXT NOT NULL,
-                    email      TEXT NOT NULL,
-                    created_at INTEGER NOT NULL,
-                    expires_at INTEGER NOT NULL,
-                    FOREIGN KEY (user_id) REFERENCES dashboard_users(id)
-                );
-
-                CREATE INDEX IF NOT EXISTS idx_sessions_expires
-                    ON dashboard_sessions(expires_at);
             """)
             # Migrations
             cols = {r[1] for r in conn.execute("PRAGMA table_info(devices)")}
@@ -819,9 +799,83 @@ class AgentStore:
                 "SELECT COUNT(*) FROM mcp_servers WHERE dismissed = 0"
             ).fetchone()[0]
 
-    # ── Dashboard user authentication ─────────────────────────────────────────
+    def get_device_timeseries(self, device_id: str) -> list[dict]:
+        """Return ordered list of {t, fail, warn, pass} scan history points for a device."""
+        with self._lock, self._conn() as conn:
+            rows = conn.execute(
+                "SELECT received_at, fail_count, warn_count, pass_count FROM reports "
+                "WHERE device_id = ? ORDER BY received_at ASC",
+                (device_id,),
+            ).fetchall()
+        return [
+            {'t': int(r['received_at']), 'fail': int(r['fail_count']),
+             'warn': int(r['warn_count']), 'pass': int(r['pass_count'])}
+            for r in rows
+        ]
 
-    _SESSION_TTL = 8 * 3600  # 8 hours
+
+# ── Customer registry + dashboard auth (central DB, one record per customer) ──
+
+_REGISTRY_SESSION_TTL = 8 * 3600
+
+
+class CustomerRegistry:
+    """
+    Central registry: one record per customer, all dashboard users and sessions.
+    Lives at data/customers.db — separate from per-customer agents.db files.
+    """
+
+    def __init__(self, db_path: Path):
+        self._path = Path(db_path)
+        self._path.parent.mkdir(parents=True, exist_ok=True)
+        self._lock = threading.Lock()
+        self._init_db()
+
+    def _conn(self) -> sqlite3.Connection:
+        conn = sqlite3.connect(str(self._path), check_same_thread=False, timeout=30)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA foreign_keys=ON")
+        return conn
+
+    def _init_db(self) -> None:
+        with self._lock, self._conn() as conn:
+            conn.executescript("""
+                CREATE TABLE IF NOT EXISTS customers (
+                    id          TEXT PRIMARY KEY,
+                    name        TEXT NOT NULL,
+                    agent_token TEXT UNIQUE NOT NULL,
+                    created_at  INTEGER NOT NULL,
+                    active      INTEGER NOT NULL DEFAULT 1
+                );
+
+                CREATE TABLE IF NOT EXISTS dashboard_users (
+                    id            TEXT PRIMARY KEY,
+                    customer_id   TEXT NOT NULL REFERENCES customers(id),
+                    email         TEXT UNIQUE NOT NULL,
+                    password_hash TEXT NOT NULL,
+                    role          TEXT NOT NULL DEFAULT 'admin',
+                    created_at    INTEGER NOT NULL,
+                    active        INTEGER NOT NULL DEFAULT 1
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_du_customer
+                    ON dashboard_users(customer_id, active);
+
+                CREATE TABLE IF NOT EXISTS dashboard_sessions (
+                    token       TEXT PRIMARY KEY,
+                    user_id     TEXT NOT NULL REFERENCES dashboard_users(id),
+                    customer_id TEXT NOT NULL REFERENCES customers(id),
+                    email       TEXT NOT NULL,
+                    created_at  INTEGER NOT NULL,
+                    expires_at  INTEGER NOT NULL
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_ds_expires
+                    ON dashboard_sessions(expires_at);
+            """)
+
+    # ── password helpers ──────────────────────────────────────────────────────
 
     @staticmethod
     def _hash_pw(password: str) -> str:
@@ -840,57 +894,125 @@ class AgentStore:
         except Exception:
             return False
 
-    def has_dashboard_users(self) -> bool:
+    # ── customer management ───────────────────────────────────────────────────
+
+    def has_customers(self) -> bool:
         with self._lock, self._conn() as conn:
             return conn.execute(
-                'SELECT 1 FROM dashboard_users WHERE active=1 LIMIT 1'
+                'SELECT 1 FROM customers WHERE active=1 LIMIT 1'
             ).fetchone() is not None
 
-    def create_dashboard_user(self, email: str, password: str, role: str = 'admin') -> dict:
+    def create_customer(self, name: str) -> dict:
+        import uuid, secrets
+        cid = str(uuid.uuid4())
+        token = secrets.token_urlsafe(32)
+        now = int(time.time())
+        with self._lock, self._conn() as conn:
+            conn.execute(
+                'INSERT INTO customers (id, name, agent_token, created_at, active) VALUES (?,?,?,?,1)',
+                (cid, name.strip(), token, now),
+            )
+        return {'id': cid, 'name': name.strip(), 'agent_token': token}
+
+    def list_customers(self) -> list[dict]:
+        with self._lock, self._conn() as conn:
+            rows = conn.execute(
+                'SELECT id, name, agent_token, created_at, active FROM customers ORDER BY created_at DESC'
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def get_by_agent_token(self, token: str) -> dict | None:
+        if not token:
+            return None
+        with self._lock, self._conn() as conn:
+            row = conn.execute(
+                'SELECT id, name FROM customers WHERE agent_token=? AND active=1', (token,)
+            ).fetchone()
+        return dict(row) if row else None
+
+    def get_by_id(self, customer_id: str) -> dict | None:
+        with self._lock, self._conn() as conn:
+            row = conn.execute(
+                'SELECT id, name, agent_token FROM customers WHERE id=? AND active=1', (customer_id,)
+            ).fetchone()
+        return dict(row) if row else None
+
+    def rotate_agent_token(self, customer_id: str) -> str:
+        import secrets
+        new_token = secrets.token_urlsafe(32)
+        with self._lock, self._conn() as conn:
+            conn.execute('UPDATE customers SET agent_token=? WHERE id=?', (new_token, customer_id))
+        return new_token
+
+    # ── dashboard user management ─────────────────────────────────────────────
+
+    def create_user(self, customer_id: str, email: str, password: str, role: str = 'admin') -> dict:
         import uuid
         uid = str(uuid.uuid4())
         now = int(time.time())
-        pw_hash = self._hash_pw(password)
         with self._lock, self._conn() as conn:
             conn.execute(
-                'INSERT INTO dashboard_users (id, email, password_hash, role, created_at, active) '
-                'VALUES (?,?,?,?,?,1)',
-                (uid, email.lower().strip(), pw_hash, role, now),
+                'INSERT INTO dashboard_users '
+                '(id, customer_id, email, password_hash, role, created_at, active) '
+                'VALUES (?,?,?,?,?,?,1)',
+                (uid, customer_id, email.lower().strip(), self._hash_pw(password), role, now),
             )
-        return {'id': uid, 'email': email.lower().strip(), 'role': role}
+        return {'id': uid, 'customer_id': customer_id,
+                'email': email.lower().strip(), 'role': role}
 
-    def authenticate_dashboard_user(self, email: str, password: str) -> dict | None:
+    def authenticate_user(self, email: str, password: str) -> dict | None:
         with self._lock, self._conn() as conn:
             row = conn.execute(
-                'SELECT id, email, password_hash, role FROM dashboard_users '
+                'SELECT id, customer_id, email, password_hash, role FROM dashboard_users '
                 'WHERE email=? AND active=1',
                 (email.lower().strip(),),
             ).fetchone()
-        if row is None:
+        if row is None or not self._verify_pw(password, row['password_hash']):
             return None
-        if not self._verify_pw(password, row['password_hash']):
-            return None
-        return {'id': row['id'], 'email': row['email'], 'role': row['role']}
+        return {'id': row['id'], 'customer_id': row['customer_id'],
+                'email': row['email'], 'role': row['role']}
 
-    def create_dashboard_session(self, user_id: str, email: str) -> str:
+    def list_users(self, customer_id: str) -> list[dict]:
+        with self._lock, self._conn() as conn:
+            rows = conn.execute(
+                'SELECT id, email, role, created_at, active FROM dashboard_users '
+                'WHERE customer_id=? ORDER BY created_at ASC',
+                (customer_id,),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def deactivate_user(self, user_id: str, customer_id: str) -> bool:
+        with self._lock, self._conn() as conn:
+            cur = conn.execute(
+                'UPDATE dashboard_users SET active=0 WHERE id=? AND customer_id=?',
+                (user_id, customer_id),
+            )
+            if cur.rowcount:
+                conn.execute('DELETE FROM dashboard_sessions WHERE user_id=?', (user_id,))
+            return cur.rowcount > 0
+
+    # ── session management ────────────────────────────────────────────────────
+
+    def create_session(self, user_id: str, customer_id: str, email: str) -> str:
         import secrets
         token = secrets.token_urlsafe(32)
         now = int(time.time())
         with self._lock, self._conn() as conn:
             conn.execute(
-                'INSERT INTO dashboard_sessions (token, user_id, email, created_at, expires_at) '
-                'VALUES (?,?,?,?,?)',
-                (token, user_id, email, now, now + self._SESSION_TTL),
+                'INSERT INTO dashboard_sessions '
+                '(token, user_id, customer_id, email, created_at, expires_at) '
+                'VALUES (?,?,?,?,?,?)',
+                (token, user_id, customer_id, email, now, now + _REGISTRY_SESSION_TTL),
             )
         return token
 
-    def get_dashboard_session(self, token: str) -> dict | None:
+    def get_session(self, token: str) -> dict | None:
         if not token:
             return None
         now = int(time.time())
         with self._lock, self._conn() as conn:
             row = conn.execute(
-                'SELECT s.user_id, s.email, u.role '
+                'SELECT s.user_id, s.customer_id, s.email, u.role '
                 'FROM dashboard_sessions s '
                 'JOIN dashboard_users u ON u.id = s.user_id '
                 'WHERE s.token=? AND s.expires_at>? AND u.active=1',
@@ -898,42 +1020,11 @@ class AgentStore:
             ).fetchone()
         return dict(row) if row else None
 
-    def delete_dashboard_session(self, token: str) -> None:
+    def delete_session(self, token: str) -> None:
         with self._lock, self._conn() as conn:
             conn.execute('DELETE FROM dashboard_sessions WHERE token=?', (token,))
-
-    def list_dashboard_users(self) -> list[dict]:
-        with self._lock, self._conn() as conn:
-            rows = conn.execute(
-                'SELECT id, email, role, created_at, active FROM dashboard_users '
-                'ORDER BY created_at ASC'
-            ).fetchall()
-        return [dict(r) for r in rows]
-
-    def deactivate_dashboard_user(self, user_id: str) -> bool:
-        with self._lock, self._conn() as conn:
-            cur = conn.execute(
-                'UPDATE dashboard_users SET active=0 WHERE id=?', (user_id,)
-            )
-            if cur.rowcount:
-                conn.execute('DELETE FROM dashboard_sessions WHERE user_id=?', (user_id,))
-            return cur.rowcount > 0
 
     def prune_expired_sessions(self) -> None:
         now = int(time.time())
         with self._lock, self._conn() as conn:
             conn.execute('DELETE FROM dashboard_sessions WHERE expires_at<?', (now,))
-
-    def get_device_timeseries(self, device_id: str) -> list[dict]:
-        """Return ordered list of {t, fail, warn, pass} scan history points for a device."""
-        with self._lock, self._conn() as conn:
-            rows = conn.execute(
-                "SELECT received_at, fail_count, warn_count, pass_count FROM reports "
-                "WHERE device_id = ? ORDER BY received_at ASC",
-                (device_id,),
-            ).fetchall()
-        return [
-            {'t': int(r['received_at']), 'fail': int(r['fail_count']),
-             'warn': int(r['warn_count']), 'pass': int(r['pass_count'])}
-            for r in rows
-        ]
