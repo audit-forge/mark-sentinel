@@ -3887,7 +3887,8 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
     AI Asset Inventory
     <span style="font-size:12px;font-weight:400;color:#6B7280;margin-left:8px">Formal record of all AI in the environment · approve or flag each asset</span>
   </div>
-  <div id="inv-counts" style="display:flex;gap:12px;margin-bottom:12px;flex-wrap:wrap"></div>
+  <div id="inv-counts" style="display:flex;gap:12px;margin-bottom:8px;flex-wrap:wrap"></div>
+  <div id="inv-reviewer-bar" style="margin-bottom:10px;font-size:12px;color:#6B7280"></div>
   <div id="inv-filters" style="display:flex;gap:6px;margin-bottom:10px;flex-wrap:wrap">
     <button class="rr-fil rr-active" onclick="invFilter('all',this)">All</button>
     <button class="rr-fil" onclick="invFilter('unapproved',this)">Unapproved</button>
@@ -5353,14 +5354,13 @@ async function loadInventory() {{
     _invData = d.items || [];
     const c = d.counts || {{}};
     const reviewer = _invReviewer();
-    const rvTag = reviewer
-      ? `<span style="font-size:11px;color:#6B7280;margin-left:12px">Approving as: <strong>${{esc(reviewer)}}</strong> · <a href="#" onclick="localStorage.removeItem('sentinel_reviewer');loadInventory();return false" style="color:#6B7280">change</a></span>`
-      : `<span style="font-size:11px;color:#f0a500;margin-left:12px">⚠ No reviewer name set — you will be prompted when approving</span>`;
     document.getElementById('inv-counts').innerHTML =
       `<div class="inv-count-card"><div class="inv-count-n" style="color:#DC2626">${{c.unapproved||0}}</div><div style="color:#6B7280">Unapproved</div></div>` +
       `<div class="inv-count-card"><div class="inv-count-n" style="color:#CA8A04">${{c.under_review||0}}</div><div style="color:#6B7280">Under Review</div></div>` +
-      `<div class="inv-count-card"><div class="inv-count-n" style="color:#16A34A">${{c.approved||0}}</div><div style="color:#6B7280">Approved</div></div>` +
-      rvTag;
+      `<div class="inv-count-card"><div class="inv-count-n" style="color:#16A34A">${{c.approved||0}}</div><div style="color:#6B7280">Approved</div></div>`;
+    document.getElementById('inv-reviewer-bar').innerHTML = reviewer
+      ? `Approving as: <strong style="color:#111827">${{esc(reviewer)}}</strong> &nbsp;·&nbsp; <a href="#" onclick="localStorage.removeItem('sentinel_reviewer');loadInventory();return false" style="color:#6B7280;text-decoration:underline">change</a>`
+      : `<span style="color:#CA8A04">⚠ No reviewer name set — you will be prompted when approving</span>`;
     renderInventory();
   }} catch(e) {{
     document.getElementById('inv-body').innerHTML = '<div style="color:#DC2626;font-size:13px;padding:8px 0">Failed to load inventory.</div>';
