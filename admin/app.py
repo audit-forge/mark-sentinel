@@ -527,7 +527,7 @@ async def users_page(request: Request):
         """).fetchall()
     return templates.TemplateResponse("users.html", {
         "request": request, "user": user,
-        "current_user_id": user["id"],
+        "current_user_id": user["sub"],
         "users": [dict(r) for r in rows],
         "all_users": [dict(r) for r in all_users],
         "customers": [dict(r) for r in customers],
@@ -618,7 +618,7 @@ async def remove_user(request: Request, user_id: str = Form(...)):
         target = conn.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone()
         if not target:
             return RedirectResponse("/users", status_code=303)
-        if target["id"] == user["id"]:
+        if target["id"] == user["sub"]:
             return RedirectResponse("/users?error=forbidden", status_code=303)
         if user["role"] == "customer_admin" and target["customer_id"] != user["customer_id"]:
             return RedirectResponse("/users?error=forbidden", status_code=303)
