@@ -79,17 +79,29 @@ _log: list[str] = []
 # ─────────────────────────────────────────────────────────────────────────────
 
 # ── agent store (lazy init) ───────────────────────────────────────────────────
-_store = None
-_store_lock = threading.Lock()
+_store_cache: dict = {}
+_store_cache_lock = threading.Lock()
+_registry = None
+_registry_lock = threading.Lock()
 
-def _get_store():
-    global _store
-    if _store is None:
-        with _store_lock:
-            if _store is None:
-                from storage import AgentStore
-                _store = AgentStore(ROOT / 'data' / 'agents.db')
-    return _store
+
+def _get_registry():
+    global _registry
+    if _registry is None:
+        with _registry_lock:
+            if _registry is None:
+                from storage import CustomerRegistry
+                _registry = CustomerRegistry(ROOT / 'data' / 'customers.db')
+    return _registry
+
+
+def _get_store(customer_id: str = 'default'):
+    with _store_cache_lock:
+        if customer_id not in _store_cache:
+            from storage import AgentStore
+            db_path = ROOT / 'data' / 'customers' / customer_id / 'agents.db'
+            _store_cache[customer_id] = AgentStore(db_path)
+    return _store_cache[customer_id]
 
 
 # ── license (loaded once at startup) ─────────────────────────────────────────
@@ -939,9 +951,11 @@ class _Handler(http.server.BaseHTTPRequestHandler):
 
     def _session_user(self) -> dict | None:
         token = _get_session_cookie(self.headers)
-        if not token:
-            return None
-        return _get_store().get_dashboard_session(token)
+        return _get_registry().get_session(token) if token else None
+
+    def _store(self):
+        user = self._session_user()
+        return _get_store(user['customer_id'] if user else 'default')
 
     def _check_dashboard_auth(self) -> bool:
         return self._session_user() is not None
@@ -953,8 +967,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self._send(401, b'Unauthorized', 'text/plain')
         else:
             from urllib.parse import quote
-            store = _get_store()
-            if not store.has_dashboard_users():
+            if not _get_registry().has_customers():
                 self.send_response(302)
                 self.send_header('Location', '/setup')
                 self.end_headers()
@@ -964,13 +977,24 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                 self.end_headers()
         return False
 
-    def _check_agent_bearer(self) -> bool:
-        if not _agent_token() and not (ROOT / 'output' / 'agent_tokens.json').exists():
-            return True  # no auth configured
+    def _get_agent_customer(self) -> dict | None:
         submitted = self.headers.get('Authorization', '')
         if submitted.startswith('Bearer '):
             submitted = submitted[len('Bearer '):]
-        return _check_agent_token(submitted)
+        if not submitted:
+            return None
+        cust = _get_registry().get_by_agent_token(submitted)
+        if cust:
+            return cust
+        if _check_agent_token(submitted):
+            return {'id': 'default', 'name': 'Default'}
+        return None
+
+    def _check_agent_bearer(self) -> bool:
+        if not _agent_token() and not (ROOT / 'output' / 'agent_tokens.json').exists():
+            if not _get_registry().has_customers():
+                return True
+        return self._get_agent_customer() is not None
 
     # ── routing ───────────────────────────────────────────────────────────────
 
@@ -1224,8 +1248,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
     def _serve_login(self):
         import html as _html
         from urllib.parse import parse_qs
-        store = _get_store()
-        if not store.has_dashboard_users():
+        if not _get_registry().has_customers():
             self.send_response(302)
             self.send_header('Location', '/setup')
             self.end_headers()
@@ -1273,10 +1296,10 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         next_url = params.get('next', ['/'])[0]
         if not next_url.startswith('/') or '//' in next_url:
             next_url = '/'
-        store = _get_store()
-        user = store.authenticate_dashboard_user(email, password)
+        reg = _get_registry()
+        user = reg.authenticate_user(email, password)
         if user:
-            token = store.create_dashboard_session(user['id'], user['email'])
+            token = reg.create_session(user['id'], user['customer_id'], user['email'])
             self.send_response(302)
             self.send_header('Set-Cookie',
                 f'sentinel_session={token}; Path=/; HttpOnly; SameSite=Strict')
@@ -1290,7 +1313,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
     def _handle_logout(self):
         token = _get_session_cookie(self.headers)
         if token:
-            _get_store().delete_dashboard_session(token)
+            _get_registry().delete_session(token)
         self.send_response(302)
         self.send_header('Set-Cookie',
             'sentinel_session=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0')
@@ -1300,37 +1323,39 @@ class _Handler(http.server.BaseHTTPRequestHandler):
     def _serve_setup(self):
         import html as _html
         from urllib.parse import parse_qs
-        store = _get_store()
-        if store.has_dashboard_users():
+        if _get_registry().has_customers():
             self.send_response(302)
             self.send_header('Location', '/login')
             self.end_headers()
             return
         qs = parse_qs(urlparse(self.path).query)
         err_map = {
-            'exists': 'An account with that email already exists.',
+            'exists':   'An account with that email already exists.',
             'mismatch': 'Passwords do not match.',
-            'short': 'Password must be at least 8 characters.',
-            'invalid': 'Please enter a valid email address.',
+            'short':    'Password must be at least 8 characters.',
+            'invalid':  'Please enter a valid email address.',
+            'company':  'Please enter your company name.',
         }
         err_key = qs.get('error', [''])[0]
         err_html = f'<p class="err">{err_map.get(err_key, "")}</p>' if err_key else ''
         body = (
             f'<!doctype html><html><head><meta charset="utf-8">'
-            f'<title>M.A.R.K. Sentinel — Create admin account</title>'
+            f'<title>M.A.R.K. Sentinel — Setup</title>'
             f'<style>{self._LOGIN_CSS}</style>'
             f'</head><body><div class="box">'
             f'<h2>M.A.R.K. Sentinel</h2>'
-            f'<p class="sub">Create your admin account to get started</p>'
+            f'<p class="sub">Create your organization and admin account</p>'
             f'{err_html}'
             f'<form method="POST" action="/setup">'
-            f'<label>Email</label>'
-            f'<input type="email" name="email" placeholder="you@company.com" autofocus autocomplete="username">'
+            f'<label>Company name</label>'
+            f'<input type="text" name="company" placeholder="Acme Corp" autofocus autocomplete="organization">'
+            f'<label>Admin email</label>'
+            f'<input type="email" name="email" placeholder="you@company.com" autocomplete="username">'
             f'<label>Password</label>'
             f'<input type="password" name="password" placeholder="Min 8 characters" autocomplete="new-password">'
             f'<label>Confirm password</label>'
             f'<input type="password" name="confirm" placeholder="Re-enter password" autocomplete="new-password">'
-            f'<button type="submit">Create account &amp; sign in</button>'
+            f'<button type="submit">Create &amp; sign in</button>'
             f'</form>'
             f'<div class="brand">Powered by Hash</div>'
             f'</div></body></html>'
@@ -1342,39 +1367,34 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def _handle_setup_post(self):
-        from urllib.parse import parse_qs, quote
-        store = _get_store()
-        if store.has_dashboard_users():
+        from urllib.parse import parse_qs
+        reg = _get_registry()
+        if reg.has_customers():
             self.send_response(302)
             self.send_header('Location', '/login')
             self.end_headers()
             return
         length = _content_length(self.headers)
-        if length > 4096:
+        if length > 8192:
             self._send(400, b'Bad request', 'text/plain')
             return
         params = parse_qs(self.rfile.read(length).decode(errors='ignore'))
+        company = params.get('company', [''])[0].strip()
         email = params.get('email', [''])[0].strip().lower()
         password = params.get('password', [''])[0]
         confirm = params.get('confirm', [''])[0]
+        if not company:
+            self.send_response(302); self.send_header('Location', '/setup?error=company'); self.end_headers(); return
         if '@' not in email or '.' not in email.split('@')[-1]:
-            self.send_response(302)
-            self.send_header('Location', '/setup?error=invalid')
-            self.end_headers()
-            return
+            self.send_response(302); self.send_header('Location', '/setup?error=invalid'); self.end_headers(); return
         if len(password) < 8:
-            self.send_response(302)
-            self.send_header('Location', '/setup?error=short')
-            self.end_headers()
-            return
+            self.send_response(302); self.send_header('Location', '/setup?error=short'); self.end_headers(); return
         if password != confirm:
-            self.send_response(302)
-            self.send_header('Location', '/setup?error=mismatch')
-            self.end_headers()
-            return
+            self.send_response(302); self.send_header('Location', '/setup?error=mismatch'); self.end_headers(); return
         try:
-            user = store.create_dashboard_user(email, password, role='admin')
-            token = store.create_dashboard_session(user['id'], user['email'])
+            customer = reg.create_customer(company)
+            user = reg.create_user(customer['id'], email, password, role='admin')
+            token = reg.create_session(user['id'], customer['id'], user['email'])
             self.send_response(302)
             self.send_header('Set-Cookie',
                 f'sentinel_session={token}; Path=/; HttpOnly; SameSite=Strict')
@@ -1388,15 +1408,20 @@ class _Handler(http.server.BaseHTTPRequestHandler):
     def _api_auth_me(self):
         user = self._session_user()
         if user:
-            self._json({'email': user['email'], 'role': user['role']})
+            self._json({'email': user['email'], 'role': user['role'],
+                        'customer_id': user['customer_id']})
         else:
-            self._json({'email': None, 'role': None}, 401)
+            self._json({'email': None, 'role': None, 'customer_id': None}, 401)
 
     def _api_users_list(self):
-        users = _get_store().list_dashboard_users()
-        safe = [{'id': u['id'], 'email': u['email'], 'role': u['role'],
-                  'active': u['active'], 'created_at': u['created_at']} for u in users]
-        self._json({'users': safe})
+        me = self._session_user()
+        if not me:
+            self._json({'error': 'unauthorized'}, 401)
+            return
+        users = _get_registry().list_users(me['customer_id'])
+        self._json({'users': [{'id': u['id'], 'email': u['email'], 'role': u['role'],
+                                'active': u['active'], 'created_at': u['created_at']}
+                               for u in users]})
 
     def _api_users_add(self):
         me = self._session_user()
@@ -1414,7 +1439,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             if '@' not in email or len(password) < 8:
                 self._json({'error': 'invalid'}, 400)
                 return
-            user = _get_store().create_dashboard_user(email, password, role)
+            user = _get_registry().create_user(me['customer_id'], email, password, role)
             self._json({'ok': True, 'user': user})
         except Exception as e:
             self._json({'error': str(e)}, 500)
@@ -1426,7 +1451,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             return
         try:
             user_id = user_id_str.strip('/')
-            ok = _get_store().deactivate_dashboard_user(user_id)
+            ok = _get_registry().deactivate_user(user_id, me['customer_id'])
             self._json({'ok': ok})
         except Exception as e:
             self._json({'error': str(e)}, 500)
@@ -1549,14 +1574,14 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self._not_found()
             return
         try:
-            report = _get_store().get_latest_report(device_id)
+            report = self._store().get_latest_report(device_id)
         except Exception as e:
             log.error('get_latest_report error for %s: %s', device_id, e)
             self._send(500, f'Store error: {e}'.encode(), 'text/plain')
             return
         if report is None:
             try:
-                device = _get_store().get_device(device_id)
+                device = self._store().get_device(device_id)
             except Exception:
                 device = None
             if device is None:
@@ -1605,7 +1630,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self._not_found()
             return
         try:
-            report = _get_store().get_latest_report(device_id)
+            report = self._store().get_latest_report(device_id)
         except Exception as e:
             log.error('get_latest_report error for %s: %s', device_id, e)
             self._send(500, f'Store error: {e}'.encode(), 'text/plain')
@@ -1740,7 +1765,8 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                 return
             _report_last_seen[device_id] = now
 
-        store = _get_store()
+        _cust = self._get_agent_customer()
+        store = _get_store(_cust['id'] if _cust else 'default')
         is_new = not store.is_known_device(device_id)
 
         # Duplicate hostname detection — warn when a new device_id uses an existing hostname
@@ -1815,7 +1841,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             if auth != f'Bearer {expected}':
                 self._send(401, b'Unauthorized', 'text/plain')
                 return
-        store = _get_store()
+        store = self._store()
         store.touch_device(device_id)
         command = store.claim_command(device_id)
         self._json({'command': command})
@@ -1828,7 +1854,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         if not device_id:
             self._json({'error': 'missing device_id'}, 400)
             return
-        store = _get_store()
+        store = self._store()
         if store.get_device(device_id) is None:
             self._json({'error': 'device not found'}, 404)
             return
@@ -1877,7 +1903,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         }
         batch_size, sleep_secs = PRESETS.get(stagger, PRESETS['normal'])
 
-        store   = _get_store()
+        store   = self._store()
         devices = store.list_devices()
         ids     = [d['device_id'] for d in devices if d.get('device_id')]
         total   = len(ids)
@@ -1904,7 +1930,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         if not device_id:
             self._json({'error': 'missing device_id'}, 400)
             return
-        store = _get_store()
+        store = self._store()
         if store.get_device(device_id) is None:
             self._json({'error': 'device not found'}, 404)
             return
@@ -1913,7 +1939,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
 
     def _api_fleet_update_all(self):
         """POST /api/fleet/update/all — push update_self command to every known device."""
-        store = _get_store()
+        store = self._store()
         devices = store.list_devices()
         queued = []
         for d in devices:
@@ -1929,7 +1955,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         if not device_id:
             self._json({'error': 'missing device_id'}, 400)
             return
-        found = _get_store().delete_device(device_id)
+        found = self._store().delete_device(device_id)
         self._json({'status': 'removed' if found else 'not_found', 'device_id': device_id})
 
     def _api_agent_discovery(self):
@@ -1951,7 +1977,8 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self._send(400, b'Missing device_id or results', 'text/plain')
             return
 
-        store = _get_store()
+        _cust = self._get_agent_customer()
+        store = _get_store(_cust['id'] if _cust else 'default')
         agent_ips = store.list_agent_ips()
         stored = 0
         for r in results:
@@ -1990,7 +2017,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
 
     def _api_fleet_discover_all(self):
         """POST /api/fleet/discover/all — push discover_network command to every agent."""
-        store = _get_store()
+        store = self._store()
         devices = store.list_devices()
         queued = []
         for d in devices:
@@ -2006,7 +2033,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         if not device_id:
             self._json({'error': 'missing device_id'}, 400)
             return
-        store = _get_store()
+        store = self._store()
         if store.get_device(device_id) is None:
             self._json({'error': 'device not found'}, 404)
             return
@@ -2016,7 +2043,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
     def _api_fleet_live_stats(self):
         """GET /api/fleet/live-stats — lightweight poll: stat counts + device rows HTML."""
         try:
-            store   = _get_store()
+            store   = self._store()
             devices = store.list_devices()
             shadow  = [s for s in store.list_shadow_devices() if not s.get('dismissed')]
             mcp     = [m for m in store.list_mcp_servers()    if not m.get('dismissed')]
@@ -2098,7 +2125,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
     def _api_fleet_shadow(self):
         """GET /api/fleet/shadow — list discovered unmanaged AI devices."""
         try:
-            shadow = _get_store().list_shadow_devices()
+            shadow = self._store().list_shadow_devices()
             self._json({'devices': shadow, 'count': len(shadow)})
         except Exception as e:
             self._json({'error': str(e)}, 500)
@@ -2106,7 +2133,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
     def _api_fleet_shadow_dismiss(self, shadow_id_str: str):
         """POST /api/fleet/shadow/dismiss/<id|all> — dismiss one or all shadow findings."""
         if shadow_id_str.strip() == 'all':
-            count = _get_store().dismiss_all_shadow_devices()
+            count = self._store().dismiss_all_shadow_devices()
             self._json({'status': 'dismissed', 'count': count})
             return
         try:
@@ -2114,7 +2141,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         except ValueError:
             self._json({'error': 'invalid id'}, 400)
             return
-        found = _get_store().dismiss_shadow_device(shadow_id)
+        found = self._store().dismiss_shadow_device(shadow_id)
         self._json({'status': 'dismissed' if found else 'not_found'})
 
     def _api_agent_mcp(self):
@@ -2134,7 +2161,8 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         if not device_id or not isinstance(results, list):
             self._json({'error': 'missing fields'}, 400)
             return
-        store   = _get_store()
+        _cust = self._get_agent_customer()
+        store = _get_store(_cust['id'] if _cust else 'default')
         stored  = 0
         for r in results:
             host         = str(r.get('host', '')).strip()
@@ -2159,14 +2187,14 @@ class _Handler(http.server.BaseHTTPRequestHandler):
     def _api_fleet_mcp(self):
         """GET /api/fleet/mcp — list discovered MCP servers."""
         try:
-            servers = _get_store().list_mcp_servers()
+            servers = self._store().list_mcp_servers()
             self._json({'servers': servers, 'count': len(servers)})
         except Exception as e:
             self._json({'error': str(e)}, 500)
 
     def _api_fleet_mcp_discover_all(self):
         """POST /api/fleet/mcp/discover/all — push discover_mcp to every agent."""
-        store   = _get_store()
+        store   = self._store()
         devices = store.list_devices()
         queued  = []
         for d in devices:
@@ -2179,7 +2207,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
     def _api_fleet_mcp_dismiss(self, mcp_id_str: str):
         """POST /api/fleet/mcp/dismiss/<id|all> — dismiss one or all MCP findings."""
         if mcp_id_str.strip() == 'all':
-            count = _get_store().dismiss_all_mcp_servers()
+            count = self._store().dismiss_all_mcp_servers()
             self._json({'status': 'dismissed', 'count': count})
             return
         try:
@@ -2187,7 +2215,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         except ValueError:
             self._json({'error': 'invalid id'}, 400)
             return
-        found = _get_store().dismiss_mcp_server(mcp_id)
+        found = self._store().dismiss_mcp_server(mcp_id)
         self._json({'status': 'dismissed' if found else 'not_found'})
 
     def _api_fleet_mcp_report(self):
@@ -2197,7 +2225,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         tier = (qs.get('tier', ['ciso'])[0]).lower()
         if tier not in ('executive', 'ciso', 'technical'):
             tier = 'ciso'
-        servers = _get_store().list_mcp_servers()
+        servers = self._store().list_mcp_servers()
         html    = _build_mcp_report_html(servers, tier)
         body    = html.encode('utf-8')
         self.send_response(200)
@@ -2210,7 +2238,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         """GET /api/admin/license — license status + overage audit log."""
         try:
             from license import license_summary
-            summary = license_summary(_get_store())
+            summary = license_summary(self._store())
             self._json(summary)
         except Exception as e:
             self._json({'error': str(e)}, 500)
@@ -2237,7 +2265,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         profiles = [p for p in profile_raw.split(',') if p in _VALID_PROFILES]
         profile  = ','.join(profiles)
         try:
-            store = _get_store()
+            store = self._store()
             if profiles:
                 devices = store.list_devices_by_profile(profiles)
             else:
@@ -2300,7 +2328,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                   'lifesciences', 'owasp_agentic', 'eu_ai_act'}
         profiles = [p for p in profile_raw.split(',') if p in _VALID]
         try:
-            store = _get_store()
+            store = self._store()
             devices = store.list_devices_by_profile(profiles) if profiles else store.list_devices()
             for d in devices:
                 if '_report' not in d:
@@ -2449,7 +2477,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
     def _api_risk_register(self):
         """GET /api/fleet/risk-register — deduplicated open findings with trend info."""
         try:
-            store = _get_store()
+            store = self._store()
             entries = store.get_risk_register()
             self._json({'entries': entries, 'count': len(entries)})
         except Exception as e:
@@ -2461,7 +2489,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         import io, csv
         from datetime import datetime as _dt
         try:
-            store = _get_store()
+            store = self._store()
             entries = store.get_risk_register()
             buf = io.StringIO()
             writer = csv.writer(buf)
@@ -2488,7 +2516,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
     def _api_inventory(self):
         """GET /api/fleet/inventory — all shadow AI devices as formal asset inventory."""
         try:
-            store = _get_store()
+            store = self._store()
             items = store.list_inventory()
             counts = {'approved': 0, 'under_review': 0, 'unapproved': 0}
             for item in items:
@@ -2509,7 +2537,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                 self.headers.get('X-Forwarded-For', '').split(',')[0].strip()
                 or self.client_address[0]
             )
-            store = _get_store()
+            store = self._store()
             ok = store.set_shadow_approval(shadow_id, status,
                                            changed_by=changed_by,
                                            ip_address=ip_address)
@@ -2524,7 +2552,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         """GET /api/fleet/inventory/history/<id> — approval event log for one asset."""
         try:
             shadow_id = int(shadow_id_str.strip('/'))
-            store = _get_store()
+            store = self._store()
             history = store.get_approval_history(shadow_id)
             self._json({'history': history})
         except (ValueError, TypeError):
@@ -2549,7 +2577,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
     def _api_schedules_list(self):
         """GET /api/schedules"""
         try:
-            store = _get_store()
+            store = self._store()
             self._json({'schedules': store.list_schedules()})
         except Exception as e:
             self._json({'error': str(e)}, 500)
@@ -2566,7 +2594,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             weekday = int(body['weekday']) if 'weekday' in body else None
             monthday = int(body['monthday']) if 'monthday' in body else None
             interval_hours = int(body.get('interval_hours', 0))
-            store = _get_store()
+            store = self._store()
             new_id = store.add_schedule(device_id, cadence, hour, profile, label, weekday, monthday, interval_hours)
             self._json({'ok': True, 'id': new_id})
         except Exception as e:
@@ -2576,7 +2604,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
     def _api_schedule_toggle(self, schedule_id_str: str):
         """POST /api/schedules/<id>/toggle"""
         try:
-            store = _get_store()
+            store = self._store()
             ok = store.toggle_schedule(int(schedule_id_str.strip('/')))
             self._json({'ok': ok})
         except Exception as e:
@@ -2585,7 +2613,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
     def _api_schedule_delete(self, schedule_id_str: str):
         """POST /api/schedules/<id>/delete"""
         try:
-            store = _get_store()
+            store = self._store()
             ok = store.delete_schedule(int(schedule_id_str.strip('/')))
             self._json({'ok': ok})
         except Exception as e:
@@ -2597,7 +2625,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         via /api/fleet/discover/all and results are stored in shadow_devices.
         """
         try:
-            shadow = _get_store().list_shadow_devices()
+            shadow = self._store().list_shadow_devices()
             src_map = {
                 'network':   'network_probe',
                 'process':   'process_scan',
@@ -2637,7 +2665,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
 
     def _api_devices(self):
         try:
-            devices = _get_store().list_devices()
+            devices = self._store().list_devices()
             for d in devices:
                 if d.get('last_seen'):
                     d['last_seen_iso'] = datetime.fromtimestamp(
@@ -2652,7 +2680,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self._not_found()
             return
         try:
-            report = _get_store().get_latest_report(device_id)
+            report = self._store().get_latest_report(device_id)
         except Exception as e:
             self._json({'error': str(e)}, 500)
             return
@@ -2669,7 +2697,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self._not_found()
             return
         try:
-            points = _get_store().get_device_timeseries(device_id)
+            points = self._store().get_device_timeseries(device_id)
             self._json({'points': points})
         except Exception as e:
             self._json({'error': str(e)}, 500)
@@ -2856,7 +2884,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         pushed = 0
         if any(k in clean for k in _push_keys):
             try:
-                store = _get_store()
+                store = self._store()
                 cmd_payload = json.dumps({k: clean[k] for k in _push_keys if k in clean})
                 for d in store.list_devices():
                     did = d.get('device_id', '')
@@ -2966,7 +2994,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
     def _serve_fleet(self):
         print('[SENTINEL] _serve_fleet: start', flush=True)
         try:
-            store = _get_store()
+            store = self._store()
             devices = store.list_devices()
             shadow  = store.list_shadow_devices()
             mcp     = store.list_mcp_servers()
@@ -2981,7 +3009,8 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             user = self._session_user()
             body = _build_fleet_html(
                 devices, shadow, mcp,
-                current_user_email=user['email'] if user else ''
+                current_user_email=user['email'] if user else '',
+                store=store,
             ).encode('utf-8')
             print(f'[SENTINEL] _serve_fleet: body built {len(body)} bytes', flush=True)
         except Exception as _e:
@@ -3699,7 +3728,8 @@ def _build_mcp_section(servers: list[dict], ts_now: int) -> str:
 
 def _build_fleet_html(devices: list[dict], shadow: list[dict] | None = None,
                       mcp: list[dict] | None = None,
-                      current_user_email: str = '') -> str:
+                      current_user_email: str = '',
+                      store=None) -> str:
     shadow = shadow or []
     mcp    = mcp    or []
     ts_now = int(time.time())
@@ -3766,7 +3796,7 @@ def _build_fleet_html(devices: list[dict], shadow: list[dict] | None = None,
     # Severity-based counts for stat cards (one query, all devices)
     _dash_ch = _dash_med = _dash_li = 0
     try:
-        for _rpt in _get_store().get_all_latest_reports():
+        for _rpt in (store or _get_store()).get_all_latest_reports():
             _rjson = _rpt if isinstance(_rpt, dict) else {}
             for _f in _rjson.get('findings', _rjson.get('results', [])):
                 if _f.get('status') == 'SKIP':
@@ -6174,27 +6204,33 @@ def main():
     try:
         _load_license()
         from license import start_monitors
-        start_monitors(_get_store())
+        start_monitors(_get_store('default'))
     except Exception as _startup_err:
         log.error('License/monitor startup error (non-fatal): %s', _startup_err, exc_info=True)
+
     def _schedule_ticker():
         import time as _t
         while True:
             _t.sleep(60)
             try:
-                _store = _get_store()
-                due = _store.get_due_schedules()
-                for sched in due:
-                    device_id = sched.get('device_id', 'all')
-                    if device_id == 'all':
-                        devices = _store.list_devices()
-                        for d in devices:
-                            _store.enqueue_command(d['device_id'], 'scan_now')
-                        log.info('schedule %s fired: queued scan for %d devices', sched['id'], len(devices))
-                    else:
-                        _store.enqueue_command(device_id, 'scan_now')
-                        log.info('schedule %s fired: queued scan for device %s', sched['id'], device_id)
-                    _store.mark_schedule_fired(sched['id'])
+                customers = _get_registry().list_customers()
+                cids = [c['id'] for c in customers] or ['default']
+                for cid in cids:
+                    try:
+                        _st = _get_store(cid)
+                        for sched in _st.get_due_schedules():
+                            device_id = sched.get('device_id', 'all')
+                            if device_id == 'all':
+                                devices = _st.list_devices()
+                                for d in devices:
+                                    _st.enqueue_command(d['device_id'], 'scan_now')
+                                log.info('schedule %s fired for customer %s: %d devices', sched['id'], cid, len(devices))
+                            else:
+                                _st.enqueue_command(device_id, 'scan_now')
+                                log.info('schedule %s fired for customer %s: device %s', sched['id'], cid, device_id)
+                            _st.mark_schedule_fired(sched['id'])
+                    except Exception as _ce:
+                        log.error('schedule ticker error for customer %s: %s', cid, _ce)
             except Exception as _se:
                 log.error('schedule ticker error: %s', _se)
 
