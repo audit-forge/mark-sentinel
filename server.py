@@ -1336,12 +1336,19 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         self.send_header('Set-Cookie',
             'sentinel_session=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0')
         if os.environ.get('SENTINEL_TRUSTED_PROXY'):
-            # Cloud mode: also clear the admin-panel JWT by hitting its logout.
-            # Host header has no port (nginx strips it), so derive admin URL from host.
+            # Cloud mode: clear admin-panel JWT via its logout endpoint.
+            # Send ?next to the login page (with next= pointing back to Sentinel)
+            # so the redirect chain is: admin-logout → login page → Sentinel dashboard
+            # rather than: admin-logout → Sentinel (blocked) → login page.
+            from urllib.parse import quote as _q
             host = self.headers.get('Host', '').split(':')[0]
             ext = os.environ.get('SENTINEL_EXTERNAL_URL', '')
-            next_qs = f'?next={ext}' if ext else ''
-            self.send_header('Location', f'http://{host}/logout{next_qs}')
+            if ext:
+                login_url = f'http://{host}/login?next={_q(ext)}'
+                location = f'http://{host}/logout?next={_q(login_url)}'
+            else:
+                location = f'http://{host}/logout'
+            self.send_header('Location', location)
         else:
             self.send_header('Location', '/login')
         self.end_headers()
