@@ -79,11 +79,15 @@ server {
     location / {
         auth_request /_auth;
         error_page 401 403 = @login_redirect;
+        auth_request_set \$sentinel_user_email \$upstream_http_x_sentinel_user_email;
+        auth_request_set \$sentinel_user_role  \$upstream_http_x_sentinel_user_role;
 
         proxy_pass http://${CONTAINER_NAME}:7331;
         proxy_set_header Host \$host;
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Sentinel-User-Email \$sentinel_user_email;
+        proxy_set_header X-Sentinel-User-Role  \$sentinel_user_role;
         proxy_read_timeout 300;
         proxy_buffering off;
     }

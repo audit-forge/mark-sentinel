@@ -93,7 +93,10 @@ async def auth_verify(request: Request):
     if customer_id and user["role"] != "super_admin":
         if user.get("customer_id") != customer_id:
             return Response(status_code=403)
-    return Response(status_code=200)
+    return Response(status_code=200, headers={
+        "X-Sentinel-User-Email": user.get("sub", ""),
+        "X-Sentinel-User-Role":  user.get("role", ""),
+    })
 
 
 # ── Dashboard ─────────────────────────────────────────────────────────────────
@@ -626,6 +629,80 @@ async def remove_user(request: Request, user_id: str = Form(...)):
             return RedirectResponse("/users?error=forbidden", status_code=303)
         conn.execute("UPDATE users SET active=0 WHERE id=?", (user_id,))
     return RedirectResponse("/users", status_code=303)
+
+
+# ── JSON API — used by Sentinel dashboard in cloud/proxy mode ─────────────────
+
+@app.get("/api/users")
+async def api_users_list(request: Request):
+    from fastapi.responses import JSONResponse
+    try:
+        user = get_current_user(request)
+    except HTTPException:
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    with get_conn() as conn:
+        if user["role"] == "super_admin":
+            rows = conn.execute(
+                "SELECT id, email, role, created_at FROM users WHERE active=1 ORDER BY role='super_admin' DESC, email"
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT id, email, role, created_at FROM users WHERE active=1 AND customer_id=? AND role != 'super_admin' ORDER BY email",
+                (user["customer_id"],),
+            ).fetchall()
+    return JSONResponse({"users": [dict(r) for r in rows], "current_user": user.get("sub")})
+
+
+@app.post("/api/users/add")
+async def api_add_user(request: Request):
+    from fastapi.responses import JSONResponse
+    try:
+        user = get_current_user(request)
+    except HTTPException:
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    if user["role"] not in ("super_admin", "customer_admin"):
+        return JSONResponse({"error": "forbidden"}, status_code=403)
+    body = await request.json()
+    email    = str(body.get("email", "")).strip().lower()
+    password = str(body.get("password", ""))
+    role     = str(body.get("role", "customer_admin"))
+    if user["role"] == "customer_admin" and role not in ("customer_admin", "user"):
+        return JSONResponse({"error": "forbidden"}, status_code=403)
+    if "@" not in email or len(password) < 8:
+        return JSONResponse({"error": "invalid email or password too short"}, status_code=400)
+    customer_id = user["customer_id"] if user["role"] != "super_admin" else body.get("customer_id")
+    try:
+        with get_conn() as conn:
+            conn.execute(
+                "INSERT INTO users (id, email, password_hash, role, customer_id, created_at) VALUES (?,?,?,?,?,?)",
+                (str(uuid.uuid4()), email, hash_password(password), role,
+                 customer_id or None, datetime.now(timezone.utc).isoformat()),
+            )
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
+    return JSONResponse({"ok": True})
+
+
+@app.post("/api/users/remove/{user_id}")
+async def api_remove_user(request: Request, user_id: str):
+    from fastapi.responses import JSONResponse
+    try:
+        user = get_current_user(request)
+    except HTTPException:
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    if user["role"] not in ("super_admin", "customer_admin"):
+        return JSONResponse({"error": "forbidden"}, status_code=403)
+    with get_conn() as conn:
+        target = conn.execute("SELECT * FROM users WHERE id=? AND active=1", (user_id,)).fetchone()
+        if not target:
+            return JSONResponse({"error": "not found"}, status_code=404)
+        if target["id"] == user["sub"]:
+            return JSONResponse({"error": "cannot remove yourself"}, status_code=400)
+        if user["role"] == "customer_admin":
+            if target["customer_id"] != user["customer_id"] or target["role"] == "super_admin":
+                return JSONResponse({"error": "forbidden"}, status_code=403)
+        conn.execute("UPDATE users SET active=0 WHERE id=?", (user_id,))
+    return JSONResponse({"ok": True})
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────

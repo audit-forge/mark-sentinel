@@ -949,7 +949,22 @@ class _Handler(http.server.BaseHTTPRequestHandler):
 
     # ── auth helpers ──────────────────────────────────────────────────────────
 
+    def _proxy_session_user(self) -> dict | None:
+        if not os.environ.get('SENTINEL_TRUSTED_PROXY'):
+            return None
+        email = self.headers.get('X-Sentinel-User-Email', '').strip()
+        if not email:
+            return None
+        return {
+            'email':       email,
+            'role':        self.headers.get('X-Sentinel-User-Role', 'admin').strip(),
+            'customer_id': 'default',
+        }
+
     def _session_user(self) -> dict | None:
+        proxy = self._proxy_session_user()
+        if proxy:
+            return proxy
         token = _get_session_cookie(self.headers)
         return _get_registry().get_session(token) if token else None
 
@@ -1415,27 +1430,52 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         else:
             self._json({'email': None, 'role': None, 'customer_id': None}, 401)
 
+    def _admin_panel_url(self) -> str:
+        return os.environ.get('SENTINEL_ADMIN_URL', 'http://user-manager:8000')
+
+    def _proxy_to_admin(self, path: str, method: str = 'GET', body: bytes = b'') -> None:
+        import urllib.request, urllib.error
+        url = self._admin_panel_url() + path
+        cookie = self.headers.get('Cookie', '')
+        req = urllib.request.Request(url, data=body or None, method=method,
+                                     headers={'Cookie': cookie, 'Content-Type': 'application/json'})
+        try:
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                data = resp.read()
+                self._send(resp.status, data, 'application/json')
+        except urllib.error.HTTPError as e:
+            self._send(e.code, e.read(), 'application/json')
+        except Exception as ex:
+            self._json({'error': str(ex)}, 502)
+
     def _api_users_list(self):
         me = self._session_user()
         if not me:
             self._json({'error': 'unauthorized'}, 401)
             return
+        if os.environ.get('SENTINEL_TRUSTED_PROXY'):
+            self._proxy_to_admin('/api/users')
+            return
         users = _get_registry().list_users(me['customer_id'])
         self._json({'users': [{'id': u['id'], 'email': u['email'], 'role': u['role'],
                                 'active': u['active'], 'created_at': u['created_at']}
-                               for u in users]})
+                               for u in users], 'current_user': me['email']})
 
     def _api_users_add(self):
         me = self._session_user()
-        if not me or me.get('role') != 'admin':
+        if not me or me.get('role') not in ('admin', 'customer_admin', 'super_admin'):
             self._json({'error': 'forbidden'}, 403)
             return
+        cl = int(self.headers.get('Content-Length', 0))
+        raw = self.rfile.read(cl) if cl else b'{}'
+        if os.environ.get('SENTINEL_TRUSTED_PROXY'):
+            self._proxy_to_admin('/api/users/add', 'POST', raw)
+            return
         try:
-            cl = int(self.headers.get('Content-Length', 0))
-            body = json.loads(self.rfile.read(cl)) if cl else {}
-            email = str(body.get('email', '')).strip().lower()
+            body = json.loads(raw)
+            email    = str(body.get('email', '')).strip().lower()
             password = str(body.get('password', ''))
-            role = str(body.get('role', 'admin'))
+            role     = str(body.get('role', 'admin'))
             if role not in ('admin', 'viewer'):
                 role = 'admin'
             if '@' not in email or len(password) < 8:
@@ -1448,11 +1488,14 @@ class _Handler(http.server.BaseHTTPRequestHandler):
 
     def _api_users_deactivate(self, user_id_str: str):
         me = self._session_user()
-        if not me or me.get('role') != 'admin':
+        if not me or me.get('role') not in ('admin', 'customer_admin', 'super_admin'):
             self._json({'error': 'forbidden'}, 403)
             return
+        user_id = user_id_str.strip('/')
+        if os.environ.get('SENTINEL_TRUSTED_PROXY'):
+            self._proxy_to_admin(f'/api/users/remove/{user_id}', 'POST')
+            return
         try:
-            user_id = user_id_str.strip('/')
             ok = _get_registry().deactivate_user(user_id, me['customer_id'])
             self._json({'ok': ok})
         except Exception as e:
@@ -5781,16 +5824,31 @@ async function copyToken() {{
 async function loadUsers() {{
   try {{
     const r = await fetch('/api/users');
+    if (!r.ok) {{
+      document.getElementById('users-list').innerHTML = '<div style="color:#DC2626;font-size:13px">Failed to load users (' + r.status + ').</div>';
+      return;
+    }}
     const d = await r.json();
     const users = d.users || [];
-    const me = await _loadSessionUser();
+    const myEmail = d.current_user || await _loadSessionUser();
+    const ROLE_BADGE = {{
+      super_admin:    '<span style="font-size:10px;font-weight:600;color:#16A34A;background:#DCFCE7;padding:1px 6px;border-radius:4px">internal</span>',
+      customer_admin: '<span style="font-size:10px;font-weight:600;color:#4F46E5;background:#EEF2FF;padding:1px 6px;border-radius:4px">admin</span>',
+      admin:          '<span style="font-size:10px;font-weight:600;color:#4F46E5;background:#EEF2FF;padding:1px 6px;border-radius:4px">admin</span>',
+      user:           '<span style="font-size:10px;font-weight:600;color:#CA8A04;background:#FEF9C3;padding:1px 6px;border-radius:4px">viewer</span>',
+    }};
     const rows = users.map(u => {{
-      const isMe = u.email === me;
-      const inactive = !u.active;
+      const isMe = u.email === myEmail;
+      const inactive = u.active === false || u.active === 0;
+      const badge = ROLE_BADGE[u.role] || `<span style="font-size:10px;color:#6B7280">${{esc(u.role)}}</span>`;
       return `<div style="display:flex;align-items:center;gap:12px;padding:8px 0;border-bottom:1px solid #F3F4F6">
-        <span style="font-size:13px;color:${{inactive?'#9CA3AF':'#111827'}};flex:1">${{esc(u.email)}}${{isMe?' <span style="font-size:10px;color:#4F46E5;font-weight:600">(you)</span>':''}}${{inactive?' <span style="font-size:10px;color:#9CA3AF">(deactivated)</span>':''}}</span>
-        <span style="font-size:11px;color:#6B7280;width:50px">${{esc(u.role)}}</span>
-        ${{!isMe && u.active ? `<button class="inv-action" onclick="deactivateUser('${{esc(u.id)}}','${{esc(u.email)}}')" style="color:#DC2626">Remove</button>` : '<span style="width:60px"></span>'}}
+        <span style="font-size:13px;color:${{inactive?'#9CA3AF':'#111827'}};flex:1">
+          ${{esc(u.email)}}
+          ${{isMe ? '<span style="font-size:10px;color:#4F46E5;font-weight:600;margin-left:4px">(you)</span>' : ''}}
+          ${{inactive ? '<span style="font-size:10px;color:#9CA3AF;margin-left:4px">(deactivated)</span>' : ''}}
+        </span>
+        <span style="min-width:70px">${{badge}}</span>
+        ${{!isMe && !inactive ? `<button class="inv-action" onclick="deactivateUser('${{esc(u.id)}}','${{esc(u.email)}}')" style="color:#DC2626">Remove</button>` : '<span style="width:60px"></span>'}}
       </div>`;
     }}).join('');
     document.getElementById('users-list').innerHTML = rows || '<div style="font-size:13px;color:#9CA3AF">No users yet.</div>';
