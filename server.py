@@ -1069,6 +1069,8 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self._api_risk_register_csv()
         elif path == '/api/fleet/inventory':
             self._api_inventory()
+        elif path.startswith('/api/fleet/inventory/history/'):
+            self._api_inventory_history(path[len('/api/fleet/inventory/history/'):])
         elif path == '/api/schedules':
             self._api_schedules_list()
         elif path == '/api/verify' or path.startswith('/api/verify?'):
@@ -2147,7 +2149,9 @@ button:hover{{background:#2ea043}}
                     f"2. findings.csv           — All findings across all devices\n"
                     f"3. fleet_report.pdf       — CISO-tier fleet summary (cryptographically signed)\n"
                     f"4. manifest.json          — Report ID, signature, and key fingerprint\n"
-                    f"5. device_reports/<host>.json — Per-device raw scan data\n\n"
+                    f"5. device_reports/<host>.json — Per-device raw scan data\n"
+                    f"6. ai_asset_inventory.csv     — All discovered AI assets with approval status\n"
+                    f"7. ai_asset_approval_log.csv  — Full audit trail: who approved each asset and when\n\n"
                     f"ATTESTATION\n-----------\n"
                     f"Generated automatically by M.A.R.K. Sentinel. All findings\n"
                     f"reflect the most recent scan for each enrolled device. Scan\n"
@@ -2203,6 +2207,57 @@ button:hover{{background:#2ea043}}
                 for d in devices:
                     safe_name = d.get('hostname', d.get('device_id', 'unknown')).replace('/', '_').replace('\\', '_')
                     zf.writestr(f'device_reports/{safe_name}.json', json.dumps(d['_report'], indent=2))
+
+                # AI asset inventory + approval audit trail
+                try:
+                    inventory = store.list_inventory()
+                    events    = store.get_all_approval_events()
+                    inv_buf   = io.StringIO()
+                    inv_writer = csv.writer(inv_buf)
+                    inv_writer.writerow([
+                        'Asset ID', 'Host', 'Port', 'Service', 'Models',
+                        'Source', 'First Seen', 'Last Seen',
+                        'Approval Status', 'Approved By', 'Approved At',
+                    ])
+                    for item in inventory:
+                        approved_at = ''
+                        if item.get('approved_at'):
+                            from datetime import datetime as _dt2
+                            approved_at = _dt2.utcfromtimestamp(item['approved_at']).strftime('%Y-%m-%d %H:%M UTC')
+                        first_seen = _dt.utcfromtimestamp(item['first_seen']).strftime('%Y-%m-%d %H:%M UTC') if item.get('first_seen') else ''
+                        last_seen  = _dt.utcfromtimestamp(item['last_seen']).strftime('%Y-%m-%d %H:%M UTC') if item.get('last_seen') else ''
+                        inv_writer.writerow([
+                            item['id'],
+                            item.get('host', ''),
+                            item.get('port', ''),
+                            item.get('service', ''),
+                            ', '.join(item.get('models', [])),
+                            item.get('source', ''),
+                            first_seen,
+                            last_seen,
+                            item.get('approval_status', 'unapproved'),
+                            item.get('approved_by', ''),
+                            approved_at,
+                        ])
+                    zf.writestr('ai_asset_inventory.csv', inv_buf.getvalue())
+
+                    ev_buf = io.StringIO()
+                    ev_writer = csv.writer(ev_buf)
+                    ev_writer.writerow([
+                        'Event ID', 'Asset ID', 'Host', 'Port', 'Service',
+                        'From Status', 'To Status', 'Changed By', 'IP Address', 'Timestamp (UTC)',
+                    ])
+                    for ev in events:
+                        ts = _dt.utcfromtimestamp(ev['changed_at']).strftime('%Y-%m-%d %H:%M:%S UTC') if ev.get('changed_at') else ''
+                        ev_writer.writerow([
+                            ev['id'], ev['shadow_id'],
+                            ev.get('host', ''), ev.get('port', ''), ev.get('service', ''),
+                            ev.get('from_status', ''), ev.get('to_status', ''),
+                            ev.get('changed_by', ''), ev.get('ip_address', ''), ts,
+                        ])
+                    zf.writestr('ai_asset_approval_log.csv', ev_buf.getvalue())
+                except Exception as _ie:
+                    zf.writestr('ai_asset_inventory_error.txt', f'Inventory export failed: {_ie}')
 
             zip_bytes = buf.getvalue()
             fname = f'sentinel_evidence_{date_str}.zip'
@@ -2273,13 +2328,40 @@ button:hover{{background:#2ea043}}
         """POST /api/fleet/inventory/{approve|review|unapprove}/<id>"""
         try:
             shadow_id = int(shadow_id_str.strip('/'))
+            body = {}
+            cl = int(self.headers.get('Content-Length', 0))
+            if cl:
+                try:
+                    body = json.loads(self.rfile.read(cl))
+                except Exception:
+                    pass
+            changed_by = str(body.get('by', '')).strip()[:120]
+            ip_address = (
+                self.headers.get('X-Forwarded-For', '').split(',')[0].strip()
+                or self.client_address[0]
+            )
             store = _get_store()
-            ok = store.set_shadow_approval(shadow_id, status)
+            ok = store.set_shadow_approval(shadow_id, status,
+                                           changed_by=changed_by,
+                                           ip_address=ip_address)
             self._json({'ok': ok, 'status': status})
         except (ValueError, TypeError):
             self._json({'error': 'invalid id'}, 400)
         except Exception as e:
             log.error('inventory set status error: %s', e, exc_info=True)
+            self._json({'error': str(e)}, 500)
+
+    def _api_inventory_history(self, shadow_id_str: str):
+        """GET /api/fleet/inventory/history/<id> — approval event log for one asset."""
+        try:
+            shadow_id = int(shadow_id_str.strip('/'))
+            store = _get_store()
+            history = store.get_approval_history(shadow_id)
+            self._json({'history': history})
+        except (ValueError, TypeError):
+            self._json({'error': 'invalid id'}, 400)
+        except Exception as e:
+            log.error('inventory history error: %s', e, exc_info=True)
             self._json({'error': str(e)}, 500)
 
     def _api_verify_signature(self):
@@ -5245,16 +5327,40 @@ async function downloadFleetReport(tier, btn) {{
 let _invData = [];
 let _invStatus = 'all';
 
+function _invReviewer() {{
+  return localStorage.getItem('sentinel_reviewer') || '';
+}}
+
+function _ensureReviewer() {{
+  let r = _invReviewer();
+  if (!r) {{
+    r = (prompt('Enter your name or initials for the approval record (stored locally):') || '').trim();
+    if (r) localStorage.setItem('sentinel_reviewer', r);
+  }}
+  return r || 'Dashboard user';
+}}
+
+function _fmtTs(epoch) {{
+  if (!epoch) return '';
+  const d = new Date(epoch * 1000);
+  return d.toISOString().replace('T',' ').slice(0,16) + ' UTC';
+}}
+
 async function loadInventory() {{
   try {{
     const r = await fetch('/api/fleet/inventory');
     const d = await r.json();
     _invData = d.items || [];
     const c = d.counts || {{}};
+    const reviewer = _invReviewer();
+    const rvTag = reviewer
+      ? `<span style="font-size:11px;color:#6B7280;margin-left:12px">Approving as: <strong>${{esc(reviewer)}}</strong> · <a href="#" onclick="localStorage.removeItem('sentinel_reviewer');loadInventory();return false" style="color:#6B7280">change</a></span>`
+      : `<span style="font-size:11px;color:#f0a500;margin-left:12px">⚠ No reviewer name set — you will be prompted when approving</span>`;
     document.getElementById('inv-counts').innerHTML =
       `<div class="inv-count-card"><div class="inv-count-n" style="color:#DC2626">${{c.unapproved||0}}</div><div style="color:#6B7280">Unapproved</div></div>` +
       `<div class="inv-count-card"><div class="inv-count-n" style="color:#CA8A04">${{c.under_review||0}}</div><div style="color:#6B7280">Under Review</div></div>` +
-      `<div class="inv-count-card"><div class="inv-count-n" style="color:#16A34A">${{c.approved||0}}</div><div style="color:#6B7280">Approved</div></div>`;
+      `<div class="inv-count-card"><div class="inv-count-n" style="color:#16A34A">${{c.approved||0}}</div><div style="color:#6B7280">Approved</div></div>` +
+      rvTag;
     renderInventory();
   }} catch(e) {{
     document.getElementById('inv-body').innerHTML = '<div style="color:#DC2626;font-size:13px;padding:8px 0">Failed to load inventory.</div>';
@@ -5281,7 +5387,7 @@ function renderInventory() {{
     const icon = SRC_ICON[item.source] || '🤖';
     const models = (item.models||[]).slice(0,3).join(', ') || '—';
     const st = item.approval_status || 'unapproved';
-    let badge, actions;
+    let badge, actions, attribution;
     if (st === 'approved') {{
       badge = '<span class="inv-badge-approved">Approved</span>';
       actions = `<button class="inv-action" onclick="invSetStatus(${{item.id}},'under_review',this)">→ Review</button>
@@ -5295,6 +5401,13 @@ function renderInventory() {{
       actions = `<button class="inv-action" onclick="invSetStatus(${{item.id}},'approved',this)">Approve</button>
                  <button class="inv-action" onclick="invSetStatus(${{item.id}},'under_review',this)">Flag for Review</button>`;
     }}
+    if (item.approved_by && item.approved_at) {{
+      attribution = `<span style="font-size:10px;color:#6B7280" title="Full history: click History">${{esc(item.approved_by)}} · ${{_fmtTs(item.approved_at)}}</span>`;
+    }} else if (item.approved_by) {{
+      attribution = `<span style="font-size:10px;color:#6B7280">${{esc(item.approved_by)}}</span>`;
+    }} else {{
+      attribution = '<span style="font-size:10px;color:#D1D5DB">—</span>';
+    }}
     return `<tr>
       <td style="font-size:16px">${{icon}}</td>
       <td style="color:#111827;font-weight:600">${{esc(item.host)}}${{item.port ? ':'+item.port : ''}}</td>
@@ -5302,24 +5415,72 @@ function renderInventory() {{
       <td style="color:#6B7280;font-size:12px">${{esc(models)}}</td>
       <td style="color:#6B7280;font-size:11px">${{esc(item.reporter_hostname||'')}}</td>
       <td>${{badge}}</td>
-      <td style="white-space:nowrap;display:flex;gap:4px">${{actions}}</td>
+      <td>${{attribution}}</td>
+      <td style="white-space:nowrap;display:flex;gap:4px">
+        ${{actions}}
+        <button class="inv-action" onclick="invShowHistory(${{item.id}},this)" style="color:#6B7280">History</button>
+      </td>
     </tr>`;
   }}).join('');
   el.innerHTML = `<table class="rr-table">
-    <thead><tr><th></th><th>Host</th><th>Service</th><th>Models</th><th>Reported by</th><th>Status</th><th>Actions</th></tr></thead>
+    <thead><tr><th></th><th>Host</th><th>Service</th><th>Models</th><th>Reported by</th><th>Status</th><th>Reviewer · Timestamp</th><th>Actions</th></tr></thead>
     <tbody>${{trs}}</tbody>
-  </table><div style="font-size:11px;color:#9CA3AF;margin-bottom:8px">${{rows.length}} asset${{rows.length!==1?'s':''}} · approvals are timestamped and attributed in the evidence export</div>`;
+  </table><div style="font-size:11px;color:#9CA3AF;margin-bottom:8px">${{rows.length}} asset${{rows.length!==1?'s':''}} · approval records are included in the Evidence Package export</div>
+  <div id="inv-history-panel" style="display:none;margin-top:12px;background:#F9FAFB;border:1px solid #E5E7EB;border-radius:6px;padding:12px"></div>`;
 }}
 
 async function invSetStatus(id, status, btn) {{
   const orig = btn.textContent;
   btn.disabled = true; btn.textContent = '…';
   try {{
+    const by = _ensureReviewer();
     const slug = status==='under_review'?'review':status==='approved'?'approve':'unapprove';
-    const r = await fetch('/api/fleet/inventory/' + slug + '/' + id, {{method:'POST'}});
+    const r = await fetch('/api/fleet/inventory/' + slug + '/' + id, {{
+      method: 'POST',
+      headers: {{'Content-Type': 'application/json'}},
+      body: JSON.stringify({{by}}),
+    }});
     const d = await r.json();
     if (d.ok) {{ await loadInventory(); }} else {{ btn.disabled=false; btn.textContent=orig; }}
   }} catch(e) {{ btn.disabled=false; btn.textContent=orig; }}
+}}
+
+async function invShowHistory(id, btn) {{
+  const panel = document.getElementById('inv-history-panel');
+  if (panel && panel.dataset.openId === String(id) && panel.style.display !== 'none') {{
+    panel.style.display = 'none';
+    panel.dataset.openId = '';
+    return;
+  }}
+  try {{
+    const r = await fetch('/api/fleet/inventory/history/' + id);
+    const d = await r.json();
+    const rows = (d.history || []);
+    if (!rows.length) {{
+      panel.innerHTML = '<div style="font-size:12px;color:#6B7280">No approval history for this asset.</div>';
+    }} else {{
+      const STATUS_LABELS = {{approved:'Approved',under_review:'Under Review',unapproved:'Unapproved','':'—'}};
+      const trs = rows.map(ev => {{
+        const ts = _fmtTs(ev.changed_at);
+        const from = STATUS_LABELS[ev.from_status] || ev.from_status;
+        const to   = STATUS_LABELS[ev.to_status]   || ev.to_status;
+        return `<tr>
+          <td style="font-size:11px;color:#6B7280;white-space:nowrap">${{esc(ts)}}</td>
+          <td style="font-size:12px;color:#111827;font-weight:600">${{esc(ev.changed_by||'Unknown')}}</td>
+          <td style="font-size:11px;color:#6B7280">${{esc(from)}} → ${{esc(to)}}</td>
+          <td style="font-size:10px;color:#9CA3AF">${{esc(ev.ip_address||'')}}</td>
+        </tr>`;
+      }}).join('');
+      panel.innerHTML = `<div style="font-size:12px;font-weight:600;color:#374151;margin-bottom:6px">Approval History</div>
+        <table class="rr-table"><thead><tr><th>Timestamp</th><th>Reviewer</th><th>Change</th><th>IP</th></tr></thead>
+        <tbody>${{trs}}</tbody></table>`;
+    }}
+    panel.style.display = 'block';
+    panel.dataset.openId = String(id);
+    panel.scrollIntoView({{behavior:'smooth',block:'nearest'}});
+  }} catch(e) {{
+    if (panel) panel.innerHTML = '<div style="color:#DC2626;font-size:12px">Failed to load history.</div>';
+  }}
 }}
 
 const CADENCE_LABELS = {{daily:'Daily',weekly:'Weekly',monthly:'Monthly'}};

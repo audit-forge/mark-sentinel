@@ -109,6 +109,23 @@ class AgentStore:
                 CREATE INDEX IF NOT EXISTS idx_shadow_last_seen
                     ON shadow_devices(last_seen DESC);
 
+                CREATE TABLE IF NOT EXISTS approval_events (
+                    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                    shadow_id       INTEGER NOT NULL,
+                    from_status     TEXT NOT NULL DEFAULT '',
+                    to_status       TEXT NOT NULL,
+                    changed_by      TEXT NOT NULL DEFAULT '',
+                    ip_address      TEXT NOT NULL DEFAULT '',
+                    changed_at      INTEGER NOT NULL,
+                    FOREIGN KEY (shadow_id) REFERENCES shadow_devices(id)
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_approval_events_shadow
+                    ON approval_events(shadow_id, changed_at DESC);
+
+                CREATE INDEX IF NOT EXISTS idx_approval_events_time
+                    ON approval_events(changed_at DESC);
+
                 CREATE TABLE IF NOT EXISTS mcp_servers (
                     id                  INTEGER PRIMARY KEY AUTOINCREMENT,
                     reporter_device_id  TEXT NOT NULL,
@@ -151,6 +168,14 @@ class AgentStore:
             if 'approval_status' not in sh_cols:
                 conn.execute(
                     "ALTER TABLE shadow_devices ADD COLUMN approval_status TEXT NOT NULL DEFAULT 'unapproved'"
+                )
+            if 'approved_by' not in sh_cols:
+                conn.execute(
+                    "ALTER TABLE shadow_devices ADD COLUMN approved_by TEXT NOT NULL DEFAULT ''"
+                )
+            if 'approved_at' not in sh_cols:
+                conn.execute(
+                    "ALTER TABLE shadow_devices ADD COLUMN approved_at INTEGER"
                 )
             sc_cols = {r[1] for r in conn.execute("PRAGMA table_info(scan_schedules)")}
             if 'interval_hours' not in sc_cols:
@@ -668,7 +693,8 @@ class AgentStore:
         with self._lock, self._conn() as conn:
             rows = conn.execute("""
                 SELECT id, reporter_hostname, host, port, service, models_json,
-                       source, detail, first_seen, last_seen, dismissed, approval_status
+                       source, detail, first_seen, last_seen, dismissed,
+                       approval_status, approved_by, approved_at
                 FROM shadow_devices
                 ORDER BY approval_status ASC, last_seen DESC
             """).fetchall()
@@ -679,17 +705,59 @@ class AgentStore:
             result.append(d)
         return result
 
-    def set_shadow_approval(self, shadow_id: int, status: str) -> bool:
-        """Set approval_status for a shadow device. Status: approved|under_review|unapproved."""
+    def set_shadow_approval(self, shadow_id: int, status: str,
+                            changed_by: str = '', ip_address: str = '') -> bool:
+        """Set approval_status for a shadow device and record the attribution event."""
         if status not in ('approved', 'under_review', 'unapproved'):
             return False
         now = int(time.time())
+        actor = changed_by.strip() or 'Dashboard user'
         with self._lock, self._conn() as conn:
+            row = conn.execute(
+                "SELECT approval_status FROM shadow_devices WHERE id = ?", (shadow_id,)
+            ).fetchone()
+            if row is None:
+                return False
+            from_status = row['approval_status'] or 'unapproved'
             cur = conn.execute(
-                "UPDATE shadow_devices SET approval_status = ?, last_seen = ? WHERE id = ?",
-                (status, now, shadow_id),
+                """UPDATE shadow_devices
+                   SET approval_status = ?, approved_by = ?, approved_at = ?
+                   WHERE id = ?""",
+                (status, actor, now, shadow_id),
             )
-            return cur.rowcount > 0
+            if cur.rowcount == 0:
+                return False
+            conn.execute(
+                """INSERT INTO approval_events
+                       (shadow_id, from_status, to_status, changed_by, ip_address, changed_at)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                (shadow_id, from_status, status, actor, ip_address, now),
+            )
+            return True
+
+    def get_approval_history(self, shadow_id: int) -> list[dict]:
+        """Return full approval event history for one asset, newest first."""
+        with self._lock, self._conn() as conn:
+            rows = conn.execute(
+                """SELECT from_status, to_status, changed_by, ip_address, changed_at
+                   FROM approval_events WHERE shadow_id = ?
+                   ORDER BY changed_at DESC""",
+                (shadow_id,),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def get_all_approval_events(self) -> list[dict]:
+        """Return all approval events across all assets for evidence export."""
+        with self._lock, self._conn() as conn:
+            rows = conn.execute(
+                """SELECT ae.id, ae.shadow_id, sd.host, sd.port, sd.service,
+                          ae.from_status, ae.to_status, ae.changed_by,
+                          ae.ip_address, ae.changed_at
+                   FROM approval_events ae
+                   JOIN shadow_devices sd ON sd.id = ae.shadow_id
+                   ORDER BY ae.changed_at DESC""",
+            ).fetchall()
+        return [dict(r) for r in rows]
 
     def upsert_mcp_server(self, reporter_device_id: str, reporter_hostname: str,
                           host: str, port: int, server_name: str, tools: list,
