@@ -177,13 +177,11 @@ def _check_agent_token(submitted: str) -> bool:
             pass
     return False
 
-def _dashboard_token() -> str:
-    """Return expected dashboard token. Empty = no auth required."""
-    if os.environ.get('SENTINEL_DASHBOARD_TOKEN'):
-        return os.environ['SENTINEL_DASHBOARD_TOKEN']
-    tok_file = ROOT / 'dashboard_token.txt'
-    if tok_file.exists():
-        return tok_file.read_text().strip()
+def _get_session_cookie(headers) -> str:
+    for part in headers.get('Cookie', '').split(';'):
+        k, _, v = part.strip().partition('=')
+        if k.strip() == 'sentinel_session':
+            return v.strip()
     return ''
 
 # ── per-device report rate limiting ──────────────────────────────────────────
@@ -902,27 +900,31 @@ class _Handler(http.server.BaseHTTPRequestHandler):
 
     # ── auth helpers ──────────────────────────────────────────────────────────
 
-    def _check_dashboard_auth(self) -> bool:
-        import hmac as _hmac
-        token = _dashboard_token()
+    def _session_user(self) -> dict | None:
+        token = _get_session_cookie(self.headers)
         if not token:
-            return True
-        for part in self.headers.get('Cookie', '').split(';'):
-            k, _, v = part.strip().partition('=')
-            if k.strip() == 'sentinel_session' and _hmac.compare_digest(v.strip(), token):
-                return True
-        return False
+            return None
+        return _get_store().get_dashboard_session(token)
+
+    def _check_dashboard_auth(self) -> bool:
+        return self._session_user() is not None
 
     def _require_dashboard_auth(self) -> bool:
         if self._check_dashboard_auth():
             return True
         if self.command == 'POST':
-            self._send(401, b'Unauthorized - set SENTINEL_DASHBOARD_TOKEN', 'text/plain')
+            self._send(401, b'Unauthorized', 'text/plain')
         else:
             from urllib.parse import quote
-            self.send_response(302)
-            self.send_header('Location', f'/login?next={quote(urlparse(self.path).path)}')
-            self.end_headers()
+            store = _get_store()
+            if not store.has_dashboard_users():
+                self.send_response(302)
+                self.send_header('Location', '/setup')
+                self.end_headers()
+            else:
+                self.send_response(302)
+                self.send_header('Location', f'/login?next={quote(urlparse(self.path).path)}')
+                self.end_headers()
         return False
 
     def _check_agent_bearer(self) -> bool:
@@ -957,7 +959,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
     def _do_GET_inner(self):
         path = urlparse(self.path).path
 
-        # Auth-exempt: health probe and login UI
+        # Auth-exempt: health probe, login, and first-run setup
         if path == '/health':
             self._api_health()
             return
@@ -966,6 +968,12 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             return
         if path == '/logout':
             self._handle_logout()
+            return
+        if path == '/setup':
+            self._serve_setup()
+            return
+        if path == '/api/auth/me':
+            self._api_auth_me()
             return
 
         # Agent-token-gated: agents download these during self-update
@@ -1034,6 +1042,8 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self._api_inventory_history(path[len('/api/fleet/inventory/history/'):])
         elif path == '/api/schedules':
             self._api_schedules_list()
+        elif path == '/api/users':
+            self._api_users_list()
         elif path == '/api/verify' or path.startswith('/api/verify?'):
             self._api_verify_signature()
         else:
@@ -1058,9 +1068,12 @@ class _Handler(http.server.BaseHTTPRequestHandler):
     def _do_POST_inner(self):
         path = urlparse(self.path).path
 
-        # Login form submission — no auth needed
+        # Login / setup — no auth needed
         if path == '/login':
             self._handle_login_post()
+            return
+        if path == '/setup':
+            self._handle_setup_post()
             return
 
         # Agent endpoints — use agent-token auth, not dashboard session
@@ -1139,45 +1152,68 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self._api_fleet_mcp_discover_all()
         elif path.startswith('/api/fleet/mcp/dismiss/'):
             self._api_fleet_mcp_dismiss(path[len('/api/fleet/mcp/dismiss/'):])
+        elif path == '/api/users/add':
+            self._api_users_add()
+        elif path.startswith('/api/users/deactivate/'):
+            self._api_users_deactivate(path[len('/api/users/deactivate/'):])
         else:
             self._not_found()
 
     def do_OPTIONS(self):
         self._send(200, b'', 'text/plain')
 
-    # ── login / logout ────────────────────────────────────────────────────────
+    # ── login / logout / setup ────────────────────────────────────────────────
+
+    _LOGIN_CSS = (
+        'body{font-family:system-ui;background:#0d1117;color:#8b949e;'
+        'display:flex;align-items:center;justify-content:center;height:100vh;margin:0}'
+        '.box{background:#161b22;border:1px solid #30363d;border-radius:8px;padding:40px 36px;width:340px}'
+        'h2{color:#e6edf3;font-size:18px;margin:0 0 6px}'
+        '.sub{font-size:12px;color:#6B7280;margin:0 0 24px}'
+        'label{display:block;font-size:12px;color:#8b949e;margin-bottom:4px}'
+        'input{width:100%;box-sizing:border-box;background:#0d1117;border:1px solid #30363d;'
+        'border-radius:6px;color:#e6edf3;padding:10px 12px;font-size:14px;margin-bottom:14px}'
+        'button{width:100%;background:#238636;color:#fff;border:none;border-radius:6px;'
+        'padding:10px;font-size:14px;cursor:pointer;font-weight:600}'
+        'button:hover{background:#2ea043}'
+        '.err{color:#f85149;font-size:13px;margin:0 0 14px}'
+        '.brand{color:#58a6ff;font-size:12px;text-align:center;margin-top:20px}'
+    )
 
     def _serve_login(self):
         import html as _html
         from urllib.parse import parse_qs
+        store = _get_store()
+        if not store.has_dashboard_users():
+            self.send_response(302)
+            self.send_header('Location', '/setup')
+            self.end_headers()
+            return
         qs = parse_qs(urlparse(self.path).query)
         next_url = qs.get('next', ['/'])[0]
         if not next_url.startswith('/') or '//' in next_url:
             next_url = '/'
         safe_next = _html.escape(next_url, quote=True)
-        error = bool(qs.get('error'))
-        err_html = '<p style="color:#f85149;font-size:13px;margin:0 0 14px">Incorrect token.</p>' if error else ''
-        body = f"""<!doctype html><html><head><meta charset="utf-8">
-<title>M.A.R.K. Sentinel — Sign in</title>
-<style>body{{font-family:system-ui;background:#0d1117;color:#8b949e;
-display:flex;align-items:center;justify-content:center;height:100vh;margin:0}}
-.box{{background:#161b22;border:1px solid #30363d;border-radius:8px;padding:40px 36px;width:320px}}
-h2{{color:#e6edf3;font-size:18px;margin:0 0 24px}}
-input{{width:100%;box-sizing:border-box;background:#0d1117;border:1px solid #30363d;
-border-radius:6px;color:#e6edf3;padding:10px 12px;font-size:14px;margin-bottom:16px}}
-button{{width:100%;background:#238636;color:#fff;border:none;border-radius:6px;
-padding:10px;font-size:14px;cursor:pointer;font-weight:600}}
-button:hover{{background:#2ea043}}
-.brand{{color:#58a6ff;font-size:12px;text-align:center;margin-top:20px}}</style>
-</head><body><div class="box">
-<h2>M.A.R.K. Sentinel</h2>{err_html}
-<form method="POST" action="/login">
-<input type="hidden" name="next" value="{safe_next}">
-<input type="password" name="token" placeholder="Dashboard token" autofocus>
-<button type="submit">Sign in</button>
-</form>
-<div class="brand">Powered by Hash</div>
-</div></body></html>""".encode()
+        err_html = '<p class="err">Incorrect email or password.</p>' if qs.get('error') else ''
+        body = (
+            f'<!doctype html><html><head><meta charset="utf-8">'
+            f'<title>M.A.R.K. Sentinel — Sign in</title>'
+            f'<style>{self._LOGIN_CSS}</style>'
+            f'</head><body><div class="box">'
+            f'<h2>M.A.R.K. Sentinel</h2>'
+            f'<p class="sub">Sign in to your account</p>'
+            f'{err_html}'
+            f'<form method="POST" action="/login">'
+            f'<input type="hidden" name="next" value="{safe_next}">'
+            f'<label>Email</label>'
+            f'<input type="email" name="email" placeholder="you@company.com" autofocus autocomplete="username">'
+            f'<label>Password</label>'
+            f'<input type="password" name="password" placeholder="••••••••" autocomplete="current-password">'
+            f'<button type="submit">Sign in</button>'
+            f'</form>'
+            f'<div class="brand">Powered by Hash</div>'
+            f'</div></body></html>'
+        ).encode()
         self.send_response(200)
         self.send_header('Content-Type', 'text/html; charset=utf-8')
         self.send_header('Content-Length', len(body))
@@ -1191,16 +1227,18 @@ button:hover{{background:#2ea043}}
             self._send(400, b'Bad request', 'text/plain')
             return
         params = parse_qs(self.rfile.read(length).decode(errors='ignore'))
-        submitted = params.get('token', [''])[0]
+        email = params.get('email', [''])[0].strip()
+        password = params.get('password', [''])[0]
         next_url = params.get('next', ['/'])[0]
         if not next_url.startswith('/') or '//' in next_url:
             next_url = '/'
-        import hmac as _hmac
-        expected = _dashboard_token()
-        if expected and _hmac.compare_digest(submitted, expected):
+        store = _get_store()
+        user = store.authenticate_dashboard_user(email, password)
+        if user:
+            token = store.create_dashboard_session(user['id'], user['email'])
             self.send_response(302)
             self.send_header('Set-Cookie',
-                f'sentinel_session={expected}; Path=/; HttpOnly; SameSite=Strict')
+                f'sentinel_session={token}; Path=/; HttpOnly; SameSite=Strict')
             self.send_header('Location', next_url)
             self.end_headers()
         else:
@@ -1209,11 +1247,148 @@ button:hover{{background:#2ea043}}
             self.end_headers()
 
     def _handle_logout(self):
+        token = _get_session_cookie(self.headers)
+        if token:
+            _get_store().delete_dashboard_session(token)
         self.send_response(302)
         self.send_header('Set-Cookie',
             'sentinel_session=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0')
         self.send_header('Location', '/login')
         self.end_headers()
+
+    def _serve_setup(self):
+        import html as _html
+        from urllib.parse import parse_qs
+        store = _get_store()
+        if store.has_dashboard_users():
+            self.send_response(302)
+            self.send_header('Location', '/login')
+            self.end_headers()
+            return
+        qs = parse_qs(urlparse(self.path).query)
+        err_map = {
+            'exists': 'An account with that email already exists.',
+            'mismatch': 'Passwords do not match.',
+            'short': 'Password must be at least 8 characters.',
+            'invalid': 'Please enter a valid email address.',
+        }
+        err_key = qs.get('error', [''])[0]
+        err_html = f'<p class="err">{err_map.get(err_key, "")}</p>' if err_key else ''
+        body = (
+            f'<!doctype html><html><head><meta charset="utf-8">'
+            f'<title>M.A.R.K. Sentinel — Create admin account</title>'
+            f'<style>{self._LOGIN_CSS}</style>'
+            f'</head><body><div class="box">'
+            f'<h2>M.A.R.K. Sentinel</h2>'
+            f'<p class="sub">Create your admin account to get started</p>'
+            f'{err_html}'
+            f'<form method="POST" action="/setup">'
+            f'<label>Email</label>'
+            f'<input type="email" name="email" placeholder="you@company.com" autofocus autocomplete="username">'
+            f'<label>Password</label>'
+            f'<input type="password" name="password" placeholder="Min 8 characters" autocomplete="new-password">'
+            f'<label>Confirm password</label>'
+            f'<input type="password" name="confirm" placeholder="Re-enter password" autocomplete="new-password">'
+            f'<button type="submit">Create account &amp; sign in</button>'
+            f'</form>'
+            f'<div class="brand">Powered by Hash</div>'
+            f'</div></body></html>'
+        ).encode()
+        self.send_response(200)
+        self.send_header('Content-Type', 'text/html; charset=utf-8')
+        self.send_header('Content-Length', len(body))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _handle_setup_post(self):
+        from urllib.parse import parse_qs, quote
+        store = _get_store()
+        if store.has_dashboard_users():
+            self.send_response(302)
+            self.send_header('Location', '/login')
+            self.end_headers()
+            return
+        length = _content_length(self.headers)
+        if length > 4096:
+            self._send(400, b'Bad request', 'text/plain')
+            return
+        params = parse_qs(self.rfile.read(length).decode(errors='ignore'))
+        email = params.get('email', [''])[0].strip().lower()
+        password = params.get('password', [''])[0]
+        confirm = params.get('confirm', [''])[0]
+        if '@' not in email or '.' not in email.split('@')[-1]:
+            self.send_response(302)
+            self.send_header('Location', '/setup?error=invalid')
+            self.end_headers()
+            return
+        if len(password) < 8:
+            self.send_response(302)
+            self.send_header('Location', '/setup?error=short')
+            self.end_headers()
+            return
+        if password != confirm:
+            self.send_response(302)
+            self.send_header('Location', '/setup?error=mismatch')
+            self.end_headers()
+            return
+        try:
+            user = store.create_dashboard_user(email, password, role='admin')
+            token = store.create_dashboard_session(user['id'], user['email'])
+            self.send_response(302)
+            self.send_header('Set-Cookie',
+                f'sentinel_session={token}; Path=/; HttpOnly; SameSite=Strict')
+            self.send_header('Location', '/')
+            self.end_headers()
+        except Exception:
+            self.send_response(302)
+            self.send_header('Location', '/setup?error=exists')
+            self.end_headers()
+
+    def _api_auth_me(self):
+        user = self._session_user()
+        if user:
+            self._json({'email': user['email'], 'role': user['role']})
+        else:
+            self._json({'email': None, 'role': None}, 401)
+
+    def _api_users_list(self):
+        users = _get_store().list_dashboard_users()
+        safe = [{'id': u['id'], 'email': u['email'], 'role': u['role'],
+                  'active': u['active'], 'created_at': u['created_at']} for u in users]
+        self._json({'users': safe})
+
+    def _api_users_add(self):
+        me = self._session_user()
+        if not me or me.get('role') != 'admin':
+            self._json({'error': 'forbidden'}, 403)
+            return
+        try:
+            cl = int(self.headers.get('Content-Length', 0))
+            body = json.loads(self.rfile.read(cl)) if cl else {}
+            email = str(body.get('email', '')).strip().lower()
+            password = str(body.get('password', ''))
+            role = str(body.get('role', 'admin'))
+            if role not in ('admin', 'viewer'):
+                role = 'admin'
+            if '@' not in email or len(password) < 8:
+                self._json({'error': 'invalid'}, 400)
+                return
+            user = _get_store().create_dashboard_user(email, password, role)
+            self._json({'ok': True, 'user': user})
+        except Exception as e:
+            self._json({'error': str(e)}, 500)
+
+    def _api_users_deactivate(self, user_id_str: str):
+        me = self._session_user()
+        if not me or me.get('role') != 'admin':
+            self._json({'error': 'forbidden'}, 403)
+            return
+        try:
+            user_id = user_id_str.strip('/')
+            ok = _get_store().deactivate_dashboard_user(user_id)
+            self._json({'ok': ok})
+        except Exception as e:
+            self._json({'error': str(e)}, 500)
 
     # ── endpoints ─────────────────────────────────────────────────────────────
 
@@ -2197,14 +2372,8 @@ button:hover{{background:#2ea043}}
         """POST /api/fleet/inventory/{approve|review|unapprove}/<id>"""
         try:
             shadow_id = int(shadow_id_str.strip('/'))
-            body = {}
-            cl = int(self.headers.get('Content-Length', 0))
-            if cl:
-                try:
-                    body = json.loads(self.rfile.read(cl))
-                except Exception:
-                    pass
-            changed_by = str(body.get('by', '')).strip()[:120]
+            user = self._session_user()
+            changed_by = user['email'] if user else 'Unknown'
             ip_address = (
                 self.headers.get('X-Forwarded-For', '').split(',')[0].strip()
                 or self.client_address[0]
@@ -2621,7 +2790,11 @@ button:hover{{background:#2ea043}}
             shadow  = []
             mcp     = []
         try:
-            body = _build_fleet_html(devices, shadow, mcp).encode('utf-8')
+            user = self._session_user()
+            body = _build_fleet_html(
+                devices, shadow, mcp,
+                current_user_email=user['email'] if user else ''
+            ).encode('utf-8')
             print(f'[SENTINEL] _serve_fleet: body built {len(body)} bytes', flush=True)
         except Exception as _e:
             print(f'[SENTINEL] _serve_fleet: build error: {_e}', flush=True)
@@ -3337,7 +3510,8 @@ def _build_mcp_section(servers: list[dict], ts_now: int) -> str:
 
 
 def _build_fleet_html(devices: list[dict], shadow: list[dict] | None = None,
-                      mcp: list[dict] | None = None) -> str:
+                      mcp: list[dict] | None = None,
+                      current_user_email: str = '') -> str:
     shadow = shadow or []
     mcp    = mcp    or []
     ts_now = int(time.time())
@@ -3602,9 +3776,11 @@ html.light .sb-footer a,body.light .sb-footer a{{color:#8c959f}}
       <button class="sb-item" id="nav-reports" onclick="navTo('reports')">&#128196; Reports</button>
       <div class="sb-group"></div>
       <button class="sb-item" id="nav-settings" onclick="navTo('settings')">&#9881; Settings</button>
+      <button class="sb-item" id="nav-users" onclick="navTo('users')">&#128100; Users</button>
       {'<button class="sb-item" id="nav-probe" onclick="navTo(\'probe\')">&#128272; API Tester</button>' if _has_live_scan() else '<span style="display:block;padding:8px 16px;font-size:13px;color:#484f58;cursor:default" title="Upgrade to Pro to access the API Tester">&#128274; API Tester</span>'}
     </nav>
     <div class="sb-footer">
+      {f'<span style="font-size:11px;color:#9CA3AF;word-break:break-all">{current_user_email}</span>' if current_user_email else ''}
       <a href="/academy" target="_blank">Academy</a>
       <a href="/logout" style="color:#ef4444">&#x2192; Sign Out</a>
       <button id="theme-toggle" onclick="toggleTheme()" style="background:none;border:none;font-size:11px;color:#484f58;cursor:pointer;text-align:left;padding:0;margin-top:2px">&#9728; Theme</button>
@@ -4058,6 +4234,30 @@ html.light .sb-footer a,body.light .sb-footer a{{color:#8c959f}}
 
   {'<div class="page" id="page-probe" style="position:fixed;top:0;left:216px;right:0;bottom:0;z-index:50"><iframe id="probe-iframe" data-loaded="0" style="width:100%;height:100%;border:none;display:block"></iframe></div>' if _has_live_scan() else ''}
 
+  <div class="page" id="page-users">
+  <div class="sec-hdr" style="margin-top:0;padding-top:0">Users</div>
+  <div class="content-panel" style="background:#ffffff;border:1px solid #F3F4F6;border-radius:8px;padding:20px;margin-bottom:16px">
+    <div class="panel-sub-hdr" style="font-size:12px;color:#6B7280;font-weight:600;text-transform:uppercase;letter-spacing:.06em;margin-bottom:14px">Team members</div>
+    <p style="font-size:13px;color:#6B7280;margin:0 0 14px">Each user has their own email and password. Approvals and actions are attributed to the logged-in account — names cannot be changed after the fact.</p>
+    <div id="users-list" style="margin-bottom:20px"></div>
+    <div style="border-top:1px solid #F3F4F6;padding-top:16px;margin-top:4px">
+      <div style="font-size:12px;color:#374151;font-weight:600;margin-bottom:10px">Add user</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr auto;gap:8px;align-items:end;max-width:560px">
+        <div>
+          <label style="font-size:12px;color:#6B7280;display:block;margin-bottom:4px">Email</label>
+          <input id="new-user-email" type="email" placeholder="user@company.com" class="form-input" style="width:100%;box-sizing:border-box">
+        </div>
+        <div>
+          <label style="font-size:12px;color:#6B7280;display:block;margin-bottom:4px">Password</label>
+          <input id="new-user-pw" type="password" placeholder="Min 8 characters" class="form-input" style="width:100%;box-sizing:border-box">
+        </div>
+        <button class="scan-btn" onclick="addUser()" style="color:#16A34A;border-color:#E5E7EB;white-space:nowrap">Add user</button>
+      </div>
+      <div id="users-msg" style="font-size:12px;margin-top:8px"></div>
+    </div>
+  </div>
+  </div>
+
 </div>
 
 <script>
@@ -4141,6 +4341,8 @@ function navTo(page) {{
   const b = document.getElementById('nav-' + page);
   if (b) b.classList.add('sb-active');
   document.getElementById('main').scrollTop = 0;
+  if (page === 'settings') {{ loadLiveScanConfig(); }}
+  if (page === 'users') {{ loadUsers(); }}
   if (page === 'probe') {{
     const fr = document.getElementById('probe-iframe');
     if (fr && fr.getAttribute('data-loaded') === '0') {{
@@ -5114,17 +5316,18 @@ async function downloadFleetReport(tier, btn) {{
 let _invData = [];
 let _invStatus = 'all';
 
-function _invReviewer() {{
-  return localStorage.getItem('sentinel_reviewer') || '';
-}}
+let _sessionEmail = null;
 
-function _ensureReviewer() {{
-  let r = _invReviewer();
-  if (!r) {{
-    r = (prompt('Enter your name or initials for the approval record (stored locally):') || '').trim();
-    if (r) localStorage.setItem('sentinel_reviewer', r);
+async function _loadSessionUser() {{
+  if (_sessionEmail !== null) return _sessionEmail;
+  try {{
+    const r = await fetch('/api/auth/me');
+    const d = await r.json();
+    _sessionEmail = d.email || '';
+  }} catch(e) {{
+    _sessionEmail = '';
   }}
-  return r || 'Dashboard user';
+  return _sessionEmail;
 }}
 
 function _fmtTs(epoch) {{
@@ -5135,19 +5338,19 @@ function _fmtTs(epoch) {{
 
 async function loadInventory() {{
   try {{
-    const r = await fetch('/api/fleet/inventory');
-    const d = await r.json();
-    _invData = d.items || [];
-    const c = d.counts || {{}};
-    const reviewer = _invReviewer();
-    const rvTag = reviewer
-      ? `<span style="font-size:11px;color:#6B7280;margin-left:12px">Approving as: <strong>${{esc(reviewer)}}</strong> · <a href="#" onclick="localStorage.removeItem('sentinel_reviewer');loadInventory();return false" style="color:#6B7280">change</a></span>`
-      : `<span style="font-size:11px;color:#f0a500;margin-left:12px">⚠ No reviewer name set — you will be prompted when approving</span>`;
+    const [inv, email] = await Promise.all([
+      fetch('/api/fleet/inventory').then(r => r.json()),
+      _loadSessionUser(),
+    ]);
+    _invData = inv.items || [];
+    const c = inv.counts || {{}};
     document.getElementById('inv-counts').innerHTML =
       `<div class="inv-count-card"><div class="inv-count-n" style="color:#DC2626">${{c.unapproved||0}}</div><div style="color:#6B7280">Unapproved</div></div>` +
       `<div class="inv-count-card"><div class="inv-count-n" style="color:#CA8A04">${{c.under_review||0}}</div><div style="color:#6B7280">Under Review</div></div>` +
-      `<div class="inv-count-card"><div class="inv-count-n" style="color:#16A34A">${{c.approved||0}}</div><div style="color:#6B7280">Approved</div></div>` +
-      rvTag;
+      `<div class="inv-count-card"><div class="inv-count-n" style="color:#16A34A">${{c.approved||0}}</div><div style="color:#6B7280">Approved</div></div>`;
+    document.getElementById('inv-reviewer-bar').innerHTML = email
+      ? `Approving as: <strong style="color:#111827">${{esc(email)}}</strong>`
+      : `<span style="color:#CA8A04">⚠ Not signed in</span>`;
     renderInventory();
   }} catch(e) {{
     document.getElementById('inv-body').innerHTML = '<div style="color:#f85149;font-size:13px;padding:8px 0">Failed to load inventory.</div>';
@@ -5220,13 +5423,8 @@ async function invSetStatus(id, status, btn) {{
   const orig = btn.textContent;
   btn.disabled = true; btn.textContent = '…';
   try {{
-    const by = _ensureReviewer();
     const slug = status==='under_review'?'review':status==='approved'?'approve':'unapprove';
-    const r = await fetch('/api/fleet/inventory/' + slug + '/' + id, {{
-      method: 'POST',
-      headers: {{'Content-Type': 'application/json'}},
-      body: JSON.stringify({{by}}),
-    }});
+    const r = await fetch('/api/fleet/inventory/' + slug + '/' + id, {{method:'POST'}});
     const d = await r.json();
     if (d.ok) {{ await loadInventory(); }} else {{ btn.disabled=false; btn.textContent=orig; }}
   }} catch(e) {{ btn.disabled=false; btn.textContent=orig; }}
@@ -5268,6 +5466,61 @@ async function invShowHistory(id, btn) {{
   }} catch(e) {{
     if (panel) panel.innerHTML = '<div style="color:#DC2626;font-size:12px">Failed to load history.</div>';
   }}
+}}
+
+async function loadUsers() {{
+  try {{
+    const r = await fetch('/api/users');
+    const d = await r.json();
+    const users = d.users || [];
+    const me = await _loadSessionUser();
+    const rows = users.map(u => {{
+      const isMe = u.email === me;
+      const inactive = !u.active;
+      return `<div style="display:flex;align-items:center;gap:12px;padding:8px 0;border-bottom:1px solid #F3F4F6">
+        <span style="font-size:13px;color:${{inactive?'#9CA3AF':'#111827'}};flex:1">${{esc(u.email)}}${{isMe?' <span style="font-size:10px;color:#4F46E5;font-weight:600">(you)</span>':''}}${{inactive?' <span style="font-size:10px;color:#9CA3AF">(deactivated)</span>':''}}</span>
+        <span style="font-size:11px;color:#6B7280;width:50px">${{esc(u.role)}}</span>
+        ${{!isMe && u.active ? `<button class="inv-action" onclick="deactivateUser('${{esc(u.id)}}','${{esc(u.email)}}')" style="color:#DC2626">Remove</button>` : '<span style="width:60px"></span>'}}
+      </div>`;
+    }}).join('');
+    document.getElementById('users-list').innerHTML = rows || '<div style="font-size:13px;color:#9CA3AF">No users yet.</div>';
+  }} catch(e) {{
+    document.getElementById('users-list').innerHTML = '<div style="color:#DC2626;font-size:13px">Failed to load users.</div>';
+  }}
+}}
+
+async function addUser() {{
+  const email = (document.getElementById('new-user-email').value || '').trim();
+  const pw = document.getElementById('new-user-pw').value || '';
+  const msg = document.getElementById('users-msg');
+  if (!email || !pw) {{ msg.style.color='#DC2626'; msg.textContent='Email and password are required.'; return; }}
+  if (pw.length < 8) {{ msg.style.color='#DC2626'; msg.textContent='Password must be at least 8 characters.'; return; }}
+  try {{
+    const r = await fetch('/api/users/add', {{
+      method: 'POST',
+      headers: {{'Content-Type':'application/json'}},
+      body: JSON.stringify({{email, password: pw, role:'admin'}}),
+    }});
+    const d = await r.json();
+    if (d.ok) {{
+      msg.style.color='#16A34A'; msg.textContent='User added.';
+      document.getElementById('new-user-email').value='';
+      document.getElementById('new-user-pw').value='';
+      await loadUsers();
+    }} else {{
+      msg.style.color='#DC2626'; msg.textContent = d.error || 'Failed to add user.';
+    }}
+  }} catch(e) {{ msg.style.color='#DC2626'; msg.textContent='Network error.'; }}
+}}
+
+async function deactivateUser(id, email) {{
+  if (!confirm(`Remove ${{email}}? They will be signed out immediately and cannot log in.`)) return;
+  try {{
+    const r = await fetch('/api/users/deactivate/' + id, {{method:'POST'}});
+    const d = await r.json();
+    if (d.ok) {{ await loadUsers(); }}
+    else {{ alert('Failed: ' + (d.error || 'unknown error')); }}
+  }} catch(e) {{ alert('Network error.'); }}
 }}
 
 const CADENCE_LABELS = {{daily:'Daily',weekly:'Weekly',monthly:'Monthly'}};
