@@ -159,6 +159,27 @@ class AgentStore:
                     created_at INTEGER NOT NULL,
                     last_fired INTEGER
                 );
+
+                CREATE TABLE IF NOT EXISTS dashboard_users (
+                    id            TEXT PRIMARY KEY,
+                    email         TEXT UNIQUE NOT NULL,
+                    password_hash TEXT NOT NULL,
+                    role          TEXT NOT NULL DEFAULT 'admin',
+                    created_at    INTEGER NOT NULL,
+                    active        INTEGER NOT NULL DEFAULT 1
+                );
+
+                CREATE TABLE IF NOT EXISTS dashboard_sessions (
+                    token      TEXT PRIMARY KEY,
+                    user_id    TEXT NOT NULL,
+                    email      TEXT NOT NULL,
+                    created_at INTEGER NOT NULL,
+                    expires_at INTEGER NOT NULL,
+                    FOREIGN KEY (user_id) REFERENCES dashboard_users(id)
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_sessions_expires
+                    ON dashboard_sessions(expires_at);
             """)
             # Migrations
             cols = {r[1] for r in conn.execute("PRAGMA table_info(devices)")}
@@ -815,6 +836,111 @@ class AgentStore:
             return conn.execute(
                 "SELECT COUNT(*) FROM mcp_servers WHERE dismissed = 0"
             ).fetchone()[0]
+
+    # ── Dashboard user authentication ─────────────────────────────────────────
+
+    _SESSION_TTL = 8 * 3600  # 8 hours
+
+    @staticmethod
+    def _hash_pw(password: str) -> str:
+        import hashlib, secrets
+        salt = secrets.token_hex(16)
+        dk = hashlib.pbkdf2_hmac('sha256', password.encode('utf-8'), salt.encode(), 260_000)
+        return f'pbkdf2:sha256:260000:{salt}:{dk.hex()}'
+
+    @staticmethod
+    def _verify_pw(password: str, stored: str) -> bool:
+        import hashlib, hmac as _hmac
+        try:
+            _, algo, iters, salt, dk_hex = stored.split(':')
+            dk = hashlib.pbkdf2_hmac(algo, password.encode('utf-8'), salt.encode(), int(iters))
+            return _hmac.compare_digest(dk.hex(), dk_hex)
+        except Exception:
+            return False
+
+    def has_dashboard_users(self) -> bool:
+        with self._lock, self._conn() as conn:
+            return conn.execute(
+                'SELECT 1 FROM dashboard_users WHERE active=1 LIMIT 1'
+            ).fetchone() is not None
+
+    def create_dashboard_user(self, email: str, password: str, role: str = 'admin') -> dict:
+        import uuid
+        uid = str(uuid.uuid4())
+        now = int(time.time())
+        pw_hash = self._hash_pw(password)
+        with self._lock, self._conn() as conn:
+            conn.execute(
+                'INSERT INTO dashboard_users (id, email, password_hash, role, created_at, active) '
+                'VALUES (?,?,?,?,?,1)',
+                (uid, email.lower().strip(), pw_hash, role, now),
+            )
+        return {'id': uid, 'email': email.lower().strip(), 'role': role}
+
+    def authenticate_dashboard_user(self, email: str, password: str) -> dict | None:
+        with self._lock, self._conn() as conn:
+            row = conn.execute(
+                'SELECT id, email, password_hash, role FROM dashboard_users '
+                'WHERE email=? AND active=1',
+                (email.lower().strip(),),
+            ).fetchone()
+        if row is None:
+            return None
+        if not self._verify_pw(password, row['password_hash']):
+            return None
+        return {'id': row['id'], 'email': row['email'], 'role': row['role']}
+
+    def create_dashboard_session(self, user_id: str, email: str) -> str:
+        import secrets
+        token = secrets.token_urlsafe(32)
+        now = int(time.time())
+        with self._lock, self._conn() as conn:
+            conn.execute(
+                'INSERT INTO dashboard_sessions (token, user_id, email, created_at, expires_at) '
+                'VALUES (?,?,?,?,?)',
+                (token, user_id, email, now, now + self._SESSION_TTL),
+            )
+        return token
+
+    def get_dashboard_session(self, token: str) -> dict | None:
+        if not token:
+            return None
+        now = int(time.time())
+        with self._lock, self._conn() as conn:
+            row = conn.execute(
+                'SELECT s.user_id, s.email, u.role '
+                'FROM dashboard_sessions s '
+                'JOIN dashboard_users u ON u.id = s.user_id '
+                'WHERE s.token=? AND s.expires_at>? AND u.active=1',
+                (token, now),
+            ).fetchone()
+        return dict(row) if row else None
+
+    def delete_dashboard_session(self, token: str) -> None:
+        with self._lock, self._conn() as conn:
+            conn.execute('DELETE FROM dashboard_sessions WHERE token=?', (token,))
+
+    def list_dashboard_users(self) -> list[dict]:
+        with self._lock, self._conn() as conn:
+            rows = conn.execute(
+                'SELECT id, email, role, created_at, active FROM dashboard_users '
+                'ORDER BY created_at ASC'
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def deactivate_dashboard_user(self, user_id: str) -> bool:
+        with self._lock, self._conn() as conn:
+            cur = conn.execute(
+                'UPDATE dashboard_users SET active=0 WHERE id=?', (user_id,)
+            )
+            if cur.rowcount:
+                conn.execute('DELETE FROM dashboard_sessions WHERE user_id=?', (user_id,))
+            return cur.rowcount > 0
+
+    def prune_expired_sessions(self) -> None:
+        now = int(time.time())
+        with self._lock, self._conn() as conn:
+            conn.execute('DELETE FROM dashboard_sessions WHERE expires_at<?', (now,))
 
     def get_device_timeseries(self, device_id: str) -> list[dict]:
         """Return ordered list of {t, fail, warn, pass} scan history points for a device."""
