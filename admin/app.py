@@ -137,6 +137,17 @@ async def dashboard(request: Request):
 
 # ── Deploy ────────────────────────────────────────────────────────────────────
 
+@app.post("/admin/dismiss-alert")
+async def dismiss_alert(request: Request, alert_id: int = Form(...)):
+    try:
+        require_super_admin(request)
+    except HTTPException:
+        return RedirectResponse("/login")
+    with get_conn() as conn:
+        conn.execute("DELETE FROM license_alerts WHERE id=?", (alert_id,))
+    return RedirectResponse("/dashboard", status_code=303)
+
+
 @app.post("/admin/refresh-seats")
 async def refresh_seats(request: Request):
     try:
