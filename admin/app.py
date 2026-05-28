@@ -137,6 +137,18 @@ async def dashboard(request: Request):
 
 # ── Deploy ────────────────────────────────────────────────────────────────────
 
+@app.post("/admin/refresh-seats")
+async def refresh_seats(request: Request):
+    try:
+        require_super_admin(request)
+    except HTTPException:
+        return RedirectResponse("/login")
+    import threading
+    from monitor import _check_all_customers
+    threading.Thread(target=_check_all_customers, daemon=True).start()
+    return RedirectResponse("/dashboard?seats_refreshed=1", status_code=303)
+
+
 @app.post("/admin/deploy")
 async def deploy(request: Request):
     try:
@@ -323,6 +335,7 @@ async def update_seats(request: Request, customer_id: str = Form(...), max_seats
         tier    = row["tier"]
         expires = row["license_expires_at"]
     _write_license_file(customer_id, name, tier, expires, max_seats)
+    _run_script("restart_customer.sh", customer_id)
     return RedirectResponse("/customers?seats_updated=" + customer_id, status_code=303)
 
 
@@ -632,6 +645,31 @@ async def remove_user(request: Request, user_id: str = Form(...)):
     return RedirectResponse("/users", status_code=303)
 
 
+# ── Telemetry — receives usage heartbeats from running customer containers ─────
+
+@app.post("/api/telemetry")
+async def receive_telemetry(request: Request):
+    from fastapi.responses import JSONResponse
+    try:
+        payload = await request.json()
+    except Exception:
+        return JSONResponse({"error": "bad_request"}, status_code=400)
+    customer_id    = payload.get("customer_id")
+    current_agents = payload.get("current_agents")
+    if not customer_id or current_agents is None:
+        return JSONResponse({"error": "missing_fields"}, status_code=400)
+    try:
+        current_agents = int(current_agents)
+    except (TypeError, ValueError):
+        return JSONResponse({"error": "invalid_agent_count"}, status_code=400)
+    with get_conn() as conn:
+        row = conn.execute("SELECT id, max_seats FROM customers WHERE id=? AND active=1", (customer_id,)).fetchone()
+        if not row:
+            return JSONResponse({"error": "unknown_customer"}, status_code=404)
+        conn.execute("UPDATE customers SET current_agents=? WHERE id=?", (current_agents, customer_id))
+    return JSONResponse({"status": "ok", "current_agents": current_agents, "max_seats": row["max_seats"]})
+
+
 # ── JSON API — used by Sentinel dashboard in cloud/proxy mode ─────────────────
 
 @app.get("/api/users")
@@ -727,15 +765,18 @@ def _write_license_file(customer_id: str, name: str, tier: str, expires: str, ma
     licenses_dir = os.environ.get("LICENSES_DIR", "/licenses")
     customer_dir = os.path.join(licenses_dir, customer_id)
     os.makedirs(customer_dir, exist_ok=True)
+    telemetry_url = f"http://sentinel-admin:8000/api/telemetry"
     payload = {
-        "customer_id":   customer_id,
-        "licensed_to":   name,
-        "max_agents":    max_seats,
-        "grace_pct":     10,
-        "expires_at":    expires,
-        "issued_at":     date.today().isoformat(),
-        "issued_by":     "M.A.R.K. AI Systems",
-        "plan":          tier,
+        "customer_id":        customer_id,
+        "licensed_to":        name,
+        "max_agents":         max_seats,
+        "grace_pct":          10,
+        "expires_at":         expires,
+        "issued_at":          date.today().isoformat(),
+        "issued_by":          "M.A.R.K. AI Systems",
+        "plan":               tier,
+        "telemetry_url":      telemetry_url,
+        "telemetry_interval_h": 1,
     }
     path = os.path.join(customer_dir, "license.json")
     with open(path, "w") as f:

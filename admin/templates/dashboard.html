@@ -2,6 +2,10 @@
 {% block content %}
 <h1>DASHBOARD{% if overages > 0 %} <span style="font-size:13px;color:#ff5555;font-weight:normal;margin-left:12px">&#9888; {{ overages }} overage{{ 's' if overages != 1 }}</span>{% endif %}</h1>
 
+{% if request.query_params.get('seats_refreshed') %}
+<div class="error" style="background:#4F46E518;border-color:#4F46E540;color:#4F46E5">&#10003; Seat counts refresh started — reload in a moment to see updated values</div>
+{% endif %}
+
 <div class="grid-stats">
   <div class="stat-card">
     <div class="stat-num">{{ customer_count }}</div>
@@ -18,7 +22,12 @@
 </div>
 
 <div class="card">
-  <div class="card-title">Seat Usage</div>
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+    <div class="card-title" style="margin-bottom:0">Seat Usage</div>
+    <form method="post" action="/admin/refresh-seats" style="margin:0">
+      <button type="submit" class="btn btn-sm" style="background:#F9FAFB;color:#4F46E5;border:1px solid #4F46E540">&#8635; Refresh Counts</button>
+    </form>
+  </div>
   {% if seats %}
   <table>
     <thead>

@@ -48,10 +48,19 @@ def _check_all_customers():
 def _query_agent_count(customer_id: str) -> int | None:
     import subprocess
     container = f"sentinel-{customer_id}"
+    # The sentinel server stores agents.db under /app/data/customers/<customer_id>/agents.db
+    # Use glob so this works regardless of what customer_id slug is in the license.
     try:
+        find = subprocess.run(
+            ["docker", "exec", container, "find", "/app/data", "-name", "agents.db"],
+            capture_output=True, text=True, timeout=10
+        )
+        if find.returncode != 0 or not find.stdout.strip():
+            return None
+        db_path = find.stdout.strip().splitlines()[0]
         result = subprocess.run(
             ["docker", "exec", container, "python3", "-c",
-             "import sqlite3,time; conn=sqlite3.connect('/app/data/agents.db'); "
+             f"import sqlite3,time; conn=sqlite3.connect('{db_path}'); "
              "cutoff=int(time.time())-1800; "
              "print(conn.execute('SELECT COUNT(*) FROM devices WHERE last_seen>=?',(cutoff,)).fetchone()[0])"],
             capture_output=True, text=True, timeout=10
