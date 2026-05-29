@@ -94,9 +94,13 @@ async def auth_verify(request: Request):
     if customer_id and user["role"] != "super_admin":
         if user.get("customer_id") != customer_id:
             return Response(status_code=403)
+    with get_conn() as conn:
+        row = conn.execute("SELECT email FROM users WHERE id=?", (user["sub"],)).fetchone()
+    email = row["email"] if row else ""
     return Response(status_code=200, headers={
-        "X-Sentinel-User-Email": user.get("sub", ""),
-        "X-Sentinel-User-Role":  user.get("role", ""),
+        "X-Sentinel-User-Email":    email,
+        "X-Sentinel-User-Role":     user.get("role", ""),
+        "X-Sentinel-Customer-ID":   user.get("customer_id", ""),
     })
 
 
@@ -700,7 +704,9 @@ async def api_users_list(request: Request):
                 "SELECT id, email, role, created_at FROM users WHERE active=1 AND customer_id=? AND role != 'super_admin' ORDER BY email",
                 (user["customer_id"],),
             ).fetchall()
-    return JSONResponse({"users": [dict(r) for r in rows], "current_user": user.get("sub")})
+        me_row = conn.execute("SELECT email FROM users WHERE id=?", (user.get("sub"),)).fetchone()
+    current_user_email = me_row["email"] if me_row else ""
+    return JSONResponse({"users": [dict(r) for r in rows], "current_user": current_user_email})
 
 
 @app.post("/api/users/add")

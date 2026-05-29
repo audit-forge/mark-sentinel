@@ -10,7 +10,7 @@ import json
 from db import get_conn
 from mailer import send_alert
 
-MONITOR_INTERVAL = int(os.environ.get("MONITOR_INTERVAL_H", "24")) * 3600
+MONITOR_INTERVAL = int(os.environ.get("MONITOR_INTERVAL_H", "1")) * 3600
 ALERT_TO         = os.environ.get("ALERT_TO", "")
 _SENTINEL_TIMEOUT = 5
 
