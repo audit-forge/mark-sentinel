@@ -67,6 +67,14 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 PORT = 7331
+
+
+def _compiled_cmd(script: Path) -> list:
+    """Return command prefix for a script — uses compiled binary if present, else Python."""
+    binary = script.with_suffix('')
+    if binary.exists() and not binary.is_dir():
+        return [str(binary)]
+    return [sys.executable, str(script)]
 ROOT = Path(__file__).parent
 _serve_port = PORT   # updated at startup so handlers can reference it
 
@@ -885,13 +893,13 @@ def _run_scan(mode: str, target: str, profile: str, providers: list[str], live_c
 
     try:
         if mode == 'demo':
-            cmd = [sys.executable, str(ROOT / 'scripts' / 'demo.py'), '--target', target]
+            cmd = _compiled_cmd(ROOT / 'scripts' / 'demo.py') + ['--target', target]
             if profile and profile != 'default':
                 cmd += ['--profile', profile]
         else:
             provider = providers[0] if providers else 'config'
             db_path = str(ROOT / 'data' / 'agents.db')
-            cmd = [sys.executable, str(ROOT / 'audit.py'),
+            cmd = _compiled_cmd(ROOT / 'audit.py') + [
                    '--target', target,
                    '--mode', provider, '--profile', profile, '--output', 'json',
                    '--store-db', db_path]
