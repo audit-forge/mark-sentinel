@@ -955,10 +955,11 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         email = self.headers.get('X-Sentinel-User-Email', '').strip()
         if not email:
             return None
+        customer_id = self.headers.get('X-Sentinel-Customer-ID', '').strip() or 'default'
         return {
             'email':       email,
             'role':        self.headers.get('X-Sentinel-User-Role', 'admin').strip(),
-            'customer_id': 'default',
+            'customer_id': customer_id,
         }
 
     def _session_user(self) -> dict | None:

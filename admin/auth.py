@@ -19,11 +19,12 @@ def verify_password(plain: str, hashed: str) -> bool:
     return pwd_context.verify(plain, hashed)
 
 
-def create_token(user_id: str, role: str, customer_id: str | None) -> str:
+def create_token(user_id: str, role: str, customer_id: str | None, email: str = "") -> str:
     payload = {
         "sub": user_id,
         "role": role,
         "customer_id": customer_id,
+        "email": email,
         "exp": datetime.now(timezone.utc) + timedelta(hours=TOKEN_EXPIRE_HOURS),
     }
     return jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)

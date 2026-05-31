@@ -68,7 +68,7 @@ async def login(
         return templates.TemplateResponse("login.html", {
             "request": request, "error": "Invalid credentials", "next": next
         })
-    token = create_token(row["id"], row["role"], row["customer_id"])
+    token = create_token(row["id"], row["role"], row["customer_id"], row["email"])
     destination = next if next else "/dashboard"
     resp = RedirectResponse(destination, status_code=303)
     resp.set_cookie("token", token, httponly=True, max_age=28800, samesite="lax")
