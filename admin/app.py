@@ -40,6 +40,17 @@ def _ensure_super_admin():
             )
 
 
+def _sentinel_url(customer_id: str | None) -> str:
+    """Return the Sentinel dashboard URL for a given customer_id."""
+    if not customer_id:
+        return "/login"
+    with get_conn() as conn:
+        row = conn.execute("SELECT port FROM customers WHERE id=?", (customer_id,)).fetchone()
+    if not row or not row["port"]:
+        return "/login"
+    return f"http://{PUBLIC_IP}:{row['port']}"
+
+
 # ── Auth ──────────────────────────────────────────────────────────────────────
 
 @app.get("/", response_class=HTMLResponse)
@@ -70,7 +81,7 @@ async def login(
         })
     token = create_token(row["id"], row["role"], row["customer_id"], row["email"])
     if not next:
-        destination = "/dashboard" if row["role"] == "super_admin" else "http://35.255.19.236:7001"
+        destination = "/dashboard" if row["role"] == "super_admin" else _sentinel_url(row["customer_id"])
     else:
         destination = next
     resp = RedirectResponse(destination, status_code=303)
@@ -85,7 +96,7 @@ async def logout(request: Request, next: str = None):
     else:
         try:
             user = get_current_user(request)
-            dest = "/login" if user.get("role") == "super_admin" else "http://35.255.19.236:7001"
+            dest = "/login" if user.get("role") == "super_admin" else _sentinel_url(user.get("customer_id"))
         except Exception:
             dest = "/login"
     resp = RedirectResponse(dest, status_code=303)
@@ -123,7 +134,7 @@ async def dashboard(request: Request):
     except HTTPException:
         return RedirectResponse("/login")
     if user.get("role") != "super_admin":
-        return RedirectResponse("http://35.255.19.236:7001")
+        return RedirectResponse(_sentinel_url(user.get("customer_id")))
     with get_conn() as conn:
         customer_count = conn.execute(
             "SELECT COUNT(*) FROM customers WHERE active=1"
