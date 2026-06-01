@@ -69,7 +69,10 @@ async def login(
             "request": request, "error": "Invalid credentials", "next": next
         })
     token = create_token(row["id"], row["role"], row["customer_id"], row["email"])
-    destination = next if next else "/dashboard"
+    if not next:
+        destination = "/dashboard" if row["role"] == "super_admin" else "http://35.255.19.236:7001"
+    else:
+        destination = next
     resp = RedirectResponse(destination, status_code=303)
     resp.set_cookie("token", token, httponly=True, max_age=28800, samesite="lax")
     return resp
@@ -112,6 +115,8 @@ async def dashboard(request: Request):
         user = get_current_user(request)
     except HTTPException:
         return RedirectResponse("/login")
+    if user.get("role") != "super_admin":
+        return RedirectResponse("http://35.255.19.236:7001")
     with get_conn() as conn:
         customer_count = conn.execute(
             "SELECT COUNT(*) FROM customers WHERE active=1"
