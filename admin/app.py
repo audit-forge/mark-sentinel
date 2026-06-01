@@ -80,7 +80,14 @@ async def login(
 
 @app.get("/logout")
 async def logout(request: Request, next: str = None):
-    dest = next if (next and next.startswith('http')) else "/login"
+    if next and next.startswith('http'):
+        dest = next
+    else:
+        try:
+            user = get_current_user(request)
+            dest = "/login" if user.get("role") == "super_admin" else "http://35.255.19.236:7001"
+        except Exception:
+            dest = "/login"
     resp = RedirectResponse(dest, status_code=303)
     resp.delete_cookie("token")
     return resp
