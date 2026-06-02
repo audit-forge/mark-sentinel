@@ -575,11 +575,19 @@ async def users_page(request: Request):
             """, (user["customer_id"],)).fetchall()
             customers = []
     with get_conn() as conn:
-        all_users = conn.execute("""
-            SELECT u.*, c.name as customer_name
-            FROM users u LEFT JOIN customers c ON u.customer_id = c.id
-            WHERE u.active=1 ORDER BY u.email
-        """).fetchall()
+        if user["role"] == "super_admin":
+            all_users = conn.execute("""
+                SELECT u.*, c.name as customer_name
+                FROM users u LEFT JOIN customers c ON u.customer_id = c.id
+                WHERE u.active=1 ORDER BY u.email
+            """).fetchall()
+        else:
+            all_users = conn.execute("""
+                SELECT u.*, c.name as customer_name
+                FROM users u LEFT JOIN customers c ON u.customer_id = c.id
+                WHERE u.active=1 AND u.customer_id=? AND u.role != 'super_admin'
+                ORDER BY u.email
+            """, (user["customer_id"],)).fetchall()
     return templates.TemplateResponse("users.html", {
         "request": request, "user": user,
         "current_user_id": user["sub"],
@@ -759,6 +767,30 @@ async def api_add_user(request: Request):
             )
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=400)
+    return JSONResponse({"ok": True})
+
+
+@app.post("/api/users/password/{user_id}")
+async def api_change_user_password(request: Request, user_id: str):
+    from fastapi.responses import JSONResponse
+    try:
+        user = get_current_user(request)
+    except HTTPException:
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    if user["role"] not in ("super_admin", "customer_admin"):
+        return JSONResponse({"error": "forbidden"}, status_code=403)
+    body = await request.json()
+    new_password = str(body.get("new_password", ""))
+    if len(new_password) < 8:
+        return JSONResponse({"error": "password too short"}, status_code=400)
+    with get_conn() as conn:
+        target = conn.execute("SELECT * FROM users WHERE id=? AND active=1", (user_id,)).fetchone()
+        if not target:
+            return JSONResponse({"error": "not found"}, status_code=404)
+        if user["role"] == "customer_admin":
+            if target["customer_id"] != user["customer_id"] or target["role"] == "super_admin":
+                return JSONResponse({"error": "forbidden"}, status_code=403)
+        conn.execute("UPDATE users SET password_hash=? WHERE id=?", (hash_password(new_password), user_id))
     return JSONResponse({"ok": True})
 
 

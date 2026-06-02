@@ -101,6 +101,7 @@
   {% endif %}
 </div>
 
+{% if user.role == 'super_admin' %}
 <div class="card">
   <div class="card-title">Edit User</div>
   <form method="post" action="/users/edit">
@@ -137,6 +138,7 @@
     </div>
   </form>
 </div>
+{% endif %}
 
 <div class="card" id="pw-section">
   <div class="card-title">Change Password</div>

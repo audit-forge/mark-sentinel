@@ -1009,6 +1009,14 @@ class CustomerRegistry:
                 conn.execute('DELETE FROM dashboard_sessions WHERE user_id=?', (user_id,))
             return cur.rowcount > 0
 
+    def change_user_password(self, user_id: str, customer_id: str, new_password: str) -> bool:
+        with self._lock, self._conn() as conn:
+            cur = conn.execute(
+                'UPDATE dashboard_users SET password_hash=? WHERE id=? AND customer_id=? AND active=1',
+                (self._hash_pw(new_password), user_id, customer_id),
+            )
+            return cur.rowcount > 0
+
     # ── session management ────────────────────────────────────────────────────
 
     def create_session(self, user_id: str, customer_id: str, email: str) -> str:

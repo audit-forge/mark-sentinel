@@ -1,7 +1,7 @@
 # ── Stage 1: Compile scanner binaries only (audit + demo) ────────────────────
 # server.py runs as Python — it's behind auth and changes frequently.
 # audit.py and demo.py are the actual IP — compiled to native binaries.
-FROM --platform=linux/amd64 python:3.12-slim AS builder
+FROM --platform=linux/amd64 python:3.12.4-slim AS builder
 WORKDIR /src
 
 RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-recommends \
@@ -10,6 +10,7 @@ RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-reco
 
 COPY requirements.txt ./
 RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir --upgrade setuptools wheel && \
     pip install --no-cache-dir -r requirements.txt && \
     pip install --no-cache-dir nuitka ordered-set
 
@@ -26,7 +27,7 @@ RUN python -m nuitka --standalone --assume-yes-for-downloads \
     scripts/demo.py
 
 # ── Stage 2: Python runtime with compiled scanners ───────────────────────────
-FROM --platform=linux/amd64 python:3.12-slim
+FROM --platform=linux/amd64 python:3.12.4-slim
 WORKDIR /app
 ENV PYTHONUNBUFFERED=1
 
@@ -36,6 +37,7 @@ RUN groupadd -r sentinel && useradd -r -g sentinel -m -d /home/sentinel sentinel
 
 COPY requirements.txt ./
 RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir --upgrade setuptools wheel && \
     pip install --no-cache-dir -r requirements.txt
 
 # Copy all Python source for the server
