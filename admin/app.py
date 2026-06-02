@@ -462,6 +462,31 @@ async def delete_customer(request: Request, customer_id: str = Form(...)):
     return RedirectResponse("/customers?status=inactive", status_code=303)
 
 
+@app.post("/customers/rotate-token")
+async def rotate_customer_token(request: Request):
+    """Generate a new agent token for a customer. Immediately invalidates the old one."""
+    try:
+        require_super_admin(request)
+    except HTTPException:
+        return JSONResponse({"error": "unauthorized"}, status_code=403)
+    try:
+        body = await request.json()
+        customer_id = str(body.get("customer_id", "")).strip()
+    except Exception:
+        return JSONResponse({"error": "invalid_request"}, status_code=400)
+    if not customer_id:
+        return JSONResponse({"error": "customer_id required"}, status_code=400)
+    new_token = secrets.token_urlsafe(32)
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT id, name FROM customers WHERE id=? AND active=1", (customer_id,)
+        ).fetchone()
+        if not row:
+            return JSONResponse({"error": "customer not found"}, status_code=404)
+        conn.execute("UPDATE customers SET agent_token=? WHERE id=?", (new_token, customer_id))
+    return JSONResponse({"token": new_token, "customer_id": customer_id, "name": row["name"]})
+
+
 # ── Forgot / Reset password ───────────────────────────────────────────────────
 
 @app.get("/forgot-password", response_class=HTMLResponse)

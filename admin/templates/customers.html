@@ -131,6 +131,9 @@
           <button type="button" class="btn btn-sm"
                   onclick="openDeploy('{{ c.id }}','{{ c.name | replace("'","\\x27") }}',{{ c.port or 7001 }},'{{ c.agent_token or '' }}')"
                   style="background:#F9FAFB;color:#4488ff;border:1px solid #4488ff40">Deploy</button>
+          <button type="button" class="btn btn-sm"
+                  onclick="openRotate('{{ c.id }}','{{ c.name | replace("'","\\x27") }}')"
+                  style="background:#F9FAFB;color:#DC2626;border:1px solid #DC262640">Rotate Token</button>
           <form method="post" action="/customers/renew" style="display:inline">
             <input type="hidden" name="customer_id" value="{{ c.id }}">
             <button type="submit" class="btn btn-sm" style="background:#F9FAFB;color:#4F46E5;border:1px solid #4F46E540">Renew</button>
@@ -301,6 +304,113 @@ function dCopy(id, btn) {
 }
 document.getElementById('deployModal').addEventListener('click', function(e) {
   if (e.target === this) closeDeploy();
+});
+</script>
+
+<!-- ── Rotate Token Modal ──────────────────────────────────────────────── -->
+<div id="rotateModal" style="display:none;position:fixed;inset:0;z-index:9999;background:#000000cc;overflow-y:auto">
+  <div style="background:#fff;border:1px solid #E5E7EB;border-radius:8px;max-width:520px;margin:100px auto 40px;overflow:hidden">
+
+    <div style="padding:20px 24px;border-bottom:1px solid #E5E7EB;display:flex;align-items:center;justify-content:space-between">
+      <div>
+        <div style="font-size:12px;color:#DC2626;letter-spacing:1px;text-transform:uppercase;font-weight:600">Rotate Agent Token</div>
+        <div id="rt-name" style="font-size:18px;color:#111827;margin-top:4px"></div>
+      </div>
+      <button onclick="closeRotate()" style="background:none;border:none;color:#6B7280;font-size:26px;cursor:pointer;padding:2px 10px;line-height:1">&times;</button>
+    </div>
+
+    <!-- Confirm step -->
+    <div id="rt-confirm" style="padding:24px">
+      <div style="background:#FEF2F2;border:1px solid #FECACA;border-radius:6px;padding:14px 16px;margin-bottom:20px;font-size:14px;color:#991B1B;line-height:1.6">
+        <strong>This action immediately invalidates the current token.</strong><br>
+        All deployed Sentinel agents for this customer will stop checking in until they are reinstalled with the new token. Deploy a new agent installer after rotating.
+      </div>
+      <div style="display:flex;gap:10px;justify-content:flex-end">
+        <button onclick="closeRotate()" class="btn" style="background:#F9FAFB;color:#374151;border:1px solid #E5E7EB">Cancel</button>
+        <button onclick="confirmRotate()" class="btn" style="background:#DC2626;color:#fff;border:none" id="rt-confirm-btn">Rotate Token</button>
+      </div>
+    </div>
+
+    <!-- Result step -->
+    <div id="rt-result" style="display:none;padding:24px">
+      <div style="background:#F0FDF4;border:1px solid #BBF7D0;border-radius:6px;padding:12px 16px;margin-bottom:16px;font-size:13px;color:#166534">
+        &#10003; New token generated. Copy it now — it will not be shown again.
+      </div>
+      <label style="font-size:13px;font-weight:600;color:#374151;display:block;margin-bottom:6px">New Agent Token</label>
+      <div style="position:relative;margin-bottom:20px">
+        <code id="rt-token-val" style="display:block;background:#F9FAFB;border:1px solid #E5E7EB;border-radius:6px;padding:12px 70px 12px 14px;font-size:13px;font-family:'Menlo','Consolas',monospace;color:#4F46E5;word-break:break-all;line-height:1.6"></code>
+        <button onclick="copyToken()" id="rt-copy-btn" style="position:absolute;top:10px;right:10px;background:#F9FAFB;border:1px solid #E5E7EB;color:#6B7280;font-size:12px;padding:4px 10px;border-radius:4px;cursor:pointer;font-family:inherit">Copy</button>
+      </div>
+      <p style="font-size:13px;color:#6B7280;margin-bottom:20px">Use the <strong>Deploy</strong> button to generate an updated installer command with this token, then run it on each affected device.</p>
+      <div style="display:flex;justify-content:flex-end">
+        <button onclick="closeRotate()" class="btn btn-primary">Done</button>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+var _rotateCid = '';
+function openRotate(cid, name) {
+  _rotateCid = cid;
+  document.getElementById('rt-name').textContent = name;
+  document.getElementById('rt-confirm').style.display = 'block';
+  document.getElementById('rt-result').style.display  = 'none';
+  document.getElementById('rt-confirm-btn').disabled = false;
+  document.getElementById('rt-confirm-btn').textContent = 'Rotate Token';
+  document.getElementById('rotateModal').style.display = 'block';
+}
+function closeRotate() {
+  document.getElementById('rotateModal').style.display = 'none';
+  // Refresh the page so the Deploy modal picks up the new token
+  if (document.getElementById('rt-result').style.display === 'block') {
+    window.location.reload();
+  }
+}
+function confirmRotate() {
+  var btn = document.getElementById('rt-confirm-btn');
+  btn.disabled = true;
+  btn.textContent = 'Rotating…';
+  fetch('/customers/rotate-token', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({customer_id: _rotateCid})
+  })
+  .then(function(r) { return r.json(); })
+  .then(function(data) {
+    if (data.error) {
+      alert('Error: ' + data.error);
+      btn.disabled = false;
+      btn.textContent = 'Rotate Token';
+      return;
+    }
+    document.getElementById('rt-token-val').textContent = data.token;
+    document.getElementById('rt-confirm').style.display = 'none';
+    document.getElementById('rt-result').style.display  = 'block';
+  })
+  .catch(function(e) {
+    alert('Request failed: ' + e);
+    btn.disabled = false;
+    btn.textContent = 'Rotate Token';
+  });
+}
+function copyToken() {
+  var text = document.getElementById('rt-token-val').textContent;
+  var btn  = document.getElementById('rt-copy-btn');
+  function flash() { btn.textContent = 'Copied!'; setTimeout(function(){ btn.textContent = 'Copy'; }, 2000); }
+  if (navigator.clipboard && window.isSecureContext) {
+    navigator.clipboard.writeText(text).then(flash);
+  } else {
+    var ta = document.createElement('textarea');
+    ta.value = text; ta.style.cssText = 'position:fixed;left:-9999px;opacity:0';
+    document.body.appendChild(ta); ta.select();
+    try { document.execCommand('copy'); flash(); } catch(e) {}
+    document.body.removeChild(ta);
+  }
+}
+document.getElementById('rotateModal').addEventListener('click', function(e) {
+  if (e.target === this) closeRotate();
 });
 </script>
 {% endblock %}
