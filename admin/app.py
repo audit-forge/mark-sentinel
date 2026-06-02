@@ -8,7 +8,7 @@ import time
 from collections import defaultdict
 from datetime import datetime, date, timezone, timedelta
 from fastapi import FastAPI, Request, Form, HTTPException
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 
 from db import init_db, get_conn
