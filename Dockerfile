@@ -1,20 +1,57 @@
-FROM python:3.12-slim
+# ── Stage 1: Compile scanner binaries only (audit + demo) ────────────────────
+# server.py runs as Python — it's behind auth and changes frequently.
+# audit.py and demo.py are the actual IP — compiled to native binaries.
+FROM --platform=linux/amd64 python:3.12.4-slim AS builder
+WORKDIR /src
 
+RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-recommends \
+    gcc g++ patchelf ccache make libffi-dev && \
+    rm -rf /var/lib/apt/lists/*
+
+COPY requirements.txt ./
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir --upgrade setuptools wheel && \
+    pip install --no-cache-dir -r requirements.txt && \
+    pip install --no-cache-dir nuitka ordered-set
+
+# Copy only the files needed for compilation so layer cache survives server.py changes
+COPY audit.py checks/ profiles/ ./
+COPY scripts/ ./scripts/
+
+RUN python -m nuitka --standalone --assume-yes-for-downloads \
+    --output-dir=/build/audit --output-filename=audit \
+    audit.py
+
+RUN python -m nuitka --standalone --assume-yes-for-downloads \
+    --output-dir=/build/demo --output-filename=demo \
+    scripts/demo.py
+
+# ── Stage 2: Python runtime with compiled scanners ───────────────────────────
+FROM --platform=linux/amd64 python:3.12.4-slim
 WORKDIR /app
 ENV PYTHONUNBUFFERED=1
 
-# Create non-root user
+RUN apt-get update && apt-get upgrade -y && rm -rf /var/lib/apt/lists/*
+
 RUN groupadd -r sentinel && useradd -r -g sentinel -m -d /home/sentinel sentinel
 
-# Install Python deps
 COPY requirements.txt ./
 RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir --upgrade setuptools wheel && \
     pip install --no-cache-dir -r requirements.txt
 
-# Copy application files
+# Copy all Python source for the server
 COPY . .
-RUN chown -R sentinel:sentinel /app
 
+# Overwrite audit and demo with compiled binaries from builder
+COPY --from=builder /build/audit/audit.dist/audit /app/audit
+COPY --from=builder /build/demo/demo.dist/demo /app/scripts/demo
+RUN chmod +x /app/audit /app/scripts/demo
+
+RUN --mount=type=bind,from=builder,source=/src,target=/build-src \
+    cp /build-src/license.json /app/ 2>/dev/null || true
+
+RUN chown -R sentinel:sentinel /app
 USER sentinel
 EXPOSE 7331
 

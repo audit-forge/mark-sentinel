@@ -80,7 +80,11 @@
       </td>
       <td style="color:#666">{{ u.customer_name or '—' }}</td>
       <td style="color:#555">{{ u.created_at[:10] }}</td>
-      <td>
+      <td style="white-space:nowrap">
+        <button type="button" class="btn btn-sm" style="background:#F9FAFB;border:1px solid #D1D5DB;color:#374151;margin-right:4px"
+          onclick="document.getElementById('pw-user').value='{{ u.id }}';document.getElementById('pw-section').scrollIntoView({behavior:'smooth'})">
+          Change Password
+        </button>
         {% if u.id != current_user_id %}
         <form method="post" action="/users/remove" style="display:inline" onsubmit="return confirm('Remove this user?')">
           <input type="hidden" name="user_id" value="{{ u.id }}">
@@ -97,6 +101,7 @@
   {% endif %}
 </div>
 
+{% if user.role == 'super_admin' %}
 <div class="card">
   <div class="card-title">Edit User</div>
   <form method="post" action="/users/edit">
@@ -133,14 +138,15 @@
     </div>
   </form>
 </div>
+{% endif %}
 
-<div class="card">
-  <div class="card-title">Reset Password</div>
+<div class="card" id="pw-section">
+  <div class="card-title">Change Password</div>
   <form method="post" action="/users/password">
     <div class="form-row">
       <div class="form-group">
         <label>User</label>
-        <select name="user_id" required>
+        <select name="user_id" id="pw-user" required>
           <option value="">— select user —</option>
           {% for u in all_users %}
           <option value="{{ u.id }}">{{ u.email }} ({{ u.role }}{% if u.customer_name %} · {{ u.customer_name }}{% endif %})</option>
