@@ -1,26 +1,21 @@
-# ── Stage 1: Compile Python source to native binaries ─────────────────────────
-FROM python:3.12-slim AS builder
+# ── Stage 1: Compile scanner binaries only (audit + demo) ────────────────────
+# server.py runs as Python — it's behind auth and changes frequently.
+# audit.py and demo.py are the actual IP — compiled to native binaries.
+FROM --platform=linux/amd64 python:3.12-slim AS builder
 WORKDIR /src
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-recommends \
     gcc g++ patchelf ccache make libffi-dev && \
     rm -rf /var/lib/apt/lists/*
 
-# Install deps first so Nuitka can follow all imports
 COPY requirements.txt ./
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt && \
     pip install --no-cache-dir nuitka ordered-set
 
-COPY . .
-
-# Compile the three entry points as standalone executables.
-# --assume-yes-for-downloads fetches any missing Nuitka C runtime automatically.
-# --output-dir keeps each build isolated.
-RUN python -m nuitka --standalone --assume-yes-for-downloads \
-    --output-dir=/build/server --output-filename=server \
-    --include-data-dir=./profiles=profiles \
-    server.py
+# Copy only the files needed for compilation so layer cache survives server.py changes
+COPY audit.py checks/ profiles/ ./
+COPY scripts/ ./scripts/
 
 RUN python -m nuitka --standalone --assume-yes-for-downloads \
     --output-dir=/build/audit --output-filename=audit \
@@ -30,30 +25,32 @@ RUN python -m nuitka --standalone --assume-yes-for-downloads \
     --output-dir=/build/demo --output-filename=demo \
     scripts/demo.py
 
-# ── Stage 2: Lean runtime image — no Python, no source ───────────────────────
-FROM debian:bookworm-slim
+# ── Stage 2: Python runtime with compiled scanners ───────────────────────────
+FROM --platform=linux/amd64 python:3.12-slim
 WORKDIR /app
 ENV PYTHONUNBUFFERED=1
 
+RUN apt-get update && apt-get upgrade -y && rm -rf /var/lib/apt/lists/*
+
 RUN groupadd -r sentinel && useradd -r -g sentinel -m -d /home/sentinel sentinel
 
-# Copy compiled server (includes bundled Python runtime + all dependencies)
-COPY --from=builder /build/server/server.dist /app
+COPY requirements.txt ./
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir -r requirements.txt
 
-# Drop compiled audit and demo binaries next to server (server.py uses _compiled_cmd to find them)
+# Copy all Python source for the server
+COPY . .
+
+# Overwrite audit and demo with compiled binaries from builder
 COPY --from=builder /build/audit/audit.dist/audit /app/audit
 COPY --from=builder /build/demo/demo.dist/demo /app/scripts/demo
+RUN chmod +x /app/audit /app/scripts/demo
 
-# Copy non-Python assets that the server reads at runtime
-COPY --from=builder /src/agent_config.json /app/
-COPY --from=builder /src/tools.json /app/
-COPY --from=builder /src/alerts_config.json.example /app/
-COPY --from=builder /src/license.json* /app/ 2>/dev/null || true
+RUN --mount=type=bind,from=builder,source=/src,target=/build-src \
+    cp /build-src/license.json /app/ 2>/dev/null || true
 
-RUN chmod +x /app/server /app/audit /app/scripts/demo && \
-    chown -R sentinel:sentinel /app
-
+RUN chown -R sentinel:sentinel /app
 USER sentinel
 EXPOSE 7331
 
-CMD ["/app/server", "--no-browser"]
+CMD ["python", "server.py", "--no-browser"]

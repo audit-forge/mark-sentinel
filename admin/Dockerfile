@@ -1,5 +1,5 @@
-FROM python:3.11-slim
-RUN apt-get update && apt-get install -y --no-install-recommends \
+FROM python:3.12-slim
+RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-recommends \
     curl ca-certificates gnupg \
     && install -m 0755 -d /etc/apt/keyrings \
     && curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc \
