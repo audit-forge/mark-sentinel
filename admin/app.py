@@ -4,9 +4,11 @@ import json
 import secrets
 import string
 import subprocess
+import time
+from collections import defaultdict
 from datetime import datetime, date, timezone, timedelta
 from fastapi import FastAPI, Request, Form, HTTPException
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 
 from db import init_db, get_conn
@@ -15,6 +17,22 @@ from monitor import start_monitor
 
 app = FastAPI(docs_url=None, redoc_url=None)
 templates = Jinja2Templates(directory="templates")
+
+# Brute-force protection: track failed attempts per IP
+_login_attempts: dict[str, list[float]] = defaultdict(list)
+_LOGIN_WINDOW   = 300   # 5 minutes
+_LOGIN_MAX      = 10    # max attempts per window
+_LOCKOUT_SECS   = 600   # 10 minute lockout after exceeding limit
+
+def _check_rate_limit(ip: str) -> bool:
+    """Return True if the IP is allowed to attempt login, False if locked out."""
+    now = time.time()
+    attempts = [t for t in _login_attempts[ip] if now - t < _LOGIN_WINDOW]
+    _login_attempts[ip] = attempts
+    return len(attempts) < _LOGIN_MAX
+
+def _record_failed_login(ip: str) -> None:
+    _login_attempts[ip].append(time.time())
 
 ADMIN_EMAIL    = os.environ.get("ADMIN_EMAIL", "admin@sentinel.local")
 MAX_CUSTOMERS  = int(os.environ.get("MAX_CUSTOMERS", "0"))  # 0 = unlimited
@@ -40,6 +58,46 @@ def _ensure_super_admin():
             )
 
 
+def _get_shadow_ai_devices(customer_id: str) -> list[dict]:
+    """Query the Sentinel app database for detected shadow AI devices."""
+    try:
+        cmd = [
+            "sudo", "docker", "exec", "sentinel-mfdynamicsllc", "python3", "-c",
+            f"""
+import sqlite3
+import json
+try:
+    db = sqlite3.connect('/app/data/customers/{customer_id}/agents.db')
+    db.row_factory = sqlite3.Row
+    rows = db.execute('SELECT reporter_hostname, host, service, models_json, source, last_seen FROM shadow_devices WHERE dismissed=0 ORDER BY last_seen DESC').fetchall()
+    devices = [dict(r) for r in rows]
+    print(json.dumps(devices))
+except Exception as e:
+    print(json.dumps([]))
+"""
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+        if result.returncode == 0:
+            import json
+            return json.loads(result.stdout.strip() or "[]")
+        else:
+            return []
+    except Exception as e:
+        print(f"Error in _get_shadow_ai_devices: {e}")
+        return []
+
+
+def _sentinel_url(customer_id: str | None) -> str:
+    """Return the Sentinel dashboard URL for a given customer_id."""
+    if not customer_id:
+        return "/login"
+    with get_conn() as conn:
+        row = conn.execute("SELECT port FROM customers WHERE id=?", (customer_id,)).fetchone()
+    if not row or not row["port"]:
+        return "/login"
+    return f"http://{PUBLIC_IP}:{row['port']}"
+
+
 # ── Auth ──────────────────────────────────────────────────────────────────────
 
 @app.get("/", response_class=HTMLResponse)
@@ -60,16 +118,27 @@ async def login(
     password: str = Form(...),
     next: str = Form(""),
 ):
+    client_ip = request.client.host if request.client else "unknown"
+    if not _check_rate_limit(client_ip):
+        return templates.TemplateResponse("login.html", {
+            "request": request,
+            "error": "Too many failed attempts. Try again in 10 minutes.",
+            "next": next,
+        }, status_code=429)
     with get_conn() as conn:
         row = conn.execute(
             "SELECT * FROM users WHERE email=? AND active=1", (email,)
         ).fetchone()
     if not row or not verify_password(password, row["password_hash"]):
+        _record_failed_login(client_ip)
         return templates.TemplateResponse("login.html", {
             "request": request, "error": "Invalid credentials", "next": next
         })
-    token = create_token(row["id"], row["role"], row["customer_id"])
-    destination = next if next else "/dashboard"
+    token = create_token(row["id"], row["role"], row["customer_id"], row["email"])
+    if not next:
+        destination = "/dashboard" if row["role"] == "super_admin" else _sentinel_url(row["customer_id"])
+    else:
+        destination = next
     resp = RedirectResponse(destination, status_code=303)
     resp.set_cookie("token", token, httponly=True, max_age=28800, samesite="lax")
     return resp
@@ -77,7 +146,14 @@ async def login(
 
 @app.get("/logout")
 async def logout(request: Request, next: str = None):
-    dest = next if (next and next.startswith('http')) else "/login"
+    if next and next.startswith('http'):
+        dest = next
+    else:
+        try:
+            user = get_current_user(request)
+            dest = "/login" if user.get("role") == "super_admin" else _sentinel_url(user.get("customer_id"))
+        except Exception:
+            dest = "/login"
     resp = RedirectResponse(dest, status_code=303)
     resp.delete_cookie("token")
     return resp
@@ -94,9 +170,13 @@ async def auth_verify(request: Request):
     if customer_id and user["role"] != "super_admin":
         if user.get("customer_id") != customer_id:
             return Response(status_code=403)
+    with get_conn() as conn:
+        row = conn.execute("SELECT email FROM users WHERE id=?", (user["sub"],)).fetchone()
+    email = row["email"] if row else ""
     return Response(status_code=200, headers={
-        "X-Sentinel-User-Email": user.get("sub", ""),
-        "X-Sentinel-User-Role":  user.get("role", ""),
+        "X-Sentinel-User-Email":    email or "",
+        "X-Sentinel-User-Role":     user.get("role") or "",
+        "X-Sentinel-Customer-ID":   user.get("customer_id") or "",
     })
 
 
@@ -108,6 +188,8 @@ async def dashboard(request: Request):
         user = get_current_user(request)
     except HTTPException:
         return RedirectResponse("/login")
+    if user.get("role") != "super_admin":
+        return RedirectResponse(_sentinel_url(user.get("customer_id")))
     with get_conn() as conn:
         customer_count = conn.execute(
             "SELECT COUNT(*) FROM customers WHERE active=1"
@@ -132,10 +214,33 @@ async def dashboard(request: Request):
         "seats": seats,
         "overages": overages,
         "alerts": [dict(r) for r in alert_rows],
-    })
+        "shadow_ai_devices": _get_shadow_ai_devices(user["customer_id"]) if user.get("customer_id") else []})
 
 
 # ── Deploy ────────────────────────────────────────────────────────────────────
+
+@app.post("/admin/dismiss-alert")
+async def dismiss_alert(request: Request, alert_id: int = Form(...)):
+    try:
+        require_super_admin(request)
+    except HTTPException:
+        return RedirectResponse("/login")
+    with get_conn() as conn:
+        conn.execute("DELETE FROM license_alerts WHERE id=?", (alert_id,))
+    return RedirectResponse("/dashboard", status_code=303)
+
+
+@app.post("/admin/refresh-seats")
+async def refresh_seats(request: Request):
+    try:
+        require_super_admin(request)
+    except HTTPException:
+        return RedirectResponse("/login")
+    import threading
+    from monitor import _check_all_customers
+    threading.Thread(target=_check_all_customers, daemon=True).start()
+    return RedirectResponse("/dashboard?seats_refreshed=1", status_code=303)
+
 
 @app.post("/admin/deploy")
 async def deploy(request: Request):
@@ -323,6 +428,7 @@ async def update_seats(request: Request, customer_id: str = Form(...), max_seats
         tier    = row["tier"]
         expires = row["license_expires_at"]
     _write_license_file(customer_id, name, tier, expires, max_seats)
+    _run_script("restart_customer.sh", customer_id)
     return RedirectResponse("/customers?seats_updated=" + customer_id, status_code=303)
 
 
@@ -383,6 +489,66 @@ async def delete_customer(request: Request, customer_id: str = Form(...)):
         conn.execute("DELETE FROM users WHERE customer_id=?", (customer_id,))
     _run_script("remove_customer.sh", customer_id)
     return RedirectResponse("/customers?status=inactive", status_code=303)
+
+
+@app.post("/customers/rotate-token")
+async def rotate_customer_token(request: Request):
+    """Rotate agent token with 48h rollover window.
+    Old token stays valid while agents self-update via in-band delivery and set_config push."""
+    try:
+        require_super_admin(request)
+    except HTTPException:
+        return JSONResponse({"error": "unauthorized"}, status_code=403)
+    try:
+        body = await request.json()
+        customer_id = str(body.get("customer_id", "")).strip()
+    except Exception:
+        return JSONResponse({"error": "invalid_request"}, status_code=400)
+    if not customer_id:
+        return JSONResponse({"error": "customer_id required"}, status_code=400)
+
+    new_token = secrets.token_urlsafe(32)
+    rollover_hours = 48
+    expires_at = int(__import__("time").time()) + rollover_hours * 3600
+
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT id, name, port FROM customers WHERE id=? AND active=1", (customer_id,)
+        ).fetchone()
+        if not row:
+            return JSONResponse({"error": "customer not found"}, status_code=404)
+        # Migrate columns if needed
+        existing_cols = {r[1] for r in conn.execute("PRAGMA table_info(customers)").fetchall()}
+        if "agent_token_prev" not in existing_cols:
+            conn.execute("ALTER TABLE customers ADD COLUMN agent_token_prev TEXT DEFAULT NULL")
+        if "token_prev_expires" not in existing_cols:
+            conn.execute("ALTER TABLE customers ADD COLUMN token_prev_expires INTEGER DEFAULT 0")
+        conn.execute(
+            "UPDATE customers SET agent_token_prev=agent_token, token_prev_expires=?, agent_token=? WHERE id=?",
+            (expires_at, new_token, customer_id),
+        )
+
+    # Tell the Sentinel server for this customer to push set_config to all known devices
+    push_count = 0
+    port = row["port"] if row["port"] else 7001
+    sentinel_url = f"http://127.0.0.1:{port}/api/fleet/push-token"
+    try:
+        import httpx
+        async with httpx.AsyncClient(timeout=5) as client:
+            r = await client.post(sentinel_url)
+            if r.status_code == 200:
+                push_count = r.json().get("device_count", 0)
+    except Exception:
+        pass  # push is best-effort; in-band delivery still works
+
+    return JSONResponse({
+        "token": new_token,
+        "customer_id": customer_id,
+        "name": row["name"],
+        "rollover_hours": rollover_hours,
+        "expires_at": expires_at,
+        "push_queued": push_count,
+    })
 
 
 # ── Forgot / Reset password ───────────────────────────────────────────────────
@@ -524,11 +690,19 @@ async def users_page(request: Request):
             """, (user["customer_id"],)).fetchall()
             customers = []
     with get_conn() as conn:
-        all_users = conn.execute("""
-            SELECT u.*, c.name as customer_name
-            FROM users u LEFT JOIN customers c ON u.customer_id = c.id
-            WHERE u.active=1 ORDER BY u.email
-        """).fetchall()
+        if user["role"] == "super_admin":
+            all_users = conn.execute("""
+                SELECT u.*, c.name as customer_name
+                FROM users u LEFT JOIN customers c ON u.customer_id = c.id
+                WHERE u.active=1 ORDER BY u.email
+            """).fetchall()
+        else:
+            all_users = conn.execute("""
+                SELECT u.*, c.name as customer_name
+                FROM users u LEFT JOIN customers c ON u.customer_id = c.id
+                WHERE u.active=1 AND u.customer_id=? AND u.role != 'super_admin'
+                ORDER BY u.email
+            """, (user["customer_id"],)).fetchall()
     return templates.TemplateResponse("users.html", {
         "request": request, "user": user,
         "current_user_id": user["sub"],
@@ -632,6 +806,31 @@ async def remove_user(request: Request, user_id: str = Form(...)):
     return RedirectResponse("/users", status_code=303)
 
 
+# ── Telemetry — receives usage heartbeats from running customer containers ─────
+
+@app.post("/api/telemetry")
+async def receive_telemetry(request: Request):
+    from fastapi.responses import JSONResponse
+    try:
+        payload = await request.json()
+    except Exception:
+        return JSONResponse({"error": "bad_request"}, status_code=400)
+    customer_id    = payload.get("customer_id")
+    current_agents = payload.get("current_agents")
+    if not customer_id or current_agents is None:
+        return JSONResponse({"error": "missing_fields"}, status_code=400)
+    try:
+        current_agents = int(current_agents)
+    except (TypeError, ValueError):
+        return JSONResponse({"error": "invalid_agent_count"}, status_code=400)
+    with get_conn() as conn:
+        row = conn.execute("SELECT id, max_seats FROM customers WHERE id=? AND active=1", (customer_id,)).fetchone()
+        if not row:
+            return JSONResponse({"error": "unknown_customer"}, status_code=404)
+        conn.execute("UPDATE customers SET current_agents=? WHERE id=?", (current_agents, customer_id))
+    return JSONResponse({"status": "ok", "current_agents": current_agents, "max_seats": row["max_seats"]})
+
+
 # ── JSON API — used by Sentinel dashboard in cloud/proxy mode ─────────────────
 
 @app.get("/api/users")
@@ -651,7 +850,9 @@ async def api_users_list(request: Request):
                 "SELECT id, email, role, created_at FROM users WHERE active=1 AND customer_id=? AND role != 'super_admin' ORDER BY email",
                 (user["customer_id"],),
             ).fetchall()
-    return JSONResponse({"users": [dict(r) for r in rows], "current_user": user.get("sub")})
+        me_row = conn.execute("SELECT email FROM users WHERE id=?", (user.get("sub"),)).fetchone()
+    current_user_email = me_row["email"] if me_row else ""
+    return JSONResponse({"users": [dict(r) for r in rows], "current_user": current_user_email})
 
 
 @app.post("/api/users/add")
@@ -681,6 +882,30 @@ async def api_add_user(request: Request):
             )
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=400)
+    return JSONResponse({"ok": True})
+
+
+@app.post("/api/users/password/{user_id}")
+async def api_change_user_password(request: Request, user_id: str):
+    from fastapi.responses import JSONResponse
+    try:
+        user = get_current_user(request)
+    except HTTPException:
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    if user["role"] not in ("super_admin", "customer_admin"):
+        return JSONResponse({"error": "forbidden"}, status_code=403)
+    body = await request.json()
+    new_password = str(body.get("new_password", ""))
+    if len(new_password) < 8:
+        return JSONResponse({"error": "password too short"}, status_code=400)
+    with get_conn() as conn:
+        target = conn.execute("SELECT * FROM users WHERE id=? AND active=1", (user_id,)).fetchone()
+        if not target:
+            return JSONResponse({"error": "not found"}, status_code=404)
+        if user["role"] == "customer_admin":
+            if target["customer_id"] != user["customer_id"] or target["role"] == "super_admin":
+                return JSONResponse({"error": "forbidden"}, status_code=403)
+        conn.execute("UPDATE users SET password_hash=? WHERE id=?", (hash_password(new_password), user_id))
     return JSONResponse({"ok": True})
 
 
@@ -727,15 +952,18 @@ def _write_license_file(customer_id: str, name: str, tier: str, expires: str, ma
     licenses_dir = os.environ.get("LICENSES_DIR", "/licenses")
     customer_dir = os.path.join(licenses_dir, customer_id)
     os.makedirs(customer_dir, exist_ok=True)
+    telemetry_url = f"http://sentinel-admin:8000/api/telemetry"
     payload = {
-        "customer_id":   customer_id,
-        "licensed_to":   name,
-        "max_agents":    max_seats,
-        "grace_pct":     10,
-        "expires_at":    expires,
-        "issued_at":     date.today().isoformat(),
-        "issued_by":     "M.A.R.K. AI Systems",
-        "plan":          tier,
+        "customer_id":        customer_id,
+        "licensed_to":        name,
+        "max_agents":         max_seats,
+        "grace_pct":          10,
+        "expires_at":         expires,
+        "issued_at":          date.today().isoformat(),
+        "issued_by":          "M.A.R.K. AI Systems",
+        "plan":               tier,
+        "telemetry_url":      telemetry_url,
+        "telemetry_interval_h": 1,
     }
     path = os.path.join(customer_dir, "license.json")
     with open(path, "w") as f:
