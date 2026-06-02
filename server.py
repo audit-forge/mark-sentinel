@@ -62,6 +62,7 @@ import tarfile
 import threading
 import time
 import webbrowser
+from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlparse
@@ -79,6 +80,21 @@ ROOT = Path(__file__).parent
 _serve_port = PORT   # updated at startup so handlers can reference it
 
 log = logging.getLogger('sentinel.server')
+
+# ── login rate limiting ───────────────────────────────────────────────────────
+_login_attempts: dict[str, list[float]] = defaultdict(list)
+_LOGIN_WINDOW  = 300   # 5 minutes
+_LOGIN_MAX     = 10    # max attempts before lockout
+_LOCKOUT_SECS  = 600   # 10 minute lockout
+
+def _login_allowed(ip: str) -> bool:
+    now = time.time()
+    recent = [t for t in _login_attempts[ip] if now - t < _LOGIN_WINDOW]
+    _login_attempts[ip] = recent
+    return len(recent) < _LOGIN_MAX
+
+def _login_failed(ip: str) -> None:
+    _login_attempts[ip].append(time.time())
 
 # ── scan state ────────────────────────────────────────────────────────────────
 _lock   = threading.Lock()
@@ -1319,6 +1335,12 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         if length > 4096:
             self._send(400, b'Bad request', 'text/plain')
             return
+        client_ip = self.client_address[0]
+        if not _login_allowed(client_ip):
+            self.send_response(302)
+            self.send_header('Location', f'/login?error=ratelimit')
+            self.end_headers()
+            return
         params = parse_qs(self.rfile.read(length).decode(errors='ignore'))
         email = params.get('email', [''])[0].strip()
         password = params.get('password', [''])[0]
@@ -1335,6 +1357,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self.send_header('Location', next_url)
             self.end_headers()
         else:
+            _login_failed(client_ip)
             self.send_response(302)
             self.send_header('Location', f'/login?next={quote(next_url)}&error=1')
             self.end_headers()

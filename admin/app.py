@@ -4,6 +4,8 @@ import json
 import secrets
 import string
 import subprocess
+import time
+from collections import defaultdict
 from datetime import datetime, date, timezone, timedelta
 from fastapi import FastAPI, Request, Form, HTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -15,6 +17,22 @@ from monitor import start_monitor
 
 app = FastAPI(docs_url=None, redoc_url=None)
 templates = Jinja2Templates(directory="templates")
+
+# Brute-force protection: track failed attempts per IP
+_login_attempts: dict[str, list[float]] = defaultdict(list)
+_LOGIN_WINDOW   = 300   # 5 minutes
+_LOGIN_MAX      = 10    # max attempts per window
+_LOCKOUT_SECS   = 600   # 10 minute lockout after exceeding limit
+
+def _check_rate_limit(ip: str) -> bool:
+    """Return True if the IP is allowed to attempt login, False if locked out."""
+    now = time.time()
+    attempts = [t for t in _login_attempts[ip] if now - t < _LOGIN_WINDOW]
+    _login_attempts[ip] = attempts
+    return len(attempts) < _LOGIN_MAX
+
+def _record_failed_login(ip: str) -> None:
+    _login_attempts[ip].append(time.time())
 
 ADMIN_EMAIL    = os.environ.get("ADMIN_EMAIL", "admin@sentinel.local")
 MAX_CUSTOMERS  = int(os.environ.get("MAX_CUSTOMERS", "0"))  # 0 = unlimited
@@ -71,11 +89,19 @@ async def login(
     password: str = Form(...),
     next: str = Form(""),
 ):
+    client_ip = request.client.host if request.client else "unknown"
+    if not _check_rate_limit(client_ip):
+        return templates.TemplateResponse("login.html", {
+            "request": request,
+            "error": "Too many failed attempts. Try again in 10 minutes.",
+            "next": next,
+        }, status_code=429)
     with get_conn() as conn:
         row = conn.execute(
             "SELECT * FROM users WHERE email=? AND active=1", (email,)
         ).fetchone()
     if not row or not verify_password(password, row["password_hash"]):
+        _record_failed_login(client_ip)
         return templates.TemplateResponse("login.html", {
             "request": request, "error": "Invalid credentials", "next": next
         })
