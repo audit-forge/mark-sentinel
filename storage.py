@@ -860,11 +860,13 @@ class CustomerRegistry:
         with self._lock, self._conn() as conn:
             conn.executescript("""
                 CREATE TABLE IF NOT EXISTS customers (
-                    id          TEXT PRIMARY KEY,
-                    name        TEXT NOT NULL,
-                    agent_token TEXT UNIQUE NOT NULL,
-                    created_at  INTEGER NOT NULL,
-                    active      INTEGER NOT NULL DEFAULT 1
+                    id                   TEXT PRIMARY KEY,
+                    name                 TEXT NOT NULL,
+                    agent_token          TEXT UNIQUE NOT NULL,
+                    agent_token_prev     TEXT DEFAULT NULL,
+                    token_prev_expires   INTEGER DEFAULT 0,
+                    created_at           INTEGER NOT NULL,
+                    active               INTEGER NOT NULL DEFAULT 1
                 );
 
                 CREATE TABLE IF NOT EXISTS dashboard_users (
@@ -943,10 +945,28 @@ class CustomerRegistry:
         if not token:
             return None
         with self._lock, self._conn() as conn:
+            # Try current token first
             row = conn.execute(
-                'SELECT id, name FROM customers WHERE agent_token=? AND active=1', (token,)
+                'SELECT id, name, agent_token FROM customers WHERE agent_token=? AND active=1',
+                (token,),
             ).fetchone()
-        return dict(row) if row else None
+            if row:
+                return {'id': row['id'], 'name': row['name'], 'using_old_token': False}
+            # Try previous token within rollover window
+            now = int(time.time())
+            row = conn.execute(
+                '''SELECT id, name, agent_token FROM customers
+                   WHERE agent_token_prev=? AND active=1 AND token_prev_expires>?''',
+                (token, now),
+            ).fetchone()
+            if row:
+                return {
+                    'id': row['id'],
+                    'name': row['name'],
+                    'new_token': row['agent_token'],
+                    'using_old_token': True,
+                }
+        return None
 
     def get_by_id(self, customer_id: str) -> dict | None:
         with self._lock, self._conn() as conn:
@@ -955,12 +975,45 @@ class CustomerRegistry:
             ).fetchone()
         return dict(row) if row else None
 
-    def rotate_agent_token(self, customer_id: str) -> str:
+    def rotate_agent_token(self, customer_id: str, rollover_hours: int = 48) -> str:
+        """Replace the agent token, keeping the old one valid for rollover_hours.
+        Returns the new token. Agents still using the old token receive the new
+        one in their next check-in response and self-update."""
         import secrets
         new_token = secrets.token_urlsafe(32)
+        expires = int(time.time()) + rollover_hours * 3600
         with self._lock, self._conn() as conn:
-            conn.execute('UPDATE customers SET agent_token=? WHERE id=?', (new_token, customer_id))
+            # Migrate schema if columns don't exist yet (live upgrade path)
+            cols = {r[1] for r in conn.execute('PRAGMA table_info(customers)').fetchall()}
+            if 'agent_token_prev' not in cols:
+                conn.execute('ALTER TABLE customers ADD COLUMN agent_token_prev TEXT DEFAULT NULL')
+            if 'token_prev_expires' not in cols:
+                conn.execute('ALTER TABLE customers ADD COLUMN token_prev_expires INTEGER DEFAULT 0')
+            # Move current token → previous, set new token
+            conn.execute(
+                '''UPDATE customers
+                   SET agent_token_prev=agent_token, token_prev_expires=?, agent_token=?
+                   WHERE id=?''',
+                (expires, new_token, customer_id),
+            )
         return new_token
+
+    def token_rollout_status(self, customer_id: str) -> dict | None:
+        """Return rollover state: new token expiry and whether a rollover is active."""
+        with self._lock, self._conn() as conn:
+            row = conn.execute(
+                'SELECT agent_token_prev, token_prev_expires FROM customers WHERE id=? AND active=1',
+                (customer_id,),
+            ).fetchone()
+        if not row:
+            return None
+        now = int(time.time())
+        active = bool(row['agent_token_prev'] and row['token_prev_expires'] > now)
+        return {
+            'rollover_active': active,
+            'expires_at': row['token_prev_expires'] if active else None,
+            'seconds_remaining': max(0, row['token_prev_expires'] - now) if active else 0,
+        }
 
     # ── dashboard user management ─────────────────────────────────────────────
 

@@ -319,6 +319,25 @@ def report_discovery(results: list, config: dict, device_id: str, hostname: str)
     return False
 
 
+def _apply_token_update(config: dict, new_token: str) -> None:
+    """Persist a new agent token to disk and update the live config dict.
+    Called when the server signals a token rotation via check-in response or set_config."""
+    config_path = DEFAULT_CONFIG
+    try:
+        existing: dict = {}
+        if config_path.exists():
+            try:
+                existing = json.loads(config_path.read_text(encoding='utf-8'))
+            except Exception:
+                pass
+        existing['token'] = new_token
+        config_path.write_text(json.dumps(existing, indent=2), encoding='utf-8')
+        config['token'] = new_token
+        log.info('Token rotated: config updated with new token (first 8 chars: %s…)', new_token[:8])
+    except Exception as e:
+        log.error('Failed to persist token update: %s', e)
+
+
 def report_to_server(report: dict, config: dict,
                      device_id: str, hostname: str) -> bool:
     """POST the scan report to the central Sentinel server."""
@@ -355,6 +374,9 @@ def report_to_server(report: dict, config: dict,
                         warn = body.get('warning')
                         if warn:
                             log.warning('SERVER WARNING: %s', warn.get('message', warn))
+                        token_upd = body.get('token_update')
+                        if token_upd and token_upd.get('token'):
+                            _apply_token_update(config, token_upd['token'])
                     except Exception:
                         pass
                     log.info('Report accepted (HTTP %s)', resp.status)
@@ -874,10 +896,8 @@ def main() -> None:
             elif cmd and cmd.startswith('set_config:'):
                 try:
                     updates = json.loads(cmd[len('set_config:'):])
-                    config_path = DEFAULT_CONFIG
-                    existing = json.loads(config_path.read_text(encoding='utf-8')) if config_path.exists() else {}
-                    existing.update({k: v for k, v in updates.items() if k in ('profile', 'interval', 'extra_subnets')})
-                    config_path.write_text(json.dumps(existing, indent=2), encoding='utf-8')
+                    if 'token' in updates:
+                        _apply_token_update(cfg, updates['token'])
                     if 'profile' in updates:
                         cfg['profile'] = updates['profile']
                     if 'extra_subnets' in updates:
@@ -888,7 +908,15 @@ def main() -> None:
                             raise ValueError(f'interval must be >= 60, got {new_interval}')
                         cfg['interval'] = new_interval
                         interval = cfg['interval']
-                    log.info('Config updated by server: %s', updates)
+                    # Persist non-token fields directly
+                    non_token = {k: v for k, v in updates.items()
+                                 if k in ('profile', 'interval', 'extra_subnets')}
+                    if non_token:
+                        config_path = DEFAULT_CONFIG
+                        existing = json.loads(config_path.read_text(encoding='utf-8')) if config_path.exists() else {}
+                        existing.update(non_token)
+                        config_path.write_text(json.dumps(existing, indent=2), encoding='utf-8')
+                    log.info('Config updated by server: %s', list(updates.keys()))
                 except Exception as e:
                     log.error('set_config failed: %s', e)
 

@@ -1031,6 +1031,16 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             return {'id': 'default', 'name': 'Default'}
         return None
 
+    def _get_dashboard_customer(self) -> dict | None:
+        """Return the customer record for the authenticated dashboard user, or None."""
+        user = self._get_dashboard_user()
+        if not user:
+            return None
+        cust_id = user.get('customer_id')
+        if not cust_id:
+            return None
+        return _get_registry().get_by_id(cust_id)
+
     def _check_agent_bearer(self) -> bool:
         if not _agent_token() and not (ROOT / 'output' / 'agent_tokens.json').exists():
             if not _get_registry().has_customers():
@@ -1225,6 +1235,8 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self._api_fleet_scan(path[len('/api/fleet/scan/'):])
         elif path == '/api/fleet/update/all':
             self._api_fleet_update_all()
+        elif path == '/api/fleet/push-token':
+            self._api_fleet_push_token()
         elif path.startswith('/api/fleet/update/'):
             self._api_fleet_update(path[len('/api/fleet/update/'):])
         elif path.startswith('/api/fleet/remove/'):
@@ -1969,6 +1981,12 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         resp = {'status': 'accepted', 'device_id': device_id, 'license_status': license_status}
         if duplicate_warning:
             resp['warning'] = duplicate_warning
+        # If this agent is still using the old rollover token, deliver the new one
+        # in the response body so the agent self-updates without any manual intervention.
+        if _cust and _cust.get('using_old_token') and _cust.get('new_token'):
+            resp['token_update'] = {'token': _cust['new_token']}
+            log.info('Token rollover delivery: sent new token to device %s (%s)',
+                     device_id, hostname)
         self._json(resp)
 
     def _api_agent_commands(self, device_id: str):
@@ -2089,6 +2107,32 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                 store.enqueue_command(did, 'update_self')
                 queued.append(did)
         self._json({'status': 'queued', 'count': len(queued), 'devices': queued})
+
+    def _api_fleet_push_token(self):
+        """POST /api/fleet/push-token — queue set_config token update for all known devices.
+        Called by the admin panel immediately after token rotation so agents receive the
+        new token via the command poll channel (every 15s) in addition to the in-band
+        delivery on their next check-in report."""
+        cust = self._get_dashboard_customer()
+        if not cust:
+            self._send(403, b'Forbidden', 'text/plain')
+            return
+        import json as _json
+        new_token = cust.get('agent_token', '')
+        if not new_token:
+            self._json({'error': 'no token found'}, 400)
+            return
+        store = self._store()
+        devices = store.list_devices()
+        cmd_payload = _json.dumps({'token': new_token})
+        queued = []
+        for d in devices:
+            did = d.get('device_id', '')
+            if did:
+                store.enqueue_command(did, f'set_config:{cmd_payload}')
+                queued.append(did)
+        log.info('Token push queued for %d devices (customer %s)', len(queued), cust.get('id'))
+        self._json({'status': 'queued', 'device_count': len(queued)})
 
     def _api_fleet_remove(self, device_id: str):
         """POST /api/fleet/remove/<id> — permanently delete a device and its history."""

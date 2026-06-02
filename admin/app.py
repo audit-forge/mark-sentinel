@@ -464,7 +464,8 @@ async def delete_customer(request: Request, customer_id: str = Form(...)):
 
 @app.post("/customers/rotate-token")
 async def rotate_customer_token(request: Request):
-    """Generate a new agent token for a customer. Immediately invalidates the old one."""
+    """Rotate agent token with 48h rollover window.
+    Old token stays valid while agents self-update via in-band delivery and set_config push."""
     try:
         require_super_admin(request)
     except HTTPException:
@@ -476,15 +477,49 @@ async def rotate_customer_token(request: Request):
         return JSONResponse({"error": "invalid_request"}, status_code=400)
     if not customer_id:
         return JSONResponse({"error": "customer_id required"}, status_code=400)
+
     new_token = secrets.token_urlsafe(32)
+    rollover_hours = 48
+    expires_at = int(__import__("time").time()) + rollover_hours * 3600
+
     with get_conn() as conn:
         row = conn.execute(
-            "SELECT id, name FROM customers WHERE id=? AND active=1", (customer_id,)
+            "SELECT id, name, port FROM customers WHERE id=? AND active=1", (customer_id,)
         ).fetchone()
         if not row:
             return JSONResponse({"error": "customer not found"}, status_code=404)
-        conn.execute("UPDATE customers SET agent_token=? WHERE id=?", (new_token, customer_id))
-    return JSONResponse({"token": new_token, "customer_id": customer_id, "name": row["name"]})
+        # Migrate columns if needed
+        existing_cols = {r[1] for r in conn.execute("PRAGMA table_info(customers)").fetchall()}
+        if "agent_token_prev" not in existing_cols:
+            conn.execute("ALTER TABLE customers ADD COLUMN agent_token_prev TEXT DEFAULT NULL")
+        if "token_prev_expires" not in existing_cols:
+            conn.execute("ALTER TABLE customers ADD COLUMN token_prev_expires INTEGER DEFAULT 0")
+        conn.execute(
+            "UPDATE customers SET agent_token_prev=agent_token, token_prev_expires=?, agent_token=? WHERE id=?",
+            (expires_at, new_token, customer_id),
+        )
+
+    # Tell the Sentinel server for this customer to push set_config to all known devices
+    push_count = 0
+    port = row["port"] if row["port"] else 7001
+    sentinel_url = f"http://127.0.0.1:{port}/api/fleet/push-token"
+    try:
+        import httpx
+        async with httpx.AsyncClient(timeout=5) as client:
+            r = await client.post(sentinel_url)
+            if r.status_code == 200:
+                push_count = r.json().get("device_count", 0)
+    except Exception:
+        pass  # push is best-effort; in-band delivery still works
+
+    return JSONResponse({
+        "token": new_token,
+        "customer_id": customer_id,
+        "name": row["name"],
+        "rollover_hours": rollover_hours,
+        "expires_at": expires_at,
+        "push_queued": push_count,
+    })
 
 
 # ── Forgot / Reset password ───────────────────────────────────────────────────

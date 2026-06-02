@@ -334,14 +334,21 @@ document.getElementById('deployModal').addEventListener('click', function(e) {
     <!-- Result step -->
     <div id="rt-result" style="display:none;padding:24px">
       <div style="background:#F0FDF4;border:1px solid #BBF7D0;border-radius:6px;padding:12px 16px;margin-bottom:16px;font-size:13px;color:#166534">
-        &#10003; New token generated. Copy it now — it will not be shown again.
+        &#10003; Token rotated. Existing agents will self-update on their next check-in (within 15 seconds).
       </div>
       <label style="font-size:13px;font-weight:600;color:#374151;display:block;margin-bottom:6px">New Agent Token</label>
-      <div style="position:relative;margin-bottom:20px">
+      <div style="position:relative;margin-bottom:16px">
         <code id="rt-token-val" style="display:block;background:#F9FAFB;border:1px solid #E5E7EB;border-radius:6px;padding:12px 70px 12px 14px;font-size:13px;font-family:'Menlo','Consolas',monospace;color:#4F46E5;word-break:break-all;line-height:1.6"></code>
         <button onclick="copyToken()" id="rt-copy-btn" style="position:absolute;top:10px;right:10px;background:#F9FAFB;border:1px solid #E5E7EB;color:#6B7280;font-size:12px;padding:4px 10px;border-radius:4px;cursor:pointer;font-family:inherit">Copy</button>
       </div>
-      <p style="font-size:13px;color:#6B7280;margin-bottom:20px">Use the <strong>Deploy</strong> button to generate an updated installer command with this token, then run it on each affected device.</p>
+      <div id="rt-rollover-info" style="background:#FFF7ED;border:1px solid #FED7AA;border-radius:6px;padding:12px 16px;margin-bottom:16px;font-size:13px;color:#92400E">
+        <strong>Rollover window active.</strong> The old token remains valid for <span id="rt-countdown">48 hours</span> so existing agents self-update without reinstallation.
+        <div id="rt-push-info" style="margin-top:6px;color:#78350F"></div>
+      </div>
+      <p style="font-size:13px;color:#6B7280;margin-bottom:20px">
+        Agents update automatically via their next check-in or command poll.<br>
+        New devices: use the <strong>Deploy</strong> button to get an installer with the new token.
+      </p>
       <div style="display:flex;justify-content:flex-end">
         <button onclick="closeRotate()" class="btn btn-primary">Done</button>
       </div>
@@ -388,6 +395,22 @@ function confirmRotate() {
     document.getElementById('rt-token-val').textContent = data.token;
     document.getElementById('rt-confirm').style.display = 'none';
     document.getElementById('rt-result').style.display  = 'block';
+    // Show rollover countdown
+    if (data.expires_at) {
+      var expMs = data.expires_at * 1000;
+      function updateCountdown() {
+        var remaining = Math.max(0, expMs - Date.now());
+        var h = Math.floor(remaining / 3600000);
+        var m = Math.floor((remaining % 3600000) / 60000);
+        document.getElementById('rt-countdown').textContent = h + 'h ' + m + 'm';
+      }
+      updateCountdown();
+      setInterval(updateCountdown, 60000);
+    }
+    if (data.push_queued > 0) {
+      document.getElementById('rt-push-info').textContent =
+        'Token update queued for ' + data.push_queued + ' device' + (data.push_queued === 1 ? '' : 's') + ' via command channel.';
+    }
   })
   .catch(function(e) {
     alert('Request failed: ' + e);
