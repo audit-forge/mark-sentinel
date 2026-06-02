@@ -1248,6 +1248,8 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self._api_users_add()
         elif path.startswith('/api/users/deactivate/'):
             self._api_users_deactivate(path[len('/api/users/deactivate/'):])
+        elif path.startswith('/api/users/password/'):
+            self._api_users_password(path[len('/api/users/password/'):])
         else:
             self._not_found()
 
@@ -1514,6 +1516,28 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         try:
             ok = _get_registry().deactivate_user(user_id, me['customer_id'])
             self._json({'ok': ok})
+        except Exception as e:
+            self._json({'error': str(e)}, 500)
+
+    def _api_users_password(self, user_id_str: str):
+        me = self._session_user()
+        if not me or me.get('role') not in ('admin', 'customer_admin', 'super_admin'):
+            self._json({'error': 'forbidden'}, 403)
+            return
+        user_id = user_id_str.strip('/')
+        cl = int(self.headers.get('Content-Length', 0))
+        raw = self.rfile.read(cl) if cl else b'{}'
+        if os.environ.get('SENTINEL_TRUSTED_PROXY'):
+            self._proxy_to_admin(f'/api/users/password/{user_id}', 'POST', raw)
+            return
+        try:
+            body = json.loads(raw)
+            new_password = str(body.get('new_password', ''))
+            if len(new_password) < 8:
+                self._json({'error': 'password too short'}, 400)
+                return
+            ok = _get_registry().change_user_password(user_id, me['customer_id'], new_password)
+            self._json({'ok': ok} if ok else {'error': 'user not found'}, 200 if ok else 404)
         except Exception as e:
             self._json({'error': str(e)}, 500)
 
@@ -2313,15 +2337,36 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         self._json({'status': 'dismissed' if found else 'not_found'})
 
     def _api_fleet_mcp_report(self):
-        """GET /api/fleet/mcp/report?tier=executive|ciso|technical"""
+        """GET /api/fleet/mcp/report?tier=executive|ciso|technical[&fmt=pdf|html]"""
         from urllib.parse import parse_qs, urlparse as _up
         qs   = parse_qs(_up(self.path).query)
         tier = (qs.get('tier', ['ciso'])[0]).lower()
+        fmt  = (qs.get('fmt',  ['html'])[0]).lower()
         if tier not in ('executive', 'ciso', 'technical'):
             tier = 'ciso'
+        if tier == 'technical' and not _has_technical_reports():
+            self._send(402, b'Technical MCP reports require a Plus license. Contact sales@markai.io to upgrade.', 'text/plain')
+            return
         servers = self._store().list_mcp_servers()
-        html    = _build_mcp_report_html(servers, tier)
-        body    = html.encode('utf-8')
+        if fmt == 'pdf':
+            try:
+                from output.fleet_report import generate_mcp_pdf
+                pdf_bytes = generate_mcp_pdf(servers, tier=tier, demo=_is_demo())
+                fname = f'sentinel_mcp_{tier}.pdf'
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/pdf')
+                self.send_header('Content-Disposition', f'attachment; filename="{fname}"')
+                self.send_header('Content-Length', str(len(pdf_bytes)))
+                self.end_headers()
+                self.wfile.write(pdf_bytes)
+            except Exception as pdf_err:
+                import traceback
+                tb = traceback.format_exc()
+                log.error('MCP PDF generation error:\n%s', tb)
+                self._send(500, f'PDF generation failed: {pdf_err}\n\n{tb}'.encode(), 'text/plain')
+            return
+        html = _build_mcp_report_html(servers, tier)
+        body = html.encode('utf-8')
         self.send_response(200)
         self.send_header('Content-Type', 'text/html; charset=utf-8')
         self.send_header('Content-Length', str(len(body)))
@@ -3593,8 +3638,11 @@ def _build_shadow_section(shadow: list[dict], ts_now: int) -> str:
             else:
                 location_html = (f'<span style="font-weight:700;color:#e6edf3;font-size:14px">'
                                  f'{svc}</span>')
-                sub_html = (f'<span style="font-size:12px;color:#6e7681">{detail}</span>'
-                            if detail else '')
+                device_html = (f'<span style="font-size:12px;color:#8b949e;font-family:monospace">'
+                               f'&#128187; {reporter}</span>')
+                detail_html = (f'<span style="font-size:12px;color:#6e7681"> &nbsp;{detail}</span>'
+                               if detail else '')
+                sub_html = device_html + detail_html
             model_html = _model_tags(models) if models else (
                 f'<span style="font-size:11px;color:#484f58">No model details available</span>'
             )
@@ -3613,8 +3661,7 @@ def _build_shadow_section(shadow: list[dict], ts_now: int) -> str:
                 f'<div style="display:flex;flex-wrap:wrap;gap:5px;align-items:center">{model_html}</div>'
                 f'</div>'
                 f'<div style="text-align:right;flex-shrink:0">'
-                f'<div style="font-size:11px;color:#484f58;margin-bottom:3px">Detected {age}</div>'
-                f'<div style="font-size:11px;color:#6e7681;margin-bottom:8px">via {reporter}</div>'
+                f'<div style="font-size:11px;color:#484f58;margin-bottom:8px">Detected {age}</div>'
                 f'<button class="scan-btn" onclick="dismissShadow({sid})" '
                 f'style="font-size:11px;color:#6e7681;border-color:#30363d">Dismiss</button>'
                 f'</div></div></div>'
@@ -3917,6 +3964,16 @@ def _build_fleet_html(devices: list[dict], shadow: list[dict] | None = None,
         '<button class="scan-btn" onclick="rptDownloadPdf(\'technical\',this)"'
         ' style="color:#3fb950;border-color:#238636;font-size:12px">&#8659; Download PDF</button>'
         '<button class="scan-btn" onclick="rptPreview(\'technical\')"'
+        ' style="color:#8b949e;font-size:12px">&#128065; Preview</button>'
+        if _has_technical_reports() else
+        '<button disabled class="scan-btn" style="color:#484f58;border-color:#21262d;font-size:12px;cursor:default">'
+        '&#128274; Plus Plan Required</button>'
+        '<div style="font-size:11px;color:#484f58;margin-top:8px">Contact sales@markai.io to upgrade</div>'
+    )
+    _btn_mcp_technical = (
+        '<button class="scan-btn" onclick="rptDownloadMcpPdf(\'technical\',this)"'
+        ' style="color:#3fb950;border-color:#238636;font-size:12px">&#8659; Download PDF</button>'
+        '<button class="scan-btn" onclick="rptPreviewMcp(\'technical\')"'
         ' style="color:#8b949e;font-size:12px">&#128065; Preview</button>'
         if _has_technical_reports() else
         '<button disabled class="scan-btn" style="color:#484f58;border-color:#21262d;font-size:12px;cursor:default">'
@@ -4478,6 +4535,7 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
       <div style="font-size:15px;font-weight:700;color:#111827;margin-bottom:6px">&#128279; Executive — Agent Risk</div>
       <div style="font-size:12px;color:#6B7280;line-height:1.6;margin-bottom:16px">Business risk summary of AI agent tool exposure. No server inventory or technical detail. Safe for board-level distribution.</div>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="scan-btn" onclick="rptDownloadMcpPdf('executive',this)" style="color:#16A34A;border-color:#238636;font-size:12px">&#8659; Download PDF</button>
         <button class="scan-btn" onclick="rptPreviewMcp('executive')" style="color:#6B7280;font-size:12px">&#128065; Preview</button>
       </div>
     </div>
@@ -4486,6 +4544,7 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
       <div style="font-size:15px;font-weight:700;color:#111827;margin-bottom:6px">&#128279; CISO — Agent Governance</div>
       <div style="font-size:12px;color:#6B7280;line-height:1.6;margin-bottom:16px">Full MCP server inventory, auth status, OWASP Agentic AI risks, and EU AI Act exposure mapping. No remediation steps.</div>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="scan-btn" onclick="rptDownloadMcpPdf('ciso',this)" style="color:#16A34A;border-color:#238636;font-size:12px">&#8659; Download PDF</button>
         <button class="scan-btn" onclick="rptPreviewMcp('ciso')" style="color:#6B7280;font-size:12px">&#128065; Preview</button>
       </div>
     </div>
@@ -4494,7 +4553,7 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
       <div style="font-size:15px;font-weight:700;color:#111827;margin-bottom:6px">&#128279; Technical — Per-Server Detail</div>
       <div style="font-size:12px;color:#6B7280;line-height:1.6;margin-bottom:16px">Per-server auth status, exposed tools, high-risk tool flags, and remediation steps for each unauthenticated server.</div>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
-        <button class="scan-btn" onclick="rptPreviewMcp('technical')" style="color:#6B7280;font-size:12px">&#128065; Preview</button>
+        {_btn_mcp_technical}
       </div>
     </div>
   </div>
@@ -4512,7 +4571,7 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
 
   {'<div class="page" id="page-probe" style="position:fixed;top:0;left:240px;right:0;bottom:0;z-index:50"><iframe id="probe-iframe" data-loaded="0" style="width:100%;height:100%;border:none;display:block"></iframe></div>' if _has_live_scan() else ''}
 
-  <div class="page" id="page-users">
+  <div class="page" id="page-users" style="position:fixed;top:0;left:240px;right:0;bottom:0;z-index:50;background:#F9FAFB;overflow-y:auto;padding:28px 36px">
   <div class="sec-hdr" style="margin-top:0;padding-top:0">Users</div>
   <div class="content-panel" style="background:#ffffff;border:1px solid #F3F4F6;border-radius:8px;padding:20px;margin-bottom:16px">
     <div class="panel-sub-hdr" style="font-size:12px;color:#6B7280;font-weight:600;text-transform:uppercase;letter-spacing:.06em;margin-bottom:14px">Team members</div>
@@ -5632,6 +5691,24 @@ async function rptDownloadPdf(tier, btn) {{
   }} catch(e) {{ alert('Download error: ' + e); }}
   finally {{ btn.disabled = false; btn.textContent = orig; }}
 }}
+async function rptDownloadMcpPdf(tier, btn) {{
+  const orig = btn.textContent;
+  btn.disabled = true; btn.textContent = 'Generating…';
+  try {{
+    const r = await fetch('/api/fleet/mcp/report?tier=' + tier + '&fmt=pdf');
+    if (!r.ok) {{ alert('Report failed: ' + await r.text().catch(() => r.status)); return; }}
+    const blob = await r.blob();
+    if (!blob.size) {{ alert('Server returned an empty PDF — check server log.'); return; }}
+    const a = Object.assign(document.createElement('a'), {{
+      href: URL.createObjectURL(blob),
+      download: 'sentinel_mcp_' + tier + '.pdf'
+    }});
+    document.body.appendChild(a); a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(a.href);
+  }} catch(e) {{ alert('Download error: ' + e); }}
+  finally {{ btn.disabled = false; btn.textContent = orig; }}
+}}
 
 async function downloadFleetReport(tier, btn) {{
   const orig = btn.textContent;
@@ -5668,7 +5745,7 @@ async function downloadFleetReport(tier, btn) {{
 let _invData = [];
 let _invStatus = 'all';
 
-let _sessionEmail = null;
+var _sessionEmail = null;
 
 async function _loadSessionUser() {{
   if (_sessionEmail !== null) return _sessionEmail;
@@ -5889,6 +5966,9 @@ async function loadUsers() {{
       const isMe = u.email === myEmail;
       const inactive = u.active === false || u.active === 0;
       const badge = ROLE_BADGE[u.role] || `<span style="font-size:10px;color:#6B7280">${{esc(u.role)}}</span>`;
+      const uid = esc(u.id);
+      const chgPwd = !inactive ? `<button class="inv-action" onclick="togglePwForm('${{uid}}')" style="color:#4F46E5;margin-right:4px">Chg Pwd</button>` : '';
+      const remove = !isMe && !inactive ? `<button class="inv-action" onclick="deactivateUser('${{uid}}','${{esc(u.email)}}')" style="color:#DC2626">Remove</button>` : '';
       return `<div style="display:flex;align-items:center;gap:12px;padding:8px 0;border-bottom:1px solid #F3F4F6">
         <span style="font-size:13px;color:${{inactive?'#9CA3AF':'#111827'}};flex:1">
           ${{esc(u.email)}}
@@ -5896,7 +5976,15 @@ async function loadUsers() {{
           ${{inactive ? '<span style="font-size:10px;color:#9CA3AF;margin-left:4px">(deactivated)</span>' : ''}}
         </span>
         <span style="min-width:70px">${{badge}}</span>
-        ${{!isMe && !inactive ? `<button class="inv-action" onclick="deactivateUser('${{esc(u.id)}}','${{esc(u.email)}}')" style="color:#DC2626">Remove</button>` : '<span style="width:60px"></span>'}}
+        ${{chgPwd}}${{remove}}
+      </div>
+      <div id="pw-form-${{uid}}" style="display:none;padding:10px 0 12px;border-bottom:1px solid #F3F4F6">
+        <div style="display:flex;align-items:center;gap:8px;max-width:420px">
+          <input type="password" id="pw-input-${{uid}}" placeholder="New password (min 8 chars)" style="flex:1;padding:7px 10px;border:1px solid #D1D5DB;border-radius:6px;font-size:13px">
+          <button class="inv-action" onclick="savePassword('${{uid}}')" style="color:#16A34A">Save</button>
+          <button class="inv-action" onclick="togglePwForm('${{uid}}')" style="color:#6B7280">Cancel</button>
+        </div>
+        <div id="pw-msg-${{uid}}" style="font-size:12px;margin-top:6px"></div>
       </div>`;
     }}).join('');
     document.getElementById('users-list').innerHTML = rows || '<div style="font-size:13px;color:#9CA3AF">No users yet.</div>';
@@ -5937,6 +6025,46 @@ async function deactivateUser(id, email) {{
     if (d.ok) {{ await loadUsers(); }}
     else {{ alert('Failed: ' + (d.error || 'unknown error')); }}
   }} catch(e) {{ alert('Network error.'); }}
+}}
+
+function togglePwForm(uid) {{
+  const el = document.getElementById('pw-form-' + uid);
+  if (!el) return;
+  const showing = el.style.display !== 'none';
+  el.style.display = showing ? 'none' : 'block';
+  if (!showing) {{
+    const inp = document.getElementById('pw-input-' + uid);
+    if (inp) {{ inp.value = ''; inp.focus(); }}
+    const msg = document.getElementById('pw-msg-' + uid);
+    if (msg) msg.textContent = '';
+    el.scrollIntoView({{behavior:'smooth', block:'nearest'}});
+  }}
+}}
+
+async function savePassword(uid) {{
+  const inp = document.getElementById('pw-input-' + uid);
+  const msg = document.getElementById('pw-msg-' + uid);
+  const pw = inp ? inp.value : '';
+  if (!pw || pw.length < 8) {{
+    if (msg) {{ msg.style.color='#DC2626'; msg.textContent='Password must be at least 8 characters.'; }}
+    return;
+  }}
+  try {{
+    const r = await fetch('/api/users/password/' + uid, {{
+      method: 'POST',
+      headers: {{'Content-Type': 'application/json'}},
+      body: JSON.stringify({{new_password: pw}}),
+    }});
+    const d = await r.json();
+    if (d.ok) {{
+      if (msg) {{ msg.style.color='#16A34A'; msg.textContent='Password updated.'; }}
+      setTimeout(() => togglePwForm(uid), 1500);
+    }} else {{
+      if (msg) {{ msg.style.color='#DC2626'; msg.textContent = d.error || 'Failed to update password.'; }}
+    }}
+  }} catch(e) {{
+    if (msg) {{ msg.style.color='#DC2626'; msg.textContent='Network error.'; }}
+  }}
 }}
 
 const CADENCE_LABELS = {{daily:'Daily',weekly:'Weekly',monthly:'Monthly'}};
