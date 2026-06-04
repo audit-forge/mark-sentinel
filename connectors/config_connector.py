@@ -16,7 +16,37 @@ except ImportError:
 SKIP_DIRS = frozenset({
     '.git', '__pycache__', '.venv', 'venv', 'node_modules',
     '.pytest_cache', 'dist', 'build', '.eggs', '.tox',
+    # Browser and OS directories — never contain AI deployment config
+    'Cache', 'Caches', 'cache', 'Logs', 'logs',
+    'Trash', '.Trash', '.cache', '.local',
+    'Safari', 'Firefox', 'Chromium',
+    'WasmTtsEngine', 'NativeMessagingHosts',
+    # macOS system dirs
+    'CoreData', 'CloudKit', 'Containers',
+    # IDE / editor artifacts
+    '.idea', '.vscode', '.DS_Store',
 })
+
+# Path fragments that indicate a directory subtree to skip entirely.
+# Checked against the path relative to the scan root.
+SKIP_PATH_FRAGMENTS = (
+    'Library/Application Support/Google',
+    'Library/Application Support/Mozilla',
+    'Library/Application Support/Microsoft',
+    'Library/Application Support/Apple',
+    'Library/Application Support/com.apple',
+    'Library/Application Support/Firefox',
+    'Library/Application Support/Safari',
+    'Library/Caches',
+    'Library/Logs',
+    'Library/Mail',
+    'Library/Containers',
+    'Library/Group Containers',
+    'Library/CloudStorage',
+    '.claude/paste-cache',
+    '.npm/_npx',
+    '.npm/cache',
+)
 TEXT_EXTS = frozenset({
     '.py', '.json', '.yml', '.yaml', '.txt', '.md', '.env',
     '.cfg', '.ini', '.conf', '.toml', '.sh', '.bash', '.nginx',
@@ -105,6 +135,10 @@ def scan_directory(target_dir: str, mode: str = "config", max_files: int | None 
     for dirpath, dirnames, filenames in os.walk(root):
         if count >= limit:
             break
+        rel_dir_str = str(Path(dirpath).relative_to(root)).replace('\\', '/')
+        if any(frag in rel_dir_str for frag in SKIP_PATH_FRAGMENTS):
+            dirnames[:] = []
+            continue
         dirnames[:] = sorted(d for d in dirnames if d not in SKIP_DIRS)
         rel_dir = Path(dirpath).relative_to(root)
 
