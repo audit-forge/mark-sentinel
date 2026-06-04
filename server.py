@@ -4248,7 +4248,7 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
       <div class="sb-group"></div>
       <button class="sb-item" id="nav-settings" onclick="navTo('settings')">&#9881; Settings</button>
       <button class="sb-item" id="nav-users" onclick="navTo('users')">&#128100; Users</button>
-      {'<button class="sb-item" id="nav-probe" onclick="navTo(\'probe\')">&#128272; API Tester</button>' if _has_live_scan() else '<span style="display:block;padding:8px 16px;font-size:13px;color:#6B7280;cursor:default" title="Upgrade to Pro to access the API Tester">&#128274; API Tester</span>'}
+      {("<button class=\"sb-item\" id=\"nav-probe\" onclick=\"navTo('probe')\">&#128272; API Tester</button>") if _has_live_scan() else "<span style=\"display:block;padding:8px 16px;font-size:13px;color:#6B7280;cursor:default\" title=\"Upgrade to Pro to access the API Tester\">&#128274; API Tester</span>"}
     </nav>
     <div class="sb-footer">
       {f'<span style="font-size:11px;color:#9CA3AF;word-break:break-all">{current_user_email}</span>' if current_user_email else ''}
