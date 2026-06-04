@@ -192,6 +192,8 @@ def load_config(path: Path | None = None) -> dict:
         cfg['server'] = os.environ['SENTINEL_SERVER']
     if os.environ.get('SENTINEL_AGENT_TOKEN'):
         cfg['token'] = os.environ['SENTINEL_AGENT_TOKEN']
+    if cfg.get('target', '') in ('~', '.', ''):
+        cfg['target'] = _resolve_home()
     return cfg
 
 

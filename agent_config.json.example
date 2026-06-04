@@ -3,5 +3,6 @@
   "token":    "replace-with-your-secret-token",
   "target":   "~",
   "profile":  "default",
-  "interval": 3600
+  "interval": 3600,
+  "_note":    "target '~' resolves to the real user home even when the agent runs as root. Use an absolute path (e.g. /home/username) if you need to target a specific directory."
 }
