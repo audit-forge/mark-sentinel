@@ -1,7 +1,0 @@
-{
-  "agents": {
-    "name": "PNC Operations Agent",
-    "tools": ["delete_file", "send_email", "execute_query", "transfer_funds", "read_customer_data"],
-    "max_iterations": 50
-  }
-}
