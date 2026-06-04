@@ -1241,6 +1241,8 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self._api_fleet_update(path[len('/api/fleet/update/'):])
         elif path.startswith('/api/fleet/remove/'):
             self._api_fleet_remove(path[len('/api/fleet/remove/'):])
+        elif path.startswith('/api/fleet/rename/'):
+            self._api_fleet_rename(path[len('/api/fleet/rename/'):])
         elif path == '/api/admin/license':
             self._api_admin_license()
         elif path == '/api/probe-scan':
@@ -2142,6 +2144,21 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             return
         found = self._store().delete_device(device_id)
         self._json({'status': 'removed' if found else 'not_found', 'device_id': device_id})
+
+    def _api_fleet_rename(self, device_id: str):
+        """POST /api/fleet/rename/<device_id> — set a custom display name for a device."""
+        device_id = device_id.strip()
+        if not device_id:
+            self._json({'error': 'missing device_id'}, 400)
+            return
+        length = _content_length(self.headers)
+        try:
+            body = json.loads(self.rfile.read(length)) if length else {}
+        except Exception:
+            body = {}
+        name = str(body.get('display_name', '')).strip()[:80]
+        found = self._store().rename_device(device_id, name)
+        self._json({'status': 'ok' if found else 'not_found', 'display_name': name})
 
     def _api_agent_discovery(self):
         """POST /api/agent/discovery — agent reports subnet scan results (unmanaged devices)."""
@@ -3542,8 +3559,8 @@ body{{background:#0d1117;color:#e6edf3;font-family:-apple-system,BlinkMacSystemF
         return body.encode('utf-8')
 
     def _serve_probe_tester(self, error=''):
-        err_html = ('<div style="background:#4a0d0d;border:1px solid #f85149;border-radius:6px;'
-                    'color:#f85149;font-size:13px;padding:14px 16px;margin-bottom:16px">'
+        err_html = ('<div style="background:#fff0f0;border:1px solid #f87171;border-radius:6px;'
+                    'color:#b91c1c;font-size:13px;padding:14px 16px;margin-bottom:16px">'
                     + error + '</div>') if error else ''
         page = (
             b'<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">'
@@ -3551,30 +3568,30 @@ body{{background:#0d1117;color:#e6edf3;font-family:-apple-system,BlinkMacSystemF
             b'<title>M.A.R.K. Sentinel - API Security Tester</title>'
             b'<style>'
             b'*{box-sizing:border-box;margin:0;padding:0}'
-            b'body{background:#0d1117;color:#e6edf3;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;font-size:14px;min-height:100vh}'
+            b'body{background:#f0f4ff;color:#1e3060;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;font-size:14px;min-height:100vh}'
             b'.wrap{max-width:860px;margin:0 auto;padding:32px 20px 64px}'
-            b'.bar{display:flex;align-items:center;gap:10px;margin-bottom:32px;padding-bottom:20px;border-bottom:1px solid #21262d}'
-            b'.bm{font-size:18px;font-weight:800;letter-spacing:2px;color:#58a6ff}'
-            b'.bn{font-size:16px;font-weight:700;letter-spacing:1px}'
-            b'.bs{font-size:12px;color:#8b949e;margin-left:4px}'
-            b'h1{font-size:20px;font-weight:700;margin-bottom:6px}'
-            b'.sub{color:#8b949e;font-size:13px;margin-bottom:28px;line-height:1.6}'
-            b'.card{background:#161b22;border:1px solid #21262d;border-radius:8px;padding:24px;margin-bottom:16px}'
-            b'label{display:block;font-size:12px;font-weight:600;color:#8b949e;margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px}'
-            b'select,input{width:100%;background:#0d1117;border:1px solid #30363d;border-radius:6px;color:#e6edf3;font-size:14px;padding:9px 12px;outline:none}'
-            b'select:focus,input:focus{border-color:#58a6ff}'
+            b'.bar{display:flex;align-items:center;gap:10px;margin-bottom:32px;padding:20px 24px;background:#0f1e3d;border-radius:10px;box-shadow:0 2px 12px rgba(15,30,61,.18)}'
+            b'.bm{font-size:18px;font-weight:800;letter-spacing:3px;color:#fff}'
+            b'.bn{font-size:16px;font-weight:700;letter-spacing:2px;color:#f5a623}'
+            b'.bs{font-size:11px;color:#8a9abf;margin-left:6px;letter-spacing:1px;text-transform:uppercase}'
+            b'h1{font-size:20px;font-weight:700;margin-bottom:6px;color:#0a1428}'
+            b'.sub{color:#4a5a7a;font-size:13px;margin-bottom:28px;line-height:1.6}'
+            b'.card{background:#fff;border:1px solid #ccd3e8;border-radius:10px;padding:24px;margin-bottom:16px;box-shadow:0 1px 6px rgba(26,47,90,.07)}'
+            b'label{display:block;font-size:12px;font-weight:700;color:#1e3060;margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px}'
+            b'select,input{width:100%;background:#f7f9ff;border:1px solid #ccd3e8;border-radius:6px;color:#0a1428;font-size:14px;padding:9px 12px;outline:none}'
+            b'select:focus,input:focus{border-color:#f5a623;box-shadow:0 0 0 2px rgba(245,166,35,.15)}'
             b'.field{margin-bottom:18px}'
             b'.row{display:grid;grid-template-columns:1fr 1fr;gap:16px}'
-            b'.hint{font-size:11px;color:#6e7681;margin-top:4px}'
-            b'.btn{background:#238636;border:none;border-radius:6px;color:#fff;cursor:pointer;font-size:14px;font-weight:600;padding:10px 22px}'
-            b'.btn:hover{background:#2ea043}'
+            b'.hint{font-size:11px;color:#6b7280;margin-top:4px}'
+            b'.btn{background:#f5a623;border:none;border-radius:6px;color:#0f1e3d;cursor:pointer;font-size:14px;font-weight:700;padding:10px 28px;letter-spacing:.3px}'
+            b'.btn:hover{background:#e09610}'
             b'#ep-field{display:block}'
-            b'#wait{display:none;color:#8b949e;font-size:13px;margin-top:16px}'
+            b'#wait{display:none;color:#4a5a7a;font-size:13px;margin-top:16px;font-style:italic}'
             b'</style></head><body>'
             b'<div class="wrap">'
             b'<div class="bar"><span class="bm">M.A.R.K.</span><span class="bn">SENTINEL</span>'
             b'<span class="bs">API Security Tester</span>'
-            b'<a href="/" style="margin-left:auto;font-size:12px;color:#8b949e;text-decoration:none;border:1px solid #30363d;border-radius:5px;padding:5px 10px">&#8592; Dashboard</a>'
+            b'<a href="/" style="margin-left:auto;font-size:12px;color:#8a9abf;text-decoration:none;border:1px solid #2a3f6a;border-radius:5px;padding:5px 12px">&#8592; Dashboard</a>'
             b'</div>'
             b'<h1>AI API Security Tester</h1>'
             b'<p class="sub">Enter your API credentials to run live adversarial probes against your AI endpoint.<br>'
@@ -4903,8 +4920,12 @@ function renderDevicePage() {{
     const pas  = d.pass_count || 0;
     const rc   = _riskCls(fail, warn);
     const age  = _age(d.last_seen);
+    const displayName = d.display_name || d.hostname || 'unknown';
     return `<tr class="dev-row" onclick="selectDevice('${{esc(did)}}')" >
-      <td class="dev-host">${{esc(d.hostname||'unknown')}}</td>
+      <td class="dev-host">
+        <span id="dn-${{esc(did)}}">${{esc(displayName)}}</span>
+        ${{d.display_name ? `<span style="font-size:10px;color:#9CA3AF;margin-left:4px" title="Custom label — agent hostname: ${{esc(d.hostname||'')}}">✎</span>` : ''}}
+      </td>
       <td>${{esc(d.platform||'')}}</td>
       <td class="c-red">${{fail}}</td>
       <td class="c-yellow">${{warn}}</td>
@@ -4916,12 +4937,14 @@ function renderDevicePage() {{
         <button class="scan-btn" id="sb-${{esc(did)}}" onclick="openScanModal('${{esc(did)}}',this)">Scan ▾</button>
         <button class="scan-btn" id="ub-${{esc(did)}}" onclick="updateDevice('${{esc(did)}}')"
                 style="margin-left:4px;color:#CA8A04;border-color:#E5E7EB">Update</button>
+        <button class="scan-btn" onclick="renameDevice('${{esc(did)}}','${{esc(d.display_name||d.hostname||'')}}')"
+                style="margin-left:4px;color:#6B7280;border-color:#E5E7EB;font-size:11px" title="Set custom display name">Rename</button>
         <a href="/fleet/device/${{esc(did)}}/dashboard" target="_blank"
            style="margin-left:8px;background:#ffffff;border:1px solid #E5E7EB;color:#6B7280;
                   border-radius:4px;padding:3px 10px;font-size:12px;text-decoration:none;display:inline-block"
            onmouseover="this.style.borderColor='#4F46E5';this.style.color='#374151'"
            onmouseout="this.style.borderColor='#E5E7EB';this.style.color='#6B7280'">Full Report</a>
-        <button class="scan-btn" onclick="removeDevice('${{esc(did)}}','${{esc(d.hostname||'')}}')"
+        <button class="scan-btn" onclick="removeDevice('${{esc(did)}}','${{esc(displayName)}}')"
                 style="margin-left:4px;color:#DC2626;border-color:#E5E7EB;font-size:11px">Remove</button>
       </td>
     </tr>`;
@@ -4980,6 +5003,25 @@ function goToPage(p) {{
 function esc(s) {{
   if (!s) return '';
   return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}}
+
+async function renameDevice(did, currentName) {{
+  const name = prompt('Set a custom display name for this device:\n(Leave blank to clear and use the real hostname)', currentName || '');
+  if (name === null) return;
+  try {{
+    const resp = await fetch('/api/fleet/rename/' + encodeURIComponent(did), {{
+      method: 'POST',
+      headers: {{'Content-Type': 'application/json'}},
+      body: JSON.stringify({{display_name: name.trim()}})
+    }});
+    if (resp.ok) {{
+      const d = _allDevices.find(x => x.device_id === did);
+      if (d) d.display_name = name.trim();
+      renderDevicePage();
+    }} else {{
+      alert('Rename failed');
+    }}
+  }} catch (e) {{ alert('Rename failed: ' + e); }}
 }}
 
 async function removeDevice(did, hostname) {{

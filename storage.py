@@ -40,6 +40,7 @@ class AgentStore:
                 CREATE TABLE IF NOT EXISTS devices (
                     device_id    TEXT PRIMARY KEY,
                     hostname     TEXT NOT NULL,
+                    display_name TEXT NOT NULL DEFAULT '',
                     platform     TEXT NOT NULL DEFAULT '',
                     agent_version TEXT NOT NULL DEFAULT '',
                     ip_address   TEXT NOT NULL DEFAULT '',
@@ -165,6 +166,8 @@ class AgentStore:
             cols = {r[1] for r in conn.execute("PRAGMA table_info(devices)")}
             if 'ip_address' not in cols:
                 conn.execute("ALTER TABLE devices ADD COLUMN ip_address TEXT NOT NULL DEFAULT ''")
+            if 'display_name' not in cols:
+                conn.execute("ALTER TABLE devices ADD COLUMN display_name TEXT NOT NULL DEFAULT ''")
             sh_cols = {r[1] for r in conn.execute("PRAGMA table_info(shadow_devices)")}
             if 'approval_status' not in sh_cols:
                 conn.execute(
@@ -228,7 +231,7 @@ class AgentStore:
         with self._lock, self._conn() as conn:
             rows = conn.execute("""
                 SELECT
-                    d.device_id, d.hostname, d.platform, d.agent_version,
+                    d.device_id, d.hostname, d.display_name, d.platform, d.agent_version,
                     d.first_seen, d.last_seen,
                     r.scan_date, r.profile, r.mode, r.target,
                     r.fail_count, r.warn_count, r.pass_count,
@@ -243,6 +246,15 @@ class AgentStore:
                 ORDER BY d.last_seen DESC
             """).fetchall()
         return [dict(r) for r in rows]
+
+    def rename_device(self, device_id: str, display_name: str) -> bool:
+        """Set a custom display name for a device. Returns True if device was found."""
+        with self._lock, self._conn() as conn:
+            n = conn.execute(
+                "UPDATE devices SET display_name=? WHERE device_id=?",
+                (display_name.strip(), device_id)
+            ).rowcount
+        return n > 0
 
     def list_agent_ips(self) -> set[str]:
         """Return the set of IP addresses for all registered agents."""
