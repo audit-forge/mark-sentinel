@@ -490,7 +490,7 @@ def run_cycle(config: dict) -> bool:
     profile_raw = config.get('profile', 'default')
     profile     = profile_raw.split(',')[0].strip() or 'default'
     device_id   = _device_id()
-    hostname  = socket.gethostname()
+    hostname  = os.environ.get('SENTINEL_HOSTNAME', '').strip() or socket.gethostname()
 
     log.info('Device: %s  Hostname: %s  Target: %s  Profile: %s',
              device_id, hostname, target, profile)
@@ -757,7 +757,7 @@ def main() -> None:
         SCAN_JITTER   = 120   # ±2 min per scan — prevents thundering herd on large fleets
 
         device_id = _device_id()
-        hostname  = socket.gethostname()
+        hostname  = os.environ.get('SENTINEL_HOSTNAME', '').strip() or socket.gethostname()
 
         # Startup jitter: stagger first scan across fleet so mass reboots don't
         # create a thundering herd. Capped at half the scan interval.

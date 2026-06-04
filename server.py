@@ -1150,6 +1150,8 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self._api_risk_register()
         elif path == '/api/fleet/risk-register/csv':
             self._api_risk_register_csv()
+        elif path == '/api/fleet/risk-register/overrides':
+            self._api_rr_overrides_list()
         elif path == '/api/fleet/inventory':
             self._api_inventory()
         elif path.startswith('/api/fleet/inventory/history/'):
@@ -1278,6 +1280,11 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self._api_users_deactivate(path[len('/api/users/deactivate/'):])
         elif path.startswith('/api/users/password/'):
             self._api_users_password(path[len('/api/users/password/'):])
+        elif path == '/api/fleet/risk-register/override':
+            self._api_rr_override_set()
+        elif path.startswith('/api/fleet/risk-register/override/') and path.endswith('/delete'):
+            check_id = path[len('/api/fleet/risk-register/override/'):-len('/delete')]
+            self._api_rr_override_delete(check_id)
         else:
             self._not_found()
 
@@ -2700,12 +2707,15 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             buf = io.StringIO()
             writer = csv.writer(buf)
             writer.writerow(['Check ID', 'Severity', 'Title', 'Category', 'Status',
-                             'Affected Devices', 'Trend', 'Days Open', 'Device Names'])
+                             'Affected Devices', 'Trend', 'Days Open', 'Device Names',
+                             'Override', 'Assigned To', 'Note'])
             for e in entries:
                 writer.writerow([
                     e['check_id'], e['severity'], e['title'], e['category'], e['status'],
                     e['affected_count'], e['trend'], e['days_open'],
                     '; '.join(e['affected_devices']),
+                    e.get('override_action', ''), e.get('override_assignee', ''),
+                    e.get('override_note', ''),
                 ])
             data = buf.getvalue().encode('utf-8')
             fname = f'sentinel_risk_register_{_dt.utcnow().strftime("%Y%m%d")}.csv'
@@ -2717,6 +2727,53 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self.wfile.write(data)
         except Exception as e:
             log.error('risk register CSV error: %s', e, exc_info=True)
+            self._json({'error': str(e)}, 500)
+
+    def _api_rr_overrides_list(self):
+        """GET /api/fleet/risk-register/overrides"""
+        try:
+            self._json({'overrides': self._store().get_risk_overrides()})
+        except Exception as e:
+            self._json({'error': str(e)}, 500)
+
+    def _api_rr_override_set(self):
+        """POST /api/fleet/risk-register/override — accept or assign a finding."""
+        try:
+            cl = int(self.headers.get('Content-Length', 0))
+            body = json.loads(self.rfile.read(cl)) if cl else {}
+            check_id = (body.get('check_id') or '').strip()
+            action   = (body.get('action') or '').strip()
+            if not check_id or action not in ('accepted', 'assigned'):
+                self._json({'error': 'check_id and action (accepted|assigned) required'}, 400)
+                return
+            assignee   = (body.get('assignee') or '').strip()
+            note       = (body.get('note') or '').strip()
+            expires_at = body.get('expires_at')
+            if isinstance(expires_at, str) and expires_at:
+                import datetime as _dt
+                try:
+                    expires_at = int(_dt.datetime.fromisoformat(expires_at).timestamp())
+                except ValueError:
+                    expires_at = None
+            user = self._session_user()
+            created_by = user['email'] if user else 'Unknown'
+            self._store().upsert_risk_override(check_id, action, assignee, note, expires_at, created_by)
+            self._json({'ok': True})
+        except Exception as e:
+            log.error('rr override set error: %s', e, exc_info=True)
+            self._json({'error': str(e)}, 500)
+
+    def _api_rr_override_delete(self, check_id: str):
+        """POST /api/fleet/risk-register/override/<check_id>/delete — clear an override."""
+        try:
+            check_id = check_id.strip('/')
+            if not check_id:
+                self._json({'error': 'check_id required'}, 400)
+                return
+            ok = self._store().delete_risk_override(check_id)
+            self._json({'ok': ok})
+        except Exception as e:
+            log.error('rr override delete error: %s', e, exc_info=True)
             self._json({'error': str(e)}, 500)
 
     def _api_inventory(self):
@@ -4110,6 +4167,18 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
 .rr-table td{{padding:9px 12px;border-bottom:1px solid #F3F4F6;vertical-align:middle}}
 .rr-new{{background:#DCFCE7;color:#16A34A;border:1px solid #BBF7D0;border-radius:10px;padding:2px 8px;font-size:11px;font-weight:600}}
 .rr-recurring{{background:#FEF9C3;color:#CA8A04;border:1px solid #FDE047;border-radius:10px;padding:2px 8px;font-size:11px;font-weight:600}}
+.rr-accepted{{background:#F3F4F6;color:#9CA3AF;border:1px solid #E5E7EB;border-radius:10px;padding:2px 8px;font-size:11px;font-weight:600}}
+.rr-assigned{{background:#EFF6FF;color:#2563EB;border:1px solid #BFDBFE;border-radius:10px;padding:2px 8px;font-size:11px;font-weight:600}}
+.rr-act-btn{{background:none;border:1px solid #D1D5DB;border-radius:4px;color:#6B7280;font-size:11px;padding:2px 7px;cursor:pointer;font-family:inherit;margin-right:3px}}
+.rr-act-btn:hover{{background:#F3F4F6;color:#111827}}
+.rr-form-row{{background:#F9FAFB;border-bottom:1px solid #E5E7EB}}
+.rr-form-row td{{padding:12px 12px}}
+.rr-input{{background:#fff;border:1px solid #D1D5DB;border-radius:4px;padding:5px 8px;font-size:13px;font-family:inherit;width:100%;box-sizing:border-box}}
+.rr-input:focus{{outline:none;border-color:#4F46E5}}
+.rr-save-btn{{background:#238636;color:#fff;border:none;border-radius:4px;padding:5px 14px;font-size:12px;cursor:pointer;font-weight:600}}
+.rr-save-btn:hover{{background:#2ea043}}
+.rr-clear-btn{{background:none;border:1px solid #D1D5DB;border-radius:4px;color:#6B7280;font-size:12px;padding:5px 10px;cursor:pointer;font-family:inherit;margin-left:6px}}
+.rr-row-accepted td{{opacity:0.6}}
 .inv-badge-approved{{background:#DCFCE7;color:#16A34A;border:1px solid #BBF7D0;border-radius:10px;padding:2px 8px;font-size:11px;font-weight:600}}
 .inv-badge-review{{background:#FEF9C3;color:#CA8A04;border:1px solid #FDE047;border-radius:10px;padding:2px 8px;font-size:11px;font-weight:600}}
 .inv-badge-unapp{{background:#FEE2E2;color:#DC2626;border:1px solid #FECACA;border-radius:10px;padding:2px 8px;font-size:11px;font-weight:600}}
@@ -4300,6 +4369,7 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
     <button class="rr-fil" onclick="rrFilter('HIGH',this)">High</button>
     <button class="rr-fil" onclick="rrFilter('MEDIUM',this)">Medium</button>
     <button class="rr-fil" onclick="rrFilter('LOW',this)">Low</button>
+    <button class="rr-fil" onclick="rrFilter('accepted',this)" style="margin-left:auto">Accepted Risk</button>
   </div>
   <div id="rr-body">
     <div style="color:#6B7280;font-size:13px;padding:16px 0">Loading risk register…</div>
@@ -6265,38 +6335,119 @@ async function loadRiskRegister() {{
 
 function rrFilter(sev, btn) {{
   _rrSev = sev;
-  document.querySelectorAll('.rr-fil').forEach(b => b.classList.remove('rr-active'));
+  document.querySelectorAll('#rr-filters .rr-fil').forEach(b => b.classList.remove('rr-active'));
   btn.classList.add('rr-active');
   renderRiskRegister();
 }}
 
+function rrToggleForm(checkId, action) {{
+  const rowId = 'rr-form-' + checkId.replace(/[^a-z0-9]/gi,'_');
+  const existing = document.getElementById(rowId);
+  if (existing) {{ existing.remove(); return; }}
+  const dataRow = document.querySelector(`tr[data-cid="${{checkId}}"]`);
+  if (!dataRow) return;
+  const e = _rrData.find(x => x.check_id === checkId) || {{}};
+  const formRow = document.createElement('tr');
+  formRow.id = rowId;
+  formRow.className = 'rr-form-row';
+  const assigneeField = action === 'assigned'
+    ? `<div style="margin-bottom:8px"><label style="font-size:11px;color:#6B7280;display:block;margin-bottom:3px">Assign to</label>
+       <input class="rr-input" id="rr-assignee-${{checkId.replace(/[^a-z0-9]/gi,'_')}}" placeholder="Name or email" value="${{esc(e.override_assignee||'')}}" style="width:220px"></div>`
+    : '';
+  formRow.innerHTML = `<td colspan="8" class="rr-form-row" style="padding:12px 16px">
+    <div style="display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end">
+      ${{assigneeField}}
+      <div style="flex:1;min-width:200px"><label style="font-size:11px;color:#6B7280;display:block;margin-bottom:3px">Note <span style="color:#9CA3AF">(optional)</span></label>
+       <input class="rr-input" id="rr-note-${{checkId.replace(/[^a-z0-9]/gi,'_')}}" placeholder="Reason, ticket #, etc." value="${{esc(e.override_note||'')}}"></div>
+      <div><label style="font-size:11px;color:#6B7280;display:block;margin-bottom:3px">Expires <span style="color:#9CA3AF">(optional)</span></label>
+       <input class="rr-input" id="rr-exp-${{checkId.replace(/[^a-z0-9]/gi,'_')}}" type="date" style="width:140px" value="${{e.override_expires ? new Date(e.override_expires*1000).toISOString().slice(0,10) : ''}}"></div>
+      <div style="display:flex;gap:6px;padding-bottom:1px">
+        <button class="rr-save-btn" onclick="rrSaveOverride('${{checkId}}','${{action}}')">Save</button>
+        ${{e.override_action ? `<button class="rr-clear-btn" onclick="rrClearOverride('${{checkId}}')">Clear</button>` : ''}}
+        <button class="rr-clear-btn" onclick="document.getElementById('${{rowId}}').remove()">Cancel</button>
+      </div>
+    </div>
+  </td>`;
+  dataRow.after(formRow);
+}}
+
+async function rrSaveOverride(checkId, action) {{
+  const slug = checkId.replace(/[^a-z0-9]/gi,'_');
+  const assignee = document.getElementById('rr-assignee-'+slug)?.value?.trim() || '';
+  const note     = document.getElementById('rr-note-'+slug)?.value?.trim() || '';
+  const expVal   = document.getElementById('rr-exp-'+slug)?.value?.trim() || '';
+  try {{
+    const r = await fetch('/api/fleet/risk-register/override', {{
+      method: 'POST',
+      headers: {{'Content-Type':'application/json'}},
+      body: JSON.stringify({{check_id: checkId, action, assignee, note, expires_at: expVal || null}})
+    }});
+    const d = await r.json();
+    if (!d.ok) {{ alert('Save failed: ' + (d.error||'unknown error')); return; }}
+    await loadRiskRegister();
+  }} catch(e) {{ alert('Save failed: ' + e); }}
+}}
+
+async function rrClearOverride(checkId) {{
+  if (!confirm('Remove override for this finding?')) return;
+  try {{
+    const r = await fetch('/api/fleet/risk-register/override/' + encodeURIComponent(checkId) + '/delete', {{method:'POST'}});
+    const d = await r.json();
+    if (!d.ok) {{ alert('Clear failed: ' + (d.error||'unknown')); return; }}
+    await loadRiskRegister();
+  }} catch(e) {{ alert('Clear failed: ' + e); }}
+}}
+
 function renderRiskRegister() {{
-  const rows = _rrSev === 'all' ? _rrData : _rrData.filter(e => e.severity === _rrSev);
+  let rows;
+  if (_rrSev === 'accepted') {{
+    rows = _rrData.filter(e => e.override_action === 'accepted');
+  }} else if (_rrSev === 'all') {{
+    rows = _rrData;
+  }} else {{
+    rows = _rrData.filter(e => e.severity === _rrSev);
+  }}
   const el = document.getElementById('rr-body');
   if (!rows.length) {{
     el.innerHTML = '<div style="color:#6B7280;font-size:13px;padding:16px 0">' +
-      (_rrData.length ? 'No findings at this severity.' : 'No open findings — fleet is clean.') + '</div>';
+      (_rrSev === 'accepted' ? 'No accepted risks.' : (_rrData.length ? 'No findings at this severity.' : 'No open findings — fleet is clean.')) + '</div>';
     return;
   }}
   const SEV_CLS = {{CRITICAL:'critical',HIGH:'high',MEDIUM:'medium',LOW:'low'}};
   const trs = rows.map(e => {{
-    const badge = e.trend === 'Recurring'
+    const trendBadge = e.trend === 'Recurring'
       ? '<span class="rr-recurring">Recurring</span>'
       : '<span class="rr-new">New</span>';
+    const overrideBadge = e.override_action === 'accepted'
+      ? '<span class="rr-accepted">&#10003; Accepted</span>'
+      : e.override_action === 'assigned'
+        ? `<span class="rr-assigned">&#128100; ${{esc(e.override_assignee||'Assigned')}}</span>`
+        : '';
     const devTip = e.affected_devices.join(', ');
-    return `<tr>
+    const rowClass = e.override_action === 'accepted' ? 'rr-row-accepted' : '';
+    const cid = e.check_id;
+    return `<tr class="${{rowClass}}" data-cid="${{esc(cid)}}">
       <td><span class="badge ${{SEV_CLS[e.severity]||'low'}}">${{esc(e.severity)}}</span></td>
-      <td style="font-family:monospace;font-size:12px;color:#6B7280">${{esc(e.check_id)}}</td>
+      <td style="font-family:monospace;font-size:12px;color:#6B7280">${{esc(cid)}}</td>
       <td style="color:#374151">${{esc(e.title)}}</td>
       <td title="${{esc(devTip)}}" style="cursor:default;color:#111827;font-weight:600">${{e.affected_count}}</td>
-      <td>${{badge}}</td>
+      <td>${{trendBadge}}</td>
       <td style="color:#6B7280">${{e.days_open}}d</td>
+      <td style="white-space:nowrap">${{overrideBadge}}</td>
+      <td style="white-space:nowrap">
+        <button class="rr-act-btn" onclick="rrToggleForm('${{esc(cid)}}','accepted')" title="Accept this risk">Accept</button>
+        <button class="rr-act-btn" onclick="rrToggleForm('${{esc(cid)}}','assigned')" title="Assign to someone">Assign</button>
+      </td>
     </tr>`;
   }}).join('');
   el.innerHTML = `<table class="rr-table">
-    <thead><tr><th>Severity</th><th>Check ID</th><th>Finding</th><th title="Hover for device list">Devices</th><th>Trend</th><th>Open</th></tr></thead>
+    <thead><tr>
+      <th>Severity</th><th>Check ID</th><th>Finding</th>
+      <th title="Hover for device list">Devices</th><th>Trend</th><th>Open</th>
+      <th>Override</th><th>Actions</th>
+    </tr></thead>
     <tbody>${{trs}}</tbody>
-  </table><div style="font-size:11px;color:#9CA3AF;margin-bottom:8px">${{rows.length}} open finding${{rows.length!==1?'s':''}} · hover device count for affected hostnames</div>`;
+  </table><div style="font-size:11px;color:#9CA3AF;margin-bottom:8px">${{rows.length}} finding${{rows.length!==1?'s':''}} · hover device count for affected hostnames</div>`;
 }}
 
 async function loadConfig() {{

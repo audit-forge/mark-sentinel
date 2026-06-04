@@ -160,6 +160,17 @@ class AgentStore:
                     last_fired INTEGER
                 );
 
+                CREATE TABLE IF NOT EXISTS risk_overrides (
+                    check_id    TEXT PRIMARY KEY,
+                    action      TEXT NOT NULL,
+                    assignee    TEXT NOT NULL DEFAULT '',
+                    note        TEXT NOT NULL DEFAULT '',
+                    expires_at  INTEGER,
+                    created_by  TEXT NOT NULL DEFAULT '',
+                    created_at  INTEGER NOT NULL,
+                    updated_at  INTEGER NOT NULL
+                );
+
             """)
             # Migrations
             cols = {r[1] for r in conn.execute("PRAGMA table_info(devices)")}
@@ -380,11 +391,17 @@ class AgentStore:
                     entry['recurring_count'] += 1
                 entry['first_seen_ts'] = min(entry['first_seen_ts'], received_at)
 
+        overrides = {}
+        with self._lock, self._conn() as conn:
+            for row in conn.execute("SELECT * FROM risk_overrides").fetchall():
+                overrides[row['check_id']] = dict(row)
+
         result = []
         for entry in findings_map.values():
             affected_count = len(entry['affected_devices'])
             trend = 'Recurring' if entry['recurring_count'] > 0 else 'New'
             days_open = max(1, (now - entry['first_seen_ts']) // 86400)
+            ov = overrides.get(entry['check_id'], {})
             result.append({
                 'check_id': entry['check_id'],
                 'title': entry['title'],
@@ -395,11 +412,46 @@ class AgentStore:
                 'affected_devices': entry['affected_devices'][:10],
                 'trend': trend,
                 'days_open': days_open,
+                'override_action':   ov.get('action', ''),
+                'override_assignee': ov.get('assignee', ''),
+                'override_note':     ov.get('note', ''),
+                'override_expires':  ov.get('expires_at'),
+                'override_by':       ov.get('created_by', ''),
             })
 
         sev_order = {'CRITICAL': 0, 'HIGH': 1, 'MEDIUM': 2, 'LOW': 3}
         result.sort(key=lambda x: (sev_order.get(x['severity'], 99), -x['affected_count']))
         return result
+
+    def upsert_risk_override(self, check_id: str, action: str, assignee: str,
+                             note: str, expires_at: int | None,
+                             created_by: str) -> None:
+        now = int(time.time())
+        with self._lock, self._conn() as conn:
+            conn.execute("""
+                INSERT INTO risk_overrides
+                    (check_id, action, assignee, note, expires_at, created_by, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(check_id) DO UPDATE SET
+                    action     = excluded.action,
+                    assignee   = excluded.assignee,
+                    note       = excluded.note,
+                    expires_at = excluded.expires_at,
+                    created_by = excluded.created_by,
+                    updated_at = excluded.updated_at
+            """, (check_id, action, assignee, note, expires_at, created_by, now, now))
+
+    def delete_risk_override(self, check_id: str) -> bool:
+        with self._lock, self._conn() as conn:
+            cur = conn.execute("DELETE FROM risk_overrides WHERE check_id = ?", (check_id,))
+            return cur.rowcount > 0
+
+    def get_risk_overrides(self) -> list[dict]:
+        with self._lock, self._conn() as conn:
+            rows = conn.execute(
+                "SELECT * FROM risk_overrides ORDER BY updated_at DESC"
+            ).fetchall()
+        return [dict(r) for r in rows]
 
     def get_device(self, device_id: str) -> dict | None:
         """Return device metadata row or None."""
