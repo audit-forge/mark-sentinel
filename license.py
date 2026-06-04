@@ -302,11 +302,23 @@ def _stale_device_loop(store) -> None:
             if newly_stale:
                 log.warning('%d device(s) unreachable (no report in %.0fh)',
                             len(newly_stale), lic.stale_alert_hours)
+                try:
+                    from alerts import load_alert_config, fire_stale_device_alert
+                    from pathlib import Path as _Path
+                    _acfg = load_alert_config(_Path(__file__).parent / 'alerts_config.json')
+                except Exception:
+                    _acfg = None
                 for d in newly_stale:
                     hours_silent = (time.time() - d['last_seen']) / 3600
                     log.warning('  STALE device=%s host=%s last_seen=%.1fh ago',
                                 d['device_id'], d['hostname'], hours_silent)
                     alerted.add(d['device_id'])
+                    if _acfg:
+                        threading.Thread(
+                            target=fire_stale_device_alert,
+                            args=(d['hostname'], d['device_id'], hours_silent, _acfg),
+                            daemon=True,
+                        ).start()
 
                 if lic.webhook_url:
                     threading.Thread(

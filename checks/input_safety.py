@@ -12,6 +12,28 @@ from connectors.config_connector import ScanContext
 
 CATEGORY = "AI-INP"
 
+_GUARD_MODEL_RE = [
+    re.compile(r'(?i)lakera[\s_-]?guard'),
+    re.compile(r'(?i)llama[\s_-]?guard'),
+    re.compile(r'(?i)prompt[\s_-]?guard'),
+    re.compile(r'(?i)guard[\s_-]?model'),
+    re.compile(r'(?i)PROMPT_GUARD|GUARD_ENDPOINT|GUARD_MODEL'),
+    re.compile(r'(?i)content[\s_-]?filter(?:ing)?'),
+    re.compile(r'(?i)input[\s_-]?saniti[sz]'),
+    re.compile(r'(?i)injection[\s_-]?detect'),
+    re.compile(r'(?i)presidio'),
+    re.compile(r'(?i)openai\.moderations'),
+    re.compile(r'(?i)moderations\.create'),
+]
+
+_RAG_GUARD_RE = [
+    re.compile(r'(?i)sanitize[\s_-]?(?:retrieved|doc|chunk|context)'),
+    re.compile(r'(?i)retrieved[\s_-]?content[\s_-]?filter'),
+    re.compile(r'(?i)rag[\s_-]?(?:guard|filter|sanitiz)'),
+    re.compile(r'(?i)strip[\s_-]?(?:tags?|instruction|directive)'),
+    re.compile(r'(?i)allow[\s_-]?(?:list|listed)[\s_-]?(?:tag|instruction)'),
+]
+
 _INPUT_LIMIT_RE = [
     re.compile(r'(?i)max[_-]?(?:tokens|input[_-]?length|message[_-]?length|context)\s*[=:{]'),
     re.compile(r'(?i)"max[_-]?tokens"\s*:'),
@@ -161,38 +183,65 @@ def check_inp_002(ctx: ScanContext) -> CheckResult:
 
 def check_inp_003(ctx: ScanContext) -> CheckResult:
     _fw = {"OWASP LLM": "LLM05", "OWASP Agentic": "OAGNT-03", "FedRAMP": "SI-10", "NIST AI RMF": "MEASURE 2.6"}
+    check_id, title, severity = "AI-INP-003", "Indirect Prompt Injection Resistance (RAG / External Content)", "HIGH"
 
     if ctx.uses_rag is False:
         return CheckResult(
-            check_id="AI-INP-003",
-            title="Indirect Prompt Injection Resistance (RAG)",
-            status=NA,
-            severity="HIGH",
+            check_id=check_id, title=title, status=NA, severity=severity,
             category=CATEGORY,
             details=(
                 "Not applicable — your system does not use document retrieval (RAG). "
-                "This test only applies to AI systems that retrieve external documents, "
-                "knowledge bases, or data sources before responding."
+                "This check applies to AI systems that retrieve external documents, "
+                "knowledge bases, or external data sources before responding."
             ),
             frameworks=_fw,
         )
 
+    all_text = '\n'.join(ctx.files.values())
+
+    has_guard = any(r.search(all_text) for r in _GUARD_MODEL_RE)
+    has_rag_sanitize = any(r.search(all_text) for r in _RAG_GUARD_RE)
+
+    evidence = []
+    missing = []
+
+    if has_guard:
+        evidence.append("Input guard / content filter configuration detected in deployment files.")
+    else:
+        missing.append("No guard model or input filter configuration found (Lakera, Llama Guard, Presidio, or equivalent).")
+
+    if has_rag_sanitize:
+        evidence.append("Retrieved-content sanitization patterns detected.")
+    else:
+        missing.append("No retrieved-content sanitization patterns found — external documents may be injected into the model context unfiltered.")
+
+    if has_guard and has_rag_sanitize:
+        return CheckResult(
+            check_id=check_id, title=title, status=PASS, severity=severity,
+            category=CATEGORY,
+            details="Input guard and retrieved-content sanitization controls are configured.",
+            evidence=evidence,
+            frameworks=_fw,
+        )
+
+    status = WARN if has_guard or has_rag_sanitize else FAIL
     return CheckResult(
-        check_id="AI-INP-003",
-        title="Indirect Prompt Injection Resistance (RAG)",
-        status=SKIP,
-        severity="HIGH",
+        check_id=check_id, title=title, status=status, severity=severity,
         category=CATEGORY,
         details=(
-            "Coming soon — Indirect injection testing via RAG (Retrieval-Augmented Generation) "
-            "requires a document retrieval endpoint to probe. This check will be available once you "
-            "connect a RAG pipeline in the tester."
+            "Indirect injection risk detected — external content (retrieved documents, emails, "
+            "web pages) could carry injected instructions that the model would execute. "
+            "This is the attack class exploited in the Google Gemini indirect injection vulnerability (2025)."
         ),
+        evidence=missing,
         remediation=(
-            "While this check is pending, apply these controls manually:\n"
-            "1. Sanitize all retrieved documents before injecting them into the model context.\n"
-            "2. Use a guard model to classify retrieved content for injection payloads.\n"
-            "3. Limit what retrieved content can instruct the model to do (e.g., it cannot modify system behavior)."
+            "1. Add a guard model (Lakera Guard, Llama Guard, or Presidio) to classify "
+            "all retrieved content before it enters the model context.\n"
+            "2. Sanitize retrieved documents — strip HTML tags, limit instruction-like patterns, "
+            "wrap content in delimiters the model treats as data not instructions.\n"
+            "3. Apply the principle of least privilege to retrieved content: it should never "
+            "be able to invoke tools, modify system behavior, or issue new instructions.\n"
+            "4. Use --mode api or --mode local to run live adversarial RAG probe tests."
         ),
         frameworks=_fw,
     )

@@ -62,8 +62,9 @@ def load_alert_config_for_ui(path: Path) -> dict:
     """Load config with password masked for safe return to the browser."""
     cfg = load_alert_config(path) or {}
     result = {
-        'slack_webhook': cfg.get('slack_webhook', ''),
-        'webhook_url':   cfg.get('webhook_url', ''),
+        'slack_webhook':       cfg.get('slack_webhook', ''),
+        'google_chat_webhook': cfg.get('google_chat_webhook', ''),
+        'webhook_url':         cfg.get('webhook_url', ''),
         'email': {
             'smtp_host': cfg.get('email', {}).get('smtp_host', ''),
             'smtp_port': cfg.get('email', {}).get('smtp_port', 587),
@@ -72,7 +73,7 @@ def load_alert_config_for_ui(path: Path) -> dict:
             'from':      cfg.get('email', {}).get('from', ''),
             'to':        cfg.get('email', {}).get('to', ''),
         },
-        'triggers': {**_DEFAULT_TRIGGERS, **cfg.get('triggers', {})},
+        'triggers': {**_DEFAULT_TRIGGERS, 'device_offline': True, **cfg.get('triggers', {})},
     }
     return result
 
@@ -92,8 +93,9 @@ def save_alert_config(path: Path, new_data: dict, existing_path: Path) -> None:
 
     triggers_raw = new_data.get('triggers', {})
     clean = {
-        'slack_webhook': str(new_data.get('slack_webhook', '')).strip(),
-        'webhook_url':   str(new_data.get('webhook_url', '')).strip(),
+        'slack_webhook':       str(new_data.get('slack_webhook', '')).strip(),
+        'google_chat_webhook': str(new_data.get('google_chat_webhook', '')).strip(),
+        'webhook_url':         str(new_data.get('webhook_url', '')).strip(),
         'email': {
             'smtp_host': str(email_new.get('smtp_host', '')).strip(),
             'smtp_port': int(email_new.get('smtp_port', 587)),
@@ -103,9 +105,10 @@ def save_alert_config(path: Path, new_data: dict, existing_path: Path) -> None:
             'to':        str(email_new.get('to', '')).strip(),
         },
         'triggers': {
-            'new_critical':  bool(triggers_raw.get('new_critical', True)),
-            'new_high':      bool(triggers_raw.get('new_high', True)),
-            'new_shadow_ai': bool(triggers_raw.get('new_shadow_ai', True)),
+            'new_critical':    bool(triggers_raw.get('new_critical', True)),
+            'new_high':        bool(triggers_raw.get('new_high', True)),
+            'new_shadow_ai':   bool(triggers_raw.get('new_shadow_ai', True)),
+            'device_offline':  bool(triggers_raw.get('device_offline', True)),
         },
     }
     path.write_text(json.dumps(clean, indent=2), encoding='utf-8')
@@ -160,6 +163,22 @@ def fire_alerts(report: dict, device_id: str, hostname: str,
         log.info('alert fired: %s %s on %s', msg['severity'], msg['check_id'], hostname)
 
 
+def fire_stale_device_alert(hostname: str, device_id: str,
+                            hours_offline: float, alert_cfg: dict) -> None:
+    """Called by the stale-device monitor when a device exceeds its silence threshold."""
+    triggers = {**_DEFAULT_TRIGGERS, 'device_offline': True, **alert_cfg.get('triggers', {})}
+    if not triggers.get('device_offline'):
+        return
+    _dispatch(alert_cfg, {
+        'event':         'device_offline',
+        'severity':      'HIGH',
+        'device':        hostname,
+        'device_id':     device_id,
+        'hours_offline': round(hours_offline, 1),
+    })
+    log.info('device offline alert: %s (%s) — %.1fh silent', hostname, device_id, hours_offline)
+
+
 def fire_shadow_alert(reporter_hostname: str, service: str,
                       host: str, alert_cfg: dict) -> None:
     """Called when a brand-new shadow AI asset is discovered for the first time."""
@@ -191,6 +210,12 @@ def send_test_alert(alert_cfg: dict, channel: str) -> tuple[bool, str]:
             return False, 'No Slack webhook URL configured'
         ok = _post_slack(url, _format_text(payload), payload)
         return ok, 'Test sent to Slack' if ok else 'Slack delivery failed — check the webhook URL'
+    if channel == 'google_chat':
+        url = alert_cfg.get('google_chat_webhook', '').strip()
+        if not url:
+            return False, 'No Google Chat webhook URL configured'
+        ok = _post_google_chat(url, _format_text(payload))
+        return ok, 'Test sent to Google Chat' if ok else 'Google Chat delivery failed — check the webhook URL'
     if channel == 'email':
         cfg = alert_cfg.get('email', {})
         if not cfg.get('smtp_host') or not cfg.get('to'):
@@ -210,11 +235,14 @@ def send_test_alert(alert_cfg: dict, channel: str) -> tuple[bool, str]:
 
 def _dispatch(alert_cfg: dict, payload: dict) -> None:
     slack_url   = alert_cfg.get('slack_webhook', '').strip()
+    gchat_url   = alert_cfg.get('google_chat_webhook', '').strip()
     webhook_url = alert_cfg.get('webhook_url', '').strip()
     email_cfg   = alert_cfg.get('email', {})
     text        = _format_text(payload)
     if slack_url:
         _post_slack(slack_url, text, payload)
+    if gchat_url:
+        _post_google_chat(gchat_url, text)
     if webhook_url:
         _post_webhook(webhook_url, payload)
     if email_cfg.get('smtp_host') and email_cfg.get('to'):
@@ -241,6 +269,22 @@ def _post_slack(webhook_url: str, text: str, payload: dict) -> bool:
             return 200 <= r.status < 300
     except Exception as e:
         log.error('Slack POST failed: %s', e)
+        return False
+
+
+def _post_google_chat(webhook_url: str, text: str) -> bool:
+    """Post a plain-text message to a Google Chat space via incoming webhook."""
+    data = json.dumps({'text': text}).encode()
+    req = urllib.request.Request(
+        webhook_url, data=data,
+        headers={'Content-Type': 'application/json'},
+        method='POST',
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=10) as r:
+            return 200 <= r.status < 300
+    except Exception as e:
+        log.error('Google Chat POST failed: %s', e)
         return False
 
 
@@ -298,6 +342,10 @@ def _format_text(payload: dict) -> str:
         return (f"Shadow AI Detected on {device}\n"
                 f"Service: {payload.get('service', '')} at {payload.get('host', '')}\n"
                 f"Review in the Sentinel Asset Inventory and approve or remove this asset.")
+    if ev == 'device_offline':
+        return (f"Device Offline: {device}\n"
+                f"No check-in for {payload.get('hours_offline', '?')} hours.\n"
+                f"Verify the agent is running and the device is reachable.")
     if ev == 'test_alert':
         return payload.get('title', 'Test alert from M.A.R.K. Sentinel')
     sev    = payload.get('severity', 'HIGH')
@@ -312,6 +360,8 @@ def _alert_subject(payload: dict) -> str:
     device = payload.get('device', 'unknown')
     if ev == 'new_shadow_ai':
         return f'[Sentinel] Shadow AI detected on {device}'
+    if ev == 'device_offline':
+        return f'[Sentinel] Device offline: {device} ({payload.get("hours_offline", "?")}h silent)'
     sev = payload.get('severity', 'HIGH')
     return f'[Sentinel] {sev}: {payload.get("check_id", "Finding")} on {device}'
 
