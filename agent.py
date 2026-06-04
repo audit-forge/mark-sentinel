@@ -485,8 +485,43 @@ def self_update(config: dict) -> bool:
 
 # ── Main scan cycle ────────────────────────────────────────────────────────────
 
+def _resolve_home() -> str:
+    """Return the real user's home directory — works correctly even when the process runs as root."""
+    import pwd as _pwd
+    for var in ('SUDO_USER', 'LOGNAME', 'USER'):
+        user = os.environ.get(var, '')
+        if user and user != 'root':
+            try:
+                return _pwd.getpwnam(user).pw_dir
+            except KeyError:
+                pass
+    try:
+        import subprocess as _sp
+        user = _sp.run(
+            ['stat', '-f', '%Su', '/dev/console'],
+            capture_output=True, text=True, timeout=2
+        ).stdout.strip()
+        if user and user != 'root':
+            return _pwd.getpwnam(user).pw_dir
+    except Exception:
+        pass
+    try:
+        import subprocess as _sp
+        out = _sp.run(['loginctl', 'list-sessions', '--no-legend'],
+                      capture_output=True, text=True, timeout=2).stdout
+        for line in out.splitlines():
+            parts = line.split()
+            if len(parts) >= 3:
+                user = parts[2]
+                if user and user != 'root':
+                    return _pwd.getpwnam(user).pw_dir
+    except Exception:
+        pass
+    return str(Path.home())
+
+
 def run_cycle(config: dict) -> bool:
-    target      = config.get('target', '.')
+    target      = _resolve_home() if config.get('target', '~') in ('.', '~', '') else config.get('target')
     profile_raw = config.get('profile', 'default')
     profile     = profile_raw.split(',')[0].strip() or 'default'
     device_id   = _device_id()

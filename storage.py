@@ -317,7 +317,6 @@ class AgentStore:
         with self._lock, self._conn() as conn:
             cur = conn.execute("DELETE FROM reports WHERE received_at < ?", (cutoff,))
             pruned = cur.rowcount
-            conn.execute("DELETE FROM devices WHERE device_id NOT IN (SELECT DISTINCT device_id FROM reports)")
         return pruned
 
     def get_latest_report(self, device_id: str) -> dict | None:
