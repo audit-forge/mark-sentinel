@@ -86,15 +86,28 @@ def _npm_global(package: str) -> bool:
         return False
 
 
-def _world_readable_in(directory: Path) -> list:
+_SKIP_SUBDIRS = {'file-history', 'sessions', 'cache', 'shell-snapshots', '__pycache__', 'node_modules'}
+_EVIDENCE_CAP = 10
+
+
+def _world_readable_in(directory: Path, skip_subdirs: set = frozenset()) -> list:
     found = []
     try:
         for p in directory.rglob('*'):
+            if any(part in skip_subdirs for part in p.relative_to(directory).parts):
+                continue
             if p.is_file() and _is_world_readable(p):
                 found.append(str(p))
     except OSError:
         pass
     return found
+
+
+def _cap_evidence(items: list) -> tuple[list, str]:
+    """Return (capped_list, overflow_note). Note is empty string if no cap needed."""
+    if len(items) <= _EVIDENCE_CAP:
+        return items, ''
+    return items[:_EVIDENCE_CAP], f' (and {len(items) - _EVIDENCE_CAP} more)'
 
 
 def check_tool_001(ctx: ScanContext) -> CheckResult:
@@ -168,7 +181,7 @@ def check_tool_002(ctx: ScanContext) -> CheckResult:
         d = home / '.claude'
         if _path_exists(d):
             config_found = True
-            world_readable.extend(_world_readable_in(d))
+            world_readable.extend(_world_readable_in(d, skip_subdirs=_SKIP_SUBDIRS))
 
     if not binary and not npm_found and not pip_found and not config_found:
         return CheckResult(
@@ -181,15 +194,16 @@ def check_tool_002(ctx: ScanContext) -> CheckResult:
         )
 
     if world_readable:
+        capped, overflow = _cap_evidence(world_readable)
         return CheckResult(
             check_id='AI-TOOL-002',
             title='Claude Code CLI config files are world-readable',
             status=FAIL,
             severity='HIGH',
             category=CATEGORY,
-            details=f'Config files readable by all users: {", ".join(world_readable)}',
-            evidence=world_readable,
-            remediation='chmod -R 600 ~/.claude/*.json',
+            details=f'Config files readable by all users: {", ".join(capped)}{overflow}',
+            evidence=capped,
+            remediation='chmod -R 700 ~/.claude',
             frameworks={'NIST AI RMF': 'GOVERN 1.7', 'OWASP LLM': 'LLM06'},
         )
 
@@ -350,7 +364,7 @@ def check_tool_005(ctx: ScanContext) -> CheckResult:
         d = home / '.config' / 'github-copilot'
         if _path_exists(d):
             config_found = True
-            world_readable.extend(_world_readable_in(d))
+            world_readable.extend(_world_readable_in(d, skip_subdirs=_SKIP_SUBDIRS))
 
     if not copilot_ext and not config_found:
         return CheckResult(
@@ -363,14 +377,15 @@ def check_tool_005(ctx: ScanContext) -> CheckResult:
         )
 
     if world_readable:
+        capped, overflow = _cap_evidence(world_readable)
         return CheckResult(
             check_id='AI-TOOL-005',
             title='GitHub Copilot CLI credential files are world-readable',
             status=FAIL,
             severity='HIGH',
             category=CATEGORY,
-            details=f'Copilot credential files readable by all users: {", ".join(world_readable)}',
-            evidence=world_readable,
+            details=f'Copilot credential files readable by all users: {", ".join(capped)}{overflow}',
+            evidence=capped,
             remediation='chmod -R 600 ~/.config/github-copilot/',
             frameworks={'NIST AI RMF': 'GOVERN 1.7', 'OWASP LLM': 'LLM06'},
         )

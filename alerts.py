@@ -118,7 +118,12 @@ def save_alert_config(path: Path, new_data: dict, existing_path: Path) -> None:
 
 def fire_alerts(report: dict, device_id: str, hostname: str,
                 alert_cfg: dict, store=None) -> None:
-    """Called after each new scan report is stored. Fires for new CRITICAL/HIGH findings."""
+    """Called after each new scan report is stored.
+    - Dispatches to external channels (Slack/email/webhook) only for NEW findings
+      (not seen in the previous scan) to avoid notification fatigue.
+    - Logs ALL active CRITICAL/HIGH findings to the DB alert_log, deduplicated
+      to at most once per 24h per device+check_id so the dashboard stays current.
+    """
     triggers = {**_DEFAULT_TRIGGERS, **alert_cfg.get('triggers', {})}
     findings = report.get('findings', [])
 
@@ -132,67 +137,106 @@ def fire_alerts(report: dict, device_id: str, hostname: str,
         except Exception as e:
             log.error('prev report lookup: %s', e)
 
-    messages = []
-    if triggers.get('new_critical'):
-        for f in findings:
-            if (f.get('status') == 'FAIL'
-                    and f.get('severity', '').upper() == 'CRITICAL'
-                    and f.get('check_id', '') not in prev_fail_ids):
-                messages.append({
-                    'event':    'new_critical_finding',
-                    'severity': 'CRITICAL',
-                    'device':   hostname,
-                    'check_id': f.get('check_id', ''),
-                    'title':    f.get('title', ''),
-                })
-    if triggers.get('new_high'):
-        for f in findings:
-            if (f.get('status') == 'FAIL'
-                    and f.get('severity', '').upper() == 'HIGH'
-                    and f.get('check_id', '') not in prev_fail_ids):
-                messages.append({
-                    'event':    'new_high_finding',
-                    'severity': 'HIGH',
-                    'device':   hostname,
-                    'check_id': f.get('check_id', ''),
-                    'title':    f.get('title', ''),
-                })
+    sev_map = {'CRITICAL': 'new_critical_finding', 'HIGH': 'new_high_finding'}
+    trigger_map = {'CRITICAL': 'new_critical', 'HIGH': 'new_high'}
 
-    for msg in messages:
-        _dispatch(alert_cfg, msg)
-        log.info('alert fired: %s %s on %s', msg['severity'], msg['check_id'], hostname)
+    for f in findings:
+        if f.get('status') != 'FAIL':
+            continue
+        sev = f.get('severity', '').upper()
+        if sev not in sev_map:
+            continue
+        check_id = f.get('check_id', '')
+        title    = f.get('title', '')
+        event    = sev_map[sev]
+        is_new   = check_id not in prev_fail_ids
+
+        # External channel dispatch — only for newly appeared findings
+        if is_new and triggers.get(trigger_map[sev]):
+            msg = {'event': event, 'severity': sev, 'device': hostname,
+                   'check_id': check_id, 'title': title}
+            channels = _dispatch(alert_cfg, msg)
+            log.info('alert fired: %s %s on %s', sev, check_id, hostname)
+        else:
+            channels = 'none'
+
+        # DB log — all active findings, deduplicated to once per 24h
+        if store is not None:
+            try:
+                if not store.has_recent_alert(device_id, check_id, within_hours=24):
+                    store.log_alert(
+                        event_type=event,
+                        severity=sev,
+                        check_id=check_id,
+                        title=title,
+                        device_id=device_id,
+                        hostname=hostname,
+                        channels=channels,
+                    )
+            except Exception as _le:
+                log.error('alert log write error: %s', _le)
 
 
 def fire_stale_device_alert(hostname: str, device_id: str,
-                            hours_offline: float, alert_cfg: dict) -> None:
+                            hours_offline: float, alert_cfg: dict,
+                            store=None) -> None:
     """Called by the stale-device monitor when a device exceeds its silence threshold."""
     triggers = {**_DEFAULT_TRIGGERS, 'device_offline': True, **alert_cfg.get('triggers', {})}
     if not triggers.get('device_offline'):
         return
-    _dispatch(alert_cfg, {
+    payload = {
         'event':         'device_offline',
         'severity':      'HIGH',
         'device':        hostname,
         'device_id':     device_id,
         'hours_offline': round(hours_offline, 1),
-    })
+    }
+    channels = _dispatch(alert_cfg, payload)
     log.info('device offline alert: %s (%s) — %.1fh silent', hostname, device_id, hours_offline)
+    if store is not None:
+        try:
+            store.log_alert(
+                event_type='device_offline',
+                severity='HIGH',
+                check_id='',
+                title=f'Device offline for {round(hours_offline, 1)}h',
+                device_id=device_id,
+                hostname=hostname,
+                channels=channels,
+            )
+        except Exception as _le:
+            log.error('alert log write error: %s', _le)
 
 
 def fire_shadow_alert(reporter_hostname: str, service: str,
-                      host: str, alert_cfg: dict) -> None:
+                      host: str, alert_cfg: dict,
+                      reporter_device_id: str = '', store=None) -> None:
     """Called when a brand-new shadow AI asset is discovered for the first time."""
     triggers = {**_DEFAULT_TRIGGERS, **alert_cfg.get('triggers', {})}
     if not triggers.get('new_shadow_ai'):
         return
-    _dispatch(alert_cfg, {
+    payload = {
         'event':    'new_shadow_ai',
         'severity': 'HIGH',
         'device':   reporter_hostname,
         'service':  service,
         'host':     host,
-    })
+    }
+    channels = _dispatch(alert_cfg, payload)
     log.info('shadow AI alert: %s at %s via %s', service, host, reporter_hostname)
+    if store is not None:
+        try:
+            store.log_alert(
+                event_type='new_shadow_ai',
+                severity='HIGH',
+                check_id='',
+                title=f'Shadow AI: {service} at {host}',
+                device_id=reporter_device_id,
+                hostname=reporter_hostname,
+                channels=channels,
+            )
+        except Exception as _le:
+            log.error('alert log write error: %s', _le)
 
 
 def send_test_alert(alert_cfg: dict, channel: str) -> tuple[bool, str]:
@@ -233,20 +277,27 @@ def send_test_alert(alert_cfg: dict, channel: str) -> tuple[bool, str]:
 
 # ── Delivery backends ─────────────────────────────────────────────────────────
 
-def _dispatch(alert_cfg: dict, payload: dict) -> None:
+def _dispatch(alert_cfg: dict, payload: dict) -> str:
+    """Deliver alert to all configured channels. Returns comma-separated list of channels fired."""
     slack_url   = alert_cfg.get('slack_webhook', '').strip()
     gchat_url   = alert_cfg.get('google_chat_webhook', '').strip()
     webhook_url = alert_cfg.get('webhook_url', '').strip()
     email_cfg   = alert_cfg.get('email', {})
     text        = _format_text(payload)
+    fired = []
     if slack_url:
         _post_slack(slack_url, text, payload)
+        fired.append('slack')
     if gchat_url:
         _post_google_chat(gchat_url, text)
+        fired.append('gchat')
     if webhook_url:
         _post_webhook(webhook_url, payload)
+        fired.append('webhook')
     if email_cfg.get('smtp_host') and email_cfg.get('to'):
         _send_email(email_cfg, _alert_subject(payload), text)
+        fired.append('email')
+    return ','.join(fired) if fired else 'none'
 
 
 def _post_slack(webhook_url: str, text: str, payload: dict) -> bool:

@@ -133,38 +133,63 @@ def _load_license() -> None:
     from license import load_license
     load_license(ROOT / 'license.json')
 
+# Thread-local storage for per-request customer license
+_request_lic = threading.local()
+
+
+def _set_request_license(customer: dict | None) -> None:
+    """Called at the start of each authenticated request to set the per-customer license."""
+    if customer:
+        from license import get_customer_license
+        _request_lic.license = get_customer_license(customer)
+    else:
+        _request_lic.license = None
+
+
+def _current_license():
+    """Return per-request customer license if set, else fall back to global license.json."""
+    lic = getattr(_request_lic, 'license', None)
+    if lic is not None:
+        return lic
+    from license import get_license
+    return get_license()
+
+
 def _has_technical_reports() -> bool:
-    """Return True if this license includes Technical reports and remediation. Defaults True."""
     try:
-        from license import get_license
-        return get_license().has_technical_reports
+        return _current_license().has_technical_reports
     except Exception:
         return True
 
 def _is_demo() -> bool:
-    """Return True when running in demo mode."""
     try:
-        from license import get_license
-        return get_license().is_demo
+        return _current_license().is_demo
     except Exception:
         return False
 
 def _has_evidence_package() -> bool:
-    """Return True when the license allows Evidence Package export. Defaults True."""
     try:
-        from license import get_license
-        return get_license().has_evidence_package
+        return _current_license().has_evidence_package
     except Exception:
         return True
-
 
 def _has_live_scan() -> bool:
-    """Return True when the license allows live adversarial probe scans (Plus only)."""
     try:
-        from license import get_license
-        return get_license().has_live_scan
+        return _current_license().has_live_scan
     except Exception:
         return True
+
+
+# ── per-customer alert config path ────────────────────────────────────────────
+def _alert_config_path(customer_id: str) -> Path:
+    """Return the per-customer alert config path, falling back to legacy global path."""
+    per_cust = ROOT / 'data' / 'customers' / customer_id / 'alerts_config.json'
+    if per_cust.exists():
+        return per_cust
+    legacy = ROOT / 'alerts_config.json'
+    if legacy.exists():
+        return legacy
+    return per_cust  # new customers write here on first save
 
 
 _LIVE_SCAN_CFG_PATH = ROOT / 'data' / 'live_scan_config.json'
@@ -1033,7 +1058,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
 
     def _get_dashboard_customer(self) -> dict | None:
         """Return the customer record for the authenticated dashboard user, or None."""
-        user = self._get_dashboard_user()
+        user = self._session_user()
         if not user:
             return None
         cust_id = user.get('customer_id')
@@ -1084,6 +1109,9 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         if path == '/setup':
             self._serve_setup()
             return
+        if path == '/admin':
+            self._serve_admin_panel()
+            return
         if path == '/api/auth/me':
             self._api_auth_me()
             return
@@ -1122,6 +1150,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             '/command':        lambda: self._redirect('/'),
             '/api/config':           self._api_get_config,
             '/api/alerts/config':    self._api_get_alert_config,
+            '/api/alerts/log':       self._api_get_alert_log,
             '/api/live-scan-config': self._api_get_live_scan_config,
             '/api/fleet/live-stats': self._api_fleet_live_stats,
             '/api/fleet/shadow':  self._api_fleet_shadow,
@@ -1223,6 +1252,8 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self._api_set_alert_config()
         elif path == '/api/alerts/test':
             self._api_test_alert()
+        elif path == '/api/alerts/ack':
+            self._api_ack_alert()
         elif path == '/api/system/update':
             self._api_system_update()
         elif path == '/api/system/restart-agent':
@@ -1241,13 +1272,16 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self._api_fleet_update(path[len('/api/fleet/update/'):])
         elif path.startswith('/api/fleet/remove/'):
             self._api_fleet_remove(path[len('/api/fleet/remove/'):])
-        elif path.startswith('/api/fleet/rename/'):
-            self._api_fleet_rename(path[len('/api/fleet/rename/'):])
         elif path == '/api/admin/license':
             self._api_admin_license()
+        elif path == '/api/admin/customers':
+            self._api_admin_create_customer()
+        elif path.startswith('/api/admin/customers/'):
+            self._api_admin_update_customer(path[len('/api/admin/customers/'):])
         elif path == '/api/probe-scan':
             self._api_probe_scan()
         elif path == '/probe':
+            _set_request_license(self._get_dashboard_customer())
             if not _has_live_scan():
                 self._send(403, b'Live scanning requires a Pro license. Contact sales@markai.io to upgrade.', 'text/plain')
                 return
@@ -1944,13 +1978,28 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             except Exception as _de:
                 log.error('duplicate check error: %s', _de)
 
-        # License seat check — only runs when this is a previously unseen device
+        # Per-customer license seat check — only runs when this is a previously unseen device
         license_status = 'ok'
         try:
-            from license import check_overage
             if is_new:
-                current_count = store.device_count() + 1  # +1 for the device being registered
-                license_status = check_overage(device_id, hostname, current_count, store)
+                current_count = store.device_count() + 1
+                cust_record = _get_registry().get_by_id(_cust['id']) if _cust else None
+                if cust_record:
+                    from license import get_customer_license
+                    cust_lic = get_customer_license(cust_record)
+                    license_status = cust_lic.check(current_count)
+                    if license_status in ('over_limit', 'over_grace', 'expired'):
+                        store.log_license_event(
+                            event_type=license_status, device_id=device_id,
+                            hostname=hostname, agent_count=current_count,
+                            max_agents=cust_lic.max_agents,
+                        )
+                        log.warning('LICENSE %s — customer=%s device=%s count=%d max=%d',
+                                    license_status.upper(), _cust['id'], device_id,
+                                    current_count, cust_lic.max_agents)
+                else:
+                    from license import check_overage
+                    license_status = check_overage(device_id, hostname, current_count, store)
         except Exception as _le:
             log.error('license check error: %s', _le)
 
@@ -1970,13 +2019,13 @@ class _Handler(http.server.BaseHTTPRequestHandler):
 
         try:
             from alerts import load_alert_config, fire_alerts
-            alert_cfg = load_alert_config(ROOT / 'alerts_config.json')
-            if alert_cfg:
-                threading.Thread(
-                    target=fire_alerts,
-                    args=(report, device_id, hostname, alert_cfg, store),
-                    daemon=True,
-                ).start()
+            _cust_id_alert = _cust['id'] if _cust else 'default'
+            alert_cfg = load_alert_config(_alert_config_path(_cust_id_alert)) or {}
+            threading.Thread(
+                target=fire_alerts,
+                args=(report, device_id, hostname, alert_cfg, store),
+                daemon=True,
+            ).start()
         except Exception as _ae:
             log.error('alerts error: %s', _ae)
 
@@ -1996,13 +2045,11 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         if not device_id:
             self._json({'command': None})
             return
-        expected = _agent_token()
-        if expected:
-            auth = self.headers.get('Authorization', '')
-            if auth != f'Bearer {expected}':
-                self._send(401, b'Unauthorized', 'text/plain')
-                return
-        store = self._store()
+        cust = self._get_agent_customer()
+        if not cust:
+            self._send(401, b'Unauthorized', 'text/plain')
+            return
+        store = _get_store(cust['id'])
         store.touch_device(device_id)
         command = store.claim_command(device_id)
         self._json({'command': command})
@@ -2145,21 +2192,6 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         found = self._store().delete_device(device_id)
         self._json({'status': 'removed' if found else 'not_found', 'device_id': device_id})
 
-    def _api_fleet_rename(self, device_id: str):
-        """POST /api/fleet/rename/<device_id> — set a custom display name for a device."""
-        device_id = device_id.strip()
-        if not device_id:
-            self._json({'error': 'missing device_id'}, 400)
-            return
-        length = _content_length(self.headers)
-        try:
-            body = json.loads(self.rfile.read(length)) if length else {}
-        except Exception:
-            body = {}
-        name = str(body.get('display_name', '')).strip()[:80]
-        found = self._store().rename_device(device_id, name)
-        self._json({'status': 'ok' if found else 'not_found', 'display_name': name})
-
     def _api_agent_discovery(self):
         """POST /api/agent/discovery — agent reports subnet scan results (unmanaged devices)."""
         length = _content_length(self.headers)
@@ -2204,11 +2236,13 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             if is_new:
                 try:
                     from alerts import load_alert_config, fire_shadow_alert
-                    _acfg = load_alert_config(ROOT / 'alerts_config.json')
+                    _shadow_cust_id = _cust['id'] if _cust else 'default'
+                    _acfg = load_alert_config(_alert_config_path(_shadow_cust_id))
                     if _acfg:
                         threading.Thread(
                             target=fire_shadow_alert,
-                            args=(reporter_host, service, host, _acfg),
+                            args=(reporter_host, service, host, _acfg,
+                                  device_id, store),
                             daemon=True,
                         ).start()
                 except Exception as _ae:
@@ -2465,6 +2499,261 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self._json(summary)
         except Exception as e:
             self._json({'error': str(e)}, 500)
+
+    # ── super-admin customer management ──────────────────────────────────────
+
+    def _require_super_admin(self) -> bool:
+        me = self._session_user()
+        if not me or me.get('role') != 'super_admin':
+            if self.command == 'GET':
+                self._redirect('/login?next=/admin')
+            else:
+                self._json({'error': 'forbidden'}, 403)
+            return False
+        return True
+
+    def _serve_admin_panel(self):
+        if not self._require_super_admin():
+            return
+        reg = _get_registry()
+        customers = reg.list_customers()
+        # Fetch device count for each customer
+        for c in customers:
+            try:
+                c['device_count'] = _get_store(c['id']).device_count()
+                c['user_count']   = len(reg.list_users(c['id']))
+            except Exception:
+                c['device_count'] = 0
+                c['user_count']   = 0
+        def e(s): return str(s or '').replace('&','&amp;').replace('<','&lt;').replace('>','&gt;').replace('"','&quot;')
+        rows = ''
+        for c in customers:
+            plan_color = {'plus': '#16a34a', 'standard': '#2563eb', 'demo': '#d97706'}.get(c.get('plan','plus'), '#6B7280')
+            exp = c.get('expires_at') or 'Never'
+            seats = 'Unlimited' if not c.get('max_agents') else str(c['max_agents'])
+            rows += f'''<tr>
+  <td style="font-weight:600">{e(c["name"])}</td>
+  <td style="font-family:monospace;font-size:11px;color:#6B7280">{e(c["id"][:18])}…</td>
+  <td><span style="background:{plan_color}20;color:{plan_color};border:1px solid {plan_color}40;border-radius:4px;padding:2px 8px;font-size:11px;font-weight:700">{e(c.get("plan","plus")).upper()}</span></td>
+  <td style="text-align:center">{seats}</td>
+  <td style="text-align:center">{c["device_count"]}</td>
+  <td style="text-align:center">{c["user_count"]}</td>
+  <td style="font-size:12px;color:#6B7280">{e(exp)}</td>
+  <td style="font-family:monospace;font-size:10px;color:#9CA3AF;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="{e(c.get("agent_token",""))}">{e(c.get("agent_token",""))}</td>
+  <td>
+    <button onclick="editCustomer('{e(c["id"])}','{e(c.get("plan","plus"))}',{c.get("max_agents",0)},'{e(c.get("expires_at",""))}')"
+            style="font-size:11px;padding:3px 8px;background:#f0f4ff;border:1px solid #ccd3e8;border-radius:4px;cursor:pointer;color:#1e3060">Edit</button>
+    <button onclick="copyToken('{e(c.get("agent_token",""))}')"
+            style="font-size:11px;padding:3px 8px;background:#f0f4ff;border:1px solid #ccd3e8;border-radius:4px;cursor:pointer;color:#1e3060;margin-left:4px">Copy Token</button>
+  </td>
+</tr>'''
+        html = f'''<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Sentinel — Admin Panel</title>
+<style>
+*{{box-sizing:border-box;margin:0;padding:0}}
+body{{background:#f0f4ff;color:#1e3060;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;font-size:14px}}
+.wrap{{max-width:1200px;margin:0 auto;padding:32px 20px 64px}}
+.bar{{display:flex;align-items:center;gap:10px;margin-bottom:32px;padding:20px 24px;background:#0f1e3d;border-radius:10px}}
+.bm{{font-size:18px;font-weight:800;letter-spacing:3px;color:#fff}}
+.bn{{font-size:16px;font-weight:700;letter-spacing:2px;color:#f5a623}}
+.bs{{font-size:11px;color:#8a9abf;margin-left:6px;letter-spacing:1px;text-transform:uppercase}}
+.back{{margin-left:auto;font-size:12px;color:#8a9abf;text-decoration:none;border:1px solid #2a3f6a;border-radius:5px;padding:5px 12px}}
+.card{{background:#fff;border:1px solid #ccd3e8;border-radius:10px;padding:24px;margin-bottom:24px;box-shadow:0 1px 6px rgba(26,47,90,.07)}}
+h2{{font-size:16px;font-weight:700;color:#0a1428;margin-bottom:16px}}
+table{{width:100%;border-collapse:collapse;font-size:13px}}
+th{{text-align:left;font-size:11px;font-weight:700;color:#6B7280;text-transform:uppercase;letter-spacing:.5px;padding:8px 10px;border-bottom:2px solid #e5e9f5}}
+td{{padding:10px 10px;border-bottom:1px solid #f0f4ff;vertical-align:middle}}
+tr:last-child td{{border-bottom:none}}
+label{{display:block;font-size:12px;font-weight:700;color:#1e3060;margin-bottom:5px;text-transform:uppercase;letter-spacing:.5px}}
+input,select{{width:100%;background:#f7f9ff;border:1px solid #ccd3e8;border-radius:6px;color:#0a1428;font-size:14px;padding:8px 12px;outline:none;margin-bottom:14px}}
+input:focus,select:focus{{border-color:#f5a623}}
+.row2{{display:grid;grid-template-columns:1fr 1fr;gap:16px}}
+.btn{{background:#f5a623;border:none;border-radius:6px;color:#0f1e3d;cursor:pointer;font-size:14px;font-weight:700;padding:10px 24px}}
+.btn:hover{{background:#e09610}}
+.msg{{padding:10px 14px;border-radius:6px;font-size:13px;margin-bottom:14px;display:none}}
+.msg.ok{{background:#dcfce7;border:1px solid #16a34a;color:#166534}}
+.msg.err{{background:#fee2e2;border:1px solid #dc2626;color:#b91c1c}}
+</style></head><body>
+<div class="wrap">
+<div class="bar">
+  <span class="bm">M.A.R.K.</span><span class="bn">SENTINEL</span>
+  <span class="bs">Admin Panel</span>
+  <a href="#" class="back" onclick="window.location.href=window.location.protocol+'//'+window.location.hostname+'/dashboard'">&#8592; Platform Dashboard</a>
+</div>
+<div class="card">
+  <h2>Customers ({len(customers)})</h2>
+  <table>
+    <thead><tr>
+      <th>Company</th><th>ID</th><th>Plan</th><th>Seats</th>
+      <th>Devices</th><th>Users</th><th>Expires</th><th>Agent Token</th><th>Actions</th>
+    </tr></thead>
+    <tbody>{rows}</tbody>
+  </table>
+</div>
+<div class="card">
+  <h2>Add New Customer</h2>
+  <div id="create-msg" class="msg"></div>
+  <div class="row2">
+    <div><label>Company Name</label><input id="c-name" type="text" placeholder="Acme Corp"></div>
+    <div><label>Admin Email</label><input id="c-email" type="email" placeholder="admin@acmecorp.com"></div>
+  </div>
+  <div class="row2">
+    <div><label>Admin Password</label><input id="c-pass" type="password" placeholder="Min 10 characters"></div>
+    <div><label>Plan</label>
+      <select id="c-plan">
+        <option value="plus">Plus (full access)</option>
+        <option value="standard">Standard</option>
+        <option value="demo">Demo</option>
+      </select>
+    </div>
+  </div>
+  <div class="row2">
+    <div><label>Max Agents (0 = unlimited)</label><input id="c-seats" type="number" value="0" min="0"></div>
+    <div><label>Expires (leave blank = never)</label><input id="c-exp" type="date" placeholder="YYYY-MM-DD"></div>
+  </div>
+  <button class="btn" onclick="createCustomer()">Create Customer</button>
+</div>
+<div class="card" id="edit-card" style="display:none">
+  <h2>Edit License</h2>
+  <div id="edit-msg" class="msg"></div>
+  <input type="hidden" id="e-id">
+  <div class="row2">
+    <div><label>Plan</label>
+      <select id="e-plan">
+        <option value="plus">Plus</option>
+        <option value="standard">Standard</option>
+        <option value="demo">Demo</option>
+      </select>
+    </div>
+    <div><label>Max Agents (0 = unlimited)</label><input id="e-seats" type="number" min="0"></div>
+  </div>
+  <div class="row2">
+    <div><label>Expires (blank = never)</label><input id="e-exp" type="date"></div>
+    <div></div>
+  </div>
+  <button class="btn" onclick="saveEdit()">Save Changes</button>
+  <button onclick="document.getElementById('edit-card').style.display='none'"
+          style="margin-left:10px;padding:10px 20px;border:1px solid #ccd3e8;background:#fff;border-radius:6px;cursor:pointer;font-size:14px">Cancel</button>
+</div>
+</div>
+<script>
+function showMsg(id, ok, text) {{
+  const el = document.getElementById(id);
+  el.className = 'msg ' + (ok ? 'ok' : 'err');
+  el.textContent = text;
+  el.style.display = 'block';
+  setTimeout(() => el.style.display = 'none', 5000);
+}}
+async function createCustomer() {{
+  const name  = document.getElementById('c-name').value.trim();
+  const email = document.getElementById('c-email').value.trim();
+  const pass  = document.getElementById('c-pass').value;
+  const plan  = document.getElementById('c-plan').value;
+  const seats = parseInt(document.getElementById('c-seats').value) || 0;
+  const exp   = document.getElementById('c-exp').value.trim();
+  if (!name || !email || !pass) {{ showMsg('create-msg', false, 'Name, email and password are required.'); return; }}
+  if (pass.length < 10) {{ showMsg('create-msg', false, 'Password must be at least 10 characters.'); return; }}
+  const r = await fetch('/api/admin/customers', {{
+    method: 'POST',
+    headers: {{'Content-Type': 'application/json'}},
+    body: JSON.stringify({{name, email, password: pass, plan, max_agents: seats, expires_at: exp}})
+  }});
+  const d = await r.json();
+  if (r.ok) {{ showMsg('create-msg', true, 'Customer created. Agent token: ' + d.agent_token); setTimeout(() => location.reload(), 2500); }}
+  else {{ showMsg('create-msg', false, d.error || 'Failed'); }}
+}}
+function editCustomer(id, plan, seats, exp) {{
+  document.getElementById('e-id').value = id;
+  document.getElementById('e-plan').value = plan;
+  document.getElementById('e-seats').value = seats;
+  document.getElementById('e-exp').value = exp;
+  document.getElementById('edit-card').style.display = 'block';
+  document.getElementById('edit-card').scrollIntoView({{behavior:'smooth'}});
+}}
+async function saveEdit() {{
+  const id    = document.getElementById('e-id').value;
+  const plan  = document.getElementById('e-plan').value;
+  const seats = parseInt(document.getElementById('e-seats').value) || 0;
+  const exp   = document.getElementById('e-exp').value.trim();
+  const r = await fetch('/api/admin/customers/' + encodeURIComponent(id), {{
+    method: 'POST',
+    headers: {{'Content-Type': 'application/json'}},
+    body: JSON.stringify({{plan, max_agents: seats, expires_at: exp}})
+  }});
+  const d = await r.json();
+  if (r.ok) {{ showMsg('edit-msg', true, 'Saved.'); setTimeout(() => location.reload(), 1500); }}
+  else {{ showMsg('edit-msg', false, d.error || 'Failed'); }}
+}}
+function copyToken(token) {{
+  navigator.clipboard.writeText(token).then(() => alert('Token copied to clipboard.'));
+}}
+</script>
+</body></html>'''
+        self._send(200, html.encode('utf-8'), 'text/html; charset=utf-8')
+
+    def _api_admin_create_customer(self):
+        if not self._require_super_admin():
+            return
+        length = _content_length(self.headers)
+        try:
+            body = json.loads(self.rfile.read(length)) if length else {}
+        except Exception:
+            self._json({'error': 'invalid JSON'}, 400)
+            return
+        name     = str(body.get('name', '')).strip()
+        email    = str(body.get('email', '')).strip().lower()
+        password = str(body.get('password', ''))
+        plan     = str(body.get('plan', 'plus'))
+        max_ag   = int(body.get('max_agents', 0))
+        exp      = str(body.get('expires_at', '')).strip()
+        if not name or not email or not password:
+            self._json({'error': 'name, email, and password are required'}, 400)
+            return
+        if len(password) < 10:
+            self._json({'error': 'password must be at least 10 characters'}, 400)
+            return
+        if plan not in ('plus', 'standard', 'demo'):
+            self._json({'error': 'plan must be plus, standard, or demo'}, 400)
+            return
+        reg = _get_registry()
+        try:
+            customer = reg.create_customer(name, plan=plan, max_agents=max_ag, expires_at=exp)
+            reg.create_user(customer['id'], email, password, role='admin')
+            log.info('Admin created customer: %s (%s) plan=%s seats=%d',
+                     name, customer['id'], plan, max_ag)
+            self._json({'status': 'created', **customer})
+        except Exception as e:
+            log.error('create_customer error: %s', e)
+            self._json({'error': str(e)}, 500)
+
+    def _api_admin_update_customer(self, customer_id: str):
+        if not self._require_super_admin():
+            return
+        customer_id = customer_id.strip()
+        if not customer_id:
+            self._json({'error': 'missing customer_id'}, 400)
+            return
+        length = _content_length(self.headers)
+        try:
+            body = json.loads(self.rfile.read(length)) if length else {}
+        except Exception:
+            self._json({'error': 'invalid JSON'}, 400)
+            return
+        plan   = str(body.get('plan', 'plus'))
+        max_ag = int(body.get('max_agents', 0))
+        exp    = str(body.get('expires_at', '')).strip()
+        if plan not in ('plus', 'standard', 'demo'):
+            self._json({'error': 'invalid plan'}, 400)
+            return
+        ok = _get_registry().update_customer_license(customer_id, plan, max_ag, exp)
+        if ok:
+            # Flush cached store so next request gets fresh license data
+            with _store_cache_lock:
+                _store_cache.pop(customer_id, None)
+            self._json({'status': 'updated'})
+        else:
+            self._json({'error': 'customer not found'}, 404)
 
     def _api_fleet_report(self):
         """GET /api/fleet/report?tier=executive|ciso|technical&fmt=pdf|html|json[&profile=fedramp,cmmc][&status=fail|warn|pass][&sev=ch|med|li]"""
@@ -3147,7 +3436,9 @@ class _Handler(http.server.BaseHTTPRequestHandler):
 
     def _api_get_alert_config(self):
         from alerts import load_alert_config_for_ui
-        self._json(load_alert_config_for_ui(ROOT / 'alerts_config.json'))
+        cust = self._get_dashboard_customer()
+        cid = cust['id'] if cust else 'default'
+        self._json(load_alert_config_for_ui(_alert_config_path(cid)))
 
     def _api_set_alert_config(self):
         length = _content_length(self.headers)
@@ -3161,8 +3452,10 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             return
         try:
             from alerts import save_alert_config
-            path = ROOT / 'alerts_config.json'
-            save_alert_config(path, body, path)
+            cust = self._get_dashboard_customer()
+            cid = cust['id'] if cust else 'default'
+            path = ROOT / 'data' / 'customers' / cid / 'alerts_config.json'
+            save_alert_config(path, body, _alert_config_path(cid))
             self._json({'status': 'saved'})
         except Exception as e:
             self._json({'error': str(e)}, 500)
@@ -3180,11 +3473,46 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         channel = body.get('channel', '')
         try:
             from alerts import load_alert_config, send_test_alert
-            cfg = load_alert_config(ROOT / 'alerts_config.json') or {}
+            cust = self._get_dashboard_customer()
+            cid = cust['id'] if cust else 'default'
+            cfg = load_alert_config(_alert_config_path(cid)) or {}
             ok, msg = send_test_alert(cfg, channel)
             self._json({'ok': ok, 'message': msg})
         except Exception as e:
             self._json({'ok': False, 'message': str(e)}, 500)
+
+    def _api_get_alert_log(self):
+        from urllib.parse import parse_qs
+        qs = parse_qs(urlparse(self.path).query)
+        unread_only = qs.get('unread', ['0'])[0] == '1'
+        cust = self._get_dashboard_customer()
+        cid = cust['id'] if cust else 'default'
+        store = _get_store(cid)
+        entries = store.get_alert_log(limit=200, unread_only=unread_only)
+        self._json({'alerts': entries, 'unread': store.get_unread_count()})
+
+    def _api_ack_alert(self):
+        length = _content_length(self.headers)
+        if not length:
+            self._send(400, b'Empty body', 'text/plain')
+            return
+        try:
+            body = json.loads(self.rfile.read(length))
+        except json.JSONDecodeError:
+            self._send(400, b'Invalid JSON', 'text/plain')
+            return
+        me = self._session_user()
+        acked_by = me['email'] if me else ''
+        cust = self._get_dashboard_customer()
+        cid = cust['id'] if cust else 'default'
+        store = _get_store(cid)
+        if body.get('all'):
+            count = store.acknowledge_all_alerts(acked_by)
+            self._json({'acknowledged': count})
+        else:
+            alert_id = int(body.get('id', 0))
+            ok = store.acknowledge_alert(alert_id, acked_by)
+            self._json({'ok': ok})
 
     def _serve_shortcut(self):
         url = f'http://localhost:{_serve_port}/fleet'
@@ -3216,6 +3544,8 @@ class _Handler(http.server.BaseHTTPRequestHandler):
 
     def _serve_fleet(self):
         print('[SENTINEL] _serve_fleet: start', flush=True)
+        # Set per-customer license for all feature flags used during this request
+        _set_request_license(self._get_dashboard_customer())
         try:
             store = self._store()
             devices = store.list_devices()
@@ -3233,6 +3563,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             body = _build_fleet_html(
                 devices, shadow, mcp,
                 current_user_email=user['email'] if user else '',
+                current_user_role=user['role'] if user else '',
                 store=store,
             ).encode('utf-8')
             print(f'[SENTINEL] _serve_fleet: body built {len(body)} bytes', flush=True)
@@ -3402,11 +3733,11 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self._serve_probe_tester(error=f'Scan error: {exc}')
 
     def _build_probe_results(self, model, summary, results, live_error):
-        STATUS_COLOR = {'PASS': '#58a6ff', 'FAIL': '#f85149', 'WARN': '#d29922', 'SKIP': '#6e7681', 'N/A': '#444c56'}
-        STATUS_BG    = {'PASS': '#0d1a2d', 'FAIL': '#4a0d0d', 'WARN': '#4a3b0d', 'SKIP': '#1c2128', 'N/A': '#161b22'}
-        SEV_COLOR    = {'CRITICAL': '#f85149', 'HIGH': '#d29922', 'MEDIUM': '#58a6ff', 'LOW': '#8b949e'}
-        SEV_BG       = {'CRITICAL': '#4a0d0d', 'HIGH': '#4a3b0d', 'MEDIUM': '#1d3250', 'LOW': '#21262d'}
-        BORDER       = {'PASS': '#58a6ff', 'FAIL': '#f85149', 'WARN': '#d29922', 'SKIP': '#30363d', 'N/A': '#21262d'}
+        STATUS_COLOR = {'PASS': '#166534', 'FAIL': '#b91c1c', 'WARN': '#92400e', 'SKIP': '#6B7280', 'N/A': '#9CA3AF'}
+        STATUS_BG    = {'PASS': '#dcfce7', 'FAIL': '#fee2e2', 'WARN': '#fef3c7', 'SKIP': '#F3F4F6', 'N/A': '#F9FAFB'}
+        SEV_COLOR    = {'CRITICAL': '#b91c1c', 'HIGH': '#92400e', 'MEDIUM': '#1e3060', 'LOW': '#6B7280'}
+        SEV_BG       = {'CRITICAL': '#fee2e2', 'HIGH': '#fef3c7', 'MEDIUM': '#e0e7ff', 'LOW': '#F3F4F6'}
+        BORDER       = {'PASS': '#16a34a', 'FAIL': '#dc2626', 'WARN': '#d97706', 'SKIP': '#D1D5DB', 'N/A': '#E5E7EB'}
 
         def e(s):
             return str(s or '').replace('&','&amp;').replace('<','&lt;').replace('>','&gt;').replace('"','&quot;')
@@ -3427,51 +3758,49 @@ class _Handler(http.server.BaseHTTPRequestHandler):
 <title>M.A.R.K. Sentinel - Probe Results</title>
 <style>
 *{{box-sizing:border-box;margin:0;padding:0}}
-body{{background:#0d1117;color:#e6edf3;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;font-size:14px}}
+body{{background:#f0f4ff;color:#1e3060;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;font-size:14px}}
 .wrap{{max-width:900px;margin:0 auto;padding:32px 20px 64px}}
-.brand-bar{{display:flex;align-items:center;gap:10px;margin-bottom:28px;padding-bottom:16px;border-bottom:1px solid #21262d}}
-.brand-mark{{font-size:18px;font-weight:800;letter-spacing:2px;color:#58a6ff}}
-.brand-name{{font-size:16px;font-weight:700;letter-spacing:1px}}
-.brand-sub{{font-size:12px;color:#8b949e;margin-left:4px}}
-.back{{margin-left:auto;font-size:12px;color:#58a6ff;text-decoration:none}}
-.back:hover{{text-decoration:underline}}
-.model-tag{{font-size:12px;color:#6e7681;margin-bottom:20px}}
+.brand-bar{{display:flex;align-items:center;gap:10px;margin-bottom:28px;padding:20px 24px;background:#0f1e3d;border-radius:10px;box-shadow:0 2px 12px rgba(15,30,61,.18)}}
+.brand-mark{{font-size:18px;font-weight:800;letter-spacing:3px;color:#fff}}
+.brand-name{{font-size:16px;font-weight:700;letter-spacing:2px;color:#f5a623}}
+.brand-sub{{font-size:11px;color:#8a9abf;margin-left:6px;letter-spacing:1px;text-transform:uppercase}}
+.back{{margin-left:auto;font-size:12px;color:#8a9abf;text-decoration:none;border:1px solid #2a3f6a;border-radius:5px;padding:5px 12px}}
+.back:hover{{color:#f5a623;border-color:#f5a623}}
+.model-tag{{font-size:12px;color:#4a5a7a;margin-bottom:20px}}
 .strip{{display:flex;gap:12px;margin-bottom:20px;flex-wrap:wrap}}
-.sc{{flex:1;min-width:80px;background:#161b22;border:1px solid #21262d;border-radius:8px;padding:14px 12px;text-align:center}}
+.sc{{flex:1;min-width:80px;background:#fff;border:1px solid #ccd3e8;border-radius:8px;padding:14px 12px;text-align:center;box-shadow:0 1px 4px rgba(26,47,90,.06)}}
 .sc-n{{font-size:28px;font-weight:800;line-height:1}}
-.sc-l{{font-size:11px;color:#8b949e;margin-top:4px;text-transform:uppercase;letter-spacing:.5px}}
+.sc-l{{font-size:11px;color:#6B7280;margin-top:4px;text-transform:uppercase;letter-spacing:.5px}}
 .banner{{border-radius:6px;font-size:13px;padding:14px 16px;margin-bottom:18px;line-height:1.6}}
-.banner-ok{{background:#0d4a1a;border:1px solid #3fb950;color:#3fb950}}
-.banner-warn{{background:#4a3b0d;border:1px solid #d29922;color:#d29922}}
-.cat-hdr{{font-size:12px;font-weight:700;color:#8b949e;text-transform:uppercase;letter-spacing:1px;margin:22px 0 8px;padding-bottom:6px;border-bottom:1px solid #21262d}}
-.check{{border-radius:8px;margin-bottom:10px;overflow:hidden;border:1px solid #21262d}}
+.banner-ok{{background:#dcfce7;border:1px solid #16a34a;color:#166534}}
+.banner-warn{{background:#fff0f0;border:1px solid #f87171;color:#b91c1c}}
+.cat-hdr{{font-size:12px;font-weight:700;color:#4a5a7a;text-transform:uppercase;letter-spacing:1px;margin:22px 0 8px;padding-bottom:6px;border-bottom:1px solid #ccd3e8}}
+.check{{border-radius:8px;margin-bottom:10px;overflow:hidden;border:1px solid #ccd3e8;background:#fff;box-shadow:0 1px 4px rgba(26,47,90,.05)}}
 .check-head{{display:flex;align-items:flex-start;gap:10px;padding:14px 16px}}
 .sb{{font-size:11px;font-weight:700;padding:3px 9px;border-radius:4px;min-width:44px;text-align:center;flex-shrink:0;margin-top:1px}}
 .sv{{font-size:10px;font-weight:600;padding:3px 7px;border-radius:4px;border:1px solid;flex-shrink:0;margin-top:1px}}
 .meta{{flex:1;min-width:0}}
-.title{{font-size:13px;font-weight:600;margin-bottom:3px}}
-.detail{{font-size:12px;color:#8b949e;line-height:1.5}}
-.cid{{font-size:11px;color:#6e7681;flex-shrink:0;padding-top:2px}}
-.body{{padding:0 16px 16px;border-top:1px solid #21262d}}
+.title{{font-size:13px;font-weight:600;margin-bottom:3px;color:#0a1428}}
+.detail{{font-size:12px;color:#4a5a7a;line-height:1.5}}
+.cid{{font-size:11px;color:#9CA3AF;flex-shrink:0;padding-top:2px}}
+.body{{padding:0 16px 16px;border-top:1px solid #e5e9f5}}
 .sec{{margin-top:12px}}
-.sec-lbl{{font-size:11px;font-weight:700;color:#8b949e;text-transform:uppercase;letter-spacing:.5px;margin-bottom:5px}}
+.sec-lbl{{font-size:11px;font-weight:700;color:#4a5a7a;text-transform:uppercase;letter-spacing:.5px;margin-bottom:5px}}
 .ev-list{{list-style:none;padding:0}}
-.ev-list li{{font-size:12px;color:#8b949e;font-family:ui-monospace,monospace;background:#0d1117;border:1px solid #21262d;border-radius:4px;padding:5px 10px;margin-bottom:4px;word-break:break-all}}
-.fix{{font-size:13px;color:#c9d1d9;line-height:1.8;white-space:pre-wrap}}
+.ev-list li{{font-size:12px;color:#374151;font-family:ui-monospace,monospace;background:#f7f9ff;border:1px solid #ccd3e8;border-radius:4px;padding:5px 10px;margin-bottom:4px;word-break:break-all}}
+.fix{{font-size:13px;color:#1e3060;line-height:1.8;white-space:pre-wrap}}
 .fw{{display:flex;flex-wrap:wrap;gap:5px;margin-top:6px}}
-.fw span{{font-size:10px;background:#1d3250;color:#58a6ff;border-radius:4px;padding:2px 7px}}
-.run-again{{display:inline-block;margin-top:28px;background:#238636;color:#fff;border-radius:6px;padding:10px 22px;font-size:14px;font-weight:600;text-decoration:none}}
-.run-again:hover{{background:#2ea043}}
-.export-btn{{display:inline-block;margin-top:28px;margin-left:12px;background:#161b22;color:#58a6ff;border:1px solid #30363d;border-radius:6px;padding:10px 22px;font-size:14px;font-weight:600;cursor:pointer;text-decoration:none}}
-.export-btn:hover{{background:#1d3250;border-color:#58a6ff}}
-.skip-reason{{font-size:12px;color:#8b949e;background:#0d1117;border:1px solid #30363d;border-radius:4px;padding:10px 12px;line-height:1.6}}
+.fw span{{font-size:10px;background:#e0e7ff;color:#1e3060;border-radius:4px;padding:2px 7px}}
+.run-again{{display:inline-block;margin-top:28px;background:#f5a623;color:#0f1e3d;border-radius:6px;padding:10px 22px;font-size:14px;font-weight:700;text-decoration:none}}
+.run-again:hover{{background:#e09610}}
+.export-btn{{display:inline-block;margin-top:28px;margin-left:12px;background:#fff;color:#1e3060;border:1px solid #ccd3e8;border-radius:6px;padding:10px 22px;font-size:14px;font-weight:600;cursor:pointer;text-decoration:none}}
+.export-btn:hover{{background:#f0f4ff;border-color:#4a5a7a}}
+.skip-reason{{font-size:12px;color:#4a5a7a;background:#f7f9ff;border:1px solid #ccd3e8;border-radius:4px;padding:10px 12px;line-height:1.6}}
 .print-date{{display:none;font-size:11px;color:#666;margin-bottom:12px}}
 @media print{{
   body{{background:#fff;color:#000}}
   .wrap{{padding:16px}}
-  .brand-bar{{border-bottom:1px solid #ccc}}
-  .brand-mark,.brand-name{{color:#000}}
-  .brand-sub,.model-tag{{color:#555}}
+  .brand-bar{{background:#0f1e3d;border-radius:6px}}
   .back,.run-again,.export-btn{{display:none!important}}
   .strip .sc{{background:#f5f5f5;border:1px solid #ccc}}
   .sc-l{{color:#555}}
@@ -3497,11 +3826,11 @@ body{{background:#0d1117;color:#e6edf3;font-family:-apple-system,BlinkMacSystemF
 <div class="print-date">M.A.R.K. Sentinel &#8212; AI API Security Report &nbsp;|&nbsp; {__import__('datetime').datetime.now().strftime('%Y-%m-%d %H:%M')}</div>
 <div class="model-tag">Model tested: <strong>{e(model)}</strong></div>
 <div class="strip">
-  <div class="sc"><div class="sc-n" style="color:#f85149">{summary["fail"]}</div><div class="sc-l">High Risk</div></div>
-  <div class="sc"><div class="sc-n" style="color:#d29922">{summary["warn"]}</div><div class="sc-l">Medium Risk</div></div>
-  <div class="sc"><div class="sc-n" style="color:#58a6ff">{summary["pass"]}</div><div class="sc-l">Info</div></div>
-  <div class="sc"><div class="sc-n" style="color:#6e7681">{summary["skip"]}</div><div class="sc-l">Skipped</div></div>
-  <div class="sc"><div class="sc-n" style="color:#444c56">{summary.get("n/a", 0)}</div><div class="sc-l">N/A</div></div>
+  <div class="sc"><div class="sc-n" style="color:#dc2626">{summary["fail"]}</div><div class="sc-l">High Risk</div></div>
+  <div class="sc"><div class="sc-n" style="color:#d97706">{summary["warn"]}</div><div class="sc-l">Medium Risk</div></div>
+  <div class="sc"><div class="sc-n" style="color:#16a34a">{summary["pass"]}</div><div class="sc-l">Passed</div></div>
+  <div class="sc"><div class="sc-n" style="color:#9CA3AF">{summary["skip"]}</div><div class="sc-l">Skipped</div></div>
+  <div class="sc"><div class="sc-n" style="color:#D1D5DB">{summary.get("n/a", 0)}</div><div class="sc-l">N/A</div></div>
 </div>'''
 
         if all_skip:
@@ -3954,6 +4283,7 @@ def _build_mcp_section(servers: list[dict], ts_now: int) -> str:
 def _build_fleet_html(devices: list[dict], shadow: list[dict] | None = None,
                       mcp: list[dict] | None = None,
                       current_user_email: str = '',
+                      current_user_role: str = '',
                       store=None) -> str:
     shadow = shadow or []
     mcp    = mcp    or []
@@ -4184,6 +4514,7 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
       <button class="sb-item" id="nav-shadow" onclick="navTo('shadow')">&#9888; Shadow AI</button>
       <button class="sb-item" id="nav-mcp" onclick="navTo('mcp')">&#128279; MCP Servers</button>
       <div class="sb-group">Security</div>
+      <button class="sb-item" id="nav-alerts" onclick="navTo('alerts')">&#128276; Alerts</button>
       <button class="sb-item" id="nav-riskregister" onclick="navTo('riskregister')">&#128203; Risk Register</button>
       <button class="sb-item" id="nav-inventory" onclick="navTo('inventory')">&#128196; Asset Inventory</button>
       <div class="sb-group">Operations</div>
@@ -4200,6 +4531,7 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
     </nav>
     <div class="sb-footer">
       {f'<span style="font-size:11px;color:#9CA3AF;word-break:break-all">{current_user_email}</span>' if current_user_email else ''}
+      {'<a href="#" onclick="window.location.href=window.location.protocol+\'//\'+window.location.hostname+\'/dashboard\'">&#9881; Admin Panel</a>' if current_user_role == 'super_admin' else ''}
       <a href="/academy" target="_blank">Academy</a>
       <a href="/logout" style="color:#ef4444">&#x2192; Sign Out</a>
     </div>
@@ -4303,6 +4635,38 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
             style="color:#4F46E5;border-color:#1f6feb;font-size:12px">&#128279; Scan for MCP Servers</button>
   </div>
   {_build_mcp_section(mcp, ts_now)}
+  </div>
+
+  <div class="page" id="page-alerts">
+  <div class="sec-hdr" style="margin-top:0;padding-top:0;display:flex;align-items:center;gap:10px">
+    <span>Alerts</span>
+    <span id="alert-unread-badge" style="display:none;font-size:11px;background:#FEF2F2;color:#DC2626;border:1px solid #FECACA;border-radius:10px;padding:2px 10px"></span>
+    <button onclick="ackAllAlerts()" class="scan-btn" style="margin-left:auto;font-size:12px;color:#16A34A;border-color:#E5E7EB">&#10003; Acknowledge All</button>
+  </div>
+  <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap">
+    <button class="rr-fil rr-fil-active" id="alog-fil-all"      onclick="setAlertFilter('all')">All</button>
+    <button class="rr-fil"               id="alog-fil-critical" onclick="setAlertFilter('CRITICAL')">Critical</button>
+    <button class="rr-fil"               id="alog-fil-high"     onclick="setAlertFilter('HIGH')">High</button>
+    <button class="rr-fil"               id="alog-fil-unread"   onclick="setAlertFilter('unread')">Unread</button>
+  </div>
+  <div id="alert-log-wrap">
+    <table style="width:100%;border-collapse:collapse;font-size:13px">
+      <thead>
+        <tr style="border-bottom:1px solid #E5E7EB;color:#6B7280;font-size:11px;text-transform:uppercase;letter-spacing:.04em">
+          <th style="padding:6px 10px;text-align:left;width:140px">Time</th>
+          <th style="padding:6px 10px;text-align:left;width:90px">Severity</th>
+          <th style="padding:6px 10px;text-align:left;width:110px">Event</th>
+          <th style="padding:6px 10px;text-align:left">Details</th>
+          <th style="padding:6px 10px;text-align:left;width:120px">Device</th>
+          <th style="padding:6px 10px;text-align:left;width:100px">Channels</th>
+          <th style="padding:6px 10px;text-align:left;width:110px">Status</th>
+        </tr>
+      </thead>
+      <tbody id="alert-log-body">
+        <tr><td colspan="7" style="padding:24px;text-align:center;color:#9CA3AF">Loading&hellip;</td></tr>
+      </tbody>
+    </table>
+  </div>
   </div>
 
   <div class="page" id="page-riskregister">
@@ -4777,8 +5141,10 @@ function navTo(page) {{
   const b = document.getElementById('nav-' + page);
   if (b) b.classList.add('sb-active');
   document.getElementById('main').scrollTop = 0;
+  history.replaceState(null, '', '#' + page);
   if (page === 'settings') {{ loadLiveScanConfig(); }}
   if (page === 'users') {{ loadUsers(); loadCustomerInfo(); }}
+  if (page === 'alerts') {{ loadAlertLog(); }}
   if (page === 'probe') {{
     const fr = document.getElementById('probe-iframe');
     if (fr && fr.getAttribute('data-loaded') === '0') {{
@@ -4787,6 +5153,12 @@ function navTo(page) {{
     }}
   }}
 }}
+
+// Restore tab from URL hash on page load
+(function() {{
+  var hash = window.location.hash.replace('#', '');
+  if (hash && document.getElementById('page-' + hash)) {{ navTo(hash); }}
+}})();
 
 function _syncFindingsSelector() {{
   const sel = document.getElementById('findings-device-sel');
@@ -4920,12 +5292,8 @@ function renderDevicePage() {{
     const pas  = d.pass_count || 0;
     const rc   = _riskCls(fail, warn);
     const age  = _age(d.last_seen);
-    const displayName = d.display_name || d.hostname || 'unknown';
     return `<tr class="dev-row" onclick="selectDevice('${{esc(did)}}')" >
-      <td class="dev-host">
-        <span id="dn-${{esc(did)}}">${{esc(displayName)}}</span>
-        ${{d.display_name ? `<span style="font-size:10px;color:#9CA3AF;margin-left:4px" title="Custom label — agent hostname: ${{esc(d.hostname||'')}}">✎</span>` : ''}}
-      </td>
+      <td class="dev-host">${{esc(d.hostname||'unknown')}}</td>
       <td>${{esc(d.platform||'')}}</td>
       <td class="c-red">${{fail}}</td>
       <td class="c-yellow">${{warn}}</td>
@@ -4937,14 +5305,12 @@ function renderDevicePage() {{
         <button class="scan-btn" id="sb-${{esc(did)}}" onclick="openScanModal('${{esc(did)}}',this)">Scan ▾</button>
         <button class="scan-btn" id="ub-${{esc(did)}}" onclick="updateDevice('${{esc(did)}}')"
                 style="margin-left:4px;color:#CA8A04;border-color:#E5E7EB">Update</button>
-        <button class="scan-btn" onclick="renameDevice('${{esc(did)}}','${{esc(d.display_name||d.hostname||'')}}')"
-                style="margin-left:4px;color:#6B7280;border-color:#E5E7EB;font-size:11px" title="Set custom display name">Rename</button>
         <a href="/fleet/device/${{esc(did)}}/dashboard" target="_blank"
            style="margin-left:8px;background:#ffffff;border:1px solid #E5E7EB;color:#6B7280;
                   border-radius:4px;padding:3px 10px;font-size:12px;text-decoration:none;display:inline-block"
            onmouseover="this.style.borderColor='#4F46E5';this.style.color='#374151'"
            onmouseout="this.style.borderColor='#E5E7EB';this.style.color='#6B7280'">Full Report</a>
-        <button class="scan-btn" onclick="removeDevice('${{esc(did)}}','${{esc(displayName)}}')"
+        <button class="scan-btn" onclick="removeDevice('${{esc(did)}}','${{esc(d.hostname||'')}}')"
                 style="margin-left:4px;color:#DC2626;border-color:#E5E7EB;font-size:11px">Remove</button>
       </td>
     </tr>`;
@@ -5003,25 +5369,6 @@ function goToPage(p) {{
 function esc(s) {{
   if (!s) return '';
   return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-}}
-
-async function renameDevice(did, currentName) {{
-  const name = prompt('Set a custom display name for this device:\n(Leave blank to clear and use the real hostname)', currentName || '');
-  if (name === null) return;
-  try {{
-    const resp = await fetch('/api/fleet/rename/' + encodeURIComponent(did), {{
-      method: 'POST',
-      headers: {{'Content-Type': 'application/json'}},
-      body: JSON.stringify({{display_name: name.trim()}})
-    }});
-    if (resp.ok) {{
-      const d = _allDevices.find(x => x.device_id === did);
-      if (d) d.display_name = name.trim();
-      renderDevicePage();
-    }} else {{
-      alert('Rename failed');
-    }}
-  }} catch (e) {{ alert('Rename failed: ' + e); }}
 }}
 
 async function removeDevice(did, hostname) {{
@@ -6293,7 +6640,92 @@ async function downloadEvidencePackage(btn) {{
 
 let _rrData = [];
 let _rrSev = 'all';
+const _rrAccepted = new Map();
+const _rrAssigned = new Map();
 
+// ── Alert log ─────────────────────────────────────────────────────────────────
+let _alertData = [];
+let _alertFilter = 'all';
+
+async function loadAlertLog() {{
+  try {{
+    const r = await fetch('/api/alerts/log');
+    const d = await r.json();
+    _alertData = d.alerts || [];
+    const unread = d.unread || 0;
+    const badge = document.getElementById('alert-unread-badge');
+    if (badge) {{
+      if (unread > 0) {{ badge.textContent = unread + ' unread'; badge.style.display = ''; }}
+      else {{ badge.style.display = 'none'; }}
+    }}
+    renderAlertLog();
+  }} catch(e) {{
+    document.getElementById('alert-log-body').innerHTML =
+      '<tr><td colspan="7" style="padding:24px;text-align:center;color:#DC2626">Failed to load alert log.</td></tr>';
+  }}
+}}
+
+function setAlertFilter(f) {{
+  _alertFilter = f;
+  document.querySelectorAll('.rr-fil').forEach(function(b) {{ b.classList.remove('rr-fil-active'); }});
+  const btn = document.getElementById('alog-fil-' + (f === 'all' ? 'all' : f === 'CRITICAL' ? 'critical' : f === 'HIGH' ? 'high' : 'unread'));
+  if (btn) btn.classList.add('rr-fil-active');
+  renderAlertLog();
+}}
+
+function renderAlertLog() {{
+  const SEV_COLOR = {{ CRITICAL: '#DC2626', HIGH: '#D97706', INFO: '#6B7280' }};
+  const EVENT_LABEL = {{
+    new_critical_finding: 'Critical Finding',
+    new_high_finding: 'High Finding',
+    new_shadow_ai: 'Shadow AI',
+    device_offline: 'Device Offline',
+    test_alert: 'Test',
+  }};
+  let rows = _alertData;
+  if (_alertFilter === 'CRITICAL') rows = rows.filter(function(a) {{ return a.severity === 'CRITICAL'; }});
+  else if (_alertFilter === 'HIGH') rows = rows.filter(function(a) {{ return a.severity === 'HIGH'; }});
+  else if (_alertFilter === 'unread') rows = rows.filter(function(a) {{ return !a.acknowledged; }});
+
+  const tbody = document.getElementById('alert-log-body');
+  if (!rows.length) {{
+    tbody.innerHTML = '<tr><td colspan="7" style="padding:24px;text-align:center;color:#9CA3AF">No alerts' + (_alertFilter !== 'all' ? ' matching this filter' : '') + '.</td></tr>';
+    return;
+  }}
+
+  tbody.innerHTML = rows.map(function(a) {{
+    const ts = a.fired_at ? new Date(a.fired_at * 1000).toLocaleString() : '—';
+    const sevColor = SEV_COLOR[a.severity] || '#6B7280';
+    const evLabel = EVENT_LABEL[a.event_type] || a.event_type;
+    const detail = a.check_id ? esc(a.check_id) + ' — ' + esc(a.title) : esc(a.title || a.event_type);
+    const channels = a.channels ? a.channels.split(',').map(function(c) {{ return '<span style="font-size:10px;background:#F3F4F6;border-radius:3px;padding:1px 5px">' + esc(c) + '</span>'; }}).join(' ') : '<span style="color:#9CA3AF">none</span>';
+    const rowStyle = a.acknowledged ? 'opacity:0.55;' : '';
+    const ackBtn = a.acknowledged
+      ? '<span style="font-size:11px;color:#16A34A">&#10003; Acked' + (a.acked_by ? ' by ' + esc(a.acked_by) : '') + '</span>'
+      : '<button onclick="ackAlert(' + a.id + ')" style="font-size:11px;padding:2px 8px;background:#fff;border:1px solid #D1D5DB;border-radius:4px;cursor:pointer;color:#6B7280">Acknowledge</button>';
+    return '<tr style="border-bottom:1px solid #F3F4F6;' + rowStyle + '">'
+      + '<td style="padding:7px 10px;color:#6B7280;white-space:nowrap">' + ts + '</td>'
+      + '<td style="padding:7px 10px;font-weight:600;color:' + sevColor + '">' + esc(a.severity || '—') + '</td>'
+      + '<td style="padding:7px 10px">' + esc(evLabel) + '</td>'
+      + '<td style="padding:7px 10px">' + detail + '</td>'
+      + '<td style="padding:7px 10px;color:#374151">' + esc(a.hostname || a.device_id || '—') + '</td>'
+      + '<td style="padding:7px 10px">' + channels + '</td>'
+      + '<td style="padding:7px 10px">' + ackBtn + '</td>'
+      + '</tr>';
+  }}).join('');
+}}
+
+async function ackAlert(id) {{
+  await fetch('/api/alerts/ack', {{ method:'POST', headers:{{'Content-Type':'application/json'}}, body: JSON.stringify({{id: id}}) }});
+  await loadAlertLog();
+}}
+
+async function ackAllAlerts() {{
+  await fetch('/api/alerts/ack', {{ method:'POST', headers:{{'Content-Type':'application/json'}}, body: JSON.stringify({{all: true}}) }});
+  await loadAlertLog();
+}}
+
+// ── Risk register ─────────────────────────────────────────────────────────────
 async function loadRiskRegister() {{
   try {{
     const r = await fetch('/api/fleet/risk-register');
@@ -6312,6 +6744,21 @@ function rrFilter(sev, btn) {{
   renderRiskRegister();
 }}
 
+function rrAccept(checkId) {{
+  if (_rrAccepted.get(checkId)) {{ _rrAccepted.delete(checkId); }}
+  else {{ _rrAccepted.set(checkId, true); }}
+  renderRiskRegister();
+}}
+
+function rrAssign(checkId) {{
+  const current = _rrAssigned.get(checkId) || '';
+  const name = prompt('Assign to (email or name):', current);
+  if (name === null) return;
+  if (name.trim()) {{ _rrAssigned.set(checkId, name.trim()); }}
+  else {{ _rrAssigned.delete(checkId); }}
+  renderRiskRegister();
+}}
+
 function renderRiskRegister() {{
   const rows = _rrSev === 'all' ? _rrData : _rrData.filter(e => e.severity === _rrSev);
   const el = document.getElementById('rr-body');
@@ -6321,22 +6768,32 @@ function renderRiskRegister() {{
     return;
   }}
   const SEV_CLS = {{CRITICAL:'critical',HIGH:'high',MEDIUM:'medium',LOW:'low'}};
+  const btnBase = 'font-size:11px;padding:2px 8px;border-radius:4px;border:1px solid;cursor:pointer;font-weight:500;';
   const trs = rows.map(e => {{
+    const accepted = _rrAccepted.get(e.check_id) || false;
+    const assignee = _rrAssigned.get(e.check_id) || '';
     const badge = e.trend === 'Recurring'
       ? '<span class="rr-recurring">Recurring</span>'
       : '<span class="rr-new">New</span>';
     const devTip = e.affected_devices.join(', ');
-    return `<tr>
+    const acceptBtn = accepted
+      ? `<button onclick="rrAccept('${{e.check_id}}')" style="${{btnBase}}background:#F0FDF4;color:#16A34A;border-color:#BBF7D0">&#10003; Accepted</button>`
+      : `<button onclick="rrAccept('${{e.check_id}}')" style="${{btnBase}}background:#fff;color:#6B7280;border-color:#D1D5DB">Accept Risk</button>`;
+    const assignBtn = assignee
+      ? `<button onclick="rrAssign('${{e.check_id}}')" style="${{btnBase}}background:#EEF2FF;color:#4F46E5;border-color:#C7D2FE" title="Reassign">&#128100; ${{esc(assignee)}}</button>`
+      : `<button onclick="rrAssign('${{e.check_id}}')" style="${{btnBase}}background:#fff;color:#6B7280;border-color:#D1D5DB">Assign</button>`;
+    return `<tr style="${{accepted ? 'opacity:0.55;' : ''}}">
       <td><span class="badge ${{SEV_CLS[e.severity]||'low'}}">${{esc(e.severity)}}</span></td>
       <td style="font-family:monospace;font-size:12px;color:#6B7280">${{esc(e.check_id)}}</td>
       <td style="color:#374151">${{esc(e.title)}}</td>
       <td title="${{esc(devTip)}}" style="cursor:default;color:#111827;font-weight:600">${{e.affected_count}}</td>
       <td>${{badge}}</td>
       <td style="color:#6B7280">${{e.days_open}}d</td>
+      <td style="white-space:nowrap"><div style="display:flex;gap:4px;flex-wrap:wrap">${{acceptBtn}}${{assignBtn}}</div></td>
     </tr>`;
   }}).join('');
   el.innerHTML = `<table class="rr-table">
-    <thead><tr><th>Severity</th><th>Check ID</th><th>Finding</th><th title="Hover for device list">Devices</th><th>Trend</th><th>Open</th></tr></thead>
+    <thead><tr><th>Severity</th><th>Check ID</th><th>Finding</th><th title="Hover for device list">Devices</th><th>Trend</th><th>Open</th><th>Actions</th></tr></thead>
     <tbody>${{trs}}</tbody>
   </table><div style="font-size:11px;color:#9CA3AF;margin-bottom:8px">${{rows.length}} open finding${{rows.length!==1?'s':''}} · hover device count for affected hostnames</div>`;
 }}
@@ -6617,6 +7074,33 @@ def main():
         start_monitors(_get_store('default'))
     except Exception as _startup_err:
         log.error('License/monitor startup error (non-fatal): %s', _startup_err, exc_info=True)
+
+    # Seed super-admin account from env vars if provided
+    try:
+        _sa_email = os.environ.get('SENTINEL_SUPER_ADMIN_EMAIL', '').strip()
+        _sa_pass  = os.environ.get('SENTINEL_SUPER_ADMIN_PASSWORD', '').strip()
+        if _sa_email and _sa_pass:
+            reg = _get_registry()
+            # Find existing user across all customers and promote, else add to first active customer
+            existing = None
+            customers = reg.list_customers()
+            for c in customers:
+                for u in reg.list_users(c['id']):
+                    if u['email'] == _sa_email.lower():
+                        existing = (c['id'], u['id'])
+                        break
+                if existing:
+                    break
+            if existing:
+                with reg._lock, reg._conn() as _c:
+                    _c.execute("UPDATE dashboard_users SET role='super_admin' WHERE id=?", (existing[1],))
+                log.info('Super-admin role set for existing user: %s', _sa_email)
+            elif customers:
+                # Add to the first active customer — never create a new one
+                reg.create_user(customers[0]['id'], _sa_email, _sa_pass, role='super_admin')
+                log.info('Super-admin account created under %s: %s', customers[0]['id'], _sa_email)
+    except Exception as _sa_err:
+        log.error('Super-admin seed error (non-fatal): %s', _sa_err)
 
     def _schedule_ticker():
         import time as _t

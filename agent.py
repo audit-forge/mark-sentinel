@@ -485,6 +485,63 @@ def self_update(config: dict) -> bool:
         return False
 
 
+# ── On-device OS notification ──────────────────────────────────────────────────
+
+def _notify_critical_findings(report: dict) -> None:
+    """Fire a native OS notification for any new CRITICAL or HIGH findings."""
+    findings = report.get('findings', [])
+    crits = [f for f in findings if f.get('status') == 'FAIL' and f.get('severity') == 'CRITICAL']
+    highs = [f for f in findings if f.get('status') == 'FAIL' and f.get('severity') == 'HIGH']
+    if not crits and not highs:
+        return
+
+    parts = []
+    if crits:
+        parts.append(f'{len(crits)} Critical')
+    if highs:
+        parts.append(f'{len(highs)} High')
+    summary_line = ', '.join(parts) + ' finding' + ('' if len(crits) + len(highs) == 1 else 's') + ' detected'
+    first = (crits or highs)[0]
+    detail = f"{first.get('check_id', '')} — {first.get('title', '')}"
+
+    try:
+        if sys.platform == 'darwin':
+            import subprocess
+            script = (
+                f'display notification "{detail}" '
+                f'with title "M.A.R.K. Sentinel" '
+                f'subtitle "{summary_line}" '
+                f'sound name "Basso"'
+            )
+            subprocess.run(['osascript', '-e', script], timeout=5,
+                           capture_output=True, check=False)
+        elif sys.platform.startswith('linux'):
+            import subprocess
+            subprocess.run(
+                ['notify-send', '--urgency=critical', '--icon=dialog-warning',
+                 'M.A.R.K. Sentinel', f'{summary_line}\n{detail}'],
+                timeout=5, capture_output=True, check=False,
+            )
+        elif sys.platform == 'win32':
+            import subprocess
+            ps_script = (
+                f'Add-Type -AssemblyName System.Windows.Forms;'
+                f'$n = New-Object System.Windows.Forms.NotifyIcon;'
+                f'$n.Icon = [System.Drawing.SystemIcons]::Warning;'
+                f'$n.Visible = $true;'
+                f'$n.ShowBalloonTip(8000, "M.A.R.K. Sentinel", '
+                f'"{summary_line}: {detail}", '
+                f'[System.Windows.Forms.ToolTipIcon]::Warning);'
+                f'Start-Sleep -s 9; $n.Dispose()'
+            )
+            subprocess.Popen(
+                ['powershell', '-WindowStyle', 'Hidden', '-Command', ps_script],
+                creationflags=0x08000000,  # CREATE_NO_WINDOW
+            )
+    except Exception as e:
+        log.debug('OS notification failed (non-fatal): %s', e)
+
+
 # ── Main scan cycle ────────────────────────────────────────────────────────────
 
 def _resolve_home() -> str:
@@ -542,6 +599,8 @@ def run_cycle(config: dict) -> bool:
     summary = report.get('summary', {})
     log.info('Scan complete — FAIL:%d WARN:%d PASS:%d',
              summary.get('fail', 0), summary.get('warn', 0), summary.get('pass', 0))
+
+    _notify_critical_findings(report)
 
     return report_to_server(report, config, device_id, hostname)
 

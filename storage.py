@@ -161,6 +161,27 @@ class AgentStore:
                     last_fired INTEGER
                 );
 
+                CREATE TABLE IF NOT EXISTS alert_log (
+                    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                    fired_at     INTEGER NOT NULL,
+                    event_type   TEXT NOT NULL DEFAULT '',
+                    severity     TEXT NOT NULL DEFAULT '',
+                    check_id     TEXT NOT NULL DEFAULT '',
+                    title        TEXT NOT NULL DEFAULT '',
+                    device_id    TEXT NOT NULL DEFAULT '',
+                    hostname     TEXT NOT NULL DEFAULT '',
+                    channels     TEXT NOT NULL DEFAULT '',
+                    acknowledged INTEGER NOT NULL DEFAULT 0,
+                    acked_by     TEXT NOT NULL DEFAULT '',
+                    acked_at     INTEGER
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_alert_log_fired
+                    ON alert_log(fired_at DESC);
+
+                CREATE INDEX IF NOT EXISTS idx_alert_log_unread
+                    ON alert_log(acknowledged, fired_at DESC);
+
             """)
             # Migrations
             cols = {r[1] for r in conn.execute("PRAGMA table_info(devices)")}
@@ -842,6 +863,63 @@ class AgentStore:
             for r in rows
         ]
 
+    # ── Alert log ─────────────────────────────────────────────────────────────
+
+    def log_alert(self, event_type: str, severity: str, check_id: str,
+                  title: str, device_id: str, hostname: str, channels: str) -> int:
+        now = int(time.time())
+        with self._lock, self._conn() as conn:
+            cur = conn.execute(
+                "INSERT INTO alert_log "
+                "(fired_at, event_type, severity, check_id, title, device_id, hostname, channels) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (now, event_type, severity, check_id, title, device_id, hostname, channels),
+            )
+            return cur.lastrowid
+
+    def has_recent_alert(self, device_id: str, check_id: str, within_hours: int = 24) -> bool:
+        cutoff = int(time.time()) - within_hours * 3600
+        with self._lock, self._conn() as conn:
+            row = conn.execute(
+                "SELECT 1 FROM alert_log WHERE device_id=? AND check_id=? AND fired_at>? LIMIT 1",
+                (device_id, check_id, cutoff),
+            ).fetchone()
+        return row is not None
+
+    def get_alert_log(self, limit: int = 200, unread_only: bool = False) -> list[dict]:
+        q = "SELECT * FROM alert_log"
+        if unread_only:
+            q += " WHERE acknowledged = 0"
+        q += " ORDER BY fired_at DESC LIMIT ?"
+        with self._lock, self._conn() as conn:
+            rows = conn.execute(q, (limit,)).fetchall()
+        return [dict(r) for r in rows]
+
+    def acknowledge_alert(self, alert_id: int, acked_by: str = '') -> bool:
+        now = int(time.time())
+        with self._lock, self._conn() as conn:
+            cur = conn.execute(
+                "UPDATE alert_log SET acknowledged=1, acked_by=?, acked_at=? WHERE id=?",
+                (acked_by, now, alert_id),
+            )
+            return cur.rowcount > 0
+
+    def acknowledge_all_alerts(self, acked_by: str = '') -> int:
+        now = int(time.time())
+        with self._lock, self._conn() as conn:
+            cur = conn.execute(
+                "UPDATE alert_log SET acknowledged=1, acked_by=?, acked_at=? WHERE acknowledged=0",
+                (acked_by, now),
+            )
+            return cur.rowcount
+
+    def get_unread_count(self) -> int:
+        with self._lock, self._conn() as conn:
+            row = conn.execute(
+                "SELECT COUNT(*) FROM alert_log WHERE acknowledged=0"
+            ).fetchone()
+            return int(row[0]) if row else 0
+
 
 # ── Customer registry + dashboard auth (central DB, one record per customer) ──
 
@@ -876,6 +954,9 @@ class CustomerRegistry:
                     agent_token          TEXT UNIQUE NOT NULL,
                     agent_token_prev     TEXT DEFAULT NULL,
                     token_prev_expires   INTEGER DEFAULT 0,
+                    plan                 TEXT NOT NULL DEFAULT 'plus',
+                    max_agents           INTEGER NOT NULL DEFAULT 0,
+                    expires_at           TEXT NOT NULL DEFAULT '',
                     created_at           INTEGER NOT NULL,
                     active               INTEGER NOT NULL DEFAULT 1
                 );
@@ -906,6 +987,15 @@ class CustomerRegistry:
                     ON dashboard_sessions(expires_at);
             """)
 
+            # Live migrations for existing deployments
+            cols = {r[1] for r in conn.execute('PRAGMA table_info(customers)').fetchall()}
+            if 'plan' not in cols:
+                conn.execute("ALTER TABLE customers ADD COLUMN plan TEXT NOT NULL DEFAULT 'plus'")
+            if 'max_agents' not in cols:
+                conn.execute("ALTER TABLE customers ADD COLUMN max_agents INTEGER NOT NULL DEFAULT 0")
+            if 'expires_at' not in cols:
+                conn.execute("ALTER TABLE customers ADD COLUMN expires_at TEXT NOT NULL DEFAULT ''")
+
     # ── password helpers ──────────────────────────────────────────────────────
 
     @staticmethod
@@ -933,24 +1023,42 @@ class CustomerRegistry:
                 'SELECT 1 FROM customers WHERE active=1 LIMIT 1'
             ).fetchone() is not None
 
-    def create_customer(self, name: str) -> dict:
+    def create_customer(self, name: str, plan: str = 'plus',
+                        max_agents: int = 0, expires_at: str = '') -> dict:
         import uuid, secrets
         cid = str(uuid.uuid4())
         token = secrets.token_urlsafe(32)
         now = int(time.time())
         with self._lock, self._conn() as conn:
             conn.execute(
-                'INSERT INTO customers (id, name, agent_token, created_at, active) VALUES (?,?,?,?,1)',
-                (cid, name.strip(), token, now),
+                'INSERT INTO customers (id, name, agent_token, plan, max_agents, expires_at, created_at, active) '
+                'VALUES (?,?,?,?,?,?,?,1)',
+                (cid, name.strip(), token, plan, max_agents, expires_at, now),
             )
-        return {'id': cid, 'name': name.strip(), 'agent_token': token}
+        return {'id': cid, 'name': name.strip(), 'agent_token': token,
+                'plan': plan, 'max_agents': max_agents, 'expires_at': expires_at}
 
     def list_customers(self) -> list[dict]:
         with self._lock, self._conn() as conn:
             rows = conn.execute(
-                'SELECT id, name, agent_token, created_at, active FROM customers ORDER BY created_at DESC'
+                'SELECT id, name, agent_token, plan, max_agents, expires_at, created_at, active '
+                'FROM customers ORDER BY created_at DESC'
             ).fetchall()
         return [dict(r) for r in rows]
+
+    def update_customer_license(self, customer_id: str, plan: str,
+                                max_agents: int, expires_at: str) -> bool:
+        with self._lock, self._conn() as conn:
+            cur = conn.execute(
+                'UPDATE customers SET plan=?, max_agents=?, expires_at=? WHERE id=? AND active=1',
+                (plan, max_agents, expires_at, customer_id),
+            )
+        return cur.rowcount > 0
+
+    def deactivate_customer(self, customer_id: str) -> bool:
+        with self._lock, self._conn() as conn:
+            cur = conn.execute('UPDATE customers SET active=0 WHERE id=?', (customer_id,))
+        return cur.rowcount > 0
 
     def get_by_agent_token(self, token: str) -> dict | None:
         if not token:
@@ -982,7 +1090,8 @@ class CustomerRegistry:
     def get_by_id(self, customer_id: str) -> dict | None:
         with self._lock, self._conn() as conn:
             row = conn.execute(
-                'SELECT id, name, agent_token FROM customers WHERE id=? AND active=1', (customer_id,)
+                'SELECT id, name, agent_token, plan, max_agents, expires_at '
+                'FROM customers WHERE id=? AND active=1', (customer_id,)
             ).fetchone()
         return dict(row) if row else None
 

@@ -46,7 +46,7 @@ _SANITIZATION_RE = [
 
 
 def _is_live(ctx: ScanContext) -> bool:
-    return ctx.mode in ("api", "local") and bool(ctx.probe_results)
+    return ctx.mode in ("api", "local", "anthropic", "gemini") and bool(ctx.probe_results)
 
 
 def _skip(check_id: str, title: str, severity: str = "HIGH") -> CheckResult:

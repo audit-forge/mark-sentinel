@@ -155,6 +155,17 @@ def get_license() -> License:
     return _license
 
 
+def get_customer_license(customer: dict) -> License:
+    """Build a License from a customer registry record."""
+    return License({
+        'customer_id': customer.get('id', 'unknown'),
+        'licensed_to': customer.get('name', 'Unknown'),
+        'plan':        customer.get('plan', License.PLAN_PLUS),
+        'max_agents':  int(customer.get('max_agents', 0)),
+        'expires_at':  customer.get('expires_at', ''),
+    })
+
+
 # ── Overage check (called on new device registration) ────────────────────────
 
 def check_overage(device_id: str, hostname: str, current_count: int, store) -> str:
