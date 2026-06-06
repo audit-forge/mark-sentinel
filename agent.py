@@ -489,6 +489,7 @@ def self_update(config: dict) -> bool:
 
 def _notify_critical_findings(report: dict) -> None:
     """Fire a native OS notification for any new CRITICAL or HIGH findings."""
+    return  # disabled — remove this line to re-enable on-device notifications
     findings = report.get('findings', [])
     crits = [f for f in findings if f.get('status') == 'FAIL' and f.get('severity') == 'CRITICAL']
     highs = [f for f in findings if f.get('status') == 'FAIL' and f.get('severity') == 'HIGH']
