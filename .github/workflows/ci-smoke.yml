@@ -36,6 +36,39 @@ jobs:
         uses: actions/setup-python@v4
         with:
           python-version: '3.11'
+      - name: Validate customer-facing installer scripts (parse + encoding)
+        shell: powershell
+        run: |
+          # These are the scripts actually served to customers at /install/<file>
+          # (admin/install.ps1, admin/install.bat — synced from the repo root).
+          # Run under Windows PowerShell 5.1 (the stock interpreter on a fresh
+          # Windows machine, NOT pwsh) since 5.1 reads .ps1 files without a
+          # UTF-8 BOM using the system ANSI codepage — non-ASCII characters
+          # (em-dashes, box-drawing dividers, etc.) get corrupted on read and
+          # produce a wall of unrelated "Unexpected token" parse errors.
+          $failed = $false
+          foreach ($f in @("install.ps1", "uninstall.ps1", "admin\install.ps1")) {
+            $tokens = $null; $errors = $null
+            [void][System.Management.Automation.Language.Parser]::ParseFile($f, [ref]$tokens, [ref]$errors)
+            if ($errors.Count -gt 0) {
+              Write-Host "PARSE ERRORS in $f using Windows PowerShell $($PSVersionTable.PSVersion):" -ForegroundColor Red
+              $errors | ForEach-Object { Write-Host "  $_" -ForegroundColor Red }
+              $failed = $true
+            } else {
+              Write-Host "OK: $f parses cleanly under PowerShell $($PSVersionTable.PSVersion)" -ForegroundColor Green
+            }
+          }
+          foreach ($f in @("install.ps1", "install.bat", "uninstall.ps1", "uninstall.bat", "admin\install.ps1", "admin\install.bat")) {
+            $bytes = [System.IO.File]::ReadAllBytes($f)
+            $nonAscii = $bytes | Where-Object { $_ -gt 127 }
+            if ($nonAscii.Count -gt 0) {
+              Write-Host "NON-ASCII BYTES in $f -- will corrupt under PS 5.1 without a UTF-8 BOM" -ForegroundColor Red
+              $failed = $true
+            } else {
+              Write-Host "OK: $f is pure ASCII" -ForegroundColor Green
+            }
+          }
+          if ($failed) { exit 1 }
       - name: Run installer (PowerShell)
         shell: pwsh
         run: |
