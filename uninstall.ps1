@@ -1,7 +1,7 @@
 #Requires -RunAsAdministrator
 <#
 .SYNOPSIS
-    M.A.R.K. Sentinel Agent — Windows Uninstaller
+    M.A.R.K. Sentinel Agent - Windows Uninstaller
 
 .DESCRIPTION
     Stops and removes the Sentinel Windows Service, then deletes the install
@@ -18,7 +18,7 @@ $ConfigDir   = "C:\ProgramData\Sentinel"
 $ServiceName = "SentinelAgent"
 
 Write-Host ""
-Write-Host "M.A.R.K. Sentinel Agent — Windows Uninstaller" -ForegroundColor White
+Write-Host "M.A.R.K. Sentinel Agent - Windows Uninstaller" -ForegroundColor White
 Write-Host "===============================================" -ForegroundColor DarkGray
 Write-Host ""
 Write-Host "This will remove:"
@@ -33,7 +33,7 @@ if ($confirm -notmatch '^[Yy]$') {
     exit 0
 }
 
-# ── Stop and remove service ───────────────────────────────────────────────────
+# -- Stop and remove service ---------------------------------------------------
 
 $nssmPath = (Get-Command "nssm" -ErrorAction SilentlyContinue)?.Source
 $existingSvc = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
@@ -58,7 +58,7 @@ if ($existingSvc) {
     Write-Host "  Service '$ServiceName' not found, skipping." -ForegroundColor DarkGray
 }
 
-# ── Remove directories ────────────────────────────────────────────────────────
+# -- Remove directories --------------------------------------------------------
 
 if (Test-Path $InstallDir) {
     Remove-Item -Path $InstallDir -Recurse -Force

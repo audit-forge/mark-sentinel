@@ -19,7 +19,7 @@ echo   M.A.R.K. Sentinel Agent -- Windows Installer
 echo   =============================================
 echo.
 
-:: ── Admin check ──────────────────────────────────────────────────────────────
+:: -- Admin check --------------------------------------------------------------
 net session >nul 2>&1
 if %errorlevel% neq 0 (
     echo   ERROR: This installer must be run as Administrator.
@@ -29,7 +29,7 @@ if %errorlevel% neq 0 (
     exit /b 1
 )
 
-:: ── Try install.ps1 first (works when ExecutionPolicy allows it) ──────────────
+:: -- Try install.ps1 first (works when ExecutionPolicy allows it) --------------
 where pwsh >nul 2>&1
 if %errorlevel% == 0 set "PWSH_EXE=pwsh"
 where powershell >nul 2>&1
@@ -53,7 +53,7 @@ if defined PWSH_EXE (
 echo   [INFO] PowerShell unavailable -- running batch install ^(no NSSM, no color^).
 echo.
 
-:: ── Python 3.11+ check ───────────────────────────────────────────────────────
+:: -- Python 3.11+ check -------------------------------------------------------
 set "PYTHON_EXE="
 for %%C in (python python3 py) do (
     if not defined PYTHON_EXE (
@@ -82,7 +82,7 @@ if not defined PYTHON_EXE (
 
 for /f "tokens=*" %%V in ('%PYTHON_EXE% --version 2^>^&1') do echo   [OK] Found %%V
 
-:: ── Install pip dependencies ─────────────────────────────────────────────────
+:: -- Install pip dependencies -------------------------------------------------
 echo   Installing Python dependencies...
 if exist "%SCRIPT_DIR%requirements.txt" (
     %PYTHON_EXE% -m pip install --quiet --upgrade pip
@@ -97,7 +97,7 @@ if exist "%SCRIPT_DIR%requirements.txt" (
     echo   [WARN] requirements.txt not found, skipping.
 )
 
-:: ── Copy files ───────────────────────────────────────────────────────────────
+:: -- Copy files ---------------------------------------------------------------
 echo   Copying files to %INSTALL_DIR%...
 if not exist "%INSTALL_DIR%" mkdir "%INSTALL_DIR%"
 
@@ -113,7 +113,7 @@ for %%D in (checks connectors profiles) do (
 )
 echo   [OK] Files copied to %INSTALL_DIR%
 
-:: ── Create config ────────────────────────────────────────────────────────────
+:: -- Create config ------------------------------------------------------------
 echo   Configuring %CONFIG_FILE%...
 if not exist "%CONFIG_DIR%" mkdir "%CONFIG_DIR%"
 
@@ -142,7 +142,7 @@ if not exist "%CONFIG_FILE%" (
 
 icacls "%CONFIG_FILE%" /inheritance:r /grant:r "SYSTEM:(F)" /grant:r "Administrators:(F)" >nul
 
-:: ── Windows Service ──────────────────────────────────────────────────────────
+:: -- Windows Service ----------------------------------------------------------
 echo   Registering Windows Service "%SERVICE_NAME%"...
 
 sc query %SERVICE_NAME% >nul 2>&1
@@ -175,7 +175,7 @@ if %errorlevel% == 0 (
     echo         Check: %CONFIG_DIR%\sentinel-agent.log
 )
 
-:: ── Desktop shortcut ─────────────────────────────────────────────────────────
+:: -- Desktop shortcut ---------------------------------------------------------
 set "DASH_URL=http://localhost:7331/fleet"
 if not "%SERVER_ARG%"=="" set "DASH_URL=%SERVER_ARG%/fleet"
 (

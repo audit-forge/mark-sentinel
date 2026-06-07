@@ -1,7 +1,7 @@
 #Requires -RunAsAdministrator
 <#
 .SYNOPSIS
-    M.A.R.K. Sentinel Agent — Windows Installer
+    M.A.R.K. Sentinel Agent - Windows Installer
 
 .DESCRIPTION
     Installs the Sentinel Agent to C:\Program Files\Sentinel\, creates config at
@@ -59,11 +59,11 @@ function Write-Warn {
 }
 
 Write-Host ""
-Write-Host "M.A.R.K. Sentinel Agent — Windows Installer" -ForegroundColor White
+Write-Host "M.A.R.K. Sentinel Agent - Windows Installer" -ForegroundColor White
 Write-Host "============================================" -ForegroundColor DarkGray
 Write-Host ""
 
-# ── Python 3.11+ check ────────────────────────────────────────────────────────
+# -- Python 3.11+ check --------------------------------------------------------
 
 Write-Step "Checking for Python 3.11+ ..."
 
@@ -77,7 +77,7 @@ foreach ($candidate in @("python", "python3", "py")) {
             if ($major -gt 3 -or ($major -eq 3 -and $minor -ge 11)) {
                 $PythonExe = (Get-Command $candidate -ErrorAction SilentlyContinue).Source
                 if (-not $PythonExe) { $PythonExe = $candidate }
-                Write-OK "Found $candidate — Python $major.$minor"
+                Write-OK "Found $candidate - Python $major.$minor"
                 break
             }
         }
@@ -89,13 +89,13 @@ if (-not $PythonExe) {
     exit 1
 }
 
-# ── Prepare install directory ─────────────────────────────────────────────────
+# -- Prepare install directory -------------------------------------------------
 
 if (-not (Test-Path $InstallDir)) {
     New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null
 }
 
-# ── Download agent bundle from server (web install path) ─────────────────────
+# -- Download agent bundle from server (web install path) ---------------------
 
 if ($Server -ne "") {
     Write-Step "Downloading agent bundle from $Server ..."
@@ -114,7 +114,7 @@ if ($Server -ne "") {
     }
 }
 
-# ── Copy files (local install / fallback) ────────────────────────────────────
+# -- Copy files (local install / fallback) ------------------------------------
 
 $FilesToCopy = @("agent.py", "audit.py", "storage.py", "server.py", "requirements.txt")
 foreach ($f in $FilesToCopy) {
@@ -134,7 +134,7 @@ foreach ($d in $DirsToCopy) {
     }
 }
 
-# ── Install pip dependencies ──────────────────────────────────────────────────
+# -- Install pip dependencies --------------------------------------------------
 
 Write-Step "Installing Python dependencies ..."
 $ReqFile = Join-Path $InstallDir "requirements.txt"
@@ -146,7 +146,7 @@ if (Test-Path $ReqFile) {
     Write-Warn "requirements.txt not found at $ReqFile, skipping."
 }
 
-# ── Create config ─────────────────────────────────────────────────────────────
+# -- Create config -------------------------------------------------------------
 
 Write-Step "Configuring $ConfigFile ..."
 if (-not (Test-Path $ConfigDir)) {
@@ -188,7 +188,7 @@ $acl.AddAccessRule($rule1)
 $acl.AddAccessRule($rule2)
 Set-Acl -Path $ConfigFile -AclObject $acl
 
-# ── Verify agent files are present ────────────────────────────────────────────
+# -- Verify agent files are present --------------------------------------------
 
 $AgentScript = "$InstallDir\agent.py"
 if (-not (Test-Path $AgentScript)) {
@@ -201,7 +201,7 @@ if (-not (Test-Path $AgentScript)) {
 }
 Write-OK "Agent files present at $InstallDir"
 
-# ── Windows Service registration ──────────────────────────────────────────────
+# -- Windows Service registration ----------------------------------------------
 
 if (-not $NoService) {
     Write-Step "Registering Windows Service '$ServiceName' ..."
@@ -269,7 +269,7 @@ Set-Location '$InstallDir'
         Write-Warn "For production use, install NSSM (https://nssm.cc) for better service management."
     }
 
-    # ── Verify service is running (retry up to 3x) ───────────────────────────
+    # -- Verify service is running (retry up to 3x) ---------------------------
     $started = $false
     for ($attempt = 1; $attempt -le 3; $attempt++) {
         Start-Sleep -Seconds 5
@@ -279,7 +279,7 @@ Set-Location '$InstallDir'
             break
         }
         if ($attempt -lt 3) {
-            Write-Warn "Service not yet running (attempt $attempt/3) — retrying ..."
+            Write-Warn "Service not yet running (attempt $attempt/3) - retrying ..."
             try { Start-Service -Name $ServiceName -ErrorAction SilentlyContinue } catch {}
         }
     }
@@ -303,7 +303,7 @@ Set-Location '$InstallDir'
         exit 1
     }
 
-    # ── Verify server connectivity ────────────────────────────────────────────
+    # -- Verify server connectivity --------------------------------------------
     if ($Server -ne "") {
         Write-Step "Verifying agent can reach server ..."
         $healthUrl = $Server.TrimEnd('/') + '/health'
@@ -312,10 +312,10 @@ Set-Location '$InstallDir'
             if ($resp.StatusCode -eq 200) {
                 Write-OK "Server reachable at $Server"
             } else {
-                Write-Warn "Server returned HTTP $($resp.StatusCode) — agent may not connect"
+                Write-Warn "Server returned HTTP $($resp.StatusCode) - agent may not connect"
             }
         } catch {
-            Write-Host "  [WARN] Cannot reach $healthUrl — check firewall or server URL" -ForegroundColor Yellow
+            Write-Host "  [WARN] Cannot reach $healthUrl - check firewall or server URL" -ForegroundColor Yellow
             Write-Host "         Error: $_" -ForegroundColor DarkYellow
         }
     }
@@ -325,7 +325,7 @@ Set-Location '$InstallDir'
     Write-Host "  To start manually: & '$PythonExe' '$InstallDir\agent.py' --config '$ConfigFile' --daemon" -ForegroundColor DarkGray
 }
 
-# ── Desktop shortcut → opens fleet dashboard in browser ──────────────────────
+# -- Desktop shortcut -> opens fleet dashboard in browser ----------------------
 $ShortcutPath = [Environment]::GetFolderPath('Desktop') + '\Sentinel Dashboard.url'
 $DashUrl = if ($Server) { $Server.TrimEnd('/') + '/fleet' } else { 'http://localhost:7331/fleet' }
 try {

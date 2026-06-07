@@ -15,7 +15,7 @@ echo   M.A.R.K. Sentinel Agent -- Windows Uninstaller
 echo   =============================================
 echo.
 
-:: ── Admin check ──────────────────────────────────────────────────────────────
+:: -- Admin check --------------------------------------------------------------
 net session >nul 2>&1
 if %errorlevel% neq 0 (
     echo   ERROR: This uninstaller must be run as Administrator.
@@ -25,7 +25,7 @@ if %errorlevel% neq 0 (
     exit /b 1
 )
 
-:: ── Try uninstall.ps1 first (works when ExecutionPolicy allows it) ────────────
+:: -- Try uninstall.ps1 first (works when ExecutionPolicy allows it) ------------
 where pwsh >nul 2>&1
 if %errorlevel% == 0 set "PWSH_EXE=pwsh"
 where powershell >nul 2>&1
@@ -43,7 +43,7 @@ if defined PWSH_EXE (
 echo   [INFO] PowerShell unavailable -- running batch uninstall ^(no NSSM^).
 echo.
 
-:: ── Stop and delete service ──────────────────────────────────────────────────
+:: -- Stop and delete service --------------------------------------------------
 echo   Removing Windows Service "%SERVICE_NAME%" if present...
 sc query %SERVICE_NAME% >nul 2>&1
 if %errorlevel% == 0 (
@@ -55,7 +55,7 @@ if %errorlevel% == 0 (
     echo   Service "%SERVICE_NAME%" not found, skipping.
 )
 
-:: ── Remove directories ───────────────────────────────────────────────────────
+:: -- Remove directories -------------------------------------------------------
 echo   Removing install and config directories...
 if exist "%INSTALL_DIR%" (
     rd /s /q "%INSTALL_DIR%" >nul 2>&1
@@ -71,7 +71,7 @@ if exist "%CONFIG_DIR%" (
     echo   %CONFIG_DIR% not found, skipping.
 )
 
-:: ── Remove desktop shortcut ──────────────────────────────────────────────────
+:: -- Remove desktop shortcut --------------------------------------------------
 if exist "%USERPROFILE%\Desktop\Sentinel Dashboard.url" (
     del /f /q "%USERPROFILE%\Desktop\Sentinel Dashboard.url" >nul 2>&1
     echo   [OK] Desktop shortcut removed
