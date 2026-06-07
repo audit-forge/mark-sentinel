@@ -259,7 +259,7 @@ async def test_email(request: Request):
 @app.get("/install/{filename}")
 async def serve_installer(filename: str):
     from fastapi.responses import FileResponse
-    allowed = {"install.sh", "install.ps1", "install.bat"}
+    allowed = {"install.sh", "install.ps1"}
     if filename not in allowed:
         raise HTTPException(404)
     path = f"/app/{filename}"

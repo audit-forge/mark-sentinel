@@ -40,7 +40,10 @@ jobs:
         shell: powershell
         run: |
           # These are the scripts actually served to customers at /install/<file>
-          # (admin/install.ps1, admin/install.bat — synced from the repo root).
+          # (admin/install.ps1 — synced from the repo root; .bat variants were
+          # removed since the one-liner deploy command and install.bat both
+          # ultimately ran install.ps1 — keeping one path means one thing to
+          # test and keep correct).
           # Run under Windows PowerShell 5.1 (the stock interpreter on a fresh
           # Windows machine, NOT pwsh) since 5.1 reads .ps1 files without a
           # UTF-8 BOM using the system ANSI codepage — non-ASCII characters
@@ -58,7 +61,7 @@ jobs:
               Write-Host "OK: $f parses cleanly under PowerShell $($PSVersionTable.PSVersion)" -ForegroundColor Green
             }
           }
-          foreach ($f in @("install.ps1", "install.bat", "uninstall.ps1", "uninstall.bat", "admin\install.ps1", "admin\install.bat")) {
+          foreach ($f in @("install.ps1", "uninstall.ps1", "admin\install.ps1")) {
             $bytes = [System.IO.File]::ReadAllBytes($f)
             $nonAscii = $bytes | Where-Object { $_ -gt 127 }
             if ($nonAscii.Count -gt 0) {
