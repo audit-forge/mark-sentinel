@@ -267,7 +267,7 @@ def check_supply_003(ctx: ScanContext) -> CheckResult:
         pkg_name = re.split(r'[=<>!; \[\]]', line)[0].strip().lower()
         if not pkg_name:
             continue
-        is_pinned = bool(re.match(r'^[a-zA-Z0-9_-]+==[0-9]', line))
+        is_pinned = bool(re.match(r'^[a-zA-Z0-9_-]+(\[[a-zA-Z0-9_,-]+\])?==[0-9]', line))
         if is_pinned:
             pinned.append(pkg_name)
         else:

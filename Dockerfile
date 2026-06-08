@@ -43,9 +43,14 @@ RUN pip install --no-cache-dir --upgrade pip && \
 # Copy all Python source for the server
 COPY . .
 
-# Overwrite audit and demo with compiled binaries from builder
-COPY --from=builder /build/audit/audit.dist/audit /app/audit
-COPY --from=builder /build/demo/demo.dist/demo /app/scripts/demo
+# Overwrite audit and demo with compiled binaries from builder.
+# Nuitka --standalone binaries are NOT self-contained single files — they
+# require their bundled .so extension modules (e.g. _struct.so, _socket.so)
+# to sit alongside the executable at runtime. Copy the whole *.dist/ output
+# directory, not just the binary, or the binary fails at the first stdlib
+# import that needs a compiled extension (struct, socket, etc).
+COPY --from=builder /build/audit/audit.dist/ /app/
+COPY --from=builder /build/demo/demo.dist/ /app/scripts/
 RUN chmod +x /app/audit /app/scripts/demo
 
 RUN --mount=type=bind,from=builder,source=/src,target=/build-src \

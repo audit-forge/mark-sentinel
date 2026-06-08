@@ -63,7 +63,7 @@ services:
 
   # ── Ollama: local LLM endpoint ──────────────────────────────────────────────
   ollama:
-    image: ollama/ollama:latest
+    image: ollama/ollama:0.30.6
     container_name: sentinel-ollama
     hostname: sentinel-ollama
     restart: unless-stopped

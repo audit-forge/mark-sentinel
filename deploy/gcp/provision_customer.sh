@@ -68,6 +68,13 @@ server {
         proxy_set_header Host \$host;
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header Authorization \$http_authorization;
+        # Bundle generation tars the whole codebase on the fly (~45s). The
+        # nginx default proxy_read_timeout (60s) leaves almost no margin for
+        # slower client connections or server load, so downloads intermittently
+        # truncate mid-stream and the installer reports a false "connectivity"
+        # failure. Match the generous timeout used by the other proxied blocks.
+        proxy_read_timeout 300;
+        proxy_buffering off;
     }
 
     location /install/ {

@@ -545,15 +545,39 @@ def _notify_critical_findings(report: dict) -> None:
 
 # ── Main scan cycle ────────────────────────────────────────────────────────────
 
+def _usable_dir(path: str) -> bool:
+    """True if path exists, is a directory, and we can actually read+traverse it.
+    A service account's /etc/passwd entry can point at a home directory that was
+    never created (e.g. `useradd --no-create-home`) — Path.home() / pwd lookups
+    happily return that dead path, and the first os.scandir() inside it then
+    blows up with PermissionError/FileNotFoundError. Validate before trusting it."""
+    try:
+        p = Path(path)
+        return p.is_dir() and os.access(path, os.R_OK | os.X_OK)
+    except Exception:
+        return False
+
+
 def _resolve_home() -> str:
     """Return the real user's home directory — works correctly even when the process runs as root."""
+    if os.name != 'posix':
+        # Windows: no pwd/sudo/loginctl — Path.home() already resolves to the
+        # right profile for the account the service runs under.
+        own_home = str(Path.home())
+        if _usable_dir(own_home):
+            return own_home
+        log.warning('No usable home directory found for scan target — defaulting to "C:\\\\"'
+                    ' (set "target" explicitly in agent_config.json to scan a specific path)')
+        return 'C:\\'
     import pwd as _pwd
     # When invoked via sudo, SUDO_USER holds the original user
     for var in ('SUDO_USER', 'LOGNAME', 'USER'):
         user = os.environ.get(var, '')
         if user and user != 'root':
             try:
-                return _pwd.getpwnam(user).pw_dir
+                home = _pwd.getpwnam(user).pw_dir
+                if _usable_dir(home):
+                    return home
             except KeyError:
                 pass
     # macOS: ask the system who owns the console session
@@ -564,7 +588,9 @@ def _resolve_home() -> str:
             capture_output=True, text=True, timeout=2
         ).stdout.strip()
         if user and user != 'root':
-            return _pwd.getpwnam(user).pw_dir
+            home = _pwd.getpwnam(user).pw_dir
+            if _usable_dir(home):
+                return home
     except Exception:
         pass
     # Linux: check loginctl for the active session user
@@ -577,10 +603,22 @@ def _resolve_home() -> str:
             if len(parts) >= 3:
                 user = parts[2]
                 if user and user != 'root':
-                    return _pwd.getpwnam(user).pw_dir
+                    home = _pwd.getpwnam(user).pw_dir
+                    if _usable_dir(home):
+                        return home
     except Exception:
         pass
-    return str(Path.home())
+    # Last resort: the running process's own home, if it actually exists and is
+    # readable (true for real users; false for homeless system/service accounts
+    # like the `sentinel` user created by install.sh's systemd path).
+    own_home = str(Path.home())
+    if _usable_dir(own_home):
+        return own_home
+    # Headless service account with no usable home of its own — fall back to
+    # scanning the filesystem root rather than crashing on a dead path.
+    log.warning('No usable home directory found for scan target — defaulting to "/"'
+                ' (set "target" explicitly in agent_config.json to scan a specific path)')
+    return '/'
 
 
 def run_cycle(config: dict) -> bool:

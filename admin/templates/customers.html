@@ -134,6 +134,9 @@
           <button type="button" class="btn btn-sm"
                   onclick="openRotate('{{ c.id }}','{{ c.name | replace("'","\\x27") }}')"
                   style="background:#F9FAFB;color:#DC2626;border:1px solid #DC262640">Rotate Token</button>
+          <button type="button" class="btn btn-sm" id="repush-btn-{{ c.id }}"
+                  onclick="repushAgents('{{ c.id }}','{{ c.name | replace("'","\\x27") }}')"
+                  style="background:#F9FAFB;color:#059669;border:1px solid #05966940">Push Agent Update</button>
           <form method="post" action="/customers/renew" style="display:inline">
             <input type="hidden" name="customer_id" value="{{ c.id }}">
             <button type="submit" class="btn btn-sm" style="background:#F9FAFB;color:#4F46E5;border:1px solid #4F46E540">Renew</button>
@@ -435,5 +438,35 @@ function copyToken() {
 document.getElementById('rotateModal').addEventListener('click', function(e) {
   if (e.target === this) closeRotate();
 });
+
+function repushAgents(cid, name) {
+  if (!confirm('Push the latest agent code/config to every device in ' + name + '’s fleet?\n\nEach agent will download the refreshed bundle and restart itself on its next check-in — no action needed from the customer.')) {
+    return;
+  }
+  var btn = document.getElementById('repush-btn-' + cid);
+  var originalText = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = 'Pushing…';
+  fetch('/customers/repush', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({customer_id: cid})
+  })
+  .then(function(r) { return r.json(); })
+  .then(function(data) {
+    btn.disabled = false;
+    btn.textContent = originalText;
+    if (data.error) {
+      alert('Error: ' + data.error);
+      return;
+    }
+    alert('Update queued for ' + data.count + ' device' + (data.count === 1 ? '' : 's') + ' at ' + data.name + '. Agents will pick it up on their next check-in.');
+  })
+  .catch(function(e) {
+    btn.disabled = false;
+    btn.textContent = originalText;
+    alert('Request failed: ' + e);
+  });
+}
 </script>
 {% endblock %}

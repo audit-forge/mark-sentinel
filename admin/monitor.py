@@ -48,21 +48,22 @@ def _check_all_customers():
 def _query_agent_count(customer_id: str) -> int | None:
     import subprocess
     container = f"sentinel-{customer_id}"
-    # The sentinel server stores agents.db under /app/data/customers/<customer_id>/agents.db
-    # Use glob so this works regardless of what customer_id slug is in the license.
+    # _get_store() in server.py always resolves the live per-customer DB to this exact
+    # path. Querying it directly (rather than globbing /app/data for any agents.db)
+    # matters because customer containers accumulate stale/orphaned agents.db files
+    # from old provisioning attempts (UUID-named dirs, default/, legacy /app/data/agents.db,
+    # etc.) — globbing and taking the first match silently counts the wrong database
+    # (almost always 0 devices), which is why overage alerts never fired.
+    db_path = f"/app/data/customers/{customer_id}/agents.db"
     try:
-        find = subprocess.run(
-            ["docker", "exec", container, "find", "/app/data", "-name", "agents.db"],
-            capture_output=True, text=True, timeout=10
-        )
-        if find.returncode != 0 or not find.stdout.strip():
-            return None
-        db_path = find.stdout.strip().splitlines()[0]
+        # Count every device ever registered, not just ones active in a recent
+        # window — a customer shouldn't be able to accumulate more registrations
+        # than their seat count without it surfacing as an overage, even if some
+        # of those devices have since gone offline/decommissioned.
         result = subprocess.run(
             ["docker", "exec", container, "python3", "-c",
-             f"import sqlite3,time; conn=sqlite3.connect('{db_path}'); "
-             "cutoff=int(time.time())-1800; "
-             "print(conn.execute('SELECT COUNT(*) FROM devices WHERE last_seen>=?',(cutoff,)).fetchone()[0])"],
+             f"import sqlite3; conn=sqlite3.connect('{db_path}'); "
+             "print(conn.execute('SELECT COUNT(*) FROM devices').fetchone()[0])"],
             capture_output=True, text=True, timeout=10
         )
         if result.returncode == 0:

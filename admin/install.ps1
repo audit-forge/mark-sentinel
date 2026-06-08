@@ -208,31 +208,65 @@ if (-not $NoService) {
 
     $nssmCmd = Get-Command "nssm" -ErrorAction SilentlyContinue; $nssmPath = if ($nssmCmd) { $nssmCmd.Source } else { $null }
 
+    if (-not $nssmPath) {
+        Write-Step "NSSM not found — downloading it for proper Windows Service support ..."
+        try {
+            $nssmDir = "$env:ProgramData\Sentinel\nssm"
+            New-Item -ItemType Directory -Path $nssmDir -Force | Out-Null
+            $nssmZip     = "$env:TEMP\nssm-$([guid]::NewGuid()).zip"
+            $nssmExtract = "$env:TEMP\nssm-extract-$([guid]::NewGuid())"
+            Invoke-WebRequest -Uri "https://nssm.cc/release/nssm-2.24.zip" -OutFile $nssmZip -UseBasicParsing -TimeoutSec 60
+            Expand-Archive -Path $nssmZip -DestinationPath $nssmExtract -Force
+            $arch   = if ([Environment]::Is64BitOperatingSystem) { "win64" } else { "win32" }
+            $nssmSrc = Get-ChildItem -Path $nssmExtract -Recurse -Filter "nssm.exe" |
+                Where-Object { $_.FullName -like "*\$arch\*" } | Select-Object -First 1
+            if ($nssmSrc) {
+                Copy-Item -Path $nssmSrc.FullName -Destination "$nssmDir\nssm.exe" -Force
+                $nssmPath = "$nssmDir\nssm.exe"
+                Write-OK "NSSM downloaded to $nssmPath"
+            } else {
+                Write-Warn "Downloaded NSSM archive but couldn't find nssm.exe for $arch inside it."
+            }
+            Remove-Item $nssmZip -Force -ErrorAction SilentlyContinue
+            Remove-Item $nssmExtract -Recurse -Force -ErrorAction SilentlyContinue
+        } catch {
+            Write-Warn "Could not download NSSM automatically: $_"
+        }
+    }
+
     if ($nssmPath) {
         Write-Step "Using NSSM to create service ..."
 
         $existingSvc = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
         if ($existingSvc) {
             Write-Step "Stopping existing service ..."
-            & nssm stop $ServiceName 2>$null
-            & nssm remove $ServiceName confirm 2>$null
+            & $nssmPath stop $ServiceName 2>$null
+            & $nssmPath remove $ServiceName confirm 2>$null
         }
 
-        & nssm install $ServiceName $PythonExe
-        & nssm set $ServiceName AppParameters "`"$InstallDir\agent.py`" --daemon --config `"$ConfigFile`""
-        & nssm set $ServiceName AppDirectory $InstallDir
-        & nssm set $ServiceName DisplayName "M.A.R.K. Sentinel Agent"
-        & nssm set $ServiceName Description "Distributed security audit agent (M.A.R.K. Sentinel)"
-        & nssm set $ServiceName Start SERVICE_AUTO_START
-        & nssm set $ServiceName AppRestartDelay 30000
-        & nssm set $ServiceName AppStdout "$env:ProgramData\Sentinel\sentinel-agent.log"
-        & nssm set $ServiceName AppStderr "$env:ProgramData\Sentinel\sentinel-agent.log"
-        & nssm set $ServiceName AppEnvironmentExtra "PYTHONUTF8=1" "SENTINEL_SERVER=" "SENTINEL_AGENT_TOKEN="
-        & nssm start $ServiceName
+        & $nssmPath install $ServiceName $PythonExe
+        & $nssmPath set $ServiceName AppParameters "`"$InstallDir\agent.py`" --daemon --config `"$ConfigFile`""
+        & $nssmPath set $ServiceName AppDirectory $InstallDir
+        & $nssmPath set $ServiceName DisplayName "M.A.R.K. Sentinel Agent"
+        & $nssmPath set $ServiceName Description "Distributed security audit agent (M.A.R.K. Sentinel)"
+        & $nssmPath set $ServiceName Start SERVICE_AUTO_START
+        & $nssmPath set $ServiceName AppRestartDelay 30000
+        & $nssmPath set $ServiceName AppStdout "$env:ProgramData\Sentinel\sentinel-agent.log"
+        & $nssmPath set $ServiceName AppStderr "$env:ProgramData\Sentinel\sentinel-agent.log"
+        & $nssmPath set $ServiceName AppEnvironmentExtra "PYTHONUTF8=1" "SENTINEL_SERVER=" "SENTINEL_AGENT_TOKEN="
+        & $nssmPath start $ServiceName
         Write-OK "Service registered and started via NSSM"
 
     } else {
-        Write-Warn "NSSM not found; falling back to sc.exe wrapper script."
+        Write-Warn "NSSM not found; falling back to a startup Scheduled Task."
+        # NOTE: `sc.exe create binPath= "powershell.exe -File wrapper.ps1"` looks
+        # like it should work but never does — the Service Control Manager requires
+        # the target binary to call StartServiceCtrlDispatcher(), which a plain
+        # PowerShell process never does, so SCM immediately reports
+        # "Cannot start service ... CouldNotStartService". NSSM exists precisely
+        # to bridge that gap. Without it, a Scheduled Task that runs at startup
+        # as SYSTEM with auto-restart is the standard Windows-native way to get
+        # equivalent persistent-background-process behavior.
 
         $WrapperScript = "$InstallDir\sentinel-service.ps1"
         @"
@@ -244,6 +278,7 @@ Set-Location '$InstallDir'
     Tee-Object -FilePath '$ConfigDir\sentinel-agent.log' -Append
 "@ | ForEach-Object { Write-FileNoBOM $WrapperScript $_ }
 
+        # Remove any leftover service registration from a previous sc.exe-based install
         $existingSvc = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
         if ($existingSvc) {
             Stop-Service -Name $ServiceName -Force -ErrorAction SilentlyContinue
@@ -256,39 +291,53 @@ Set-Location '$InstallDir'
             $pwshExe = (Get-Command "powershell" -ErrorAction SilentlyContinue).Source
         }
 
-        sc.exe create $ServiceName `
-            binPath= "`"$pwshExe`" -NonInteractive -NoProfile -File `"$WrapperScript`"" `
-            start= auto `
-            DisplayName= "M.A.R.K. Sentinel Agent" | Out-Null
+        $TaskName = $ServiceName
+        Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction SilentlyContinue
 
-        sc.exe description $ServiceName "Distributed security audit agent (M.A.R.K. Sentinel)" | Out-Null
-        sc.exe failure $ServiceName reset= 86400 actions= restart/30000/restart/30000/restart/30000 | Out-Null
+        $action    = New-ScheduledTaskAction -Execute $pwshExe -Argument "-NonInteractive -NoProfile -WindowStyle Hidden -File `"$WrapperScript`""
+        $trigger   = New-ScheduledTaskTrigger -AtStartup
+        $principal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount -RunLevel Highest
+        $settings  = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
+            -StartWhenAvailable -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1) `
+            -ExecutionTimeLimit ([TimeSpan]::Zero)
 
-        Start-Service -Name $ServiceName
-        Write-OK "Service registered and started via sc.exe"
-        Write-Warn "For production use, install NSSM (https://nssm.cc) for better service management."
+        Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger `
+            -Principal $principal -Settings $settings `
+            -Description "Distributed security audit agent (M.A.R.K. Sentinel)" | Out-Null
+
+        Start-ScheduledTask -TaskName $TaskName
+        Write-OK "Startup task registered and started"
+        Write-Warn "For production use, install NSSM (https://nssm.cc) for true Windows Service management."
     }
 
-    # -- Verify service is running (retry up to 3x) ---------------------------
+    # -- Verify the agent is running (retry up to 3x) -------------------------
     $started = $false
     for ($attempt = 1; $attempt -le 3; $attempt++) {
         Start-Sleep -Seconds 5
-        $svc = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
-        if ($svc -and $svc.Status -eq "Running") {
-            $started = $true
-            break
-        }
-        if ($attempt -lt 3) {
-            Write-Warn "Service not yet running (attempt $attempt/3) - retrying ..."
-            try { Start-Service -Name $ServiceName -ErrorAction SilentlyContinue } catch {}
+        if ($nssmPath) {
+            $svc = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
+            if ($svc -and $svc.Status -eq "Running") { $started = $true; break }
+            if ($attempt -lt 3) {
+                Write-Warn "Service not yet running (attempt $attempt/3) - retrying ..."
+                try { Start-Service -Name $ServiceName -ErrorAction SilentlyContinue } catch {}
+            }
+        } else {
+            $task = Get-ScheduledTask -TaskName $ServiceName -ErrorAction SilentlyContinue
+            $running = Get-Process -Name "python*" -ErrorAction SilentlyContinue |
+                Where-Object { $_.Path -eq $PythonExe }
+            if ($task -and $running) { $started = $true; break }
+            if ($attempt -lt 3) {
+                Write-Warn "Agent not yet running (attempt $attempt/3) - retrying ..."
+                try { Start-ScheduledTask -TaskName $ServiceName -ErrorAction SilentlyContinue } catch {}
+            }
         }
     }
 
     if ($started) {
-        Write-OK "Service is running"
+        Write-OK "Agent is running"
     } else {
         Write-Host ""
-        Write-Host "  [FAIL] Service failed to start." -ForegroundColor Red
+        Write-Host "  [FAIL] Agent failed to start." -ForegroundColor Red
         $logFile = "$ConfigDir\sentinel-agent.log"
         if (Test-Path $logFile) {
             Write-Host "  Last log entries:" -ForegroundColor Yellow

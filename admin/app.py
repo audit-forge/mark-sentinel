@@ -5,6 +5,8 @@ import secrets
 import string
 import subprocess
 import time
+import asyncio
+import urllib.request
 from collections import defaultdict
 from datetime import datetime, date, timezone, timedelta
 from fastapi import FastAPI, Request, Form, HTTPException
@@ -57,6 +59,13 @@ def _ensure_super_admin():
                 (str(uuid.uuid4()), ADMIN_EMAIL, hash_password(ADMIN_PASSWORD),
                  "super_admin", None, datetime.now(timezone.utc).isoformat())
             )
+
+
+def _check_customer_active(customer_id: str) -> bool:
+    """True if the customer account is active — blocks login for archived/removed customers."""
+    with get_conn() as conn:
+        row = conn.execute("SELECT active FROM customers WHERE id=?", (customer_id,)).fetchone()
+    return bool(row and row["active"])
 
 
 def _sentinel_url(customer_id: Union[str, None]) -> str:
@@ -686,6 +695,89 @@ async def rotate_customer_token(request: Request):
         "rollover_hours": rollover_hours,
         "expires_at": expires_at,
         "push_queued": push_count,
+    })
+
+
+@app.post("/customers/repush")
+async def repush_customer_agents(request: Request):
+    """Push the latest agent code/config to every device in a customer's fleet.
+
+    Lets Hash ship agent fixes (bug fixes, installer updates, etc.) without the
+    customer having to manually re-run install scripts on each machine — the
+    customer's Sentinel server queues an `update_self` command for every known
+    device, which the agents pick up on their next poll, download the refreshed
+    bundle, verify it, and restart themselves.
+
+    Calls the customer container directly over the docker network (the
+    127.0.0.1-based approach used elsewhere can't reach it — different network
+    namespaces) using the trusted-proxy headers the customer container is
+    configured to accept from internal callers.
+    """
+    try:
+        user = require_super_admin(request)
+    except HTTPException:
+        return JSONResponse({"error": "unauthorized"}, status_code=403)
+    client_ip = request.client.host if request.client else "unknown"
+    try:
+        body = await request.json()
+        customer_id = str(body.get("customer_id", "")).strip()
+    except Exception:
+        return JSONResponse({"error": "invalid_request"}, status_code=400)
+    if not customer_id:
+        return JSONResponse({"error": "customer_id required"}, status_code=400)
+
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT id, name FROM customers WHERE id=? AND active=1", (customer_id,)
+        ).fetchone()
+    if not row:
+        return JSONResponse({"error": "customer not found"}, status_code=404)
+
+    container_name = f"sentinel-{customer_id}"
+    update_url = f"http://{container_name}:7331/api/fleet/update/all"
+
+    def _push():
+        req = urllib.request.Request(
+            update_url,
+            method="POST",
+            headers={
+                "X-Sentinel-Customer-ID": customer_id,
+                "X-Sentinel-User-Email": user["email"],
+                "X-Sentinel-User-Role": "admin",
+            },
+        )
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            return resp.status, json.loads(resp.read().decode("utf-8"))
+
+    try:
+        status, data = await asyncio.to_thread(_push)
+    except Exception as e:
+        log_audit(
+            actor_id=user["sub"], actor_name=user["email"], actor_role=user["role"],
+            customer_id=customer_id, action="customer.repush.failed", target=row["name"],
+            details=f"Failed to reach {container_name}: {e}", ip_address=client_ip
+        )
+        return JSONResponse({"error": f"could not reach customer server: {e}"}, status_code=502)
+
+    if status != 200:
+        log_audit(
+            actor_id=user["sub"], actor_name=user["email"], actor_role=user["role"],
+            customer_id=customer_id, action="customer.repush.failed", target=row["name"],
+            details=f"Customer server returned HTTP {status}: {data}", ip_address=client_ip
+        )
+        return JSONResponse({"error": f"customer server returned HTTP {status}"}, status_code=502)
+
+    device_count = data.get("count", 0)
+    log_audit(
+        actor_id=user["sub"], actor_name=user["email"], actor_role=user["role"],
+        customer_id=customer_id, action="customer.repush", target=row["name"],
+        details=f"Queued agent update for {device_count} device(s) at {row['name']}", ip_address=client_ip
+    )
+    return JSONResponse({
+        "customer_id": customer_id,
+        "name": row["name"],
+        "count": device_count,
+        "devices": data.get("devices", []),
     })
 
 

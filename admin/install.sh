@@ -82,12 +82,24 @@ mkdir -p "${INSTALL_PREFIX}"
 if ! "$PYTHON" -m venv --help &>/dev/null 2>&1; then
     echo "  venv module not found — attempting to install ..."
     PY_VER="$("$PYTHON" -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')"
+    # Package managers need root. Re-run through sudo when not already root —
+    # otherwise these installs fail silently (stderr suppressed below) and the
+    # user is left with a confusing "venv unavailable, run sudo apt-get ..."
+    # error despite the script having "tried" to install it for them.
+    SUDO=""
+    if [[ "$(id -u)" -ne 0 ]]; then
+        if command -v sudo &>/dev/null; then
+            SUDO="sudo"
+        else
+            echo "  Warning: not running as root and 'sudo' is unavailable — cannot auto-install venv." >&2
+        fi
+    fi
     if command -v apt-get &>/dev/null; then
-        apt-get install -y "python${PY_VER}-venv" 2>/dev/null || apt-get install -y python3-venv 2>/dev/null || true
+        $SUDO apt-get install -y "python${PY_VER}-venv" 2>/dev/null || $SUDO apt-get install -y python3-venv 2>/dev/null || true
     elif command -v dnf &>/dev/null; then
-        dnf install -y "python${PY_VER}" 2>/dev/null || true
+        $SUDO dnf install -y "python${PY_VER}" 2>/dev/null || true
     elif command -v yum &>/dev/null; then
-        yum install -y "python3" 2>/dev/null || true
+        $SUDO yum install -y "python3" 2>/dev/null || true
     fi
     if ! "$PYTHON" -m venv --help &>/dev/null 2>&1; then
         echo "Error: venv module unavailable. Run: sudo apt-get install python${PY_VER}-venv" >&2
@@ -316,4 +328,9 @@ echo "M.A.R.K. Sentinel Agent installed successfully."
 echo "  Install dir : ${INSTALL_PREFIX}"
 echo "  Config      : ${CONFIG_FILE}"
 echo ""
-echo "Edit ${CONFIG_FILE} to set your server URL and token, then restart the service."
+if [[ -n "$OPT_SERVER" && -n "$OPT_TOKEN" ]]; then
+    echo "Server and token were configured automatically from --server/--token — no further action needed."
+else
+    echo "Edit ${CONFIG_FILE} to set your server URL and token, then restart the service."
+    echo "(tip: pass --server URL --token TOKEN to install.sh to configure this automatically — useful for mass rollouts)"
+fi
