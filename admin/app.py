@@ -10,8 +10,9 @@ from datetime import datetime, date, timezone, timedelta
 from fastapi import FastAPI, Request, Form, HTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
+from typing import Union
 
-from db import init_db, get_conn
+from db import init_db, get_conn, log_audit, get_audit_log
 from auth import hash_password, verify_password, create_token, get_current_user, require_super_admin
 from monitor import start_monitor
 
@@ -58,7 +59,7 @@ def _ensure_super_admin():
             )
 
 
-def _sentinel_url(customer_id: str | None) -> str:
+def _sentinel_url(customer_id: Union[str, None]) -> str:
     """Return the Sentinel dashboard URL for a given customer_id."""
     if not customer_id:
         return "/login"
@@ -100,12 +101,22 @@ async def login(
         row = conn.execute(
             "SELECT * FROM users WHERE email=? AND active=1", (email,)
         ).fetchone()
-    if not row or not verify_password(password, row["password_hash"]):
+    if not row or not verify_password(password, row["password_hash"]) or (row["customer_id"] and not _check_customer_active(row["customer_id"])):
         _record_failed_login(client_ip)
+        log_audit(
+            actor_id="unknown", actor_name=email, actor_role="unknown",
+            customer_id="", action="login.failed", target=email,
+            details="Invalid credentials", ip_address=client_ip
+        )
         return templates.TemplateResponse("login.html", {
             "request": request, "error": "Invalid credentials", "next": next
         })
     token = create_token(row["id"], row["role"], row["customer_id"], row["email"])
+    log_audit(
+        actor_id=row["id"], actor_name=row["email"], actor_role=row["role"],
+        customer_id=row["customer_id"] or "", action="login.success", target=email,
+        details="User logged in successfully", ip_address=client_ip
+    )
     if not next:
         destination = "/dashboard" if row["role"] == "super_admin" else _sentinel_url(row["customer_id"])
     else:
@@ -117,6 +128,19 @@ async def login(
 
 @app.get("/logout")
 async def logout(request: Request, next: str = None):
+    user = None
+    try:
+        user = get_current_user(request)
+    except Exception:
+        pass # user might be already logged out or invalid token
+
+    if user:
+        log_audit(
+            actor_id=user["sub"], actor_name=user["email"], actor_role=user["role"],
+            customer_id=user["customer_id"] or "", action="logout", target=user["email"],
+            details="User logged out", ip_address=request.client.host if request.client else "unknown"
+        )
+
     if next and next.startswith('http'):
         dest = next
     else:
@@ -193,32 +217,45 @@ async def dashboard(request: Request):
 @app.post("/admin/dismiss-alert")
 async def dismiss_alert(request: Request, alert_id: int = Form(...)):
     try:
-        require_super_admin(request)
+        user = require_super_admin(request)
     except HTTPException:
         return RedirectResponse("/login")
+    client_ip = request.client.host if request.client else "unknown"
     with get_conn() as conn:
         conn.execute("DELETE FROM license_alerts WHERE id=?", (alert_id,))
+    log_audit(
+        actor_id=user["sub"], actor_name=user["email"], actor_role=user["role"],
+        customer_id="", action="alert.dismiss", target=str(alert_id),
+        details="Dismissed license alert", ip_address=client_ip
+    )
     return RedirectResponse("/dashboard", status_code=303)
 
 
 @app.post("/admin/refresh-seats")
 async def refresh_seats(request: Request):
     try:
-        require_super_admin(request)
+        user = require_super_admin(request)
     except HTTPException:
         return RedirectResponse("/login")
+    client_ip = request.client.host if request.client else "unknown"
     import threading
     from monitor import _check_all_customers
     threading.Thread(target=_check_all_customers, daemon=True).start()
+    log_audit(
+        actor_id=user["sub"], actor_name=user["email"], actor_role=user["role"],
+        customer_id="", action="seats.refresh", target="",
+        details="Triggered manual seat-count refresh for all customers", ip_address=client_ip
+    )
     return RedirectResponse("/dashboard?seats_refreshed=1", status_code=303)
 
 
 @app.post("/admin/deploy")
 async def deploy(request: Request):
     try:
-        require_super_admin(request)
+        user = require_super_admin(request)
     except HTTPException:
         return RedirectResponse("/login")
+    client_ip = request.client.host if request.client else "unknown"
     import urllib.request as urlreq
     try:
         req = urlreq.Request("http://sentinel-deployer:9000/deploy", method="POST", data=b"")
@@ -227,6 +264,11 @@ async def deploy(request: Request):
         result = "started" if code == 202 else "busy" if code == 409 else "failed"
     except Exception:
         result = "failed"
+    log_audit(
+        actor_id=user["sub"], actor_name=user["email"], actor_role=user["role"],
+        customer_id="", action="deploy.trigger", target="",
+        details=f"Triggered deploy — result: {result}", ip_address=client_ip
+    )
     return RedirectResponse(f"/dashboard?deploy={result}", status_code=303)
 
 
@@ -235,9 +277,10 @@ async def deploy(request: Request):
 @app.post("/admin/test-email")
 async def test_email(request: Request):
     try:
-        require_super_admin(request)
+        user = require_super_admin(request)
     except HTTPException:
         return RedirectResponse("/login")
+    client_ip = request.client.host if request.client else "unknown"
     from mailer import send_alert
     ok = send_alert(
         subject="[Sentinel] Test alert — email is working",
@@ -251,6 +294,11 @@ async def test_email(request: Request):
 """,
     )
     result = "ok" if ok else "fail"
+    log_audit(
+        actor_id=user["sub"], actor_name=user["email"], actor_role=user["role"],
+        customer_id="", action="email.test", target="",
+        details=f"Sent test alert email — result: {result}", ip_address=client_ip
+    )
     return RedirectResponse(f"/dashboard?email_test={result}", status_code=303)
 
 
@@ -309,9 +357,10 @@ async def add_customer(
     max_seats: int = Form(5),
 ):
     try:
-        require_super_admin(request)
+        user = require_super_admin(request)
     except HTTPException:
         return RedirectResponse("/login")
+    client_ip = request.client.host if request.client else "unknown"
     cid = customer_id.lower().strip().replace(" ", "-")
     if tier not in ("standard", "plus"):
         tier = "standard"
@@ -323,9 +372,19 @@ async def add_customer(
                 "SELECT COUNT(*) FROM customers WHERE active=1"
             ).fetchone()[0]
             if active_count >= MAX_CUSTOMERS:
+                log_audit(
+                    actor_id=user["sub"], actor_name=user["email"], actor_role=user["role"],
+                    customer_id="", action="customer.add.failed", target=cid,
+                    details="Exceeded max customer limit", ip_address=client_ip
+                )
                 return RedirectResponse("/customers?error=cap", status_code=303)
         exists = conn.execute("SELECT id FROM customers WHERE id=?", (cid,)).fetchone()
         if exists:
+            log_audit(
+                actor_id=user["sub"], actor_name=user["email"], actor_role=user["role"],
+                customer_id="", action="customer.add.failed", target=cid,
+                details="Customer ID already exists", ip_address=client_ip
+            )
             return RedirectResponse("/customers?error=exists", status_code=303)
         max_port = conn.execute("SELECT MAX(port) FROM customers").fetchone()[0]
         port = (max_port or 7000) + 1
@@ -339,6 +398,11 @@ async def add_customer(
             if existing:
                 conn.execute("UPDATE users SET active=1, customer_id=?, role='customer_admin' WHERE email=?",
                              (cid, email))
+                log_audit(
+                    actor_id=user["sub"], actor_name=user["email"], actor_role=user["role"],
+                    customer_id=cid, action="user.reactivate", target=email,
+                    details=f"Reactivated existing user {email} as customer admin for {customer_name}", ip_address=client_ip
+                )
             else:
                 temp_password = _generate_temp_password()
                 conn.execute(
@@ -349,20 +413,36 @@ async def add_customer(
                 login_url = f"http://{PUBLIC_IP}/login"
                 from mailer import send_welcome_email
                 send_welcome_email(email, customer_name.strip(), login_url, temp_password)
+                log_audit(
+                    actor_id=user["sub"], actor_name=user["email"], actor_role=user["role"],
+                    customer_id=cid, action="user.add", target=email,
+                    details=f"Created new customer admin {email} for {customer_name}", ip_address=client_ip
+                )
     _write_license_file(cid, customer_name.strip(), tier, expires, max_seats)
     _run_script("provision_customer.sh", cid, PUBLIC_IP, tier, expires, str(max_seats), customer_name.strip(), str(port), agent_token)
+    log_audit(
+        actor_id=user["sub"], actor_name=user["email"], actor_role=user["role"],
+        customer_id=cid, action="customer.add", target=customer_name.strip(),
+        details=f"Added new customer {customer_name} (Tier: {tier}, Seats: {max_seats})", ip_address=client_ip
+    )
     return RedirectResponse("/customers", status_code=303)
 
 
 @app.post("/customers/renew")
 async def renew_customer(request: Request, customer_id: str = Form(...)):
     try:
-        require_super_admin(request)
+        user = require_super_admin(request)
     except HTTPException:
         return RedirectResponse("/login")
+    client_ip = request.client.host if request.client else "unknown"
     with get_conn() as conn:
         row = conn.execute("SELECT * FROM customers WHERE id=?", (customer_id,)).fetchone()
         if not row:
+            log_audit(
+                actor_id=user["sub"], actor_name=user["email"], actor_role=user["role"],
+                customer_id=customer_id, action="customer.renew.failed", target=customer_id,
+                details="Customer not found", ip_address=client_ip
+            )
             return RedirectResponse("/customers", status_code=303)
         current_expiry = row["license_expires_at"]
         try:
@@ -379,86 +459,156 @@ async def renew_customer(request: Request, customer_id: str = Form(...)):
         name = row["name"]
     _write_license_file(customer_id, name, tier, new_expiry, max_seats)
     _run_script("restart_customer.sh", customer_id)
+    log_audit(
+        actor_id=user["sub"], actor_name=user["email"], actor_role=user["role"],
+        customer_id=customer_id, action="customer.renew", target=name,
+        details=f"Renewed license for {name} until {new_expiry}", ip_address=client_ip
+    )
     return RedirectResponse("/customers", status_code=303)
 
 
 @app.post("/customers/seats")
 async def update_seats(request: Request, customer_id: str = Form(...), max_seats: int = Form(...)):
     try:
-        require_super_admin(request)
+        user = require_super_admin(request)
     except HTTPException:
         return RedirectResponse("/login")
+    client_ip = request.client.host if request.client else "unknown"
     if max_seats < 1:
+        log_audit(
+            actor_id=user["sub"], actor_name=user["email"], actor_role=user["role"],
+            customer_id=customer_id, action="customer.seats.failed", target=customer_id,
+            details=f"Invalid seat count: {max_seats}", ip_address=client_ip
+        )
         return RedirectResponse("/customers?error=invalid_seats", status_code=303)
     with get_conn() as conn:
         row = conn.execute("SELECT * FROM customers WHERE id=?", (customer_id,)).fetchone()
         if not row:
+            log_audit(
+                actor_id=user["sub"], actor_name=user["email"], actor_role=user["role"],
+                customer_id=customer_id, action="customer.seats.failed", target=customer_id,
+                details="Customer not found", ip_address=client_ip
+            )
             return RedirectResponse("/customers?error=notfound", status_code=303)
+        old_max_seats = row["max_seats"]
         conn.execute("UPDATE customers SET max_seats=? WHERE id=?", (max_seats, customer_id))
         name    = row["name"]
         tier    = row["tier"]
         expires = row["license_expires_at"]
     _write_license_file(customer_id, name, tier, expires, max_seats)
     _run_script("restart_customer.sh", customer_id)
+    log_audit(
+        actor_id=user["sub"], actor_name=user["email"], actor_role=user["role"],
+        customer_id=customer_id, action="customer.seats.update", target=name,
+        details=f"Updated seats for {name} from {old_max_seats} to {max_seats}", ip_address=client_ip
+    )
     return RedirectResponse("/customers?seats_updated=" + customer_id, status_code=303)
 
 
 @app.post("/customers/upgrade")
 async def upgrade_customer(request: Request, customer_id: str = Form(...), tier: str = Form(...)):
     try:
-        require_super_admin(request)
+        user = require_super_admin(request)
     except HTTPException:
         return RedirectResponse("/login")
+    client_ip = request.client.host if request.client else "unknown"
     if tier not in ("standard", "plus"):
+        log_audit(
+            actor_id=user["sub"], actor_name=user["email"], actor_role=user["role"],
+            customer_id=customer_id, action="customer.upgrade.failed", target=customer_id,
+            details=f"Invalid tier: {tier}", ip_address=client_ip
+        )
         return RedirectResponse("/customers?error=invalid_tier", status_code=303)
     with get_conn() as conn:
         row = conn.execute("SELECT * FROM customers WHERE id=?", (customer_id,)).fetchone()
         if not row:
+            log_audit(
+                actor_id=user["sub"], actor_name=user["email"], actor_role=user["role"],
+                customer_id=customer_id, action="customer.upgrade.failed", target=customer_id,
+                details="Customer not found", ip_address=client_ip
+            )
             return RedirectResponse("/customers?error=notfound", status_code=303)
+        old_tier = row["tier"]
         conn.execute("UPDATE customers SET tier=? WHERE id=?", (tier, customer_id))
         name    = row["name"]
         expires = row["license_expires_at"]
         max_seats = row["max_seats"]
     _write_license_file(customer_id, name, tier, expires, max_seats)
     _run_script("restart_customer.sh", customer_id)
+    log_audit(
+        actor_id=user["sub"], actor_name=user["email"], actor_role=user["role"],
+        customer_id=customer_id, action="customer.upgrade", target=name,
+        details=f"Upgraded plan for {name} from {old_tier} to {tier}", ip_address=client_ip
+    )
     return RedirectResponse("/customers?plan_updated=" + customer_id, status_code=303)
 
 
 @app.post("/customers/remove")
 async def remove_customer(request: Request, customer_id: str = Form(...)):
     try:
-        require_super_admin(request)
+        user = require_super_admin(request)
     except HTTPException:
         return RedirectResponse("/login")
+    client_ip = request.client.host if request.client else "unknown"
     with get_conn() as conn:
+        # Get customer name before deactivating
+        customer_name_row = conn.execute("SELECT name FROM customers WHERE id=?", (customer_id,)).fetchone()
+        customer_name = customer_name_row["name"] if customer_name_row else customer_id
+
         conn.execute("UPDATE customers SET active=0 WHERE id=?", (customer_id,))
         conn.execute("UPDATE users SET active=0 WHERE customer_id=?", (customer_id,))
+
     _run_script("remove_customer.sh", customer_id)
+    log_audit(
+        actor_id=user["sub"], actor_name=user["email"], actor_role=user["role"],
+        customer_id=customer_id, action="customer.remove", target=customer_name,
+        details=f"Deactivated customer {customer_name} and all associated users", ip_address=client_ip
+    )
     return RedirectResponse("/customers", status_code=303)
 
 
 @app.post("/customers/restore")
 async def restore_customer(request: Request, customer_id: str = Form(...)):
     try:
-        require_super_admin(request)
+        user = require_super_admin(request)
     except HTTPException:
         return RedirectResponse("/login")
+    client_ip = request.client.host if request.client else "unknown"
     with get_conn() as conn:
+        # Get customer name before reactivating
+        customer_name_row = conn.execute("SELECT name FROM customers WHERE id=?", (customer_id,)).fetchone()
+        customer_name = customer_name_row["name"] if customer_name_row else customer_id
+
         conn.execute("UPDATE customers SET active=1 WHERE id=?", (customer_id,))
     _run_script("provision_customer.sh", customer_id, PUBLIC_IP)
+    log_audit(
+        actor_id=user["sub"], actor_name=user["email"], actor_role=user["role"],
+        customer_id=customer_id, action="customer.restore", target=customer_name,
+        details=f"Restored customer {customer_name}", ip_address=client_ip
+    )
     return RedirectResponse("/customers", status_code=303)
 
 
 @app.post("/customers/delete")
 async def delete_customer(request: Request, customer_id: str = Form(...)):
     try:
-        require_super_admin(request)
+        user = require_super_admin(request)
     except HTTPException:
         return RedirectResponse("/login")
+    client_ip = request.client.host if request.client else "unknown"
     with get_conn() as conn:
+        # Get customer name before deleting
+        customer_name_row = conn.execute("SELECT name FROM customers WHERE id=?", (customer_id,)).fetchone()
+        customer_name = customer_name_row["name"] if customer_name_row else customer_id
+
         conn.execute("DELETE FROM customers WHERE id=? AND active=0", (customer_id,))
         conn.execute("DELETE FROM users WHERE customer_id=?", (customer_id,))
     _run_script("remove_customer.sh", customer_id)
+    log_audit(
+        actor_id=user["sub"], actor_name=user["email"], actor_role=user["role"],
+        customer_id=customer_id, action="customer.delete", target=customer_name,
+        details=f"Permanently deleted inactive customer {customer_name} and all associated users", ip_address=client_ip
+    )
     return RedirectResponse("/customers?status=inactive", status_code=303)
 
 
@@ -484,10 +634,16 @@ async def rotate_customer_token(request: Request):
 
     with get_conn() as conn:
         row = conn.execute(
-            "SELECT id, name, port FROM customers WHERE id=? AND active=1", (customer_id,)
+            "SELECT id, name, port, agent_token FROM customers WHERE id=? AND active=1", (customer_id,)
         ).fetchone()
         if not row:
+            log_audit(
+                actor_id=user["sub"], actor_name=user["email"], actor_role=user["role"],
+                customer_id=customer_id, action="customer.rotate_token.failed", target=customer_id,
+                details="Customer not found", ip_address=client_ip
+            )
             return JSONResponse({"error": "customer not found"}, status_code=404)
+        old_token_prefix = row["agent_token"][:8]
         # Migrate columns if needed
         existing_cols = {r[1] for r in conn.execute("PRAGMA table_info(customers)").fetchall()}
         if "agent_token_prev" not in existing_cols:
@@ -509,8 +665,19 @@ async def rotate_customer_token(request: Request):
             r = await client.post(sentinel_url)
             if r.status_code == 200:
                 push_count = r.json().get("device_count", 0)
-    except Exception:
+    except Exception as e:
+        log_audit(
+            actor_id=user["sub"], actor_name=user["email"], actor_role=user["role"],
+            customer_id=customer_id, action="customer.rotate_token.push_failed", target=row["name"],
+            details=f"Failed to push new token to customer's Sentinel server: {e}", ip_address=client_ip
+        )
         pass  # push is best-effort; in-band delivery still works
+
+    log_audit(
+        actor_id=user["sub"], actor_name=user["email"], actor_role=user["role"],
+        customer_id=customer_id, action="customer.rotate_token", target=row["name"],
+        details=f"Rotated agent token for {row["name"]}. Old token (ends {old_token_prefix}) valid for {rollover_hours}h.", ip_address=client_ip
+    )
 
     return JSONResponse({
         "token": new_token,
@@ -522,6 +689,65 @@ async def rotate_customer_token(request: Request):
     })
 
 
+# ── Audit log (super-admin, platform-wide) ────────────────────────────────────
+
+@app.get("/audit-log", response_class=HTMLResponse)
+async def audit_log_page(request: Request):
+    try:
+        user = require_super_admin(request)
+    except HTTPException:
+        return RedirectResponse("/login")
+    customer_id = request.query_params.get("customer_id", "").strip()
+    action = request.query_params.get("action", "").strip()
+    with get_conn() as conn:
+        customers = [dict(r) for r in conn.execute(
+            "SELECT id, name FROM customers ORDER BY name"
+        ).fetchall()]
+        actions = [r["action"] for r in conn.execute(
+            "SELECT DISTINCT action FROM audit_log WHERE action != '' ORDER BY action"
+        ).fetchall()]
+    entries = get_audit_log(limit=300, customer_id=customer_id or None)
+    if action:
+        entries = [e for e in entries if e["action"] == action]
+    for e in entries:
+        e["occurred_at_display"] = datetime.fromtimestamp(e["occurred_at"], tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+    return templates.TemplateResponse("audit_log.html", {
+        "request": request, "user": user,
+        "entries": entries, "customers": customers, "actions": actions,
+        "customer_id": customer_id, "action": action,
+    })
+
+
+@app.get("/audit-log/csv")
+async def audit_log_csv(request: Request):
+    import io, csv
+    from fastapi.responses import Response
+    try:
+        require_super_admin(request)
+    except HTTPException:
+        return RedirectResponse("/login")
+    customer_id = request.query_params.get("customer_id", "").strip()
+    action = request.query_params.get("action", "").strip()
+    entries = get_audit_log(limit=2000, customer_id=customer_id or None)
+    if action:
+        entries = [e for e in entries if e["action"] == action]
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(["Timestamp (UTC)", "Actor", "Role", "Customer", "Action", "Target", "Details", "IP Address"])
+    for e in entries:
+        writer.writerow([
+            datetime.fromtimestamp(e["occurred_at"], tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
+            e["actor_name"] or e["actor_id"], e["actor_role"], e["customer_id"],
+            e["action"], e["target"], e["details"], e["ip_address"],
+        ])
+    fname = f'sentinel_admin_audit_log_{datetime.now(timezone.utc).strftime("%Y%m%d")}.csv'
+    return Response(
+        content=buf.getvalue(),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{fname}"'},
+    )
+
+
 # ── Forgot / Reset password ───────────────────────────────────────────────────
 
 @app.get("/forgot-password", response_class=HTMLResponse)
@@ -531,9 +757,11 @@ async def forgot_password_page(request: Request):
 
 @app.post("/forgot-password", response_class=HTMLResponse)
 async def forgot_password_submit(request: Request, email: str = Form(...)):
+    client_ip = request.client.host if request.client else "unknown"
+    addr = email.strip().lower()
     with get_conn() as conn:
         row = conn.execute(
-            "SELECT id FROM users WHERE email=? AND active=1", (email.strip().lower(),)
+            "SELECT id FROM users WHERE email=? AND active=1", (addr,)
         ).fetchone()
         if row:
             token = secrets.token_urlsafe(32)
@@ -544,7 +772,12 @@ async def forgot_password_submit(request: Request, email: str = Form(...)):
             )
             reset_url = f"http://{PUBLIC_IP}/reset-password?token={token}"
             from mailer import send_password_reset_email
-            send_password_reset_email(email.strip().lower(), reset_url)
+            send_password_reset_email(addr, reset_url)
+            log_audit(
+                actor_id=row["id"], actor_name=addr, actor_role="unknown",
+                customer_id="", action="password.reset.requested", target=addr,
+                details="Password reset email sent", ip_address=client_ip
+            )
     return templates.TemplateResponse("forgot_password.html", {"request": request, "sent": True})
 
 
@@ -572,6 +805,7 @@ async def reset_password_submit(
     new_password: str = Form(...),
     confirm_password: str = Form(...),
 ):
+    client_ip = request.client.host if request.client else "unknown"
     if new_password != confirm_password:
         return templates.TemplateResponse("reset_password.html", {
             "request": request, "token": token, "valid": True,
@@ -590,9 +824,15 @@ async def reset_password_submit(
             return templates.TemplateResponse("reset_password.html", {
                 "request": request, "token": token, "valid": False, "done": False, "error": None
             })
+        user_row = conn.execute("SELECT email FROM users WHERE id=?", (row["user_id"],)).fetchone()
         conn.execute("UPDATE users SET password_hash=? WHERE id=?",
                      (hash_password(new_password), row["user_id"]))
         conn.execute("UPDATE password_resets SET used=1 WHERE token=?", (token,))
+        log_audit(
+            actor_id=row["user_id"], actor_name=user_row["email"] if user_row else "", actor_role="unknown",
+            customer_id="", action="password.reset.completed", target=user_row["email"] if user_row else "",
+            details="Password reset via emailed token", ip_address=client_ip
+        )
     return templates.TemplateResponse("reset_password.html", {
         "request": request, "token": "", "valid": False, "done": True, "error": None
     })
@@ -620,6 +860,7 @@ async def account_change_password(
         user = get_current_user(request)
     except HTTPException:
         return RedirectResponse("/login")
+    client_ip = request.client.host if request.client else "unknown"
     if new_password != confirm_password:
         return RedirectResponse("/account?error=mismatch", status_code=303)
     with get_conn() as conn:
@@ -630,6 +871,11 @@ async def account_change_password(
             "UPDATE users SET password_hash=? WHERE id=?",
             (hash_password(new_password), user["sub"])
         )
+    log_audit(
+        actor_id=user["sub"], actor_name=user["email"], actor_role=user["role"],
+        customer_id=user["customer_id"] or "", action="password.change", target=user["email"],
+        details="User changed their own password from account page", ip_address=client_ip
+    )
     return RedirectResponse("/account?pw_changed=1", status_code=303)
 
 
@@ -695,16 +941,23 @@ async def add_user(
         user = get_current_user(request)
     except HTTPException:
         return RedirectResponse("/login")
+    client_ip = request.client.host if request.client else "unknown"
     if user["role"] == "customer_admin":
         customer_id = user["customer_id"]
         if role not in ("customer_admin", "user"):
             return RedirectResponse("/users?error=forbidden", status_code=303)
+    addr = email.strip().lower()
     with get_conn() as conn:
         conn.execute(
             "INSERT INTO users (id, email, password_hash, role, customer_id, created_at) VALUES (?,?,?,?,?,?)",
-            (str(uuid.uuid4()), email.strip().lower(), hash_password(password),
+            (str(uuid.uuid4()), addr, hash_password(password),
              role, customer_id or None, datetime.now(timezone.utc).isoformat())
         )
+    log_audit(
+        actor_id=user["sub"], actor_name=user["email"], actor_role=user["role"],
+        customer_id=customer_id or "", action="user.add", target=addr,
+        details=f"Added user {addr} with role {role}", ip_address=client_ip
+    )
     return RedirectResponse("/users", status_code=303)
 
 
@@ -719,15 +972,22 @@ async def edit_user(
         user = get_current_user(request)
     except HTTPException:
         return RedirectResponse("/login")
+    client_ip = request.client.host if request.client else "unknown"
     if user["role"] != "super_admin":
         return RedirectResponse("/users?error=forbidden", status_code=303)
     if role not in ("super_admin", "customer_admin", "user"):
         role = "user"
     with get_conn() as conn:
+        target = conn.execute("SELECT email FROM users WHERE id=?", (user_id,)).fetchone()
         conn.execute(
             "UPDATE users SET role=?, customer_id=? WHERE id=?",
             (role, customer_id or None, user_id)
         )
+    log_audit(
+        actor_id=user["sub"], actor_name=user["email"], actor_role=user["role"],
+        customer_id=customer_id or "", action="user.edit", target=target["email"] if target else user_id,
+        details=f"Changed role to {role}", ip_address=client_ip
+    )
     return RedirectResponse("/users?edited=1", status_code=303)
 
 
@@ -741,6 +1001,7 @@ async def change_password(
         user = get_current_user(request)
     except HTTPException:
         return RedirectResponse("/login")
+    client_ip = request.client.host if request.client else "unknown"
     with get_conn() as conn:
         target = conn.execute("SELECT * FROM users WHERE id=? AND active=1", (user_id,)).fetchone()
         if not target:
@@ -754,6 +1015,11 @@ async def change_password(
             "UPDATE users SET password_hash=? WHERE id=?",
             (hash_password(new_password), user_id)
         )
+    log_audit(
+        actor_id=user["sub"], actor_name=user["email"], actor_role=user["role"],
+        customer_id=target["customer_id"] or "", action="user.password.reset", target=target["email"],
+        details=f"Reset password for {target['email']}", ip_address=client_ip
+    )
     return RedirectResponse("/users?pw_changed=1", status_code=303)
 
 
@@ -763,6 +1029,7 @@ async def remove_user(request: Request, user_id: str = Form(...)):
         user = get_current_user(request)
     except HTTPException:
         return RedirectResponse("/login")
+    client_ip = request.client.host if request.client else "unknown"
     with get_conn() as conn:
         target = conn.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone()
         if not target:
@@ -774,6 +1041,11 @@ async def remove_user(request: Request, user_id: str = Form(...)):
         if user["role"] != "super_admin" and target["role"] == "super_admin":
             return RedirectResponse("/users?error=forbidden", status_code=303)
         conn.execute("UPDATE users SET active=0 WHERE id=?", (user_id,))
+    log_audit(
+        actor_id=user["sub"], actor_name=user["email"], actor_role=user["role"],
+        customer_id=target["customer_id"] or "", action="user.remove", target=target["email"],
+        details=f"Removed user {target['email']}", ip_address=client_ip
+    )
     return RedirectResponse("/users", status_code=303)
 
 
@@ -844,6 +1116,7 @@ async def api_add_user(request: Request):
     if "@" not in email or len(password) < 8:
         return JSONResponse({"error": "invalid email or password too short"}, status_code=400)
     customer_id = user["customer_id"] if user["role"] != "super_admin" else body.get("customer_id")
+    client_ip = request.client.host if request.client else "unknown"
     try:
         with get_conn() as conn:
             conn.execute(
@@ -853,6 +1126,11 @@ async def api_add_user(request: Request):
             )
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=400)
+    log_audit(
+        actor_id=user["sub"], actor_name=user["email"], actor_role=user["role"],
+        customer_id=customer_id or "", action="user.add", target=email,
+        details=f"Added user {email} with role {role} (API)", ip_address=client_ip
+    )
     return JSONResponse({"ok": True})
 
 
@@ -869,6 +1147,7 @@ async def api_change_user_password(request: Request, user_id: str):
     new_password = str(body.get("new_password", ""))
     if len(new_password) < 8:
         return JSONResponse({"error": "password too short"}, status_code=400)
+    client_ip = request.client.host if request.client else "unknown"
     with get_conn() as conn:
         target = conn.execute("SELECT * FROM users WHERE id=? AND active=1", (user_id,)).fetchone()
         if not target:
@@ -877,6 +1156,11 @@ async def api_change_user_password(request: Request, user_id: str):
             if target["customer_id"] != user["customer_id"] or target["role"] == "super_admin":
                 return JSONResponse({"error": "forbidden"}, status_code=403)
         conn.execute("UPDATE users SET password_hash=? WHERE id=?", (hash_password(new_password), user_id))
+    log_audit(
+        actor_id=user["sub"], actor_name=user["email"], actor_role=user["role"],
+        customer_id=target["customer_id"] or "", action="user.password.reset", target=target["email"],
+        details=f"Reset password for {target['email']} (API)", ip_address=client_ip
+    )
     return JSONResponse({"ok": True})
 
 
@@ -889,6 +1173,7 @@ async def api_remove_user(request: Request, user_id: str):
         return JSONResponse({"error": "unauthorized"}, status_code=401)
     if user["role"] not in ("super_admin", "customer_admin"):
         return JSONResponse({"error": "forbidden"}, status_code=403)
+    client_ip = request.client.host if request.client else "unknown"
     with get_conn() as conn:
         target = conn.execute("SELECT * FROM users WHERE id=? AND active=1", (user_id,)).fetchone()
         if not target:
@@ -899,6 +1184,11 @@ async def api_remove_user(request: Request, user_id: str):
             if target["customer_id"] != user["customer_id"] or target["role"] == "super_admin":
                 return JSONResponse({"error": "forbidden"}, status_code=403)
         conn.execute("UPDATE users SET active=0 WHERE id=?", (user_id,))
+    log_audit(
+        actor_id=user["sub"], actor_name=user["email"], actor_role=user["role"],
+        customer_id=target["customer_id"] or "", action="user.remove", target=target["email"],
+        details=f"Removed user {target['email']} (API)", ip_address=client_ip
+    )
     return JSONResponse({"ok": True})
 
 

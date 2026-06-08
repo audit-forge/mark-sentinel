@@ -14,6 +14,7 @@ import threading
 import time
 import os
 from pathlib import Path
+from typing import Union
 
 
 class AgentStore:
@@ -182,6 +183,21 @@ class AgentStore:
                 CREATE INDEX IF NOT EXISTS idx_alert_log_unread
                     ON alert_log(acknowledged, fired_at DESC);
 
+                CREATE TABLE IF NOT EXISTS audit_log (
+                    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                    occurred_at  INTEGER NOT NULL,
+                    actor_id     TEXT NOT NULL DEFAULT '',
+                    actor_name   TEXT NOT NULL DEFAULT '',
+                    actor_role   TEXT NOT NULL DEFAULT '',
+                    customer_id  TEXT NOT NULL DEFAULT '',
+                    action       TEXT NOT NULL DEFAULT '',
+                    target       TEXT NOT NULL DEFAULT '',
+                    details      TEXT NOT NULL DEFAULT '',
+                    ip_address   TEXT NOT NULL DEFAULT ''
+                );
+                CREATE INDEX IF NOT EXISTS idx_audit_log_time ON audit_log(occurred_at DESC);
+                CREATE INDEX IF NOT EXISTS idx_audit_log_customer ON audit_log(customer_id, occurred_at DESC);
+
             """)
             # Migrations
             cols = {r[1] for r in conn.execute("PRAGMA table_info(devices)")}
@@ -341,7 +357,7 @@ class AgentStore:
             pruned = cur.rowcount
         return pruned
 
-    def get_latest_report(self, device_id: str) -> dict | None:
+    def get_latest_report(self, device_id: str) -> Union[dict, None]:
         """Return the most recent full report JSON for a device."""
         with self._lock, self._conn() as conn:
             row = conn.execute("""
@@ -433,7 +449,7 @@ class AgentStore:
         result.sort(key=lambda x: (sev_order.get(x['severity'], 99), -x['affected_count']))
         return result
 
-    def get_device(self, device_id: str) -> dict | None:
+    def get_device(self, device_id: str) -> Union[dict, None]:
         """Return device metadata row or None."""
         with self._lock, self._conn() as conn:
             row = conn.execute(
@@ -441,7 +457,7 @@ class AgentStore:
             ).fetchone()
         return dict(row) if row else None
 
-    def get_previous_report(self, device_id: str) -> dict | None:
+    def get_previous_report(self, device_id: str) -> Union[dict, None]:
         """Return the second-most-recent report for a device (used for new-finding detection)."""
         with self._lock, self._conn() as conn:
             row = conn.execute("""
@@ -553,7 +569,7 @@ class AgentStore:
             )
             return cur.lastrowid
 
-    def claim_command(self, device_id: str) -> str | None:
+    def claim_command(self, device_id: str) -> Union[str, None]:
         """Return and mark-claimed the oldest pending command for a device, or None."""
         now = int(time.time())
         with self._lock, self._conn() as conn:
@@ -920,6 +936,31 @@ class AgentStore:
             ).fetchone()
             return int(row[0]) if row else 0
 
+    # ── Audit log ─────────────────────────────────────────────────────────────
+
+    def log_action(self, actor_id: str, actor_name: str, actor_role: str,
+                   action: str, target: str = '', details: str = '',
+                   ip_address: str = '') -> int:
+        now = int(time.time())
+        with self._lock, self._conn() as conn:
+            cur = conn.execute(
+                """INSERT INTO audit_log
+                   (occurred_at, actor_id, actor_name, actor_role,
+                    customer_id, action, target, details, ip_address)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (now, actor_id, actor_name, actor_role,
+                 '', action, target, details, ip_address),
+            )
+            return cur.lastrowid
+
+    def get_audit_log(self, limit: int = 200) -> list[dict]:
+        with self._lock, self._conn() as conn:
+            rows = conn.execute(
+                "SELECT * FROM audit_log ORDER BY occurred_at DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
 
 # ── Customer registry + dashboard auth (central DB, one record per customer) ──
 
@@ -1060,7 +1101,7 @@ class CustomerRegistry:
             cur = conn.execute('UPDATE customers SET active=0 WHERE id=?', (customer_id,))
         return cur.rowcount > 0
 
-    def get_by_agent_token(self, token: str) -> dict | None:
+    def get_by_agent_token(self, token: str) -> Union[dict, None]:
         if not token:
             return None
         with self._lock, self._conn() as conn:
@@ -1087,7 +1128,7 @@ class CustomerRegistry:
                 }
         return None
 
-    def get_by_id(self, customer_id: str) -> dict | None:
+    def get_by_id(self, customer_id: str) -> Union[dict, None]:
         with self._lock, self._conn() as conn:
             row = conn.execute(
                 'SELECT id, name, agent_token, plan, max_agents, expires_at '
@@ -1118,7 +1159,7 @@ class CustomerRegistry:
             )
         return new_token
 
-    def token_rollout_status(self, customer_id: str) -> dict | None:
+    def token_rollout_status(self, customer_id: str) -> Union[dict, None]:
         """Return rollover state: new token expiry and whether a rollover is active."""
         with self._lock, self._conn() as conn:
             row = conn.execute(
@@ -1151,7 +1192,7 @@ class CustomerRegistry:
         return {'id': uid, 'customer_id': customer_id,
                 'email': email.lower().strip(), 'role': role}
 
-    def authenticate_user(self, email: str, password: str) -> dict | None:
+    def authenticate_user(self, email: str, password: str) -> Union[dict, None]:
         with self._lock, self._conn() as conn:
             row = conn.execute(
                 'SELECT id, customer_id, email, password_hash, role FROM dashboard_users '

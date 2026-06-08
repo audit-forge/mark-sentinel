@@ -1,5 +1,6 @@
 import sqlite3
 import os
+import time
 from contextlib import contextmanager
 
 DB_PATH = os.environ.get("DB_PATH", "/data/sentinel.db")
@@ -43,6 +44,20 @@ def init_db():
                 expires_at TEXT NOT NULL,
                 used INTEGER NOT NULL DEFAULT 0
             );
+            CREATE TABLE IF NOT EXISTS audit_log (
+                id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                occurred_at  INTEGER NOT NULL,
+                actor_id     TEXT NOT NULL DEFAULT '',
+                actor_name   TEXT NOT NULL DEFAULT '',
+                actor_role   TEXT NOT NULL DEFAULT '',
+                customer_id  TEXT NOT NULL DEFAULT '',
+                action       TEXT NOT NULL DEFAULT '',
+                target       TEXT NOT NULL DEFAULT '',
+                details      TEXT NOT NULL DEFAULT '',
+                ip_address   TEXT NOT NULL DEFAULT ''
+            );
+            CREATE INDEX IF NOT EXISTS idx_audit_log_time ON audit_log(occurred_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_audit_log_customer ON audit_log(customer_id, occurred_at DESC);
         """)
         for col, defn in [
             ('tier',                "TEXT NOT NULL DEFAULT 'standard'"),
@@ -56,6 +71,37 @@ def init_db():
                 conn.execute(f"ALTER TABLE customers ADD COLUMN {col} {defn}")
             except Exception:
                 pass
+
+
+def log_audit(actor_id, actor_name, actor_role, customer_id, action,
+              target='', details='', ip_address=''):
+    now = int(time.time())
+    with get_conn() as conn:
+        cur = conn.execute(
+            """INSERT INTO audit_log
+               (occurred_at, actor_id, actor_name, actor_role,
+                customer_id, action, target, details, ip_address)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (now, actor_id, actor_name, actor_role,
+             customer_id, action, target, details, ip_address),
+        )
+        return cur.lastrowid
+
+
+def get_audit_log(limit=200, customer_id=None):
+    with get_conn() as conn:
+        if customer_id:
+            rows = conn.execute(
+                """SELECT * FROM audit_log WHERE customer_id=?
+                   ORDER BY occurred_at DESC LIMIT ?""",
+                (customer_id, limit)
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                """SELECT * FROM audit_log ORDER BY occurred_at DESC LIMIT ?""",
+                (limit,)
+            ).fetchall()
+    return [dict(r) for r in rows]
 
 
 @contextmanager

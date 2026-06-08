@@ -66,6 +66,7 @@ from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlparse
+from typing import Union
 
 PORT = 7331
 
@@ -137,7 +138,7 @@ def _load_license() -> None:
 _request_lic = threading.local()
 
 
-def _set_request_license(customer: dict | None) -> None:
+def _set_request_license(customer: Union[dict, None]) -> None:
     """Called at the start of each authenticated request to set the per-customer license."""
     if customer:
         from license import get_customer_license
@@ -269,7 +270,7 @@ _REPORT_MIN_INTERVAL = 60  # seconds between accepted reports per device
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-def _latest_out_dir() -> Path | None:
+def _latest_out_dir() -> Union[Path, None]:
     """Return the newest demo_* dir (by directory name) that has a non-empty dashboard.html."""
     candidates = []
     for d in (ROOT / 'output').glob('demo_*'):
@@ -665,7 +666,7 @@ function switchTier(t){{location.href='/api/fleet/mcp/report?tier='+t;}}
     return ''.join(parts)
 
 
-def _build_fleet_report_html(devices: list, tier: str, profile: str = '', profiles: list | None = None, status_filter: str = '', sev_filter: str = '', demo: bool = False) -> str:
+def _build_fleet_report_html(devices: list, tier: str, profile: str = '', profiles: Union[list, None] = None, status_filter: str = '', sev_filter: str = '', demo: bool = False) -> str:
     from datetime import datetime, timezone
     import html as _html
 
@@ -922,7 +923,7 @@ function switchTier(t){{
     return ''.join(parts)
 
 
-def _run_scan(mode: str, target: str, profile: str, providers: list[str], live_cfg: dict | None = None):
+def _run_scan(mode: str, target: str, profile: str, providers: list[str], live_cfg: Union[dict, None] = None):
     global _status, _log
     with _lock:
         _status = 'running'
@@ -998,7 +999,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
 
     # ── auth helpers ──────────────────────────────────────────────────────────
 
-    def _proxy_session_user(self) -> dict | None:
+    def _proxy_session_user(self) -> Union[dict, None]:
         if not os.environ.get('SENTINEL_TRUSTED_PROXY'):
             return None
         email = self.headers.get('X-Sentinel-User-Email', '').strip()
@@ -1011,7 +1012,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             'customer_id': customer_id,
         }
 
-    def _session_user(self) -> dict | None:
+    def _session_user(self) -> Union[dict, None]:
         proxy = self._proxy_session_user()
         if proxy:
             return proxy
@@ -1043,7 +1044,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                 self.end_headers()
         return False
 
-    def _get_agent_customer(self) -> dict | None:
+    def _get_agent_customer(self) -> Union[dict, None]:
         submitted = self.headers.get('Authorization', '')
         if submitted.startswith('Bearer '):
             submitted = submitted[len('Bearer '):]
@@ -1056,7 +1057,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             return {'id': 'default', 'name': 'Default'}
         return None
 
-    def _get_dashboard_customer(self) -> dict | None:
+    def _get_dashboard_customer(self) -> Union[dict, None]:
         """Return the customer record for the authenticated dashboard user, or None."""
         user = self._session_user()
         if not user:
@@ -1151,6 +1152,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             '/api/config':           self._api_get_config,
             '/api/alerts/config':    self._api_get_alert_config,
             '/api/alerts/log':       self._api_get_alert_log,
+            '/api/audit/log':        self._api_get_audit_log,
             '/api/live-scan-config': self._api_get_live_scan_config,
             '/api/fleet/live-stats': self._api_fleet_live_stats,
             '/api/fleet/shadow':  self._api_fleet_shadow,
@@ -1179,6 +1181,8 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self._api_risk_register()
         elif path == '/api/fleet/risk-register/csv':
             self._api_risk_register_csv()
+        elif path == '/api/audit/log/csv':
+            self._api_audit_log_csv()
         elif path == '/api/fleet/inventory':
             self._api_inventory()
         elif path.startswith('/api/fleet/inventory/history/'):
@@ -1399,6 +1403,11 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         user = reg.authenticate_user(email, password)
         if user:
             token = reg.create_session(user['id'], user['customer_id'], user['email'])
+            _get_store(user['customer_id']).log_action(
+                actor_id=user['id'], actor_name=user['email'], actor_role=user.get('role', ''),
+                action='login.success', target=user['email'],
+                details='User logged in successfully', ip_address=client_ip
+            )
             self.send_response(302)
             self.send_header('Set-Cookie',
                 f'sentinel_session={token}; Path=/; HttpOnly; SameSite=Strict')
@@ -1413,6 +1422,13 @@ class _Handler(http.server.BaseHTTPRequestHandler):
     def _handle_logout(self):
         token = _get_session_cookie(self.headers)
         if token:
+            me = _get_registry().get_session(token)
+            if me:
+                _get_store(me['customer_id']).log_action(
+                    actor_id=me['user_id'], actor_name=me['email'], actor_role=me.get('role', ''),
+                    action='logout', target=me['email'],
+                    details='User logged out', ip_address=self.client_address[0]
+                )
             _get_registry().delete_session(token)
         self.send_response(302)
         self.send_header('Set-Cookie',
@@ -1571,6 +1587,11 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                 self._json({'error': 'invalid'}, 400)
                 return
             user = _get_registry().create_user(me['customer_id'], email, password, role)
+            self._store().log_action(
+                actor_id=me.get('user_id', me.get('id', '')), actor_name=me['email'], actor_role=me.get('role', ''),
+                action='user.add', target=email,
+                details=f'Added user {email} with role {role}', ip_address=self.client_address[0]
+            )
             self._json({'ok': True, 'user': user})
         except Exception as e:
             self._json({'error': str(e)}, 500)
@@ -1586,6 +1607,12 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             return
         try:
             ok = _get_registry().deactivate_user(user_id, me['customer_id'])
+            if ok:
+                self._store().log_action(
+                    actor_id=me.get('user_id', me.get('id', '')), actor_name=me['email'], actor_role=me.get('role', ''),
+                    action='user.remove', target=user_id,
+                    details=f'Removed user {user_id}', ip_address=self.client_address[0]
+                )
             self._json({'ok': ok})
         except Exception as e:
             self._json({'error': str(e)}, 500)
@@ -1608,6 +1635,12 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                 self._json({'error': 'password too short'}, 400)
                 return
             ok = _get_registry().change_user_password(user_id, me['customer_id'], new_password)
+            if ok:
+                self._store().log_action(
+                    actor_id=me.get('user_id', me.get('id', '')), actor_name=me['email'], actor_role=me.get('role', ''),
+                    action='user.password.reset', target=user_id,
+                    details=f'Reset password for user {user_id}', ip_address=self.client_address[0]
+                )
             self._json({'ok': ok} if ok else {'error': 'user not found'}, 200 if ok else 404)
         except Exception as e:
             self._json({'error': str(e)}, 500)
@@ -1917,6 +1950,13 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             args=(mode, safe_target, profile, body.get('providers', []), live_cfg),
             daemon=True,
         ).start()
+        me = self._session_user()
+        if me:
+            self._store().log_action(
+                actor_id=me.get('user_id', me.get('id', '')), actor_name=me['email'], actor_role=me.get('role', ''),
+                action='scan.trigger', target=safe_target,
+                details=f'Triggered {mode} scan (profile={profile})', ip_address=self.client_address[0]
+            )
         self._json({'status': 'started'})
 
     # ── agent API ─────────────────────────────────────────────────────────────
@@ -2129,6 +2169,13 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                     time.sleep(sleep_secs)
 
         threading.Thread(target=_dispatch, daemon=True, name='scan-all-dispatch').start()
+        me = self._session_user()
+        if me:
+            store.log_action(
+                actor_id=me.get('user_id', me.get('id', '')), actor_name=me['email'], actor_role=me.get('role', ''),
+                action='fleet.scan.all', target='', details=f'Dispatched fleet-wide scan to {total} devices (profiles={profiles or ["default"]}, stagger={stagger})',
+                ip_address=self.client_address[0]
+            )
         self._json({'status': 'dispatching', 'total': total,
                     'profiles': profiles or ['default'], 'stagger': stagger,
                     'batch_size': batch_size, 'sleep_secs': sleep_secs})
@@ -3390,6 +3437,13 @@ function copyToken(token) {{
         except Exception as e:
             self._json({'error': str(e)}, 500)
             return
+        me = self._session_user()
+        if me:
+            self._store().log_action(
+                actor_id=me.get('user_id', me.get('id', '')), actor_name=me['email'], actor_role=me.get('role', ''),
+                action='config.save', target='agent_config',
+                details=f'Updated agent config keys: {sorted(clean.keys())}', ip_address=self.client_address[0]
+            )
 
         # Push config changes to all connected remote agents
         _push_keys = ('profile', 'interval', 'extra_subnets')
@@ -3456,6 +3510,13 @@ function copyToken(token) {{
             cid = cust['id'] if cust else 'default'
             path = ROOT / 'data' / 'customers' / cid / 'alerts_config.json'
             save_alert_config(path, body, _alert_config_path(cid))
+            me = self._session_user()
+            if me:
+                _get_store(cid).log_action(
+                    actor_id=me.get('user_id', me.get('id', '')), actor_name=me['email'], actor_role=me.get('role', ''),
+                    action='alerts.config.save', target='alerts_config',
+                    details='Updated alert notification configuration', ip_address=self.client_address[0]
+                )
             self._json({'status': 'saved'})
         except Exception as e:
             self._json({'error': str(e)}, 500)
@@ -3491,6 +3552,42 @@ function copyToken(token) {{
         entries = store.get_alert_log(limit=200, unread_only=unread_only)
         self._json({'alerts': entries, 'unread': store.get_unread_count()})
 
+    def _api_get_audit_log(self):
+        cust = self._get_dashboard_customer()
+        cid = cust['id'] if cust else 'default'
+        store = _get_store(cid)
+        entries = store.get_audit_log(limit=200)
+        self._json({'entries': entries})
+
+    def _api_audit_log_csv(self):
+        """GET /api/audit/log/csv — download this customer's audit log as CSV."""
+        import io, csv
+        try:
+            cust = self._get_dashboard_customer()
+            cid = cust['id'] if cust else 'default'
+            store = _get_store(cid)
+            entries = store.get_audit_log(limit=1000)
+            buf = io.StringIO()
+            writer = csv.writer(buf)
+            writer.writerow(['Timestamp (UTC)', 'Actor', 'Role', 'Action', 'Target', 'Details', 'IP Address'])
+            for e in entries:
+                writer.writerow([
+                    datetime.fromtimestamp(e['occurred_at'], tz=timezone.utc).strftime('%Y-%m-%d %H:%M:%S'),
+                    e['actor_name'], e['actor_role'], e['action'], e['target'],
+                    e['details'], e['ip_address'],
+                ])
+            data = buf.getvalue().encode('utf-8')
+            fname = f'sentinel_audit_log_{datetime.now(timezone.utc).strftime("%Y%m%d")}.csv'
+            self.send_response(200)
+            self.send_header('Content-Type', 'text/csv; charset=utf-8')
+            self.send_header('Content-Disposition', f'attachment; filename="{fname}"')
+            self.send_header('Content-Length', str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+        except Exception as e:
+            log.error('audit log csv export error: %s', e, exc_info=True)
+            self._json({'error': str(e)}, 500)
+
     def _api_ack_alert(self):
         length = _content_length(self.headers)
         if not length:
@@ -3508,10 +3605,22 @@ function copyToken(token) {{
         store = _get_store(cid)
         if body.get('all'):
             count = store.acknowledge_all_alerts(acked_by)
+            if me:
+                store.log_action(
+                    actor_id=me.get('user_id', me.get('id', '')), actor_name=me['email'], actor_role=me.get('role', ''),
+                    action='alert.ack.all', target='', details=f'Acknowledged {count} alerts',
+                    ip_address=self.client_address[0]
+                )
             self._json({'acknowledged': count})
         else:
             alert_id = int(body.get('id', 0))
             ok = store.acknowledge_alert(alert_id, acked_by)
+            if ok and me:
+                store.log_action(
+                    actor_id=me.get('user_id', me.get('id', '')), actor_name=me['email'], actor_role=me.get('role', ''),
+                    action='alert.ack', target=str(alert_id), details=f'Acknowledged alert {alert_id}',
+                    ip_address=self.client_address[0]
+                )
             self._json({'ok': ok})
 
     def _serve_shortcut(self):
@@ -4280,8 +4389,8 @@ def _build_mcp_section(servers: list[dict], ts_now: int) -> str:
             f'</div>')
 
 
-def _build_fleet_html(devices: list[dict], shadow: list[dict] | None = None,
-                      mcp: list[dict] | None = None,
+def _build_fleet_html(devices: list[dict], shadow: Union[list[dict], None] = None,
+                      mcp: Union[list[dict], None] = None,
                       current_user_email: str = '',
                       current_user_role: str = '',
                       store=None) -> str:
@@ -4515,6 +4624,7 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
       <button class="sb-item" id="nav-mcp" onclick="navTo('mcp')">&#128279; MCP Servers</button>
       <div class="sb-group">Security</div>
       <button class="sb-item" id="nav-alerts" onclick="navTo('alerts')">&#128276; Alerts</button>
+      <button class="sb-item" id="nav-audit" onclick="navTo('audit')">&#128221; Audit Log</button>
       <button class="sb-item" id="nav-riskregister" onclick="navTo('riskregister')">&#128203; Risk Register</button>
       <button class="sb-item" id="nav-inventory" onclick="navTo('inventory')">&#128196; Asset Inventory</button>
       <div class="sb-group">Operations</div>
@@ -4664,6 +4774,39 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
       </thead>
       <tbody id="alert-log-body">
         <tr><td colspan="7" style="padding:24px;text-align:center;color:#9CA3AF">Loading&hellip;</td></tr>
+      </tbody>
+    </table>
+  </div>
+  </div>
+
+  <div class="page" id="page-audit">
+  <div class="sec-hdr" style="margin-top:0;padding-top:0">
+    <span>Audit Log</span>
+    <span style="font-size:12px;font-weight:400;color:#6B7280;margin-left:8px">Who did what, when — logins, user changes, settings, scans, and alert actions</span>
+  </div>
+  <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap">
+    <button class="rr-fil rr-fil-active" id="adlog-fil-all"    onclick="setAuditFilter('all')">All</button>
+    <button class="rr-fil"               id="adlog-fil-login"  onclick="setAuditFilter('login')">Login/Logout</button>
+    <button class="rr-fil"               id="adlog-fil-user"   onclick="setAuditFilter('user')">User Changes</button>
+    <button class="rr-fil"               id="adlog-fil-config" onclick="setAuditFilter('config')">Settings</button>
+    <button class="rr-fil"               id="adlog-fil-scan"   onclick="setAuditFilter('scan')">Scans</button>
+    <button class="rr-fil"               id="adlog-fil-alert"  onclick="setAuditFilter('alert')">Alerts</button>
+    <a href="/api/audit/log/csv" download style="margin-left:auto;font-size:12px;color:#16A34A;text-decoration:none;border:1px solid #238636;border-radius:4px;padding:3px 10px">&#8659; Export CSV</a>
+  </div>
+  <div id="audit-log-wrap">
+    <table style="width:100%;border-collapse:collapse;font-size:13px">
+      <thead>
+        <tr style="border-bottom:1px solid #E5E7EB;color:#6B7280;font-size:11px;text-transform:uppercase;letter-spacing:.04em">
+          <th style="padding:6px 10px;text-align:left;width:140px">Time</th>
+          <th style="padding:6px 10px;text-align:left;width:180px">Actor</th>
+          <th style="padding:6px 10px;text-align:left;width:140px">Action</th>
+          <th style="padding:6px 10px;text-align:left;width:160px">Target</th>
+          <th style="padding:6px 10px;text-align:left">Details</th>
+          <th style="padding:6px 10px;text-align:left;width:120px">IP Address</th>
+        </tr>
+      </thead>
+      <tbody id="audit-log-body">
+        <tr><td colspan="6" style="padding:24px;text-align:center;color:#9CA3AF">Loading&hellip;</td></tr>
       </tbody>
     </table>
   </div>
@@ -5145,6 +5288,7 @@ function navTo(page) {{
   if (page === 'settings') {{ loadLiveScanConfig(); }}
   if (page === 'users') {{ loadUsers(); loadCustomerInfo(); }}
   if (page === 'alerts') {{ loadAlertLog(); }}
+  if (page === 'audit') {{ loadAuditLog(); }}
   if (page === 'probe') {{
     const fr = document.getElementById('probe-iframe');
     if (fr && fr.getAttribute('data-loaded') === '0') {{
@@ -6723,6 +6867,64 @@ async function ackAlert(id) {{
 async function ackAllAlerts() {{
   await fetch('/api/alerts/ack', {{ method:'POST', headers:{{'Content-Type':'application/json'}}, body: JSON.stringify({{all: true}}) }});
   await loadAlertLog();
+}}
+
+// ── Audit log ─────────────────────────────────────────────────────────────────
+let _auditData = [];
+let _auditFilter = 'all';
+
+async function loadAuditLog() {{
+  try {{
+    const r = await fetch('/api/audit/log');
+    const d = await r.json();
+    _auditData = d.entries || [];
+    renderAuditLog();
+  }} catch(e) {{
+    document.getElementById('audit-log-body').innerHTML =
+      '<tr><td colspan="6" style="padding:24px;text-align:center;color:#DC2626">Failed to load audit log.</td></tr>';
+  }}
+}}
+
+function setAuditFilter(f) {{
+  _auditFilter = f;
+  document.querySelectorAll('#page-audit .rr-fil').forEach(function(b) {{ b.classList.remove('rr-fil-active'); }});
+  const btn = document.getElementById('adlog-fil-' + f);
+  if (btn) btn.classList.add('rr-fil-active');
+  renderAuditLog();
+}}
+
+function renderAuditLog() {{
+  const GROUPS = {{
+    login:  ['login.success', 'login.failed', 'logout', 'password.change', 'password.reset.requested', 'password.reset.completed'],
+    user:   ['user.add', 'user.edit', 'user.remove', 'user.password.reset', 'user.reactivate'],
+    config: ['config.save', 'alerts.config.save', 'email.test'],
+    scan:   ['scan.trigger', 'fleet.scan.all'],
+    alert:  ['alert.ack', 'alert.ack.all', 'alert.dismiss'],
+  }};
+  let rows = _auditData;
+  if (_auditFilter !== 'all') {{
+    const wanted = GROUPS[_auditFilter] || [];
+    rows = rows.filter(function(a) {{ return wanted.indexOf(a.action) !== -1; }});
+  }}
+
+  const tbody = document.getElementById('audit-log-body');
+  if (!rows.length) {{
+    tbody.innerHTML = '<tr><td colspan="6" style="padding:24px;text-align:center;color:#9CA3AF">No audit entries' + (_auditFilter !== 'all' ? ' matching this filter' : '') + '.</td></tr>';
+    return;
+  }}
+
+  tbody.innerHTML = rows.map(function(a) {{
+    const ts = a.occurred_at ? new Date(a.occurred_at * 1000).toLocaleString() : '—';
+    const actor = esc(a.actor_name || a.actor_id || '—') + (a.actor_role ? ' <span style="font-size:10px;color:#9CA3AF">(' + esc(a.actor_role) + ')</span>' : '');
+    return '<tr style="border-bottom:1px solid #F3F4F6">'
+      + '<td style="padding:7px 10px;color:#6B7280;white-space:nowrap">' + ts + '</td>'
+      + '<td style="padding:7px 10px">' + actor + '</td>'
+      + '<td style="padding:7px 10px;font-weight:600;color:#374151">' + esc(a.action || '—') + '</td>'
+      + '<td style="padding:7px 10px;color:#374151">' + esc(a.target || '—') + '</td>'
+      + '<td style="padding:7px 10px;color:#6B7280">' + esc(a.details || '') + '</td>'
+      + '<td style="padding:7px 10px;color:#9CA3AF">' + esc(a.ip_address || '—') + '</td>'
+      + '</tr>';
+  }}).join('');
 }}
 
 // ── Risk register ─────────────────────────────────────────────────────────────

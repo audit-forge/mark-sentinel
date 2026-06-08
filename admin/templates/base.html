@@ -74,6 +74,7 @@ input:focus,select:focus{outline:none;border-color:#4F46E5;box-shadow:0 0 0 3px 
       <a href="/dashboard" class="sb-link" id="nav-dashboard">Dashboard</a>
       {% if user.role == 'super_admin' %}
       <a href="/customers" class="sb-link" id="nav-customers">Customers</a>
+      <a href="/audit-log" class="sb-link" id="nav-audit">Audit Log</a>
       {% endif %}
       <a href="/users" class="sb-link" id="nav-users">Users</a>
       <div class="sb-section" style="margin-top:8px">Account</div>
@@ -99,6 +100,7 @@ input:focus,select:focus{outline:none;border-color:#4F46E5;box-shadow:0 0 0 3px 
     var map = {
       '/dashboard': 'nav-dashboard',
       '/customers': 'nav-customers',
+      '/audit-log': 'nav-audit',
       '/users':     'nav-users',
       '/account':   'nav-account',
     };
