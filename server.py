@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-M.A.R.K. Sentinel — Dashboard Server
+Arckon by RiskRaven — Dashboard Server
 Serves the live dashboard and runs on-demand scans via a browser UI.
 
 Usage:
@@ -11,7 +11,7 @@ Usage:
 import sys
 if sys.version_info < (3, 11):
     sys.exit(
-        "M.A.R.K. Sentinel requires Python 3.11 or later.\n"
+        "Arckon by RiskRaven requires Python 3.11 or later.\n"
         f"Running: Python {sys.version.split()[0]}\n"
         "Install: https://python.org/downloads/"
     )
@@ -31,17 +31,17 @@ def _ensure_packages():
         try:
             importlib.import_module(module)
         except ImportError:
-            print(f'[sentinel] installing {package}…', flush=True)
+            print(f'[arckon] installing {package}…', flush=True)
             r = _sp.run([sys.executable, '-m', 'pip', 'install', package, '-q'],
                         capture_output=True)
             if r.returncode == 0:
                 installed_any = True
             else:
-                print(f'[sentinel] pip failed: {r.stderr.decode(errors="replace").strip()}', flush=True)
+                print(f'[arckon] pip failed: {r.stderr.decode(errors="replace").strip()}', flush=True)
     if installed_any:
         # Newly installed packages aren't visible to the running interpreter —
         # restart immediately so the next launch finds them in site-packages.
-        print('[sentinel] packages installed — restarting…', flush=True)
+        print('[arckon] packages installed — restarting…', flush=True)
         _time.sleep(0.5)
         if sys.platform == 'win32':
             _sp.Popen([sys.executable] + sys.argv,
@@ -79,8 +79,11 @@ def _compiled_cmd(script: Path) -> list:
     return [sys.executable, str(script)]
 ROOT = Path(__file__).parent
 _serve_port = PORT   # updated at startup so handlers can reference it
+# Set ARCKON_SECURE_COOKIES=true when serving over HTTPS
+_SECURE_COOKIE = os.environ.get("ARCKON_SECURE_COOKIES", "").lower() == "true"
+_COOKIE_FLAGS = "; HttpOnly; SameSite=Strict" + ("; Secure" if _SECURE_COOKIE else "")
 
-log = logging.getLogger('sentinel.server')
+log = logging.getLogger('arckon.server')
 
 # ── login rate limiting ───────────────────────────────────────────────────────
 _login_attempts: dict[str, list[float]] = defaultdict(list)
@@ -218,8 +221,8 @@ def _content_length(headers) -> int:
 
 def _agent_token() -> str:
     """Return legacy single-token value. Empty string means no auth configured."""
-    if os.environ.get('SENTINEL_AGENT_TOKEN'):
-        return os.environ['SENTINEL_AGENT_TOKEN']
+    if os.environ.get('ARCKON_AGENT_TOKEN'):
+        return os.environ['ARCKON_AGENT_TOKEN']
     tok_file = ROOT / 'agent_token.txt'
     if tok_file.exists():
         return tok_file.read_text().strip()
@@ -236,7 +239,7 @@ def _check_agent_token(submitted: str) -> bool:
     if single and _hmac.compare_digest(submitted, single):
         return True
     # Check multi-token store (tokens.py)
-    store_path_env = os.environ.get('SENTINEL_TOKEN_STORE', '')
+    store_path_env = os.environ.get('ARCKON_TOKEN_STORE', '')
     store_path = Path(store_path_env) if store_path_env else ROOT / 'output' / 'agent_tokens.json'
     if store_path.exists():
         try:
@@ -259,7 +262,7 @@ def _check_agent_token(submitted: str) -> bool:
 def _get_session_cookie(headers) -> str:
     for part in headers.get('Cookie', '').split(';'):
         k, _, v = part.strip().partition('=')
-        if k.strip() == 'sentinel_session':
+        if k.strip() == 'arckon_session':
             return v.strip()
     return ''
 
@@ -344,7 +347,7 @@ _LIGHT_MODE_CSS = (
     'html.light .auth-ok{color:#1a7f37}'
 )
 _THEME_EARLY_SCRIPT = (
-    "<script>if(localStorage.getItem('sentinel_theme')==='light')"
+    "<script>if(localStorage.getItem('arckon_theme')==='light')"
     "document.documentElement.classList.add('light');</script>"
 )
 _THEME_TOGGLE_JS = (
@@ -369,13 +372,13 @@ _THEME_TOGGLE_JS = (
     "n.style.color=l?'#57606a':null;});}}"
     "function toggleTheme(){"
     "var l=!document.documentElement.classList.contains('light');"
-    "localStorage.setItem('sentinel_theme',l?'light':'dark');"
+    "localStorage.setItem('arckon_theme',l?'light':'dark');"
     "_applyTheme(l);}"
     "document.addEventListener('DOMContentLoaded',function(){"
-    "_applyTheme(localStorage.getItem('sentinel_theme')==='light');});"
+    "_applyTheme(localStorage.getItem('arckon_theme')==='light');});"
     "window.addEventListener('storage',function(e){"
-    "if(e.key==='sentinel_theme')_applyTheme(e.newValue==='light');});"
-    "_applyTheme(localStorage.getItem('sentinel_theme')==='light');"
+    "if(e.key==='arckon_theme')_applyTheme(e.newValue==='light');});"
+    "_applyTheme(localStorage.getItem('arckon_theme')==='light');"
 )
 _THEME_BTN = (
     '<button id="theme-toggle" onclick="toggleTheme()" '
@@ -450,7 +453,7 @@ def _build_mcp_report_html(servers: list, tier: str) -> str:
     active_btn = 'color:#58a6ff;border-color:#1f6feb'
 
     parts = [f'''<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
-<title>M.A.R.K. Sentinel — MCP & Agent Governance {esc(tier_label)}</title>
+<title>Arckon by RiskRaven — MCP & Agent Governance {esc(tier_label)}</title>
 <style>
 *{{box-sizing:border-box;margin:0;padding:0}}
 body{{background:#0d1117;color:#c9d1d9;font-family:system-ui,sans-serif;padding:32px;max-width:1100px;margin:0 auto}}
@@ -483,14 +486,14 @@ function switchTier(t){{location.href='/api/fleet/mcp/report?tier='+t;}}
 {_THEME_EARLY_SCRIPT}
 </head><body>
 <div class="toolbar">
-  <span style="font-size:13px;font-weight:600;color:#c9d1d9;margin-right:6px">M.A.R.K. Sentinel</span>
+  <span style="font-size:13px;font-weight:600;color:#c9d1d9;margin-right:6px">Arckon by RiskRaven</span>
   <button onclick="switchTier('executive')" style="{btn_style}{';' + active_btn if tier=='executive' else ''}">Executive</button>
   <button onclick="switchTier('ciso')"      style="{btn_style}{';' + active_btn if tier=='ciso'      else ''}">CISO</button>
   <button onclick="switchTier('technical')" style="{btn_style}{';' + active_btn if tier=='technical' else ''}">Technical</button>
   <button onclick="window.print()" style="{btn_style}">&#128438; Print</button>
   {_THEME_BTN}
 </div>
-<h1>M.A.R.K. Sentinel &mdash; MCP &amp; Agent Governance &mdash; {esc(tier_label)}</h1>
+<h1>Arckon by RiskRaven &mdash; MCP &amp; Agent Governance &mdash; {esc(tier_label)}</h1>
 <div class="meta">Generated {esc(now)} &nbsp;&bull;&nbsp; {len(servers)} MCP server(s) discovered &nbsp;&bull;&nbsp; Confidential</div>''']
 
     # Risk banner
@@ -518,7 +521,7 @@ function switchTier(t){{location.href='/api/fleet/mcp/report?tier='+t;}}
     # ── EXECUTIVE ──────────────────────────────────────────────────────────────
     if tier == 'executive':
         if not servers:
-            parts.append('<div class="block"><p>No MCP servers have been discovered on the network. Run a scan from the Sentinel dashboard to populate this report.</p></div>')
+            parts.append('<div class="block"><p>No MCP servers have been discovered on the network. Run a scan from the Arckon dashboard to populate this report.</p></div>')
         else:
             business_risk = (
                 'Your organization has AI agent infrastructure running with <strong>no access controls</strong>. '
@@ -720,7 +723,7 @@ def _build_fleet_report_html(devices: list, tier: str, profile: str = '', profil
     _cnt_li  = sum(1 for f in _all_pre if f.get('severity') in ('LOW', 'INFO'))
 
     parts = [f'''<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
-<title>M.A.R.K. Sentinel — Fleet {esc(tier_label)}</title>
+<title>Arckon by RiskRaven — Fleet {esc(tier_label)}</title>
 <style>
 *{{box-sizing:border-box;margin:0;padding:0}}
 body{{background:#0d1117;color:#c9d1d9;font-family:system-ui,sans-serif;padding:32px;max-width:1100px;margin:0 auto}}
@@ -768,21 +771,21 @@ function switchTier(t){{
 {_THEME_EARLY_SCRIPT}
 </head><body>
 <div class="toolbar">
-  <span style="font-size:13px;font-weight:600;color:#c9d1d9;margin-right:6px">M.A.R.K. Sentinel</span>
+  <span style="font-size:13px;font-weight:600;color:#c9d1d9;margin-right:6px">Arckon by RiskRaven</span>
   <button onclick="switchTier('executive')" style="{btn_style}{';color:#58a6ff;border-color:#1f6feb' if tier=='executive' else ''}">Executive</button>
   <button onclick="switchTier('ciso')"      style="{btn_style}{';color:#58a6ff;border-color:#1f6feb' if tier=='ciso' else ''}">CISO</button>
   <button onclick="switchTier('technical')" style="{btn_style}{';color:#58a6ff;border-color:#1f6feb' if tier=='technical' else ''}">Technical</button>
   <span style="font-size:11px;color:#8b949e;white-space:nowrap;margin-left:6px">Profiles:</span>
   {_toolbar_cbs}
   <button onclick="applyProfiles()" style="{btn_style};color:#58a6ff;border-color:#1f6feb">Apply</button>
-  <a href="/api/fleet/report?tier={tier}&fmt=pdf{_pdf_profile_param}{'&status=' + status_filter if status_filter else ''}" download="sentinel_fleet_{tier}{_pdf_fname_suffix}.pdf" style="{btn_style};color:#3fb950;border-color:#238636">&#8659; Download PDF</a>
+  <a href="/api/fleet/report?tier={tier}&fmt=pdf{_pdf_profile_param}{'&status=' + status_filter if status_filter else ''}" download="arckon_fleet_{tier}{_pdf_fname_suffix}.pdf" style="{btn_style};color:#3fb950;border-color:#238636">&#8659; Download PDF</a>
   <button onclick="window.print()" style="{btn_style}">&#128438; Print</button>
   {'<a href="/api/fleet/report?tier=' + tier + '&fmt=html' + _pdf_profile_param + '" style="' + btn_style + ';color:#f85149;border-color:#30363d">&#10005; Clear filter</a>' if status_filter else ''}
   {_THEME_BTN}
 </div>
 {'<div style="background:#1c2128;border:1px solid #30363d;border-radius:6px;padding:10px 18px;margin-bottom:20px;display:flex;align-items:center;justify-content:space-between"><span style="font-size:13px;font-weight:600;color:' + ('#f85149' if status_filter=='fail' else '#d29922' if status_filter=='warn' else '#58a6ff') + '">Showing: ' + esc(_status_label) + ' only — across all devices</span></div>' if status_filter else ''}
 {'<div style="background:#3d2000;border:1px solid #bb6800;border-radius:6px;padding:10px 18px;margin-bottom:18px;display:flex;align-items:center;gap:12px"><span style="font-size:15px">⚠️</span><div><span style="font-size:13px;font-weight:700;color:#f0a500">DEMO REPORT — For evaluation purposes only. Not for distribution.</span><span style="font-size:12px;color:#8b949e;margin-left:12px">Contact <a href="mailto:sales@markai.io" style="color:#58a6ff">sales@markai.io</a> to purchase a license.</span></div></div>' if demo else ''}
-<h1>M.A.R.K. Sentinel &mdash; Fleet {esc(tier_label)}</h1>
+<h1>Arckon by RiskRaven &mdash; Fleet {esc(tier_label)}</h1>
 <div class="meta">Generated {esc(now)} &nbsp;&bull;&nbsp; {len(devices)} device(s){(' &nbsp;&bull;&nbsp; Profiles: <strong>' + esc(_profile_label) + '</strong>') if _profile_label else ''} &nbsp;&bull;&nbsp; {'DEMO — Not for distribution' if demo else 'Confidential'}</div>
 <div class="cards">
   <div class="card"><div class="card-n score">{fleet_score}%</div><div class="card-l">Fleet Score</div></div>
@@ -1000,15 +1003,15 @@ class _Handler(http.server.BaseHTTPRequestHandler):
     # ── auth helpers ──────────────────────────────────────────────────────────
 
     def _proxy_session_user(self) -> Union[dict, None]:
-        if not os.environ.get('SENTINEL_TRUSTED_PROXY'):
+        if not os.environ.get('ARCKON_TRUSTED_PROXY'):
             return None
-        email = self.headers.get('X-Sentinel-User-Email', '').strip()
+        email = self.headers.get('X-Arckon-User-Email', '').strip()
         if not email:
             return None
-        customer_id = self.headers.get('X-Sentinel-Customer-ID', '').strip() or 'default'
+        customer_id = self.headers.get('X-Arckon-Customer-ID', '').strip() or 'default'
         return {
             'email':       email,
-            'role':        self.headers.get('X-Sentinel-User-Role', 'admin').strip(),
+            'role':        self.headers.get('X-Arckon-User-Role', 'admin').strip(),
             'customer_id': customer_id,
         }
 
@@ -1076,13 +1079,13 @@ class _Handler(http.server.BaseHTTPRequestHandler):
     # ── routing ───────────────────────────────────────────────────────────────
 
     def do_GET(self):
-        print(f'[SENTINEL] GET {self.path}', flush=True)
+        print(f'[ARCKON] GET {self.path}', flush=True)
         try:
             self._do_GET_inner()
-            print(f'[SENTINEL] GET {self.path} done', flush=True)
+            print(f'[ARCKON] GET {self.path} done', flush=True)
         except BaseException as _e:
             import traceback as _tb
-            print(f'[SENTINEL] GET {self.path} EXCEPTION: {_e}\n{_tb.format_exc()}', flush=True)
+            print(f'[ARCKON] GET {self.path} EXCEPTION: {_e}\n{_tb.format_exc()}', flush=True)
             log.error('Unhandled GET error for %s: %s', self.path, _e, exc_info=True)
             try:
                 body = ('Internal server error:\n' + _tb.format_exc()).encode('utf-8', errors='replace')
@@ -1276,6 +1279,10 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self._api_fleet_update(path[len('/api/fleet/update/'):])
         elif path.startswith('/api/fleet/remove/'):
             self._api_fleet_remove(path[len('/api/fleet/remove/'):])
+        elif path == '/api/fleet/set-profile':
+            self._api_fleet_set_profile()
+        elif path.startswith('/api/fleet/rename/'):
+            self._api_fleet_rename(path[len('/api/fleet/rename/'):])
         elif path == '/api/admin/license':
             self._api_admin_license()
         elif path == '/api/admin/customers':
@@ -1358,10 +1365,10 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         err_html = '<p class="err">Incorrect email or password.</p>' if qs.get('error') else ''
         body = (
             f'<!doctype html><html><head><meta charset="utf-8">'
-            f'<title>M.A.R.K. Sentinel — Sign in</title>'
+            f'<title>Arckon by RiskRaven — Sign in</title>'
             f'<style>{self._LOGIN_CSS}</style>'
             f'</head><body><div class="box">'
-            f'<h2>M.A.R.K. Sentinel</h2>'
+            f'<h2>Arckon by RiskRaven</h2>'
             f'<p class="sub">Sign in to your account</p>'
             f'{err_html}'
             f'<form method="POST" action="/login">'
@@ -1410,7 +1417,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             )
             self.send_response(302)
             self.send_header('Set-Cookie',
-                f'sentinel_session={token}; Path=/; HttpOnly; SameSite=Strict')
+                f'arckon_session={token}; Path=/' + _COOKIE_FLAGS)
             self.send_header('Location', next_url)
             self.end_headers()
         else:
@@ -1432,8 +1439,8 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             _get_registry().delete_session(token)
         self.send_response(302)
         self.send_header('Set-Cookie',
-            'sentinel_session=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0')
-        if os.environ.get('SENTINEL_TRUSTED_PROXY'):
+            'arckon_session=; Path=/' + _COOKIE_FLAGS + '; Max-Age=0')
+        if os.environ.get('ARCKON_TRUSTED_PROXY'):
             # Cloud mode: clear admin-panel JWT via its logout endpoint,
             # which then redirects to the clean /login page.
             host = self.headers.get('Host', '').split(':')[0]
@@ -1462,10 +1469,10 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         err_html = f'<p class="err">{err_map.get(err_key, "")}</p>' if err_key else ''
         body = (
             f'<!doctype html><html><head><meta charset="utf-8">'
-            f'<title>M.A.R.K. Sentinel — Setup</title>'
+            f'<title>Arckon by RiskRaven — Setup</title>'
             f'<style>{self._LOGIN_CSS}</style>'
             f'</head><body><div class="box">'
-            f'<h2>M.A.R.K. Sentinel</h2>'
+            f'<h2>Arckon by RiskRaven</h2>'
             f'<p class="sub">Create your organization and admin account</p>'
             f'{err_html}'
             f'<form method="POST" action="/setup">'
@@ -1519,7 +1526,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             token = reg.create_session(user['id'], customer['id'], user['email'])
             self.send_response(302)
             self.send_header('Set-Cookie',
-                f'sentinel_session={token}; Path=/; HttpOnly; SameSite=Strict')
+                f'arckon_session={token}; Path=/' + _COOKIE_FLAGS)
             self.send_header('Location', '/')
             self.end_headers()
         except Exception:
@@ -1536,7 +1543,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self._json({'email': None, 'role': None, 'customer_id': None}, 401)
 
     def _admin_panel_url(self) -> str:
-        return os.environ.get('SENTINEL_ADMIN_URL', 'http://user-manager:8000')
+        return os.environ.get('ARCKON_ADMIN_URL', 'http://user-manager:8000')
 
     def _proxy_to_admin(self, path: str, method: str = 'GET', body: bytes = b'') -> None:
         import urllib.request, urllib.error
@@ -1558,7 +1565,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         if not me:
             self._json({'error': 'unauthorized'}, 401)
             return
-        if os.environ.get('SENTINEL_TRUSTED_PROXY'):
+        if os.environ.get('ARCKON_TRUSTED_PROXY'):
             self._proxy_to_admin('/api/users')
             return
         users = _get_registry().list_users(me['customer_id'])
@@ -1573,7 +1580,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             return
         cl = int(self.headers.get('Content-Length', 0))
         raw = self.rfile.read(cl) if cl else b'{}'
-        if os.environ.get('SENTINEL_TRUSTED_PROXY'):
+        if os.environ.get('ARCKON_TRUSTED_PROXY'):
             self._proxy_to_admin('/api/users/add', 'POST', raw)
             return
         try:
@@ -1602,7 +1609,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self._json({'error': 'forbidden'}, 403)
             return
         user_id = user_id_str.strip('/')
-        if os.environ.get('SENTINEL_TRUSTED_PROXY'):
+        if os.environ.get('ARCKON_TRUSTED_PROXY'):
             self._proxy_to_admin(f'/api/users/remove/{user_id}', 'POST')
             return
         try:
@@ -1625,7 +1632,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         user_id = user_id_str.strip('/')
         cl = int(self.headers.get('Content-Length', 0))
         raw = self.rfile.read(cl) if cl else b'{}'
-        if os.environ.get('SENTINEL_TRUSTED_PROXY'):
+        if os.environ.get('ARCKON_TRUSTED_PROXY'):
             self._proxy_to_admin(f'/api/users/password/{user_id}', 'POST', raw)
             return
         try:
@@ -1650,16 +1657,16 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         if not me:
             self._json({'error': 'unauthorized'}, 401)
             return
-        if os.environ.get('SENTINEL_TRUSTED_PROXY'):
+        if os.environ.get('ARCKON_TRUSTED_PROXY'):
             # Cloud mode: each container is one customer.
             # Agent token is the env var set at provision time.
-            agent_token = os.environ.get('SENTINEL_AGENT_TOKEN', '')
+            agent_token = os.environ.get('ARCKON_AGENT_TOKEN', '')
             if not agent_token:
                 tok_file = ROOT / 'data' / 'agent_token.txt'
                 if tok_file.exists():
                     agent_token = tok_file.read_text().strip()
             # Company name: first (only) customer in registry, else env var
-            name = os.environ.get('SENTINEL_CUSTOMER_NAME', '')
+            name = os.environ.get('ARCKON_CUSTOMER_NAME', '')
             if not name:
                 try:
                     custs = _get_registry().list_customers()
@@ -1739,7 +1746,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             dash = None
         self._json({
             'status': 'ok',
-            'server': 'sentinel-dashboard',
+            'server': 'arckon-dashboard',
             'time': datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
             'dashboard': dash,
         })
@@ -1753,12 +1760,12 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         self._send(200, agent_file.read_bytes(), 'text/x-python; charset=utf-8')
 
     def _serve_bundle(self):
-        """GET /bundle.tar.gz — serve a minimal Sentinel bundle for remote agents.
+        """GET /bundle.tar.gz — serve a minimal Arckon bundle for remote agents.
         Includes everything needed to run agent.py + audit.py on a remote machine.
         Excludes: output/, benchmarks/, docs/, test/, .git, __pycache__, *.db, *.log.
         """
         _SKIP_DIRS  = {'benchmarks', 'docs', 'test', '.git', '__pycache__',
-                       '.sentinel_db', 'node_modules'}
+                       '.arckon_db', 'node_modules'}
         _SKIP_EXTS  = {'.db', '.log', '.pyc', '.egg-info'}
         _SKIP_FILES = {'agent_token.txt'}
 
@@ -1778,13 +1785,13 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                 # From output/ only ship the Python modules, not scan result dirs
                 if parts[0] == 'output' and (len(parts) > 2 or path.suffix != '.py'):
                     continue
-                tar.add(path, arcname=str(Path('sentinel') / rel))
+                tar.add(path, arcname=str(Path('arckon') / rel))
         data = buf.getvalue()
         import hashlib as _hashlib
         bundle_sha256 = _hashlib.sha256(data).hexdigest()
         self.send_response(200)
         self.send_header('Content-Type', 'application/gzip')
-        self.send_header('Content-Disposition', 'attachment; filename="sentinel.tar.gz"')
+        self.send_header('Content-Disposition', 'attachment; filename="arckon.tar.gz"')
         self.send_header('Content-Length', str(len(data)))
         self.send_header('X-Bundle-SHA256', bundle_sha256)
         self.end_headers()
@@ -1880,7 +1887,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             results = [_R(r) for r in results_raw]
             pdf_bytes = format_pdf(results, profile, target, mode)
             hostname = report.get('target', device_id).replace('/', '_').replace(' ', '_')
-            filename = f'sentinel_{hostname}.pdf'
+            filename = f'arckon_{hostname}.pdf'
             self.send_response(200)
             self.send_header('Content-Type', 'application/pdf')
             self.send_header('Content-Disposition', f'attachment; filename="{filename}"')
@@ -2230,6 +2237,78 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         log.info('Token push queued for %d devices (customer %s)', len(queued), cust.get('id'))
         self._json({'status': 'queued', 'device_count': len(queued)})
 
+    def _api_fleet_set_profile(self):
+        """POST /api/fleet/set-profile — push a set_config profile update to specific devices or all.
+        Body: {"device_ids": ["id1","id2"], "profile": "fedramp"}
+        If device_ids is absent or empty, applies to all known devices.
+        """
+        body = {}
+        try:
+            length = _content_length(self.headers)
+            if length:
+                body = json.loads(self.rfile.read(length))
+        except Exception:
+            pass
+
+        _VALID = {'default', 'fedramp', 'cmmc', 'financial', 'biotech', 'healthcare', 'lifesciences', 'owasp_agentic', 'eu_ai_act'}
+        profile = (body.get('profile') or 'default').strip()
+        if profile not in _VALID:
+            self._json({'error': f'invalid profile: {profile}'}, 400)
+            return
+
+        store   = self._store()
+        ids     = body.get('device_ids') or []
+        fleet_wide = not ids
+        if fleet_wide:
+            ids = [d['device_id'] for d in store.list_devices() if d.get('device_id')]
+
+        cmd_payload = json.dumps({'profile': profile})
+        queued = []
+        for did in ids:
+            store.enqueue_command(did, f'set_config:{cmd_payload}')
+            queued.append(did)
+
+        me = self._session_user()
+        if me:
+            scope = f'all {len(queued)} device(s)' if fleet_wide else f'{len(queued)} selected device(s)'
+            store.log_action(
+                actor_id=me.get('user_id', me.get('id', '')), actor_name=me['email'], actor_role=me.get('role', ''),
+                action='fleet.set_profile', target='',
+                details=f'Set profile={profile} on {scope}',
+                ip_address=self.client_address[0]
+            )
+        self._json({'status': 'queued', 'profile': profile, 'device_count': len(queued)})
+
+    def _api_fleet_rename(self, device_id: str):
+        """POST /api/fleet/rename/<device_id> — set a custom display name for a device.
+        Body: {"display_name": "Arckon-UI"}  — pass empty string to clear back to hostname.
+        """
+        device_id = device_id.strip()
+        if not device_id:
+            self._json({'error': 'missing device_id'}, 400)
+            return
+        body = {}
+        try:
+            length = _content_length(self.headers)
+            if length:
+                body = json.loads(self.rfile.read(length))
+        except Exception:
+            pass
+        display_name = body.get('display_name', '').strip()
+        store = self._store()
+        if not store.rename_device(device_id, display_name):
+            self._json({'error': 'device not found'}, 404)
+            return
+        me = self._session_user()
+        if me:
+            store.log_action(
+                actor_id=me.get('user_id', me.get('id', '')), actor_name=me['email'], actor_role=me.get('role', ''),
+                action='fleet.rename', target=device_id,
+                details=f'Renamed device to "{display_name or "(cleared)"}"',
+                ip_address=self.client_address[0]
+            )
+        self._json({'status': 'ok', 'device_id': device_id, 'display_name': display_name})
+
     def _api_fleet_remove(self, device_id: str):
         """POST /api/fleet/remove/<id> — permanently delete a device and its history."""
         device_id = device_id.strip()
@@ -2517,7 +2596,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             try:
                 from output.fleet_report import generate_mcp_pdf
                 pdf_bytes = generate_mcp_pdf(servers, tier=tier, demo=_is_demo())
-                fname = f'sentinel_mcp_{tier}.pdf'
+                fname = f'arckon_mcp_{tier}.pdf'
                 self.send_response(200)
                 self.send_header('Content-Type', 'application/pdf')
                 self.send_header('Content-Disposition', f'attachment; filename="{fname}"')
@@ -2596,7 +2675,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
 </tr>'''
         html = f'''<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Sentinel — Admin Panel</title>
+<title>Arckon — Admin Panel</title>
 <style>
 *{{box-sizing:border-box;margin:0;padding:0}}
 body{{background:#f0f4ff;color:#1e3060;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;font-size:14px}}
@@ -2624,7 +2703,7 @@ input:focus,select:focus{{border-color:#f5a623}}
 </style></head><body>
 <div class="wrap">
 <div class="bar">
-  <span class="bm">M.A.R.K.</span><span class="bn">SENTINEL</span>
+  <span class="bm">RiskRaven</span><span class="bn">ARCKON</span>
   <span class="bs">Admin Panel</span>
   <a href="#" class="back" onclick="window.location.href=window.location.protocol+'//'+window.location.hostname+'/dashboard'">&#8592; Platform Dashboard</a>
 </div>
@@ -2845,7 +2924,7 @@ function copyToken(token) {{
                 try:
                     from output.fleet_report import generate_fleet_pdf
                     pdf_bytes = generate_fleet_pdf(devices, tier=tier, demo=_is_demo())
-                    fname = f'sentinel_fleet_{tier}{"_" + profile.replace(",","_") if profile else ""}.pdf'
+                    fname = f'arckon_fleet_{tier}{"_" + profile.replace(",","_") if profile else ""}.pdf'
                     self.send_response(200)
                     self.send_header('Content-Type', 'application/pdf')
                     self.send_header('Content-Disposition', f'attachment; filename="{fname}"')
@@ -2900,12 +2979,12 @@ function copyToken(token) {{
             buf = io.BytesIO()
             with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED) as zf:
                 cover = (
-                    f"SENTINEL COMPLIANCE EVIDENCE PACKAGE\n"
+                    f"ARCKON COMPLIANCE EVIDENCE PACKAGE\n"
                     f"{'=' * 50}\n"
                     f"Generated:  {now.strftime('%Y-%m-%d %H:%M UTC')}\n"
                     f"Profile(s): {profile_label}\n"
                     f"Devices:    {len(devices)}\n"
-                    f"Tool:       M.A.R.K. Sentinel — AI Security Audit\n\n"
+                    f"Tool:       Arckon by RiskRaven — AI Security Audit\n\n"
                     f"CONTENTS\n--------\n"
                     f"1. cover_letter.txt       — This document\n"
                     f"2. findings.csv           — All findings across all devices\n"
@@ -2915,7 +2994,7 @@ function copyToken(token) {{
                     f"6. ai_asset_inventory.csv     — All discovered AI assets with approval status\n"
                     f"7. ai_asset_approval_log.csv  — Full audit trail: who approved each asset and when\n\n"
                     f"ATTESTATION\n-----------\n"
-                    f"Generated automatically by M.A.R.K. Sentinel. All findings\n"
+                    f"Generated automatically by Arckon by RiskRaven. All findings\n"
                     f"reflect the most recent scan for each enrolled device. Scan\n"
                     f"data is stored locally and has not been transmitted to any\n"
                     f"third party.\n"
@@ -3022,7 +3101,7 @@ function copyToken(token) {{
                     zf.writestr('ai_asset_inventory_error.txt', f'Inventory export failed: {_ie}')
 
             zip_bytes = buf.getvalue()
-            fname = f'sentinel_evidence_{date_str}.zip'
+            fname = f'arckon_evidence_{date_str}.zip'
             self.send_response(200)
             self.send_header('Content-Type', 'application/zip')
             self.send_header('Content-Disposition', f'attachment; filename="{fname}"')
@@ -3061,7 +3140,7 @@ function copyToken(token) {{
                     '; '.join(e['affected_devices']),
                 ])
             data = buf.getvalue().encode('utf-8')
-            fname = f'sentinel_risk_register_{_dt.utcnow().strftime("%Y%m%d")}.csv'
+            fname = f'arckon_risk_register_{_dt.utcnow().strftime("%Y%m%d")}.csv'
             self.send_response(200)
             self.send_header('Content-Type', 'text/csv; charset=utf-8')
             self.send_header('Content-Disposition', f'attachment; filename="{fname}"')
@@ -3121,7 +3200,7 @@ function copyToken(token) {{
             self._json({'error': str(e)}, 500)
 
     def _api_verify_signature(self):
-        """GET /api/verify?sig=<hex>&content=<json> — verify a Sentinel report signature."""
+        """GET /api/verify?sig=<hex>&content=<json> — verify a Arckon report signature."""
         from urllib.parse import parse_qs, urlparse as _up
         from output.signing import verify_content, key_fingerprint
         qs = parse_qs(_up(self.path).query)
@@ -3374,14 +3453,14 @@ function copyToken(token) {{
             time.sleep(0.3)
             try:
                 if sys.platform == 'win32':
-                    subprocess.run(['schtasks', '/end', '/tn', 'SentinelAgent'], capture_output=True)
+                    subprocess.run(['schtasks', '/end', '/tn', 'ArckonAgent'], capture_output=True)
                     time.sleep(2)
-                    subprocess.run(['schtasks', '/run', '/tn', 'SentinelAgent'], capture_output=True)
+                    subprocess.run(['schtasks', '/run', '/tn', 'ArckonAgent'], capture_output=True)
                 elif sys.platform == 'darwin':
-                    subprocess.run(['launchctl', 'stop', 'com.mark.sentinel.agent'], capture_output=True)
-                    subprocess.run(['launchctl', 'start', 'com.mark.sentinel.agent'], capture_output=True)
+                    subprocess.run(['launchctl', 'stop', 'com.riskraven.arckon.agent'], capture_output=True)
+                    subprocess.run(['launchctl', 'start', 'com.riskraven.arckon.agent'], capture_output=True)
                 else:
-                    subprocess.run(['systemctl', 'restart', 'sentinel-agent'], capture_output=True)
+                    subprocess.run(['systemctl', 'restart', 'arckon-agent'], capture_output=True)
             except Exception as e:
                 log.error('restart-agent error: %s', e)
         threading.Thread(target=_do_restart, daemon=True).start()
@@ -3577,7 +3656,7 @@ function copyToken(token) {{
                     e['details'], e['ip_address'],
                 ])
             data = buf.getvalue().encode('utf-8')
-            fname = f'sentinel_audit_log_{datetime.now(timezone.utc).strftime("%Y%m%d")}.csv'
+            fname = f'arckon_audit_log_{datetime.now(timezone.utc).strftime("%Y%m%d")}.csv'
             self.send_response(200)
             self.send_header('Content-Type', 'text/csv; charset=utf-8')
             self.send_header('Content-Disposition', f'attachment; filename="{fname}"')
@@ -3630,7 +3709,7 @@ function copyToken(token) {{
             self.send_response(200)
             self.send_header('Content-Type', 'application/x-mswinurl')
             self.send_header('Content-Disposition',
-                             'attachment; filename="Sentinel Dashboard.url"')
+                             'attachment; filename="Arckon Dashboard.url"')
             self.send_header('Content-Length', len(content))
             self.end_headers()
             self.wfile.write(content)
@@ -3646,13 +3725,13 @@ function copyToken(token) {{
             self.send_response(200)
             self.send_header('Content-Type', 'application/octet-stream')
             self.send_header('Content-Disposition',
-                             'attachment; filename="Sentinel Dashboard.webloc"')
+                             'attachment; filename="Arckon Dashboard.webloc"')
             self.send_header('Content-Length', len(content))
             self.end_headers()
             self.wfile.write(content)
 
     def _serve_fleet(self):
-        print('[SENTINEL] _serve_fleet: start', flush=True)
+        print('[ARCKON] _serve_fleet: start', flush=True)
         # Set per-customer license for all feature flags used during this request
         _set_request_license(self._get_dashboard_customer())
         try:
@@ -3660,9 +3739,9 @@ function copyToken(token) {{
             devices = store.list_devices()
             shadow  = store.list_shadow_devices()
             mcp     = store.list_mcp_servers()
-            print(f'[SENTINEL] _serve_fleet: got {len(devices)} devices, {len(shadow)} shadow, {len(mcp)} mcp', flush=True)
+            print(f'[ARCKON] _serve_fleet: got {len(devices)} devices, {len(shadow)} shadow, {len(mcp)} mcp', flush=True)
         except Exception as _e:
-            print(f'[SENTINEL] _serve_fleet: store error: {_e}', flush=True)
+            print(f'[ARCKON] _serve_fleet: store error: {_e}', flush=True)
             log.error('_serve_fleet: store error: %s', _e, exc_info=True)
             devices = []
             shadow  = []
@@ -3675,9 +3754,9 @@ function copyToken(token) {{
                 current_user_role=user['role'] if user else '',
                 store=store,
             ).encode('utf-8')
-            print(f'[SENTINEL] _serve_fleet: body built {len(body)} bytes', flush=True)
+            print(f'[ARCKON] _serve_fleet: body built {len(body)} bytes', flush=True)
         except Exception as _e:
-            print(f'[SENTINEL] _serve_fleet: build error: {_e}', flush=True)
+            print(f'[ARCKON] _serve_fleet: build error: {_e}', flush=True)
             log.error('_build_fleet_html failed: %s', _e, exc_info=True)
             body = (
                 b'<html><body style="font:14px monospace;background:#0d1117;color:#f85149;padding:40px">'
@@ -3693,9 +3772,9 @@ function copyToken(token) {{
             self.send_header('Access-Control-Allow-Origin', '*')
             self.end_headers()
             self.wfile.write(body)
-            print(f'[SENTINEL] _serve_fleet: sent OK', flush=True)
+            print(f'[ARCKON] _serve_fleet: sent OK', flush=True)
         except Exception as _e:
-            print(f'[SENTINEL] _serve_fleet: send error: {_e}', flush=True)
+            print(f'[ARCKON] _serve_fleet: send error: {_e}', flush=True)
             log.error('_serve_fleet: send failed: %s', _e, exc_info=True)
 
     def _api_probe_scan(self):
@@ -3864,7 +3943,7 @@ function copyToken(token) {{
         body = f'''<!DOCTYPE html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>M.A.R.K. Sentinel - Probe Results</title>
+<title>Arckon by RiskRaven - Probe Results</title>
 <style>
 *{{box-sizing:border-box;margin:0;padding:0}}
 body{{background:#f0f4ff;color:#1e3060;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;font-size:14px}}
@@ -3927,12 +4006,12 @@ body{{background:#f0f4ff;color:#1e3060;font-family:-apple-system,BlinkMacSystemF
 }}
 </style></head><body><div class="wrap">
 <div class="brand-bar">
-  <span class="brand-mark">M.A.R.K.</span>
-  <span class="brand-name">SENTINEL</span>
+  <span class="brand-mark">RiskRaven</span>
+  <span class="brand-name">ARCKON</span>
   <span class="brand-sub">Probe Results</span>
   <a class="back" href="/probe">Run Another Test</a>
 </div>
-<div class="print-date">M.A.R.K. Sentinel &#8212; AI API Security Report &nbsp;|&nbsp; {__import__('datetime').datetime.now().strftime('%Y-%m-%d %H:%M')}</div>
+<div class="print-date">Arckon by RiskRaven &#8212; AI API Security Report &nbsp;|&nbsp; {__import__('datetime').datetime.now().strftime('%Y-%m-%d %H:%M')}</div>
 <div class="model-tag">Model tested: <strong>{e(model)}</strong></div>
 <div class="strip">
   <div class="sc"><div class="sc-n" style="color:#dc2626">{summary["fail"]}</div><div class="sc-l">High Risk</div></div>
@@ -4003,7 +4082,7 @@ body{{background:#f0f4ff;color:#1e3060;font-family:-apple-system,BlinkMacSystemF
         page = (
             b'<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">'
             b'<meta name="viewport" content="width=device-width,initial-scale=1">'
-            b'<title>M.A.R.K. Sentinel - API Security Tester</title>'
+            b'<title>Arckon by RiskRaven - API Security Tester</title>'
             b'<style>'
             b'*{box-sizing:border-box;margin:0;padding:0}'
             b'body{background:#f0f4ff;color:#1e3060;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;font-size:14px;min-height:100vh}'
@@ -4027,14 +4106,14 @@ body{{background:#f0f4ff;color:#1e3060;font-family:-apple-system,BlinkMacSystemF
             b'#wait{display:none;color:#4a5a7a;font-size:13px;margin-top:16px;font-style:italic}'
             b'</style></head><body>'
             b'<div class="wrap">'
-            b'<div class="bar"><span class="bm">M.A.R.K.</span><span class="bn">SENTINEL</span>'
+            b'<div class="bar"><span class="bm">RiskRaven</span><span class="bn">ARCKON</span>'
             b'<span class="bs">API Security Tester</span>'
             b'<a href="/" style="margin-left:auto;font-size:12px;color:#8a9abf;text-decoration:none;border:1px solid #2a3f6a;border-radius:5px;padding:5px 12px">&#8592; Dashboard</a>'
             b'</div>'
             b'<h1>AI API Security Tester</h1>'
             b'<p class="sub">Enter your API credentials to run live adversarial probes against your AI endpoint.<br>'
             b'Tests: prompt injection, jailbreaks, PII leakage, system prompt disclosure, harmful content refusals.<br>'
-            b'Your key is sent only to your endpoint and never stored by Sentinel.</p>'
+            b'Your key is sent only to your endpoint and never stored by Arckon.</p>'
         ) + err_html.encode() + (
             b'<div class="card">'
             b'<form method="POST" action="/probe" onsubmit="document.getElementById(\'wait\').style.display=\'block\';document.querySelector(\'.btn\').disabled=true;">'
@@ -4509,7 +4588,7 @@ def _build_fleet_html(devices: list[dict], shadow: Union[list[dict], None] = Non
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
-<title>M.A.R.K. Sentinel — Command Center</title>
+<title>Arckon by RiskRaven — Command Center</title>
 <style>
 *{{box-sizing:border-box;margin:0;padding:0}}
 body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-serif,"Apple Color Emoji","Segoe UI Emoji";font-size:15px;height:100vh;overflow:hidden}}
@@ -4554,6 +4633,7 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
 .dev-row{{cursor:pointer;transition:background .1s}}
 .dev-row:hover td{{background:#F5F3FF}}
 .dev-host{{font-weight:600;color:#111827}}
+.dev-row:hover .rename-btn{{opacity:1!important}}
 .risk-dot{{display:inline-block;width:10px;height:10px;border-radius:50%}}
 .risk-dot.r-fail{{background:#DC2626}}.risk-dot.r-warn{{background:#F97316}}.risk-dot.r-pass{{background:#16A34A}}
 .scan-btn{{background:#fff;border:1px solid #D1D5DB;color:#4F46E5;border-radius:6px;padding:4px 10px;font-size:12px;cursor:pointer;white-space:nowrap;font-family:inherit;font-weight:500;transition:background .1s,border-color .1s}}
@@ -4608,12 +4688,12 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
 </style>
 </head>
 <body>
-<script>if(localStorage.getItem('sentinel_theme')==='dark')document.documentElement.classList.add('dark');</script>
+<script>if(localStorage.getItem('arckon_theme')==='dark')document.documentElement.classList.add('dark');</script>
 <div id="app">
   <aside id="sidebar">
     <div class="sb-logo">
-      <div class="sb-logo-mark">M.A.R.K.</div>
-      <div class="sb-logo-name">SENTINEL</div>
+      <div class="sb-logo-mark">RiskRaven</div>
+      <div class="sb-logo-name">ARCKON</div>
       <div class="sb-logo-sub">{'<span style="color:#f0a500;font-weight:700;font-size:9px;letter-spacing:1px">⚠ DEMO MODE</span>' if _is_demo() else 'Command Center'}</div>
     </div>
     <nav class="sb-nav">
@@ -4692,11 +4772,23 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
               style="color:#a371f7;border-color:#E5E7EB;font-size:12px">&#128270; Find Shadow AI</button>
       <button id="btn-discover-mcp" class="scan-btn" onclick="discoverMcp(this)"
               style="color:#4F46E5;border-color:#E5E7EB;font-size:12px">&#128279; Scan MCP Servers</button>
+      <span id="sel-count-lbl" style="display:none;font-size:11px;background:#EEF2FF;color:#4F46E5;border:1px solid #C7D2FE;border-radius:10px;padding:2px 10px;cursor:pointer" onclick="clearSelection()" title="Click to clear selection">&#10005; <span id="sel-count-num">0</span> selected</span>
+      <select id="fleet-profile-sel" class="form-select" style="font-size:12px;padding:3px 6px;height:28px" title="Profile to apply to selected or all devices">
+        <option value="default">Default</option>
+        <option value="fedramp">FedRAMP</option>
+        <option value="cmmc">CMMC 2.0</option>
+        <option value="financial">Financial</option>
+        <option value="biotech">Biotech</option>
+        <option value="healthcare">Healthcare</option>
+      </select>
+      <button id="btn-set-profile" class="scan-btn" onclick="applyFleetProfile()"
+              style="color:#7C3AED;border-color:#E5E7EB;font-size:12px">&#9881; Set Profile</button>
     </div>
   </div>
   <div class="refresh-note" id="refresh-note">Auto-refreshes every 60s</div>
   <table class="dev-table">
     <thead><tr>
+      <th style="width:32px;text-align:center"><input type="checkbox" id="sel-all-hdr" onchange="toggleSelectAll(this)" title="Select all devices on this page" style="cursor:pointer"></th>
       <th>Hostname</th><th>Platform</th>
       <th class="c-red">High</th><th class="c-yellow">Medium</th><th class="c-green">Low</th>
       <th>Profile</th><th>Last seen</th><th>Risk</th><th></th>
@@ -5038,7 +5130,7 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
       <input id="alert-smtp-pass" type="password" class="form-input" placeholder="App password" style="width:280px;font-family:monospace;font-size:12px">
 
       <label style="font-size:13px;color:#6B7280">From Address</label>
-      <input id="alert-email-from" type="email" class="form-input" placeholder="sentinel@yourdomain.com" style="width:280px;font-family:monospace;font-size:12px">
+      <input id="alert-email-from" type="email" class="form-input" placeholder="arckon@yourdomain.com" style="width:280px;font-family:monospace;font-size:12px">
 
       <label style="font-size:13px;color:#6B7280">Send Alerts To</label>
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
@@ -5186,7 +5278,7 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
   </div>
   <div class="content-panel" style="background:#ffffff;border:1px solid #F3F4F6;border-radius:8px;padding:20px;margin-bottom:16px">
     <div class="panel-sub-hdr" style="font-size:12px;color:#6B7280;font-weight:600;text-transform:uppercase;letter-spacing:.06em;margin-bottom:14px">Agent token</div>
-    <p style="font-size:13px;color:#6B7280;margin:0 0 14px">Paste this token into your agent&apos;s config file (<code style="font-size:12px;background:#F3F4F6;padding:1px 4px;border-radius:3px">SENTINEL_TOKEN</code>). Keep it secret — anyone with this token can submit reports to your account.</p>
+    <p style="font-size:13px;color:#6B7280;margin:0 0 14px">Paste this token into your agent&apos;s config file (<code style="font-size:12px;background:#F3F4F6;padding:1px 4px;border-radius:3px">ARCKON_TOKEN</code>). Keep it secret — anyone with this token can submit reports to your account.</p>
     <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
       <input id="agent-token-display" type="password" readonly
              style="flex:1;min-width:240px;max-width:480px;font-family:monospace;font-size:13px;
@@ -5268,12 +5360,12 @@ function _applyTheme(light) {{
 }}
 function toggleTheme() {{
   const light = !document.documentElement.classList.contains('light');
-  localStorage.setItem('sentinel_theme', light ? 'light' : 'dark');
+  localStorage.setItem('arckon_theme', light ? 'light' : 'dark');
   _applyTheme(light);
 }}
-_applyTheme(localStorage.getItem('sentinel_theme') === 'light');
+_applyTheme(localStorage.getItem('arckon_theme') === 'light');
 window.addEventListener('storage', function(e) {{
-  if (e.key === 'sentinel_theme') _applyTheme(e.newValue === 'light');
+  if (e.key === 'arckon_theme') _applyTheme(e.newValue === 'light');
 }});
 
 function navTo(page) {{
@@ -5328,6 +5420,7 @@ let _allDevices = [];
 let _activeFilter = new URLSearchParams(location.search).get('filter') || null;
 let _pageSize = 10;
 let _currentPage = 1;
+let _selectedDevices = new Set();
 const _note = document.getElementById('refresh-note');
 setInterval(() => {{
   _countdown--;
@@ -5380,7 +5473,7 @@ function _syncFilterUI() {{
       bannerText.textContent = 'Showing: ' + (labelMap[_activeFilter] || _activeFilter);
       bannerText.style.color = _activeFilter === 'fail' ? '#DC2626' : _activeFilter === 'warn' ? '#CA8A04' : '#4F46E5';
       banner.style.display = 'flex';
-      document.title = 'Sentinel — ' + (labelMap[_activeFilter] || _activeFilter);
+      document.title = 'Arckon — ' + (labelMap[_activeFilter] || _activeFilter);
     }} else {{
       banner.style.display = 'none';
     }}
@@ -5417,18 +5510,19 @@ function renderDevicePage() {{
   const pgEl    = document.getElementById('device-pagination');
   const visible = _visibleDevices();
   if (!_allDevices.length) {{
-    tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:32px;color:#9CA3AF">No agents have reported yet.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="10" style="text-align:center;padding:32px;color:#9CA3AF">No agents have reported yet.</td></tr>';
     pgEl.style.display = 'none';
     return;
   }}
   if (!visible.length) {{
     const msg = _activeFilter === 'fail' ? 'No high risk devices.' : _activeFilter === 'warn' ? 'No medium risk devices.' : 'No info items.';
-    tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:32px;color:#9CA3AF">' + msg + '</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="10" style="text-align:center;padding:32px;color:#9CA3AF">' + msg + '</td></tr>';
     pgEl.style.display = 'none';
     return;
   }}
   const start = (_currentPage - 1) * _pageSize;
   const page  = visible.slice(start, start + _pageSize);
+  const hdr = document.getElementById('sel-all-hdr');
   tbody.innerHTML = page.map(d => {{
     const did  = d.device_id || '';
     const fail = d.fail_count || 0;
@@ -5436,8 +5530,16 @@ function renderDevicePage() {{
     const pas  = d.pass_count || 0;
     const rc   = _riskCls(fail, warn);
     const age  = _age(d.last_seen);
+    const chk  = _selectedDevices.has(did) ? 'checked' : '';
     return `<tr class="dev-row" onclick="selectDevice('${{esc(did)}}')" >
-      <td class="dev-host">${{esc(d.hostname||'unknown')}}</td>
+      <td onclick="event.stopPropagation()" style="width:32px;text-align:center">
+        <input type="checkbox" class="dev-sel" value="${{esc(did)}}" ${{chk}} onchange="onDevSel('${{esc(did)}}',this)" style="cursor:pointer">
+      </td>
+      <td class="dev-host">
+        ${{esc(d.display_name || d.hostname || 'unknown')}}
+        <span class="rename-btn" onclick="event.stopPropagation();renameDevice('${{esc(did)}}','${{esc(d.display_name||d.hostname||'')}}',this)"
+              title="Rename" style="cursor:pointer;margin-left:5px;opacity:0;font-size:11px;color:#9CA3AF">&#9998;</span>
+      </td>
       <td>${{esc(d.platform||'')}}</td>
       <td class="c-red">${{fail}}</td>
       <td class="c-yellow">${{warn}}</td>
@@ -5459,7 +5561,111 @@ function renderDevicePage() {{
       </td>
     </tr>`;
   }}).join('');
+  // Sync "select all" header checkbox state
+  const allOnPage = page.every(d => _selectedDevices.has(d.device_id || ''));
+  if (hdr) hdr.checked = page.length > 0 && allOnPage;
   renderPagination();
+}}
+
+function toggleSelectAll(cb) {{
+  const start = (_currentPage - 1) * _pageSize;
+  const page  = _visibleDevices().slice(start, start + _pageSize);
+  page.forEach(d => {{
+    if (cb.checked) _selectedDevices.add(d.device_id || '');
+    else            _selectedDevices.delete(d.device_id || '');
+  }});
+  document.querySelectorAll('.dev-sel').forEach(el => {{ el.checked = cb.checked; }});
+  _updateSelectionUI();
+}}
+
+function onDevSel(did, cb) {{
+  if (cb.checked) _selectedDevices.add(did);
+  else            _selectedDevices.delete(did);
+  const all = document.querySelectorAll('.dev-sel');
+  const hdr = document.getElementById('sel-all-hdr');
+  if (hdr) hdr.checked = all.length > 0 && [...all].every(el => el.checked);
+  _updateSelectionUI();
+}}
+
+function clearSelection() {{
+  _selectedDevices.clear();
+  document.querySelectorAll('.dev-sel').forEach(el => {{ el.checked = false; }});
+  const hdr = document.getElementById('sel-all-hdr');
+  if (hdr) hdr.checked = false;
+  _updateSelectionUI();
+}}
+
+function _updateSelectionUI() {{
+  const n   = _selectedDevices.size;
+  const lbl = document.getElementById('sel-count-lbl');
+  const num = document.getElementById('sel-count-num');
+  const btn = document.getElementById('btn-set-profile');
+  if (lbl) lbl.style.display = n > 0 ? 'inline-block' : 'none';
+  if (num) num.textContent = n;
+  if (btn) btn.textContent = n > 0 ? `⚙ Set Profile (${{n}})` : '⚙ Set Profile';
+}}
+
+async function renameDevice(did, current, iconEl) {{
+  const val = prompt('Display name for this device:\n(Leave blank to clear back to hostname)', current);
+  if (val === null) return;
+  try {{
+    const resp = await fetch('/api/fleet/rename/' + encodeURIComponent(did), {{
+      method: 'POST',
+      headers: {{'Content-Type': 'application/json'}},
+      body: JSON.stringify({{display_name: val.trim()}})
+    }});
+    const data = await resp.json();
+    if (resp.ok) {{
+      const cell = iconEl.closest('td');
+      if (cell) {{
+        const label = val.trim() || current;
+        cell.firstChild.textContent = label + ' ';
+      }}
+      const dev = _allDevices.find(d => d.device_id === did);
+      if (dev) dev.display_name = val.trim();
+    }} else {{
+      alert('Error: ' + (data.error || resp.status));
+    }}
+  }} catch(e) {{
+    alert('Network error: ' + e);
+  }}
+}}
+
+async function applyFleetProfile() {{
+  const profile = (document.getElementById('fleet-profile-sel') || {{}}).value || 'default';
+  const ids     = [..._selectedDevices];
+  const n       = ids.length;
+  const total   = _allDevices.length;
+  const scope   = n > 0
+    ? `${{n}} selected device${{n !== 1 ? 's' : ''}}`
+    : `all ${{total}} device${{total !== 1 ? 's' : ''}}`;
+  if (!confirm(`Set scan profile to "${{profile}}" for ${{scope}}?\n\nThis updates the agents’ default profile for future scheduled scans.`)) return;
+  const btn = document.getElementById('btn-set-profile');
+  btn.disabled = true;
+  const orig = btn.textContent;
+  btn.textContent = 'Applying…';
+  try {{
+    const body = {{ profile }};
+    if (n > 0) body.device_ids = ids;
+    const resp = await fetch('/api/fleet/set-profile', {{
+      method: 'POST',
+      headers: {{ 'Content-Type': 'application/json' }},
+      body: JSON.stringify(body)
+    }});
+    const data = await resp.json();
+    if (resp.ok) {{
+      btn.textContent = '✓ Done';
+      btn.style.color = '#16A34A';
+      if (n > 0) clearSelection();
+      setTimeout(() => {{ btn.textContent = '⚙ Set Profile'; btn.style.color = '#7C3AED'; btn.disabled = false; }}, 2000);
+    }} else {{
+      alert('Error: ' + (data.error || resp.status));
+      btn.textContent = orig; btn.disabled = false;
+    }}
+  }} catch(e) {{
+    alert('Network error: ' + e);
+    btn.textContent = orig; btn.disabled = false;
+  }}
 }}
 
 function renderPagination() {{
@@ -5583,7 +5789,7 @@ async function runDiscovery() {{
       const modelBadges = (models, service) => {{
         if (!models || !models.length) {{
           const svc = (service || '').toLowerCase();
-          if (svc.includes('sentinel') || svc.includes('hash'))
+          if (svc.includes('arckon') || svc.includes('hash'))
             return '<span style="color:#9CA3AF;font-size:11px">n/a — monitoring tool</span>';
           if (svc.includes('jupyter') || svc.includes('streamlit') || svc.includes('gradio'))
             return '<span style="color:#9CA3AF;font-size:11px">n/a — notebook/UI server</span>';
@@ -6283,7 +6489,7 @@ async function rptDownloadPdf(tier, btn) {{
     if (!blob.size) {{ alert('Server returned an empty PDF — check server log.'); return; }}
     const a = Object.assign(document.createElement('a'), {{
       href: URL.createObjectURL(blob),
-      download: 'sentinel_fleet_' + tier + '.pdf'
+      download: 'arckon_fleet_' + tier + '.pdf'
     }});
     document.body.appendChild(a); a.click();
     document.body.removeChild(a);
@@ -6301,7 +6507,7 @@ async function rptDownloadMcpPdf(tier, btn) {{
     if (!blob.size) {{ alert('Server returned an empty PDF — check server log.'); return; }}
     const a = Object.assign(document.createElement('a'), {{
       href: URL.createObjectURL(blob),
-      download: 'sentinel_mcp_' + tier + '.pdf'
+      download: 'arckon_mcp_' + tier + '.pdf'
     }});
     document.body.appendChild(a); a.click();
     document.body.removeChild(a);
@@ -6323,13 +6529,13 @@ async function downloadFleetReport(tier, btn) {{
     }}
     const blob = await r.blob();
     if (blob.size === 0) {{
-      alert('Server returned an empty PDF. Check .sentinel.log for details.');
+      alert('Server returned an empty PDF. Check .arckon.log for details.');
       return;
     }}
     const url  = URL.createObjectURL(blob);
     const a    = document.createElement('a');
     a.href     = url;
-    a.download = 'sentinel_fleet_' + tier + '.pdf';
+    a.download = 'arckon_fleet_' + tier + '.pdf';
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -6772,7 +6978,7 @@ async function downloadEvidencePackage(btn) {{
     if (!r.ok) {{ alert('Export failed: ' + await r.text().catch(() => r.status)); return; }}
     const blob = await r.blob();
     const disp = r.headers.get('Content-Disposition') || '';
-    const fname = (disp.match(/filename="([^"]+)"/) || [])[1] || 'sentinel_evidence.zip';
+    const fname = (disp.match(/filename="([^"]+)"/) || [])[1] || 'arckon_evidence.zip';
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url; a.download = fname;
@@ -7240,7 +7446,7 @@ loadAlertConfig();
 }})();
 </script>
 <div style="margin-top:48px;padding:16px 0 24px;border-top:1px solid #E5E7EB;text-align:center;font-size:11px;color:#9CA3AF">
-  © 2026 M.A.R.K. AI Systems. All rights reserved. Patent Pending.
+  © 2026 RiskRaven. All rights reserved. Patent Pending.
   &nbsp;·&nbsp; <span id="auto-refresh-countdown" style="color:#4F46E5"></span>
 </div>
 </body>
@@ -7249,7 +7455,7 @@ loadAlertConfig();
 
 def main():
     import argparse
-    ap = argparse.ArgumentParser(description='M.A.R.K. Sentinel Dashboard Server')
+    ap = argparse.ArgumentParser(description='Arckon by RiskRaven Dashboard Server')
     ap.add_argument('--port', type=int, default=PORT, help=f'Port to listen on (default: {PORT})')
     ap.add_argument('--host', default='0.0.0.0', help='Bind address (default: 0.0.0.0 — all interfaces)')
     ap.add_argument('--no-browser', action='store_true', help="Don't auto-open browser")
@@ -7258,7 +7464,7 @@ def main():
     global _serve_port
     _serve_port = args.port
 
-    log_file = ROOT / '.sentinel-server.log'
+    log_file = ROOT / '.arckon-server.log'
     _handlers: list[logging.Handler] = [logging.StreamHandler(sys.stderr)]
     try:
         _handlers.insert(0, logging.FileHandler(log_file, encoding='utf-8'))
@@ -7279,8 +7485,8 @@ def main():
 
     # Seed super-admin account from env vars if provided
     try:
-        _sa_email = os.environ.get('SENTINEL_SUPER_ADMIN_EMAIL', '').strip()
-        _sa_pass  = os.environ.get('SENTINEL_SUPER_ADMIN_PASSWORD', '').strip()
+        _sa_email = os.environ.get('ARCKON_SUPER_ADMIN_EMAIL', '').strip()
+        _sa_pass  = os.environ.get('ARCKON_SUPER_ADMIN_PASSWORD', '').strip()
         if _sa_email and _sa_pass:
             reg = _get_registry()
             # Find existing user across all customers and promote, else add to first active customer
@@ -7334,8 +7540,8 @@ def main():
 
     server = http.server.ThreadingHTTPServer((args.host, args.port), _Handler)
 
-    tls_cert = os.environ.get('SENTINEL_TLS_CERT', '')
-    tls_key  = os.environ.get('SENTINEL_TLS_KEY', '')
+    tls_cert = os.environ.get('ARCKON_TLS_CERT', '')
+    tls_key  = os.environ.get('ARCKON_TLS_KEY', '')
     if tls_cert and tls_key:
         import ssl as _ssl
         ctx = _ssl.SSLContext(_ssl.PROTOCOL_TLS_SERVER)
@@ -7346,19 +7552,19 @@ def main():
         scheme = 'http'
         log.warning(
             'TLS not configured — fleet traffic is unencrypted. '
-            'Set SENTINEL_TLS_CERT and SENTINEL_TLS_KEY env vars to enable HTTPS, '
+            'Set ARCKON_TLS_CERT and ARCKON_TLS_KEY env vars to enable HTTPS, '
             'or run behind a TLS-terminating reverse proxy (nginx, Caddy).'
         )
 
     url = f'{scheme}://localhost:{args.port}'
-    print('\n  M.A.R.K. Sentinel  ·  Dashboard Server')
+    print('\n  Arckon by RiskRaven  ·  Dashboard Server')
     print(f'  Project  : {ROOT}')
     print(f'  Dashboard: {url}')
     print(f'  Command Center: {url}/command (also available at {url}/fleet)')
     print(f'  Devices  : {url}/api/devices')
     print(f'  Network  : {scheme}://0.0.0.0:{args.port} (accessible from LAN)')
     if scheme == 'http':
-        print('  WARNING  : TLS not enabled — set SENTINEL_TLS_CERT + SENTINEL_TLS_KEY for HTTPS')
+        print('  WARNING  : TLS not enabled — set ARCKON_TLS_CERT + ARCKON_TLS_KEY for HTTPS')
     print('  Stop     : Ctrl+C\n')
     if not args.no_browser:
         threading.Timer(0.6, lambda: webbrowser.open(url)).start()
