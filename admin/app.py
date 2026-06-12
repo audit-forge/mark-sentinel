@@ -37,7 +37,7 @@ def _check_rate_limit(ip: str) -> bool:
 def _record_failed_login(ip: str) -> None:
     _login_attempts[ip].append(time.time())
 
-ADMIN_EMAIL    = os.environ.get("ADMIN_EMAIL", "admin@sentinel.local")
+ADMIN_EMAIL    = os.environ.get("ADMIN_EMAIL", "admin@arckon.local")
 MAX_CUSTOMERS  = int(os.environ.get("MAX_CUSTOMERS", "0"))  # 0 = unlimited
 ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "changeme")
 PUBLIC_IP = os.environ.get("PUBLIC_IP", "35.255.19.236")
@@ -68,8 +68,8 @@ def _check_customer_active(customer_id: str) -> bool:
     return bool(row and row["active"])
 
 
-def _sentinel_url(customer_id: Union[str, None]) -> str:
-    """Return the Sentinel dashboard URL for a given customer_id."""
+def _arckon_url(customer_id: Union[str, None]) -> str:
+    """Return the Arckon dashboard URL for a given customer_id."""
     if not customer_id:
         return "/login"
     with get_conn() as conn:
@@ -127,7 +127,7 @@ async def login(
         details="User logged in successfully", ip_address=client_ip
     )
     if not next:
-        destination = "/dashboard" if row["role"] == "super_admin" else _sentinel_url(row["customer_id"])
+        destination = "/dashboard" if row["role"] == "super_admin" else _arckon_url(row["customer_id"])
     else:
         destination = next
     resp = RedirectResponse(destination, status_code=303)
@@ -155,7 +155,7 @@ async def logout(request: Request, next: str = None):
     else:
         try:
             user = get_current_user(request)
-            dest = "/login" if user.get("role") == "super_admin" else _sentinel_url(user.get("customer_id"))
+            dest = "/login" if user.get("role") == "super_admin" else _arckon_url(user.get("customer_id"))
         except Exception:
             dest = "/login"
     resp = RedirectResponse(dest, status_code=303)
@@ -178,9 +178,9 @@ async def auth_verify(request: Request):
         row = conn.execute("SELECT email FROM users WHERE id=?", (user["sub"],)).fetchone()
     email = row["email"] if row else ""
     return Response(status_code=200, headers={
-        "X-Sentinel-User-Email":    email,
-        "X-Sentinel-User-Role":     user.get("role", ""),
-        "X-Sentinel-Customer-ID":   user.get("customer_id", ""),
+        "X-Arckon-User-Email":    email or "",
+        "X-Arckon-User-Role":     user.get("role") or "",
+        "X-Arckon-Customer-ID":   user.get("customer_id") or "",
     })
 
 
@@ -193,7 +193,7 @@ async def dashboard(request: Request):
     except HTTPException:
         return RedirectResponse("/login")
     if user.get("role") != "super_admin":
-        return RedirectResponse(_sentinel_url(user.get("customer_id")))
+        return RedirectResponse(_arckon_url(user.get("customer_id")))
     with get_conn() as conn:
         customer_count = conn.execute(
             "SELECT COUNT(*) FROM customers WHERE active=1"
@@ -267,7 +267,7 @@ async def deploy(request: Request):
     client_ip = request.client.host if request.client else "unknown"
     import urllib.request as urlreq
     try:
-        req = urlreq.Request("http://sentinel-deployer:9000/deploy", method="POST", data=b"")
+        req = urlreq.Request("http://arckon-deployer:9000/deploy", method="POST", data=b"")
         with urlreq.urlopen(req, timeout=5) as r:
             code = r.status
         result = "started" if code == 202 else "busy" if code == 409 else "failed"
@@ -292,11 +292,11 @@ async def test_email(request: Request):
     client_ip = request.client.host if request.client else "unknown"
     from mailer import send_alert
     ok = send_alert(
-        subject="[Sentinel] Test alert — email is working",
-        body_text="This is a test alert from M.A.R.K. Sentinel admin panel.\n\nIf you received this, email alerts are configured correctly.",
+        subject="[Arckon] Test alert — email is working",
+        body_text="This is a test alert from Arckon by RiskRaven admin panel.\n\nIf you received this, email alerts are configured correctly.",
         body_html="""
 <div style="font-family:monospace;background:#0a0a0a;color:#e0e0e0;padding:24px;max-width:520px">
-  <div style="color:#00ff88;font-weight:bold;letter-spacing:3px;margin-bottom:16px">M.A.R.K. SENTINEL</div>
+  <div style="color:#00ff88;font-weight:bold;letter-spacing:3px;margin-bottom:16px">RiskRaven ARCKON</div>
   <div style="font-size:15px;color:#fff;margin-bottom:12px">Test Alert</div>
   <div style="font-size:13px;color:#aaa">Email alerts are configured correctly.</div>
 </div>
@@ -664,21 +664,21 @@ async def rotate_customer_token(request: Request):
             (expires_at, new_token, customer_id),
         )
 
-    # Tell the Sentinel server for this customer to push set_config to all known devices
+    # Tell the Arckon server for this customer to push set_config to all known devices
     push_count = 0
     port = row["port"] if row["port"] else 7001
-    sentinel_url = f"http://127.0.0.1:{port}/api/fleet/push-token"
+    arckon_url = f"http://127.0.0.1:{port}/api/fleet/push-token"
     try:
         import httpx
         async with httpx.AsyncClient(timeout=5) as client:
-            r = await client.post(sentinel_url)
+            r = await client.post(arckon_url)
             if r.status_code == 200:
                 push_count = r.json().get("device_count", 0)
     except Exception as e:
         log_audit(
             actor_id=user["sub"], actor_name=user["email"], actor_role=user["role"],
             customer_id=customer_id, action="customer.rotate_token.push_failed", target=row["name"],
-            details=f"Failed to push new token to customer's Sentinel server: {e}", ip_address=client_ip
+            details=f"Failed to push new token to customer's Arckon server: {e}", ip_address=client_ip
         )
         pass  # push is best-effort; in-band delivery still works
 
@@ -704,7 +704,7 @@ async def repush_customer_agents(request: Request):
 
     Lets Hash ship agent fixes (bug fixes, installer updates, etc.) without the
     customer having to manually re-run install scripts on each machine — the
-    customer's Sentinel server queues an `update_self` command for every known
+    customer's Arckon server queues an `update_self` command for every known
     device, which the agents pick up on their next poll, download the refreshed
     bundle, verify it, and restart themselves.
 
@@ -733,7 +733,7 @@ async def repush_customer_agents(request: Request):
     if not row:
         return JSONResponse({"error": "customer not found"}, status_code=404)
 
-    container_name = f"sentinel-{customer_id}"
+    container_name = f"arckon-{customer_id}"
     update_url = f"http://{container_name}:7331/api/fleet/update/all"
 
     def _push():
@@ -741,9 +741,9 @@ async def repush_customer_agents(request: Request):
             update_url,
             method="POST",
             headers={
-                "X-Sentinel-Customer-ID": customer_id,
-                "X-Sentinel-User-Email": user["email"],
-                "X-Sentinel-User-Role": "admin",
+                "X-Arckon-Customer-ID": customer_id,
+                "X-Arckon-User-Email": user["email"],
+                "X-Arckon-User-Role": "admin",
             },
         )
         with urllib.request.urlopen(req, timeout=10) as resp:
@@ -832,7 +832,7 @@ async def audit_log_csv(request: Request):
             e["actor_name"] or e["actor_id"], e["actor_role"], e["customer_id"],
             e["action"], e["target"], e["details"], e["ip_address"],
         ])
-    fname = f'sentinel_admin_audit_log_{datetime.now(timezone.utc).strftime("%Y%m%d")}.csv'
+    fname = f'arckon_admin_audit_log_{datetime.now(timezone.utc).strftime("%Y%m%d")}.csv'
     return Response(
         content=buf.getvalue(),
         media_type="text/csv",
@@ -1166,7 +1166,7 @@ async def receive_telemetry(request: Request):
     return JSONResponse({"status": "ok", "current_agents": current_agents, "max_seats": row["max_seats"]})
 
 
-# ── JSON API — used by Sentinel dashboard in cloud/proxy mode ─────────────────
+# ── JSON API — used by Arckon dashboard in cloud/proxy mode ─────────────────
 
 @app.get("/api/users")
 async def api_users_list(request: Request):
@@ -1305,7 +1305,7 @@ def _write_license_file(customer_id: str, name: str, tier: str, expires: str, ma
     licenses_dir = os.environ.get("LICENSES_DIR", "/licenses")
     customer_dir = os.path.join(licenses_dir, customer_id)
     os.makedirs(customer_dir, exist_ok=True)
-    telemetry_url = f"http://sentinel-admin:8000/api/telemetry"
+    telemetry_url = f"http://arckon-admin:8000/api/telemetry"
     payload = {
         "customer_id":        customer_id,
         "licensed_to":        name,
@@ -1313,7 +1313,7 @@ def _write_license_file(customer_id: str, name: str, tier: str, expires: str, ma
         "grace_pct":          10,
         "expires_at":         expires,
         "issued_at":          date.today().isoformat(),
-        "issued_by":          "M.A.R.K. AI Systems",
+        "issued_by":          "RiskRaven",
         "plan":               tier,
         "telemetry_url":      telemetry_url,
         "telemetry_interval_h": 1,
