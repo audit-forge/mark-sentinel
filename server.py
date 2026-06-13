@@ -1003,15 +1003,15 @@ class _Handler(http.server.BaseHTTPRequestHandler):
     # ── auth helpers ──────────────────────────────────────────────────────────
 
     def _proxy_session_user(self) -> Union[dict, None]:
-        if not os.environ.get('ARCKON_TRUSTED_PROXY'):
+        if not (os.environ.get('ARCKON_TRUSTED_PROXY') or os.environ.get('SENTINEL_TRUSTED_PROXY')):
             return None
-        email = self.headers.get('X-Arckon-User-Email', '').strip()
+        email = (self.headers.get('X-Sentinel-User-Email') or self.headers.get('X-Arckon-User-Email', '')).strip()
         if not email:
             return None
-        customer_id = self.headers.get('X-Arckon-Customer-ID', '').strip() or 'default'
+        customer_id = (self.headers.get('X-Sentinel-Customer-ID') or self.headers.get('X-Arckon-Customer-ID', '')).strip() or 'default'
         return {
             'email':       email,
-            'role':        self.headers.get('X-Arckon-User-Role', 'admin').strip(),
+            'role':        (self.headers.get('X-Sentinel-User-Role') or self.headers.get('X-Arckon-User-Role', 'admin')).strip(),
             'customer_id': customer_id,
         }
 
@@ -4773,14 +4773,14 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
       <button id="btn-discover-mcp" class="scan-btn" onclick="discoverMcp(this)"
               style="color:#4F46E5;border-color:#E5E7EB;font-size:12px">&#128279; Scan MCP Servers</button>
       <span id="sel-count-lbl" style="display:none;font-size:11px;background:#EEF2FF;color:#4F46E5;border:1px solid #C7D2FE;border-radius:10px;padding:2px 10px;cursor:pointer" onclick="clearSelection()" title="Click to clear selection">&#10005; <span id="sel-count-num">0</span> selected</span>
-      <select id="fleet-profile-sel" class="form-select" style="font-size:12px;padding:3px 6px;height:28px" title="Profile to apply to selected or all devices">
-        <option value="default">Default</option>
-        <option value="fedramp">FedRAMP</option>
-        <option value="cmmc">CMMC 2.0</option>
-        <option value="financial">Financial</option>
-        <option value="biotech">Biotech</option>
-        <option value="healthcare">Healthcare</option>
-      </select>
+      <div id="fleet-profile-sel" style="display:inline-flex;flex-wrap:wrap;gap:6px 12px;align-items:center;background:#F9FAFB;border:1px solid #E5E7EB;border-radius:6px;padding:4px 10px;font-size:12px" title="Select one or more profiles to apply to devices">
+        <label style="display:flex;align-items:center;gap:4px;cursor:pointer;white-space:nowrap"><input type="checkbox" class="fleet-profile-cb" value="default" checked> Default</label>
+        <label style="display:flex;align-items:center;gap:4px;cursor:pointer;white-space:nowrap"><input type="checkbox" class="fleet-profile-cb" value="fedramp"> FedRAMP</label>
+        <label style="display:flex;align-items:center;gap:4px;cursor:pointer;white-space:nowrap"><input type="checkbox" class="fleet-profile-cb" value="cmmc"> CMMC 2.0</label>
+        <label style="display:flex;align-items:center;gap:4px;cursor:pointer;white-space:nowrap"><input type="checkbox" class="fleet-profile-cb" value="financial"> Financial</label>
+        <label style="display:flex;align-items:center;gap:4px;cursor:pointer;white-space:nowrap"><input type="checkbox" class="fleet-profile-cb" value="biotech"> Biotech</label>
+        <label style="display:flex;align-items:center;gap:4px;cursor:pointer;white-space:nowrap"><input type="checkbox" class="fleet-profile-cb" value="healthcare"> Healthcare</label>
+      </div>
       <button id="btn-set-profile" class="scan-btn" onclick="applyFleetProfile()"
               style="color:#7C3AED;border-color:#E5E7EB;font-size:12px">&#9881; Set Profile</button>
     </div>
@@ -5632,38 +5632,41 @@ async function renameDevice(did, current, iconEl) {{
 }}
 
 async function applyFleetProfile() {{
-  const profile = (document.getElementById('fleet-profile-sel') || {{}}).value || 'default';
-  const ids     = [..._selectedDevices];
-  const n       = ids.length;
-  const total   = _allDevices.length;
-  const scope   = n > 0
-    ? `${{n}} selected device${{n !== 1 ? 's' : ''}}`
-    : `all ${{total}} device${{total !== 1 ? 's' : ''}}`;
-  if (!confirm(`Set scan profile to "${{profile}}" for ${{scope}}?\n\nThis updates the agents’ default profile for future scheduled scans.`)) return;
-  const btn = document.getElementById('btn-set-profile');
+  const checked = [...document.querySelectorAll(‘.fleet-profile-cb:checked’)].map(cb => cb.value);
+  if (checked.length === 0) {{ alert(‘Select at least one profile.’); return; }}
+  const profiles = checked;
+  const ids      = [..._selectedDevices];
+  const n        = ids.length;
+  const total    = _allDevices.length;
+  const scope    = n > 0
+    ? `${{n}} selected device${{n !== 1 ? ‘s’ : ‘’}}`
+    : `all ${{total}} device${{total !== 1 ? ‘s’ : ‘’}}`;
+  const label    = profiles.join(‘, ‘);
+  if (!confirm(`Set scan profile(s) "${{label}}" for ${{scope}}?\n\nThis updates the agents’ default profile for future scheduled scans.`)) return;
+  const btn = document.getElementById(‘btn-set-profile’);
   btn.disabled = true;
   const orig = btn.textContent;
-  btn.textContent = 'Applying…';
+  btn.textContent = ‘Applying…’;
   try {{
-    const body = {{ profile }};
+    const body = {{ profiles }};
     if (n > 0) body.device_ids = ids;
-    const resp = await fetch('/api/fleet/set-profile', {{
-      method: 'POST',
-      headers: {{ 'Content-Type': 'application/json' }},
+    const resp = await fetch(‘/api/fleet/set-profile’, {{
+      method: ‘POST’,
+      headers: {{ ‘Content-Type’: ‘application/json’ }},
       body: JSON.stringify(body)
     }});
     const data = await resp.json();
     if (resp.ok) {{
-      btn.textContent = '✓ Done';
-      btn.style.color = '#16A34A';
+      btn.textContent = ‘✓ Done’;
+      btn.style.color = ‘#16A34A’;
       if (n > 0) clearSelection();
-      setTimeout(() => {{ btn.textContent = '⚙ Set Profile'; btn.style.color = '#7C3AED'; btn.disabled = false; }}, 2000);
+      setTimeout(() => {{ btn.textContent = ‘⚙ Set Profile’; btn.style.color = ‘#7C3AED’; btn.disabled = false; }}, 2000);
     }} else {{
-      alert('Error: ' + (data.error || resp.status));
+      alert(‘Error: ‘ + (data.error || resp.status));
       btn.textContent = orig; btn.disabled = false;
     }}
   }} catch(e) {{
-    alert('Network error: ' + e);
+    alert(‘Network error: ‘ + e);
     btn.textContent = orig; btn.disabled = false;
   }}
 }}
