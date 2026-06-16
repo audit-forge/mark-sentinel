@@ -1140,6 +1140,10 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         if not self._require_dashboard_auth():
             return
 
+        if path == '/dns-inventory':
+            self._serve_dns_inventory()
+            return
+
         static = {
             '/':               self._serve_fleet,
             '/dashboard':      self._serve_dashboard,
@@ -1289,6 +1293,8 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self._api_admin_create_customer()
         elif path.startswith('/api/admin/customers/'):
             self._api_admin_update_customer(path[len('/api/admin/customers/'):])
+        elif path == '/api/dns-inventory/analyze':
+            self._api_dns_inventory_analyze()
         elif path == '/api/probe-scan':
             self._api_probe_scan()
         elif path == '/probe':
@@ -2239,7 +2245,8 @@ class _Handler(http.server.BaseHTTPRequestHandler):
 
     def _api_fleet_set_profile(self):
         """POST /api/fleet/set-profile — push a set_config profile update to specific devices or all.
-        Body: {"device_ids": ["id1","id2"], "profile": "fedramp"}
+        Body: {"device_ids": ["id1","id2"], "profiles": ["fedramp","cmmc"]}
+        Accepts legacy singular "profile" field for backwards compatibility.
         If device_ids is absent or empty, applies to all known devices.
         """
         body = {}
@@ -2251,9 +2258,17 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             pass
 
         _VALID = {'default', 'fedramp', 'cmmc', 'financial', 'biotech', 'healthcare', 'lifesciences', 'owasp_agentic', 'eu_ai_act'}
-        profile = (body.get('profile') or 'default').strip()
-        if profile not in _VALID:
-            self._json({'error': f'invalid profile: {profile}'}, 400)
+
+        # Accept both "profiles" (array, new) and "profile" (string, legacy)
+        raw_profiles = body.get('profiles') or []
+        if not raw_profiles:
+            raw_profiles = [body.get('profile') or 'default']
+        profiles = [p.strip() for p in raw_profiles if p]
+        if not profiles:
+            profiles = ['default']
+        invalid = [p for p in profiles if p not in _VALID]
+        if invalid:
+            self._json({'error': f'invalid profile(s): {", ".join(invalid)}'}, 400)
             return
 
         store   = self._store()
@@ -2262,10 +2277,11 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         if fleet_wide:
             ids = [d['device_id'] for d in store.list_devices() if d.get('device_id')]
 
-        cmd_payload = json.dumps({'profile': profile})
         queued = []
         for did in ids:
-            store.enqueue_command(did, f'set_config:{cmd_payload}')
+            for profile in profiles:
+                cmd_payload = json.dumps({'profile': profile})
+                store.enqueue_command(did, f'set_config:{cmd_payload}')
             queued.append(did)
 
         me = self._session_user()
@@ -2274,10 +2290,10 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             store.log_action(
                 actor_id=me.get('user_id', me.get('id', '')), actor_name=me['email'], actor_role=me.get('role', ''),
                 action='fleet.set_profile', target='',
-                details=f'Set profile={profile} on {scope}',
+                details=f'Set profiles={profiles} on {scope}',
                 ip_address=self.client_address[0]
             )
-        self._json({'status': 'queued', 'profile': profile, 'device_count': len(queued)})
+        self._json({'status': 'queued', 'profiles': profiles, 'device_count': len(queued)})
 
     def _api_fleet_rename(self, device_id: str):
         """POST /api/fleet/rename/<device_id> — set a custom display name for a device.
@@ -3702,6 +3718,53 @@ function copyToken(token) {{
                 )
             self._json({'ok': ok})
 
+    def _serve_dns_inventory(self):
+        user = self._session_user()
+        email = user['email'] if user else ''
+        body = _dns_inventory_html(email).encode('utf-8')
+        self.send_response(200)
+        self.send_header('Content-Type', 'text/html; charset=utf-8')
+        self.send_header('Content-Length', len(body))
+        self.send_header('Cache-Control', 'no-store')
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _api_dns_inventory_analyze(self):
+        length = _content_length(self.headers)
+        if length > 10_000_000:
+            self._send(413, b'Log file too large (max 10 MB)', 'text/plain')
+            return
+        try:
+            body = json.loads(self.rfile.read(length)) if length else {}
+        except Exception:
+            self._send(400, b'Invalid JSON', 'text/plain')
+            return
+
+        log_text = str(body.get('log_text', '')).strip()
+        if not log_text:
+            self._json({'error': 'No log content provided.'}, 400)
+            return
+
+        approved_raw = str(body.get('approved_domains', ''))
+        approved = [d.strip() for d in approved_raw.replace(',', '\n').splitlines() if d.strip()] or None
+
+        try:
+            import sys as _sys, os as _os
+            _base = str(ROOT)
+            _cp = _os.path.join(_base, 'connectors')
+            if _cp not in _sys.path:
+                _sys.path.insert(0, _cp)
+            from dns_connector import connect as _dns_connect
+            result = _dns_connect(log_content=log_text, approved_domains=approved)
+        except ImportError:
+            self._json({'error': 'DNS connector not available on this server.'}, 500)
+            return
+        except Exception as _e:
+            self._json({'error': str(_e)}, 500)
+            return
+
+        self._json(result)
+
     def _serve_shortcut(self):
         url = f'http://localhost:{_serve_port}/fleet'
         if sys.platform == 'win32':
@@ -4707,6 +4770,8 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
       <button class="sb-item" id="nav-audit" onclick="navTo('audit')">&#128221; Audit Log</button>
       <button class="sb-item" id="nav-riskregister" onclick="navTo('riskregister')">&#128203; Risk Register</button>
       <button class="sb-item" id="nav-inventory" onclick="navTo('inventory')">&#128196; Asset Inventory</button>
+      <div class="sb-group">Tools</div>
+      <a class="sb-item" href="/dns-inventory" style="text-decoration:none;display:block">&#128202; AI Inventory</a>
       <div class="sb-group">Operations</div>
       <button class="sb-item" id="nav-schedules" onclick="navTo('schedules')">&#128337; Schedules</button>
       <button class="sb-item" id="nav-discovery" onclick="navTo('discovery')">&#128270; Discovery</button>
@@ -5606,7 +5671,7 @@ function _updateSelectionUI() {{
 }}
 
 async function renameDevice(did, current, iconEl) {{
-  const val = prompt('Display name for this device:\n(Leave blank to clear back to hostname)', current);
+  const val = prompt('Display name for this device:\\n(Leave blank to clear back to hostname)', current);
   if (val === null) return;
   try {{
     const resp = await fetch('/api/fleet/rename/' + encodeURIComponent(did), {{
@@ -5632,41 +5697,41 @@ async function renameDevice(did, current, iconEl) {{
 }}
 
 async function applyFleetProfile() {{
-  const checked = [...document.querySelectorAll(‘.fleet-profile-cb:checked’)].map(cb => cb.value);
-  if (checked.length === 0) {{ alert(‘Select at least one profile.’); return; }}
+  const checked = [...document.querySelectorAll('.fleet-profile-cb:checked')].map(cb => cb.value);
+  if (checked.length === 0) {{ alert('Select at least one profile.'); return; }}
   const profiles = checked;
   const ids      = [..._selectedDevices];
   const n        = ids.length;
   const total    = _allDevices.length;
   const scope    = n > 0
-    ? `${{n}} selected device${{n !== 1 ? ‘s’ : ‘’}}`
-    : `all ${{total}} device${{total !== 1 ? ‘s’ : ‘’}}`;
-  const label    = profiles.join(‘, ‘);
-  if (!confirm(`Set scan profile(s) "${{label}}" for ${{scope}}?\n\nThis updates the agents’ default profile for future scheduled scans.`)) return;
-  const btn = document.getElementById(‘btn-set-profile’);
+    ? `${{n}} selected device${{n !== 1 ? 's' : ''}}`
+    : `all ${{total}} device${{total !== 1 ? 's' : ''}}`;
+  const label    = profiles.join(', ');
+  if (!confirm(`Set scan profile(s) "${{label}}" for ${{scope}}?\n\nThis updates the agents' default profile for future scheduled scans.`)) return;
+  const btn = document.getElementById('btn-set-profile');
   btn.disabled = true;
   const orig = btn.textContent;
-  btn.textContent = ‘Applying…’;
+  btn.textContent = 'Applying…';
   try {{
     const body = {{ profiles }};
     if (n > 0) body.device_ids = ids;
-    const resp = await fetch(‘/api/fleet/set-profile’, {{
-      method: ‘POST’,
-      headers: {{ ‘Content-Type’: ‘application/json’ }},
+    const resp = await fetch('/api/fleet/set-profile', {{
+      method: 'POST',
+      headers: {{ 'Content-Type': 'application/json' }},
       body: JSON.stringify(body)
     }});
     const data = await resp.json();
     if (resp.ok) {{
-      btn.textContent = ‘✓ Done’;
-      btn.style.color = ‘#16A34A’;
+      btn.textContent = '✓ Done';
+      btn.style.color = '#16A34A';
       if (n > 0) clearSelection();
-      setTimeout(() => {{ btn.textContent = ‘⚙ Set Profile’; btn.style.color = ‘#7C3AED’; btn.disabled = false; }}, 2000);
+      setTimeout(() => {{ btn.textContent = '⚙ Set Profile'; btn.style.color = '#7C3AED'; btn.disabled = false; }}, 2000);
     }} else {{
-      alert(‘Error: ‘ + (data.error || resp.status));
+      alert('Error: ' + (data.error || resp.status));
       btn.textContent = orig; btn.disabled = false;
     }}
   }} catch(e) {{
-    alert(‘Network error: ‘ + e);
+    alert('Network error: ' + e);
     btn.textContent = orig; btn.disabled = false;
   }}
 }}
@@ -7579,3 +7644,212 @@ def main():
 
 if __name__ == '__main__':
     main()
+
+
+# ── DNS Inventory (added at module level so it's importable and testable) ──────
+
+def _dns_inventory_html(user_email: str = '') -> str:
+    return f'''<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>AI Inventory — Arckon</title>
+<style>
+*{{box-sizing:border-box;margin:0;padding:0}}
+body{{font-family:ui-sans-serif,system-ui,sans-serif;font-size:15px;background:#0d1117;color:#e6edf3;min-height:100vh;display:flex}}
+#sidebar{{width:220px;flex-shrink:0;background:#111827;border-right:1px solid rgba(255,255,255,0.06);display:flex;flex-direction:column;min-height:100vh}}
+.sb-logo{{padding:20px 16px 14px;border-bottom:1px solid rgba(255,255,255,0.07)}}
+.sb-logo-mark{{font-size:9px;letter-spacing:3px;color:#6366F1;font-weight:700;text-transform:uppercase}}
+.sb-logo-name{{font-size:15px;font-weight:800;color:#F9FAFB;letter-spacing:0.5px;margin-top:3px}}
+.sb-nav{{flex:1;padding:12px 8px}}
+.sb-group{{font-size:10px;font-weight:700;letter-spacing:.15em;text-transform:uppercase;color:#6B7280;padding:12px 10px 5px}}
+.sb-item{{display:block;padding:8px 10px;border-radius:6px;font-size:14px;color:#D1D5DB;text-decoration:none;margin-bottom:2px;border:none;background:none;cursor:pointer;width:100%;text-align:left;transition:background .12s}}
+.sb-item:hover,.sb-item.active{{background:rgba(255,255,255,0.06);color:#F9FAFB}}
+.sb-item.active{{background:#4F46E5;color:#fff}}
+.sb-footer{{padding:14px 16px;border-top:1px solid rgba(255,255,255,0.07);font-size:12px;color:#9CA3AF}}
+.sb-footer a{{color:#9CA3AF;text-decoration:none;display:block;margin-top:6px}}
+.sb-footer a:hover{{color:#F9FAFB}}
+#content{{flex:1;padding:36px 40px;max-width:1100px}}
+h1{{font-size:24px;font-weight:700;color:#F9FAFB;margin-bottom:6px}}
+.sub{{color:#6B7280;font-size:14px;margin-bottom:28px}}
+.card{{background:#161b22;border:1px solid #30363d;border-radius:8px;padding:24px 28px;margin-bottom:22px}}
+.card-title{{font-size:11px;font-weight:700;color:#6B7280;letter-spacing:.12em;text-transform:uppercase;margin-bottom:18px}}
+#drop-zone{{border:2px dashed #30363d;border-radius:8px;padding:40px;text-align:center;cursor:pointer;transition:border-color .15s,background .15s;background:#0d1117}}
+#drop-zone.drag-over{{border-color:#4F46E5;background:rgba(79,70,229,0.08)}}
+#drop-zone input[type=file]{{display:none}}
+textarea{{width:100%;font-family:monospace;font-size:13px;background:#0d1117;border:1px solid #30363d;border-radius:6px;padding:12px;resize:vertical;color:#e6edf3}}
+textarea:focus{{outline:none;border-color:#4F46E5}}
+label{{font-size:13px;color:#9CA3AF;font-weight:600;display:block;margin-bottom:6px;margin-top:14px}}
+.btn{{display:inline-block;padding:9px 20px;border-radius:6px;font-size:15px;font-family:inherit;cursor:pointer;border:none;font-weight:600;background:#4F46E5;color:#fff;transition:background .12s}}
+.btn:hover{{background:#4338CA}}
+.btn:disabled{{opacity:.5;cursor:default}}
+.spinner{{display:none;width:20px;height:20px;border:3px solid #30363d;border-top-color:#4F46E5;border-radius:50%;animation:spin .7s linear infinite}}
+@keyframes spin{{to{{transform:rotate(360deg)}}}}
+.err{{color:#f85149;font-size:14px}}
+table{{width:100%;border-collapse:collapse;font-size:14px}}
+th{{text-align:left;color:#6B7280;font-weight:600;padding:9px 12px;border-bottom:1px solid #30363d;font-size:12px;text-transform:uppercase;letter-spacing:.05em}}
+td{{padding:12px 12px;border-bottom:1px solid #21262d;color:#c9d1d9}}
+tr:hover td{{background:rgba(255,255,255,0.02)}}
+.badge{{font-size:11px;padding:2px 8px;border-radius:3px;font-weight:600;display:inline-block}}
+.r-high{{background:#3d1f1f;color:#f85149;border:1px solid #5e1f1f}}
+.r-medium{{background:#2d2a1a;color:#e3b341;border:1px solid #4a3f10}}
+.r-low{{background:#1a2d1a;color:#56d364;border:1px solid #1a4a1a}}
+.r-approved{{background:#1a1f3d;color:#79c0ff;border:1px solid #1a2a5e}}
+.cat{{font-size:11px;padding:2px 7px;border-radius:3px;background:#21262d;color:#8b949e;border:1px solid #30363d;font-weight:600;text-transform:uppercase;letter-spacing:.04em}}
+.gap-high{{border-left:3px solid #f85149;padding:12px 16px;background:#1a0f0f;border-radius:0 6px 6px 0;margin-bottom:10px}}
+.gap-medium{{border-left:3px solid #e3b341;padding:12px 16px;background:#1a180a;border-radius:0 6px 6px 0;margin-bottom:10px}}
+.gap-low{{border-left:3px solid #6B7280;padding:12px 16px;background:#161b22;border-radius:0 6px 6px 0;margin-bottom:10px}}
+.gap-t{{font-weight:700;font-size:14px;color:#e6edf3;margin-bottom:4px}}
+.gap-d{{font-size:13px;color:#8b949e;margin-bottom:4px}}
+.gap-r{{font-size:12px;color:#6B7280}}
+.stat-row{{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:14px;margin-bottom:22px}}
+.scard{{background:#161b22;border:1px solid #30363d;border-radius:8px;padding:18px 20px}}
+.scard-n{{font-size:30px;font-weight:700;line-height:1}}
+.scard-l{{font-size:13px;color:#6B7280;margin-top:5px}}
+.mono{{font-family:monospace;font-size:13px}}
+#results{{display:none}}
+</style>
+</head>
+<body>
+<aside id="sidebar">
+  <div class="sb-logo">
+    <div class="sb-logo-mark">RiskRaven</div>
+    <div class="sb-logo-name">ARCKON</div>
+  </div>
+  <nav class="sb-nav">
+    <div class="sb-group">Overview</div>
+    <a class="sb-item" href="/">&#8962; Home</a>
+    <div class="sb-group">Tools</div>
+    <a class="sb-item active" href="/dns-inventory">&#128202; AI Inventory</a>
+    <div class="sb-group">Security</div>
+    <a class="sb-item" href="/#alerts">&#128276; Alerts</a>
+    <a class="sb-item" href="/#audit">&#128221; Audit Log</a>
+  </nav>
+  <div class="sb-footer">
+    <span>{user_email}</span>
+    <a href="/academy" target="_blank">Academy</a>
+    <a href="/logout" style="color:#ef4444">&#x2192; Sign Out</a>
+  </div>
+</aside>
+
+<div id="content">
+  <h1>AI Inventory</h1>
+  <p class="sub">Upload a DNS log to see which AI services your organisation is using — no agent required.</p>
+
+  <div class="card">
+    <div class="card-title">Upload DNS Log</div>
+    <div id="drop-zone" onclick="document.getElementById('file-input').click()">
+      <input type="file" id="file-input" accept=".log,.txt,.csv">
+      <div style="font-size:30px;margin-bottom:8px">&#128196;</div>
+      <div style="font-weight:600;color:#c9d1d9">Drop a DNS log file here, or click to browse</div>
+      <div style="font-size:13px;color:#6B7280;margin-top:6px">Pi-hole &bull; BIND &bull; Unbound &bull; Cisco Umbrella CSV &bull; Windows DNS &bull; plain domain list</div>
+      <div id="file-name" style="margin-top:10px;font-size:13px;color:#79c0ff;font-weight:600"></div>
+    </div>
+
+    <div style="text-align:center;color:#6B7280;font-size:13px;margin:14px 0">— or paste log text —</div>
+    <textarea id="log-text" rows="6" placeholder="Paste DNS log content here..."></textarea>
+
+    <label>Approved AI domains (optional — one per line or comma-separated)</label>
+    <textarea id="approved" rows="3" placeholder="e.g. copilot.microsoft.com&#10;api.openai.com"></textarea>
+    <div style="font-size:12px;color:#6B7280;margin-top:5px">Leave blank to skip shadow AI detection.</div>
+
+    <div style="margin-top:20px;display:flex;align-items:center;gap:14px">
+      <button class="btn" id="btn" onclick="run()">Analyse Log</button>
+      <div class="spinner" id="spin"></div>
+      <span class="err" id="err"></span>
+    </div>
+  </div>
+
+  <div id="results">
+    <div class="stat-row" id="stats"></div>
+    <div id="gaps-wrap" style="display:none" class="card">
+      <div class="card-title">Policy Gaps</div>
+      <div id="gaps"></div>
+    </div>
+    <div class="card">
+      <div class="card-title">AI Services Detected</div>
+      <div id="svc-empty" class="mono" style="display:none;color:#6B7280;padding:20px 0">No recognised AI services found in this log.</div>
+      <table id="svc-table" style="display:none">
+        <thead><tr><th>Service</th><th>Vendor</th><th>Category</th><th>Risk</th><th>Queries</th><th>Devices</th></tr></thead>
+        <tbody id="svc-body"></tbody>
+      </table>
+    </div>
+    <div id="src-wrap" class="card" style="display:none">
+      <div class="card-title">Activity by Device</div>
+      <table><thead><tr><th>IP / Device</th><th>AI Services</th><th>Count</th></tr></thead>
+      <tbody id="src-body"></tbody></table>
+    </div>
+  </div>
+</div>
+
+<script>
+var _fc = null;
+var dz = document.getElementById('drop-zone');
+dz.addEventListener('dragover', function(e){{ e.preventDefault(); dz.classList.add('drag-over'); }});
+dz.addEventListener('dragleave', function(){{ dz.classList.remove('drag-over'); }});
+dz.addEventListener('drop', function(e){{ e.preventDefault(); dz.classList.remove('drag-over'); if(e.dataTransfer.files[0]) load(e.dataTransfer.files[0]); }});
+document.getElementById('file-input').addEventListener('change', function(){{ if(this.files[0]) load(this.files[0]); }});
+function load(f){{ document.getElementById('file-name').textContent = f.name; var r=new FileReader(); r.onload=function(e){{_fc=e.target.result;}}; r.readAsText(f); }}
+
+function run(){{
+  var txt = _fc || document.getElementById('log-text').value.trim();
+  if(!txt){{ setErr('Please upload a file or paste log content.'); return; }}
+  setErr('');
+  setLoad(true);
+  fetch('/api/dns-inventory/analyze', {{
+    method:'POST',
+    headers:{{'Content-Type':'application/json'}},
+    body: JSON.stringify({{log_text: txt, approved_domains: document.getElementById('approved').value}})
+  }}).then(function(r){{return r.json();}}).then(function(d){{
+    setLoad(false);
+    if(d.error){{ setErr(d.error); return; }}
+    render(d);
+  }}).catch(function(e){{setLoad(false);setErr('Request failed: '+e);}});
+}}
+
+function render(d){{
+  document.getElementById('results').style.display='';
+  var hasShadow = d.shadow_ai && d.shadow_ai.length;
+  document.getElementById('stats').innerHTML=[
+    sc(d.ai_queries,'AI Queries','#79c0ff'),
+    sc(d.services.length,'Services Found','#e6edf3'),
+    sc(d.unique_sources.length,'Devices','#e6edf3'),
+    hasShadow ? sc(d.shadow_ai.length,'Shadow AI','#f85149') : sc(d.total_queries,'Total Queries','#6B7280'),
+  ].join('');
+  if(d.policy_gaps&&d.policy_gaps.length){{
+    document.getElementById('gaps-wrap').style.display='';
+    document.getElementById('gaps').innerHTML=d.policy_gaps.map(function(g){{
+      return '<div class="gap-'+g.severity+'"><div class="gap-t">'+x(g.title)+'</div><div class="gap-d">'+x(g.detail)+'</div><div class="gap-r">&#128736; '+x(g.remediation)+'</div></div>';
+    }}).join('');
+  }}
+  if(d.services&&d.services.length){{
+    document.getElementById('svc-table').style.display='';
+    document.getElementById('svc-empty').style.display='none';
+    document.getElementById('svc-body').innerHTML=d.services.map(function(s){{
+      var rc = s.approved===true?'r-approved':'r-'+s.risk;
+      var rl = s.approved===true?'&#10003; approved':s.risk;
+      return '<tr><td><strong>'+x(s.product)+'</strong><br><span style="font-size:12px;color:#6B7280">'+x(s.domain)+'</span></td><td>'+x(s.vendor)+'</td><td><span class="cat">'+x(s.category)+'</span></td><td><span class="badge '+rc+'">'+rl+'</span></td><td style="font-weight:600">'+s.query_count+'</td><td style="color:#6B7280">'+s.unique_sources.length+'</td></tr>';
+    }}).join('');
+  }} else {{
+    document.getElementById('svc-table').style.display='none';
+    document.getElementById('svc-empty').style.display='';
+  }}
+  var bs=d.by_source||{{}}, bk=Object.keys(bs);
+  if(bk.length){{
+    document.getElementById('src-wrap').style.display='';
+    document.getElementById('src-body').innerHTML=bk.map(function(ip){{
+      var sv=bs[ip];
+      return '<tr><td class="mono">'+x(ip)+'</td><td style="font-size:13px">'+sv.map(function(s){{return '<span class="cat" style="margin-right:4px">'+x(s)+'</span>';}}).join('')+'</td><td style="font-weight:600">'+sv.length+'</td></tr>';
+    }}).join('');
+  }}
+  document.getElementById('results').scrollIntoView({{behavior:'smooth'}});
+}}
+
+function sc(n,l,c){{return '<div class="scard"><div class="scard-n" style="color:'+c+'">'+n+'</div><div class="scard-l">'+l+'</div></div>';}}
+function x(s){{var d=document.createElement('div');d.textContent=String(s||'');return d.innerHTML;}}
+function setErr(m){{document.getElementById('err').textContent=m;}}
+function setLoad(on){{document.getElementById('btn').disabled=on;document.getElementById('spin').style.display=on?'inline-block':'none';}}
+</script>
+</body>
+</html>'''
