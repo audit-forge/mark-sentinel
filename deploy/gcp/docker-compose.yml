@@ -1,28 +1,29 @@
 services:
   nginx:
     image: nginx:alpine
-    container_name: sentinel-nginx
+    container_name: arckon-nginx
     ports:
       - "80:80"
       - "7001-7100:7001-7100"
     volumes:
       - ./nginx:/etc/nginx/conf.d:ro
     networks:
-      - sentinel-net
+      - arckon-net
     restart: always
     depends_on:
       - user-manager
 
   user-manager:
     build:
-      context: ../../admin
-    container_name: sentinel-admin
+      context: ../..
+      dockerfile: admin/Dockerfile
+    container_name: arckon-admin
     environment:
       - SECRET_KEY_FILE=/run/secrets/secret_key
       - ADMIN_EMAIL=${ADMIN_EMAIL}
       - ADMIN_PASSWORD=${ADMIN_PASSWORD}
       - PUBLIC_IP=${PUBLIC_IP}
-      - DB_PATH=/data/sentinel.db
+      - DB_PATH=/data/arckon.db
       - MAX_CUSTOMERS=${MAX_CUSTOMERS:-0}
       - LICENSES_DIR=/licenses
       - SMTP_HOST=${SMTP_HOST:-}
@@ -33,8 +34,8 @@ services:
       - ALERT_TO=${ALERT_TO:-}
       - MONITOR_INTERVAL_H=${MONITOR_INTERVAL_H:-24}
     volumes:
-      - /opt/sentinel-data:/data
-      - /opt/sentinel-secrets/admin-secret-key:/run/secrets/secret_key:ro
+      - /opt/arckon-data:/data
+      - /opt/arckon-secrets/admin-secret-key:/run/secrets/secret_key:ro
       - /opt/licenses:/licenses
       - /var/run/docker.sock:/var/run/docker.sock
       - ./provision_customer.sh:/app/provision_customer.sh:ro
@@ -42,23 +43,23 @@ services:
       - ./restart_customer.sh:/app/restart_customer.sh:ro
       - ./nginx:/app/nginx
     networks:
-      - sentinel-net
+      - arckon-net
     restart: always
 
   deployer:
     build:
       context: ./deployer
-    container_name: sentinel-deployer
+    container_name: arckon-deployer
     environment:
-      - REPO_DIR=${REPO_DIR:-/opt/sentinel}
+      - REPO_DIR=${REPO_DIR:-/opt/arckon}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-      - ${REPO_DIR:-/opt/sentinel}:${REPO_DIR:-/opt/sentinel}
+      - ${REPO_DIR:-/opt/arckon}:${REPO_DIR:-/opt/arckon}
     networks:
-      - sentinel-net
+      - arckon-net
     restart: always
 
 networks:
-  sentinel-net:
-    name: sentinel-net
+  arckon-net:
+    name: arckon-net
     driver: bridge

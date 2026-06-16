@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>M.A.R.K. Sentinel — Admin</title>
+<title>Arckon by RiskRaven — Admin</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:ui-sans-serif,system-ui,sans-serif,"Apple Color Emoji","Segoe UI Emoji";font-size:15px;background:#F9FAFB;color:#111827;min-height:100vh}
@@ -66,8 +66,8 @@ input:focus,select:focus{outline:none;border-color:#4F46E5;box-shadow:0 0 0 3px 
 <div id="layout">
   <aside id="sidebar">
     <div class="sb-brand">
-      <div class="sb-mark">M.A.R.K.</div>
-      <div class="sb-name">SENTINEL</div>
+      <div class="sb-mark">RiskRaven</div>
+      <div class="sb-name">ARCKON</div>
     </div>
     <div class="sb-nav">
       <div class="sb-section">Main</div>
@@ -77,6 +77,8 @@ input:focus,select:focus{outline:none;border-color:#4F46E5;box-shadow:0 0 0 3px 
       <a href="/audit-log" class="sb-link" id="nav-audit">Audit Log</a>
       {% endif %}
       <a href="/users" class="sb-link" id="nav-users">Users</a>
+      <div class="sb-section" style="margin-top:8px">Tools</div>
+      <a href="/dns-inventory" class="sb-link" id="nav-dns">AI Inventory</a>
       <div class="sb-section" style="margin-top:8px">Account</div>
       <a href="/account" class="sb-link" id="nav-account">Account Settings</a>
     </div>
@@ -98,11 +100,12 @@ input:focus,select:focus{outline:none;border-color:#4F46E5;box-shadow:0 0 0 3px 
   (function() {
     var path = location.pathname;
     var map = {
-      '/dashboard': 'nav-dashboard',
-      '/customers': 'nav-customers',
-      '/audit-log': 'nav-audit',
-      '/users':     'nav-users',
-      '/account':   'nav-account',
+      '/dashboard':     'nav-dashboard',
+      '/customers':     'nav-customers',
+      '/audit-log':     'nav-audit',
+      '/users':         'nav-users',
+      '/account':       'nav-account',
+      '/dns-inventory': 'nav-dns',
     };
     Object.keys(map).forEach(function(p) {
       if (path === p || path.startsWith(p + '/')) {

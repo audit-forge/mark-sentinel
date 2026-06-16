@@ -1284,6 +1284,57 @@ async def api_remove_user(request: Request, user_id: str):
     return JSONResponse({"ok": True})
 
 
+# ── DNS Inventory ─────────────────────────────────────────────────────────────
+
+@app.get("/dns-inventory", response_class=HTMLResponse)
+async def dns_inventory_page(request: Request):
+    try:
+        user = get_current_user(request)
+    except HTTPException:
+        return RedirectResponse("/login")
+    return templates.TemplateResponse("dns_inventory.html", {"request": request, "user": user})
+
+
+@app.post("/dns-inventory/analyze")
+async def dns_inventory_analyze(request: Request):
+    from fastapi.responses import JSONResponse
+    try:
+        user = get_current_user(request)
+    except HTTPException:
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+
+    import sys, os
+    _base = os.path.dirname(os.path.abspath(__file__))
+    for _p in [os.path.join(_base, "connectors"), os.path.join(_base, "..", "connectors")]:
+        if os.path.isfile(os.path.join(_p, "dns_connector.py")) and _p not in sys.path:
+            sys.path.insert(0, _p)
+            break
+    try:
+        from dns_connector import connect as dns_connect
+    except ImportError as e:
+        return JSONResponse({"error": f"DNS connector not available: {e}"}, status_code=500)
+
+    form = await request.form()
+    log_content = ""
+
+    # Accept either a file upload or pasted text
+    upload = form.get("log_file")
+    if upload and hasattr(upload, "read"):
+        raw = await upload.read()
+        log_content = raw.decode("utf-8", errors="replace")
+    else:
+        log_content = form.get("log_text", "")
+
+    if not log_content or not log_content.strip():
+        return JSONResponse({"error": "No log content provided."}, status_code=400)
+
+    approved_raw = form.get("approved_domains", "")
+    approved = [d.strip() for d in approved_raw.replace(",", "\n").splitlines() if d.strip()] or None
+
+    result = dns_connect(log_content=log_content, approved_domains=approved)
+    return JSONResponse(result)
+
+
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _generate_temp_password(length: int = 14) -> str:
