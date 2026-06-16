@@ -40,7 +40,8 @@ def _record_failed_login(ip: str) -> None:
 ADMIN_EMAIL    = os.environ.get("ADMIN_EMAIL", "admin@arckon.local")
 MAX_CUSTOMERS  = int(os.environ.get("MAX_CUSTOMERS", "0"))  # 0 = unlimited
 ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "changeme")
-PUBLIC_IP = os.environ.get("PUBLIC_IP", "35.255.19.236")
+PUBLIC_IP  = os.environ.get("PUBLIC_IP", "35.255.19.236")
+ADMIN_HOST = os.environ.get("ADMIN_HOST") or f"admin.{PUBLIC_IP}.nip.io"
 
 
 @app.on_event("startup")
@@ -862,7 +863,7 @@ async def forgot_password_submit(request: Request, email: str = Form(...)):
                 "INSERT INTO password_resets (id, user_id, token, expires_at) VALUES (?,?,?,?)",
                 (str(uuid.uuid4()), row["id"], token, expires)
             )
-            reset_url = f"http://{PUBLIC_IP}/reset-password?token={token}"
+            reset_url = f"http://{ADMIN_HOST}/reset-password?token={token}"
             from mailer import send_password_reset_email
             send_password_reset_email(addr, reset_url)
             log_audit(
