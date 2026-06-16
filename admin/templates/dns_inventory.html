@@ -1,0 +1,227 @@
+{% extends "base.html" %}
+{% block content %}
+<style>
+#drop-zone{border:2px dashed #D1D5DB;border-radius:8px;padding:40px;text-align:center;cursor:pointer;transition:border-color .15s,background .15s;background:#fff}
+#drop-zone.drag-over{border-color:#4F46E5;background:#EEF2FF}
+#drop-zone input[type=file]{display:none}
+.risk-high{background:#FEE2E2;color:#DC2626;border:1px solid #FECACA}
+.risk-medium{background:#FEF9C3;color:#CA8A04;border:1px solid #FDE047}
+.risk-low{background:#DCFCE7;color:#16A34A;border:1px solid #BBF7D0}
+.risk-approved{background:#EEF2FF;color:#4F46E5;border:1px solid #C7D2FE}
+.gap-high{border-left:4px solid #DC2626;padding:12px 16px;background:#FEF2F2;border-radius:0 6px 6px 0;margin-bottom:10px}
+.gap-medium{border-left:4px solid #CA8A04;padding:12px 16px;background:#FFFBEB;border-radius:0 6px 6px 0;margin-bottom:10px}
+.gap-low{border-left:4px solid #9CA3AF;padding:12px 16px;background:#F9FAFB;border-radius:0 6px 6px 0;margin-bottom:10px}
+.gap-title{font-weight:700;font-size:14px;margin-bottom:4px}
+.gap-detail{font-size:13px;color:#374151;margin-bottom:4px}
+.gap-fix{font-size:12px;color:#6B7280}
+#results{display:none}
+.spinner{display:none;width:20px;height:20px;border:3px solid #E5E7EB;border-top-color:#4F46E5;border-radius:50%;animation:spin .7s linear infinite;margin:0 auto}
+@keyframes spin{to{transform:rotate(360deg)}}
+.source-ip{font-family:monospace;font-size:13px}
+.cat-badge{font-size:11px;padding:2px 8px;border-radius:3px;background:#F3F4F6;color:#374151;border:1px solid #E5E7EB;font-weight:600;text-transform:uppercase;letter-spacing:.05em}
+</style>
+
+<h1>AI Inventory — DNS Log Scan</h1>
+<p style="color:#6B7280;margin-top:-16px;margin-bottom:28px;font-size:14px">
+  Upload or paste a DNS query log to see your organisation's AI footprint — no agent required.
+</p>
+
+<div class="card">
+  <div class="card-title">Upload DNS Log</div>
+
+  <div id="drop-zone" onclick="document.getElementById('file-input').click()">
+    <input type="file" id="file-input" accept=".log,.txt,.csv">
+    <div style="font-size:32px;margin-bottom:8px">&#128196;</div>
+    <div style="font-weight:600;color:#374151">Drop a DNS log file here, or click to browse</div>
+    <div style="font-size:13px;color:#9CA3AF;margin-top:6px">Pi-hole &bull; BIND &bull; Unbound &bull; Cisco Umbrella CSV &bull; Windows DNS Server &bull; plain domain list</div>
+    <div id="file-name" style="margin-top:10px;font-size:13px;color:#4F46E5;font-weight:600"></div>
+  </div>
+
+  <div style="text-align:center;color:#9CA3AF;font-size:13px;margin:16px 0">— or paste log text directly —</div>
+
+  <textarea id="log-text" rows="6" placeholder="Paste DNS log content here..." style="width:100%;font-family:monospace;font-size:13px;background:#F9FAFB;border:1px solid #D1D5DB;border-radius:6px;padding:12px;resize:vertical;color:#111827"></textarea>
+
+  <div style="margin-top:16px">
+    <label style="font-size:13px;color:#374151;font-weight:600">Approved AI domains (optional — one per line or comma-separated)</label>
+    <textarea id="approved-domains" rows="3" placeholder="e.g. copilot.microsoft.com&#10;api.openai.com" style="width:100%;font-family:monospace;font-size:13px;background:#F9FAFB;border:1px solid #D1D5DB;border-radius:6px;padding:12px;resize:vertical;color:#111827;margin-top:6px"></textarea>
+    <div style="font-size:12px;color:#9CA3AF;margin-top:4px">Leave blank to skip shadow AI detection. When filled, any AI service not listed is flagged as shadow AI.</div>
+  </div>
+
+  <div style="margin-top:20px;display:flex;align-items:center;gap:16px">
+    <button class="btn btn-primary" onclick="runAnalysis()" id="analyze-btn">Analyse Log</button>
+    <div class="spinner" id="spinner"></div>
+    <div id="error-msg" style="color:#DC2626;font-size:14px"></div>
+  </div>
+</div>
+
+<!-- Results -->
+<div id="results">
+
+  <!-- Summary stats -->
+  <div class="grid-stats" id="stats-grid" style="grid-template-columns:repeat(auto-fit,minmax(160px,1fr))"></div>
+
+  <!-- Policy gaps -->
+  <div id="gaps-section" style="display:none">
+    <div class="card">
+      <div class="card-title">Policy Gaps</div>
+      <div id="gaps-list"></div>
+    </div>
+  </div>
+
+  <!-- Services table -->
+  <div class="card">
+    <div class="card-title">AI Services Detected</div>
+    <div id="services-empty" class="empty" style="display:none">No recognised AI services found in this log.</div>
+    <table id="services-table" style="display:none">
+      <thead>
+        <tr>
+          <th>Service</th>
+          <th>Vendor</th>
+          <th>Category</th>
+          <th>Risk</th>
+          <th>Queries</th>
+          <th>Devices</th>
+          <th>Last Seen</th>
+        </tr>
+      </thead>
+      <tbody id="services-tbody"></tbody>
+    </table>
+  </div>
+
+  <!-- Per-device breakdown -->
+  <div id="sources-section" class="card" style="display:none">
+    <div class="card-title">Activity by Device / User</div>
+    <table>
+      <thead>
+        <tr>
+          <th>IP / Device</th>
+          <th>AI Services Used</th>
+          <th>Count</th>
+        </tr>
+      </thead>
+      <tbody id="sources-tbody"></tbody>
+    </table>
+  </div>
+
+</div>
+
+<script>
+var _fileContent = null;
+
+var dz = document.getElementById('drop-zone');
+dz.addEventListener('dragover', function(e){ e.preventDefault(); dz.classList.add('drag-over'); });
+dz.addEventListener('dragleave', function(){ dz.classList.remove('drag-over'); });
+dz.addEventListener('drop', function(e){
+  e.preventDefault(); dz.classList.remove('drag-over');
+  var f = e.dataTransfer.files[0];
+  if(f) loadFile(f);
+});
+document.getElementById('file-input').addEventListener('change', function(){
+  if(this.files[0]) loadFile(this.files[0]);
+});
+
+function loadFile(f){
+  document.getElementById('file-name').textContent = f.name;
+  var reader = new FileReader();
+  reader.onload = function(e){ _fileContent = e.target.result; };
+  reader.readAsText(f);
+}
+
+function runAnalysis(){
+  var logText = _fileContent || document.getElementById('log-text').value.trim();
+  if(!logText){ showError('Please upload a file or paste log content.'); return; }
+  clearError();
+  setLoading(true);
+
+  var fd = new FormData();
+  fd.append('log_text', logText);
+  fd.append('approved_domains', document.getElementById('approved-domains').value);
+
+  fetch('/dns-inventory/analyze', { method:'POST', body: fd })
+    .then(function(r){ return r.json(); })
+    .then(function(data){
+      setLoading(false);
+      if(data.error){ showError(data.error); return; }
+      renderResults(data);
+    })
+    .catch(function(err){ setLoading(false); showError('Request failed: ' + err); });
+}
+
+function renderResults(d){
+  document.getElementById('results').style.display = '';
+
+  // Stats
+  var hasShadow = d.shadow_ai && d.shadow_ai.length > 0;
+  var statsHtml = [
+    stat(d.ai_queries, 'AI Queries', '#4F46E5'),
+    stat(d.services.length, 'Services Found', '#111827'),
+    stat(d.unique_sources.length, 'Devices / Users', '#111827'),
+    hasShadow ? stat(d.shadow_ai.length, 'Shadow AI', '#DC2626') : stat(d.total_queries, 'Total Queries', '#6B7280'),
+  ].join('');
+  document.getElementById('stats-grid').innerHTML = statsHtml;
+
+  // Policy gaps
+  if(d.policy_gaps && d.policy_gaps.length){
+    document.getElementById('gaps-section').style.display = '';
+    document.getElementById('gaps-list').innerHTML = d.policy_gaps.map(function(g){
+      return '<div class="gap-' + g.severity + '">' +
+        '<div class="gap-title">' + esc(g.title) + '</div>' +
+        '<div class="gap-detail">' + esc(g.detail) + '</div>' +
+        '<div class="gap-fix">&#128736; ' + esc(g.remediation) + '</div></div>';
+    }).join('');
+  }
+
+  // Services table
+  if(d.services && d.services.length){
+    document.getElementById('services-table').style.display = '';
+    document.getElementById('services-empty').style.display = 'none';
+    document.getElementById('services-tbody').innerHTML = d.services.map(function(s){
+      var riskClass = 'risk-' + (s.approved === true ? 'approved' : s.risk);
+      var riskLabel = s.approved === true ? '&#10003; approved' : s.risk;
+      var lastSeen = s.last_seen || '—';
+      return '<tr>' +
+        '<td><strong>' + esc(s.product) + '</strong><br><span style="font-size:12px;color:#9CA3AF">' + esc(s.domain) + '</span></td>' +
+        '<td>' + esc(s.vendor) + '</td>' +
+        '<td><span class="cat-badge">' + esc(s.category) + '</span></td>' +
+        '<td><span class="badge ' + riskClass + '">' + riskLabel + '</span></td>' +
+        '<td style="font-weight:600">' + s.query_count + '</td>' +
+        '<td style="font-size:13px;color:#6B7280">' + s.unique_sources.length + '</td>' +
+        '<td style="font-size:13px;color:#9CA3AF">' + esc(lastSeen) + '</td>' +
+        '</tr>';
+    }).join('');
+  } else {
+    document.getElementById('services-table').style.display = 'none';
+    document.getElementById('services-empty').style.display = '';
+  }
+
+  // By-source
+  var bySource = d.by_source || {};
+  var srcKeys = Object.keys(bySource);
+  if(srcKeys.length){
+    document.getElementById('sources-section').style.display = '';
+    document.getElementById('sources-tbody').innerHTML = srcKeys.map(function(ip){
+      var svcs = bySource[ip];
+      return '<tr>' +
+        '<td class="source-ip">' + esc(ip) + '</td>' +
+        '<td style="font-size:13px">' + svcs.map(function(s){ return '<span class="cat-badge" style="margin-right:4px">' + esc(s) + '</span>'; }).join('') + '</td>' +
+        '<td style="font-weight:600">' + svcs.length + '</td>' +
+        '</tr>';
+    }).join('');
+  }
+
+  document.getElementById('results').scrollIntoView({ behavior: 'smooth' });
+}
+
+function stat(n, label, color){
+  return '<div class="stat-card"><div class="stat-num" style="color:' + color + '">' + n + '</div><div class="stat-label">' + label + '</div></div>';
+}
+
+function esc(s){ var d=document.createElement('div'); d.textContent=String(s||''); return d.innerHTML; }
+function showError(msg){ document.getElementById('error-msg').textContent = msg; }
+function clearError(){ document.getElementById('error-msg').textContent = ''; }
+function setLoading(on){
+  document.getElementById('analyze-btn').disabled = on;
+  document.getElementById('spinner').style.display = on ? 'block' : 'none';
+}
+</script>
+{% endblock %}

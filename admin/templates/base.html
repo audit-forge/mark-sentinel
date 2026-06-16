@@ -76,6 +76,8 @@ input:focus,select:focus{outline:none;border-color:#4F46E5;box-shadow:0 0 0 3px 
       <a href="/customers" class="sb-link" id="nav-customers">Customers</a>
       {% endif %}
       <a href="/users" class="sb-link" id="nav-users">Users</a>
+      <div class="sb-section" style="margin-top:8px">Tools</div>
+      <a href="/dns-inventory" class="sb-link" id="nav-dns">AI Inventory</a>
       <div class="sb-section" style="margin-top:8px">Account</div>
       <a href="/account" class="sb-link" id="nav-account">Account Settings</a>
     </div>
@@ -101,6 +103,7 @@ input:focus,select:focus{outline:none;border-color:#4F46E5;box-shadow:0 0 0 3px 
       '/customers': 'nav-customers',
       '/users':     'nav-users',
       '/account':   'nav-account',
+      '/dns-inventory': 'nav-dns',
     };
     Object.keys(map).forEach(function(p) {
       if (path === p || path.startsWith(p + '/')) {
