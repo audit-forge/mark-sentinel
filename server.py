@@ -670,7 +670,8 @@ def _build_fleet_report_html(devices: list, tier: str, profile: str = '', profil
     active_profiles = profiles or ([profile] if profile else [])
 
     _rpt_profiles = [('default', 'Base Scan'), ('fedramp', 'FedRAMP'), ('cmmc', 'CMMC 2.0'),
-                     ('financial', 'Financial'), ('biotech', 'Biotech'), ('healthcare', 'Healthcare')]
+                     ('financial', 'Financial'), ('biotech', 'Biotech'), ('healthcare', 'Healthcare'),
+                     ('professional_services', 'Professional Services')]
     _toolbar_cbs = ' '.join(
         f'<label style="font-size:12px;color:#c9d1d9;white-space:nowrap;cursor:pointer">'
         f'<input type="checkbox" class="rpt-cb" value="{v}"{" checked" if v in active_profiles else ""}> {lbl}</label>'
@@ -2027,7 +2028,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             pass
 
         profiles = [p.strip() for p in (body.get('profiles') or []) if p.strip()]
-        _VALID = {'default', 'fedramp', 'cmmc', 'financial'}
+        _VALID = {'default', 'fedramp', 'cmmc', 'financial', 'professional_services'}
         profiles = [p for p in profiles if p in _VALID]
 
         if profiles:
@@ -2051,7 +2052,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         except Exception:
             pass
 
-        _VALID = {'default', 'fedramp', 'cmmc', 'financial'}
+        _VALID = {'default', 'fedramp', 'cmmc', 'financial', 'professional_services'}
         profiles = [p for p in (body.get('profiles') or []) if p in _VALID]
         stagger  = body.get('stagger', 'normal')
 
@@ -2467,7 +2468,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             status_filter = ''
         if sev_filter not in ('ch', 'med', 'li', ''):
             sev_filter = ''
-        _VALID_PROFILES = {'default', 'fedramp', 'cmmc', 'financial', 'biotech', 'healthcare', 'lifesciences', 'owasp_agentic', 'eu_ai_act'}
+        _VALID_PROFILES = {'default', 'fedramp', 'cmmc', 'financial', 'biotech', 'healthcare', 'lifesciences', 'owasp_agentic', 'eu_ai_act', 'professional_services'}
         profiles = [p for p in profile_raw.split(',') if p in _VALID_PROFILES]
         profile  = ','.join(profiles)
         try:
@@ -2531,7 +2532,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         qs = parse_qs(_up(self.path).query)
         profile_raw = (qs.get('profile', [''])[0]).lower().strip()
         _VALID = {'default', 'fedramp', 'cmmc', 'financial', 'biotech', 'healthcare',
-                  'lifesciences', 'owasp_agentic', 'eu_ai_act'}
+                  'lifesciences', 'owasp_agentic', 'eu_ai_act', 'professional_services'}
         profiles = [p for p in profile_raw.split(',') if p in _VALID]
         try:
             store = self._store()

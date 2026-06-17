@@ -1,0 +1,11 @@
+{
+  "name": "Professional Services",
+  "description": "AI governance and security assessment for professional services firms — aligned to NIST AI RMF 1.0, ISO/IEC 42001, and AICPA Trust Services Criteria. Emphasizes governance documentation, client data protection, shadow AI discovery, and human oversight controls.",
+  "checks": "all",
+  "default_output": "plain",
+  "include_remediation": true,
+  "include_frameworks": true,
+  "severity_threshold": "LOW",
+  "smb_language": false,
+  "framework_emphasis": "professional_services"
+}
