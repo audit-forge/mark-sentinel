@@ -58,6 +58,35 @@ def _ensure_super_admin():
             )
 
 
+def _get_shadow_ai_devices(customer_id: str) -> list[dict]:
+    """Query the Sentinel app database for detected shadow AI devices."""
+    try:
+        cmd = [
+            "sudo", "docker", "exec", "sentinel-mfdynamicsllc", "python3", "-c",
+            f"""
+import sqlite3
+import json
+try:
+    db = sqlite3.connect('/app/data/customers/{customer_id}/agents.db')
+    db.row_factory = sqlite3.Row
+    rows = db.execute('SELECT reporter_hostname, host, service, models_json, source, last_seen FROM shadow_devices WHERE dismissed=0 ORDER BY last_seen DESC').fetchall()
+    devices = [dict(r) for r in rows]
+    print(json.dumps(devices))
+except Exception as e:
+    print(json.dumps([]))
+"""
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+        if result.returncode == 0:
+            import json
+            return json.loads(result.stdout.strip() or "[]")
+        else:
+            return []
+    except Exception as e:
+        print(f"Error in _get_shadow_ai_devices: {e}")
+        return []
+
+
 def _sentinel_url(customer_id: str | None) -> str:
     """Return the Sentinel dashboard URL for a given customer_id."""
     if not customer_id:
@@ -145,9 +174,9 @@ async def auth_verify(request: Request):
         row = conn.execute("SELECT email FROM users WHERE id=?", (user["sub"],)).fetchone()
     email = row["email"] if row else ""
     return Response(status_code=200, headers={
-        "X-Sentinel-User-Email":    email,
-        "X-Sentinel-User-Role":     user.get("role", ""),
-        "X-Sentinel-Customer-ID":   user.get("customer_id", ""),
+        "X-Sentinel-User-Email":    email or "",
+        "X-Sentinel-User-Role":     user.get("role") or "",
+        "X-Sentinel-Customer-ID":   user.get("customer_id") or "",
     })
 
 
@@ -185,7 +214,7 @@ async def dashboard(request: Request):
         "seats": seats,
         "overages": overages,
         "alerts": [dict(r) for r in alert_rows],
-    })
+        "shadow_ai_devices": _get_shadow_ai_devices(user["customer_id"]) if user.get("customer_id") else []})
 
 
 # ── Deploy ────────────────────────────────────────────────────────────────────
