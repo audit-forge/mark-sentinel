@@ -168,7 +168,7 @@ def check_deploy_001(ctx: ScanContext) -> CheckResult:
         ev += gi_issues
         return CheckResult(
             check_id="AI-DEPLOY-001",
-            title="API Keys Not Exposed",
+            title="API Keys Exposed in Source Files",
             status=FAIL,
             severity="CRITICAL",
             category=CATEGORY,
@@ -188,7 +188,7 @@ def check_deploy_001(ctx: ScanContext) -> CheckResult:
     elif gi_issues:
         return CheckResult(
             check_id="AI-DEPLOY-001",
-            title="API Keys Not Exposed",
+            title="API Key Exposure Risk — .gitignore Gap",
             status=WARN,
             severity="CRITICAL",
             category=CATEGORY,

@@ -1151,6 +1151,8 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self._api_risk_register()
         elif path == '/api/fleet/risk-register/csv':
             self._api_risk_register_csv()
+        elif path == '/api/fleet/risk-register/overrides':
+            self._api_rr_overrides_list()
         elif path == '/api/fleet/inventory':
             self._api_inventory()
         elif path.startswith('/api/fleet/inventory/history/'):
@@ -1279,6 +1281,11 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self._api_users_deactivate(path[len('/api/users/deactivate/'):])
         elif path.startswith('/api/users/password/'):
             self._api_users_password(path[len('/api/users/password/'):])
+        elif path == '/api/fleet/risk-register/override':
+            self._api_rr_override_set()
+        elif path.startswith('/api/fleet/risk-register/override/') and path.endswith('/delete'):
+            check_id = path[len('/api/fleet/risk-register/override/'):-len('/delete')]
+            self._api_rr_override_delete(check_id)
         else:
             self._not_found()
 
@@ -2701,12 +2708,15 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             buf = io.StringIO()
             writer = csv.writer(buf)
             writer.writerow(['Check ID', 'Severity', 'Title', 'Category', 'Status',
-                             'Affected Devices', 'Trend', 'Days Open', 'Device Names'])
+                             'Affected Devices', 'Trend', 'Days Open', 'Device Names',
+                             'Override', 'Assigned To', 'Note'])
             for e in entries:
                 writer.writerow([
                     e['check_id'], e['severity'], e['title'], e['category'], e['status'],
                     e['affected_count'], e['trend'], e['days_open'],
                     '; '.join(e['affected_devices']),
+                    e.get('override_action', ''), e.get('override_assignee', ''),
+                    e.get('override_note', ''),
                 ])
             data = buf.getvalue().encode('utf-8')
             fname = f'sentinel_risk_register_{_dt.utcnow().strftime("%Y%m%d")}.csv'
@@ -2718,6 +2728,53 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self.wfile.write(data)
         except Exception as e:
             log.error('risk register CSV error: %s', e, exc_info=True)
+            self._json({'error': str(e)}, 500)
+
+    def _api_rr_overrides_list(self):
+        """GET /api/fleet/risk-register/overrides"""
+        try:
+            self._json({'overrides': self._store().get_risk_overrides()})
+        except Exception as e:
+            self._json({'error': str(e)}, 500)
+
+    def _api_rr_override_set(self):
+        """POST /api/fleet/risk-register/override — accept or assign a finding."""
+        try:
+            cl = int(self.headers.get('Content-Length', 0))
+            body = json.loads(self.rfile.read(cl)) if cl else {}
+            check_id = (body.get('check_id') or '').strip()
+            action   = (body.get('action') or '').strip()
+            if not check_id or action not in ('accepted', 'assigned'):
+                self._json({'error': 'check_id and action (accepted|assigned) required'}, 400)
+                return
+            assignee   = (body.get('assignee') or '').strip()
+            note       = (body.get('note') or '').strip()
+            expires_at = body.get('expires_at')
+            if isinstance(expires_at, str) and expires_at:
+                import datetime as _dt
+                try:
+                    expires_at = int(_dt.datetime.fromisoformat(expires_at).timestamp())
+                except ValueError:
+                    expires_at = None
+            user = self._session_user()
+            created_by = user['email'] if user else 'Unknown'
+            self._store().upsert_risk_override(check_id, action, assignee, note, expires_at, created_by)
+            self._json({'ok': True})
+        except Exception as e:
+            log.error('rr override set error: %s', e, exc_info=True)
+            self._json({'error': str(e)}, 500)
+
+    def _api_rr_override_delete(self, check_id: str):
+        """POST /api/fleet/risk-register/override/<check_id>/delete — clear an override."""
+        try:
+            check_id = check_id.strip('/')
+            if not check_id:
+                self._json({'error': 'check_id required'}, 400)
+                return
+            ok = self._store().delete_risk_override(check_id)
+            self._json({'ok': ok})
+        except Exception as e:
+            log.error('rr override delete error: %s', e, exc_info=True)
             self._json({'error': str(e)}, 500)
 
     def _api_inventory(self):
@@ -4111,6 +4168,18 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
 .rr-table td{{padding:9px 12px;border-bottom:1px solid #F3F4F6;vertical-align:middle}}
 .rr-new{{background:#DCFCE7;color:#16A34A;border:1px solid #BBF7D0;border-radius:10px;padding:2px 8px;font-size:11px;font-weight:600}}
 .rr-recurring{{background:#FEF9C3;color:#CA8A04;border:1px solid #FDE047;border-radius:10px;padding:2px 8px;font-size:11px;font-weight:600}}
+.rr-accepted{{background:#F3F4F6;color:#9CA3AF;border:1px solid #E5E7EB;border-radius:10px;padding:2px 8px;font-size:11px;font-weight:600}}
+.rr-assigned{{background:#EFF6FF;color:#2563EB;border:1px solid #BFDBFE;border-radius:10px;padding:2px 8px;font-size:11px;font-weight:600}}
+.rr-act-btn{{background:none;border:1px solid #D1D5DB;border-radius:4px;color:#6B7280;font-size:11px;padding:2px 7px;cursor:pointer;font-family:inherit;margin-right:3px}}
+.rr-act-btn:hover{{background:#F3F4F6;color:#111827}}
+.rr-form-row{{background:#F9FAFB;border-bottom:1px solid #E5E7EB}}
+.rr-form-row td{{padding:12px 12px}}
+.rr-input{{background:#fff;border:1px solid #D1D5DB;border-radius:4px;padding:5px 8px;font-size:13px;font-family:inherit;width:100%;box-sizing:border-box}}
+.rr-input:focus{{outline:none;border-color:#4F46E5}}
+.rr-save-btn{{background:#238636;color:#fff;border:none;border-radius:4px;padding:5px 14px;font-size:12px;cursor:pointer;font-weight:600}}
+.rr-save-btn:hover{{background:#2ea043}}
+.rr-clear-btn{{background:none;border:1px solid #D1D5DB;border-radius:4px;color:#6B7280;font-size:12px;padding:5px 10px;cursor:pointer;font-family:inherit;margin-left:6px}}
+.rr-row-accepted td{{opacity:0.6}}
 .inv-badge-approved{{background:#DCFCE7;color:#16A34A;border:1px solid #BBF7D0;border-radius:10px;padding:2px 8px;font-size:11px;font-weight:600}}
 .inv-badge-review{{background:#FEF9C3;color:#CA8A04;border:1px solid #FDE047;border-radius:10px;padding:2px 8px;font-size:11px;font-weight:600}}
 .inv-badge-unapp{{background:#FEE2E2;color:#DC2626;border:1px solid #FECACA;border-radius:10px;padding:2px 8px;font-size:11px;font-weight:600}}
@@ -4180,7 +4249,7 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
       <div class="sb-group"></div>
       <button class="sb-item" id="nav-settings" onclick="navTo('settings')">&#9881; Settings</button>
       <button class="sb-item" id="nav-users" onclick="navTo('users')">&#128100; Users</button>
-      {'<button class="sb-item" id="nav-probe" onclick="navTo(\'probe\')">&#128272; API Tester</button>' if _has_live_scan() else '<span style="display:block;padding:8px 16px;font-size:13px;color:#6B7280;cursor:default" title="Upgrade to Pro to access the API Tester">&#128274; API Tester</span>'}
+      {("<button class=\"sb-item\" id=\"nav-probe\" onclick=\"navTo('probe')\">&#128272; API Tester</button>") if _has_live_scan() else "<span style=\"display:block;padding:8px 16px;font-size:13px;color:#6B7280;cursor:default\" title=\"Upgrade to Pro to access the API Tester\">&#128274; API Tester</span>"}
     </nav>
     <div class="sb-footer">
       {f'<span style="font-size:11px;color:#9CA3AF;word-break:break-all">{current_user_email}</span>' if current_user_email else ''}
@@ -4221,6 +4290,21 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
          style="color:#4F46E5;border-color:#E5E7EB;font-size:12px">&#9654; CISO Report</button>
       {_btn_technical_report}
       {'<button id="btn-evidence-export" class="scan-btn" onclick="downloadEvidencePackage(this)" style="color:#a371f7;border-color:#E5E7EB;font-size:12px">&#8659; Evidence Package</button>' if _has_evidence_package() else '<button disabled title="Evidence Package requires a Plus license" class="scan-btn" style="color:#9CA3AF;border-color:#F3F4F6;font-size:12px;cursor:default">&#128274; Evidence Pkg (Plus)</button>'}
+      <div style="position:relative;display:inline-block">
+        <button id="scan-profile-btn" onclick="toggleScanProfileMenu(event)" class="form-select" style="font-size:12px;padding:3px 10px;height:28px;cursor:pointer;min-width:130px;text-align:left;background:#fff">Base Scan &#9660;</button>
+        <div id="scan-profile-menu" style="display:none;position:absolute;top:31px;left:0;z-index:200;background:#fff;border:1px solid #E5E7EB;border-radius:6px;box-shadow:0 4px 16px rgba(0,0,0,0.12);padding:8px 12px;min-width:240px">
+          <div style="font-size:10px;color:#9CA3AF;font-weight:600;text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">Run profiles on all devices</div>
+          <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:#111827;padding:3px 0;cursor:pointer"><input type="checkbox" class="scan-profile-cb" value="default" checked onchange="updateScanProfileBtn()"> Base Scan</label>
+          <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:#111827;padding:3px 0;cursor:pointer"><input type="checkbox" class="scan-profile-cb" value="professional_services" onchange="updateScanProfileBtn()"> Professional Services</label>
+          <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:#111827;padding:3px 0;cursor:pointer"><input type="checkbox" class="scan-profile-cb" value="financial" onchange="updateScanProfileBtn()"> Financial Services</label>
+          <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:#111827;padding:3px 0;cursor:pointer"><input type="checkbox" class="scan-profile-cb" value="fedramp" onchange="updateScanProfileBtn()"> FedRAMP / NIST 800-53</label>
+          <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:#111827;padding:3px 0;cursor:pointer"><input type="checkbox" class="scan-profile-cb" value="cmmc" onchange="updateScanProfileBtn()"> CMMC 2.0</label>
+          <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:#111827;padding:3px 0;cursor:pointer"><input type="checkbox" class="scan-profile-cb" value="healthcare" onchange="updateScanProfileBtn()"> Healthcare</label>
+          <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:#111827;padding:3px 0;cursor:pointer"><input type="checkbox" class="scan-profile-cb" value="biotech" onchange="updateScanProfileBtn()"> Biotech</label>
+          <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:#111827;padding:3px 0;cursor:pointer"><input type="checkbox" class="scan-profile-cb" value="owasp_agentic" onchange="updateScanProfileBtn()"> OWASP Agentic AI</label>
+          <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:#111827;padding:3px 0;cursor:pointer"><input type="checkbox" class="scan-profile-cb" value="eu_ai_act" onchange="updateScanProfileBtn()"> EU AI Act</label>
+        </div>
+      </div>
       <select id="scan-all-stagger" class="form-select" style="font-size:12px;padding:3px 6px;height:28px" title="Scan stagger — spread scans over time to avoid network spikes">
         <option value="normal">Normal (25/30s)</option>
         <option value="slow">Slow (10/60s)</option>
@@ -4301,6 +4385,7 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
     <button class="rr-fil" onclick="rrFilter('HIGH',this)">High</button>
     <button class="rr-fil" onclick="rrFilter('MEDIUM',this)">Medium</button>
     <button class="rr-fil" onclick="rrFilter('LOW',this)">Low</button>
+    <button class="rr-fil" onclick="rrFilter('accepted',this)" style="margin-left:auto">Accepted Risk</button>
   </div>
   <div id="rr-body">
     <div style="color:#6B7280;font-size:13px;padding:16px 0">Loading risk register…</div>
@@ -4457,6 +4542,7 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
         <label style="font-size:13px;color:#111827;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="cfg-profile-cb" value="healthcare"> Healthcare (HIPAA / HITECH / FDA SaMD)</label>
         <label style="font-size:13px;color:#111827;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="cfg-profile-cb" value="owasp_agentic"> OWASP Agentic AI Top 10</label>
         <label style="font-size:13px;color:#111827;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="cfg-profile-cb" value="eu_ai_act"> EU AI Act (High-Risk Systems)</label>
+        <label style="font-size:13px;color:#111827;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="cfg-profile-cb" value="professional_services"> Professional Services (NIST AI RMF / ISO 42001 / AICPA)</label>
       </div>
       <label style="font-size:13px;color:#6B7280">Scan Interval</label>
       <div style="display:flex;align-items:center;gap:8px">
@@ -4562,6 +4648,7 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
       <label style="font-size:13px;color:#374151;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="rpt-profile" value="healthcare"> Healthcare</label>
       <label style="font-size:13px;color:#374151;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="rpt-profile" value="owasp_agentic"> OWASP Agentic AI</label>
       <label style="font-size:13px;color:#374151;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="rpt-profile" value="eu_ai_act"> EU AI Act</label>
+      <label style="font-size:13px;color:#374151;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="rpt-profile" value="professional_services"> Professional Services</label>
     </div>
     <div style="font-size:11px;color:#9CA3AF;margin-top:8px">Select one or more profiles to filter report content. Leave all unchecked for the full base scan.</div>
   </div>
@@ -5298,8 +5385,29 @@ async function updateDevice(id) {{
   }}
 }}
 
+function toggleScanProfileMenu(e) {{
+  e.stopPropagation();
+  const m = document.getElementById('scan-profile-menu');
+  if (m) m.style.display = m.style.display === 'none' ? 'block' : 'none';
+}}
+function updateScanProfileBtn() {{
+  const checked = [...document.querySelectorAll('.scan-profile-cb:checked')].map(c => c.value);
+  const btn = document.getElementById('scan-profile-btn');
+  if (!btn) return;
+  if (checked.length === 0)      btn.innerHTML = 'No profiles &#9660;';
+  else if (checked.length === 1) btn.innerHTML = (PROFILE_LABELS[checked[0]] || checked[0]) + ' &#9660;';
+  else                           btn.innerHTML = checked.length + ' profiles &#9660;';
+}}
+document.addEventListener('click', function(e) {{
+  if (!e.target.closest('#scan-profile-menu') && !e.target.closest('#scan-profile-btn')) {{
+    const m = document.getElementById('scan-profile-menu');
+    if (m) m.style.display = 'none';
+  }}
+}});
+
 async function scanAllDevices(btn) {{
-  const profiles = [...document.querySelectorAll('.rpt-profile:checked')].map(c => c.value);
+  const profiles = [...document.querySelectorAll('.scan-profile-cb:checked')].map(c => c.value);
+  if (!profiles.length) {{ alert('Select at least one profile before scanning.'); return; }}
   const stagger  = document.getElementById('scan-all-stagger')?.value || 'normal';
   btn.disabled   = true;
   btn.textContent = 'Queuing…';
@@ -6138,7 +6246,8 @@ async function savePassword(uid) {{
 const CADENCE_LABELS = {{daily:'Daily',weekly:'Weekly',monthly:'Monthly'}};
 const WEEKDAY_LABELS = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
 const PROFILE_LABELS = {{default:'Base Scan',fedramp:'FedRAMP',cmmc:'CMMC 2.0',financial:'Financial',
-  healthcare:'Healthcare',biotech:'Biotech',owasp_agentic:'OWASP Agentic',eu_ai_act:'EU AI Act'}};
+  healthcare:'Healthcare',biotech:'Biotech',owasp_agentic:'OWASP Agentic',eu_ai_act:'EU AI Act',
+  professional_services:'Professional Services'}};
 
 async function loadSchedules() {{
   try {{
@@ -6266,38 +6375,119 @@ async function loadRiskRegister() {{
 
 function rrFilter(sev, btn) {{
   _rrSev = sev;
-  document.querySelectorAll('.rr-fil').forEach(b => b.classList.remove('rr-active'));
+  document.querySelectorAll('#rr-filters .rr-fil').forEach(b => b.classList.remove('rr-active'));
   btn.classList.add('rr-active');
   renderRiskRegister();
 }}
 
+function rrToggleForm(checkId, action) {{
+  const rowId = 'rr-form-' + checkId.replace(/[^a-z0-9]/gi,'_');
+  const existing = document.getElementById(rowId);
+  if (existing) {{ existing.remove(); return; }}
+  const dataRow = document.querySelector(`tr[data-cid="${{checkId}}"]`);
+  if (!dataRow) return;
+  const e = _rrData.find(x => x.check_id === checkId) || {{}};
+  const formRow = document.createElement('tr');
+  formRow.id = rowId;
+  formRow.className = 'rr-form-row';
+  const assigneeField = action === 'assigned'
+    ? `<div style="margin-bottom:8px"><label style="font-size:11px;color:#6B7280;display:block;margin-bottom:3px">Assign to</label>
+       <input class="rr-input" id="rr-assignee-${{checkId.replace(/[^a-z0-9]/gi,'_')}}" placeholder="Name or email" value="${{esc(e.override_assignee||'')}}" style="width:220px"></div>`
+    : '';
+  formRow.innerHTML = `<td colspan="8" class="rr-form-row" style="padding:12px 16px">
+    <div style="display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end">
+      ${{assigneeField}}
+      <div style="flex:1;min-width:200px"><label style="font-size:11px;color:#6B7280;display:block;margin-bottom:3px">Note <span style="color:#9CA3AF">(optional)</span></label>
+       <input class="rr-input" id="rr-note-${{checkId.replace(/[^a-z0-9]/gi,'_')}}" placeholder="Reason, ticket #, etc." value="${{esc(e.override_note||'')}}"></div>
+      <div><label style="font-size:11px;color:#6B7280;display:block;margin-bottom:3px">Expires <span style="color:#9CA3AF">(optional)</span></label>
+       <input class="rr-input" id="rr-exp-${{checkId.replace(/[^a-z0-9]/gi,'_')}}" type="date" style="width:140px" value="${{e.override_expires ? new Date(e.override_expires*1000).toISOString().slice(0,10) : ''}}"></div>
+      <div style="display:flex;gap:6px;padding-bottom:1px">
+        <button class="rr-save-btn" onclick="rrSaveOverride('${{checkId}}','${{action}}')">Save</button>
+        ${{e.override_action ? `<button class="rr-clear-btn" onclick="rrClearOverride('${{checkId}}')">Clear</button>` : ''}}
+        <button class="rr-clear-btn" onclick="document.getElementById('${{rowId}}').remove()">Cancel</button>
+      </div>
+    </div>
+  </td>`;
+  dataRow.after(formRow);
+}}
+
+async function rrSaveOverride(checkId, action) {{
+  const slug = checkId.replace(/[^a-z0-9]/gi,'_');
+  const assignee = document.getElementById('rr-assignee-'+slug)?.value?.trim() || '';
+  const note     = document.getElementById('rr-note-'+slug)?.value?.trim() || '';
+  const expVal   = document.getElementById('rr-exp-'+slug)?.value?.trim() || '';
+  try {{
+    const r = await fetch('/api/fleet/risk-register/override', {{
+      method: 'POST',
+      headers: {{'Content-Type':'application/json'}},
+      body: JSON.stringify({{check_id: checkId, action, assignee, note, expires_at: expVal || null}})
+    }});
+    const d = await r.json();
+    if (!d.ok) {{ alert('Save failed: ' + (d.error||'unknown error')); return; }}
+    await loadRiskRegister();
+  }} catch(e) {{ alert('Save failed: ' + e); }}
+}}
+
+async function rrClearOverride(checkId) {{
+  if (!confirm('Remove override for this finding?')) return;
+  try {{
+    const r = await fetch('/api/fleet/risk-register/override/' + encodeURIComponent(checkId) + '/delete', {{method:'POST'}});
+    const d = await r.json();
+    if (!d.ok) {{ alert('Clear failed: ' + (d.error||'unknown')); return; }}
+    await loadRiskRegister();
+  }} catch(e) {{ alert('Clear failed: ' + e); }}
+}}
+
 function renderRiskRegister() {{
-  const rows = _rrSev === 'all' ? _rrData : _rrData.filter(e => e.severity === _rrSev);
+  let rows;
+  if (_rrSev === 'accepted') {{
+    rows = _rrData.filter(e => e.override_action === 'accepted');
+  }} else if (_rrSev === 'all') {{
+    rows = _rrData;
+  }} else {{
+    rows = _rrData.filter(e => e.severity === _rrSev);
+  }}
   const el = document.getElementById('rr-body');
   if (!rows.length) {{
     el.innerHTML = '<div style="color:#6B7280;font-size:13px;padding:16px 0">' +
-      (_rrData.length ? 'No findings at this severity.' : 'No open findings — fleet is clean.') + '</div>';
+      (_rrSev === 'accepted' ? 'No accepted risks.' : (_rrData.length ? 'No findings at this severity.' : 'No open findings — fleet is clean.')) + '</div>';
     return;
   }}
   const SEV_CLS = {{CRITICAL:'critical',HIGH:'high',MEDIUM:'medium',LOW:'low'}};
   const trs = rows.map(e => {{
-    const badge = e.trend === 'Recurring'
+    const trendBadge = e.trend === 'Recurring'
       ? '<span class="rr-recurring">Recurring</span>'
       : '<span class="rr-new">New</span>';
+    const overrideBadge = e.override_action === 'accepted'
+      ? '<span class="rr-accepted">&#10003; Accepted</span>'
+      : e.override_action === 'assigned'
+        ? `<span class="rr-assigned">&#128100; ${{esc(e.override_assignee||'Assigned')}}</span>`
+        : '';
     const devTip = e.affected_devices.join(', ');
-    return `<tr>
+    const rowClass = e.override_action === 'accepted' ? 'rr-row-accepted' : '';
+    const cid = e.check_id;
+    return `<tr class="${{rowClass}}" data-cid="${{esc(cid)}}">
       <td><span class="badge ${{SEV_CLS[e.severity]||'low'}}">${{esc(e.severity)}}</span></td>
-      <td style="font-family:monospace;font-size:12px;color:#6B7280">${{esc(e.check_id)}}</td>
+      <td style="font-family:monospace;font-size:12px;color:#6B7280">${{esc(cid)}}</td>
       <td style="color:#374151">${{esc(e.title)}}</td>
       <td title="${{esc(devTip)}}" style="cursor:default;color:#111827;font-weight:600">${{e.affected_count}}</td>
-      <td>${{badge}}</td>
+      <td>${{trendBadge}}</td>
       <td style="color:#6B7280">${{e.days_open}}d</td>
+      <td style="white-space:nowrap">${{overrideBadge}}</td>
+      <td style="white-space:nowrap">
+        <button class="rr-act-btn" onclick="rrToggleForm('${{esc(cid)}}','accepted')" title="Accept this risk">Accept</button>
+        <button class="rr-act-btn" onclick="rrToggleForm('${{esc(cid)}}','assigned')" title="Assign to someone">Assign</button>
+      </td>
     </tr>`;
   }}).join('');
   el.innerHTML = `<table class="rr-table">
-    <thead><tr><th>Severity</th><th>Check ID</th><th>Finding</th><th title="Hover for device list">Devices</th><th>Trend</th><th>Open</th></tr></thead>
+    <thead><tr>
+      <th>Severity</th><th>Check ID</th><th>Finding</th>
+      <th title="Hover for device list">Devices</th><th>Trend</th><th>Open</th>
+      <th>Override</th><th>Actions</th>
+    </tr></thead>
     <tbody>${{trs}}</tbody>
-  </table><div style="font-size:11px;color:#9CA3AF;margin-bottom:8px">${{rows.length}} open finding${{rows.length!==1?'s':''}} · hover device count for affected hostnames</div>`;
+  </table><div style="font-size:11px;color:#9CA3AF;margin-bottom:8px">${{rows.length}} finding${{rows.length!==1?'s':''}} · hover device count for affected hostnames</div>`;
 }}
 
 async function loadConfig() {{
