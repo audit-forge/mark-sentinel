@@ -17,14 +17,37 @@ Fields:
 
 Enforcement is always soft — agents are never blocked from reporting.
 """
+import hashlib
+import hmac
 import json
 import logging
+import os
 import threading
 import time
 from datetime import date
 from pathlib import Path
 from typing import Optional
 import urllib.request
+
+# License signing key — set LICENSE_SIGNING_KEY env var on the server.
+# generate_license.py uses the same key to sign; license.py verifies on load.
+_SIGNING_KEY = os.environ.get('LICENSE_SIGNING_KEY', '').encode()
+
+
+def _sign(data: dict) -> str:
+    """Return HMAC-SHA256 hex digest of the canonical JSON (keys sorted, no sig field)."""
+    payload = {k: v for k, v in sorted(data.items()) if k != 'sig'}
+    canon = json.dumps(payload, sort_keys=True, separators=(',', ':'))
+    return hmac.new(_SIGNING_KEY, canon.encode(), hashlib.sha256).hexdigest()
+
+
+def _verify(data: dict) -> bool:
+    """Return True if the license sig field matches the computed HMAC, or signing is disabled."""
+    if not _SIGNING_KEY:
+        return True   # signing not enforced — dev/internal mode
+    expected = _sign(data)
+    provided = data.get('sig', '')
+    return hmac.compare_digest(expected, provided)
 
 log = logging.getLogger('sentinel.license')
 
@@ -129,6 +152,9 @@ def load_license(path: Path) -> License:
         if path.exists():
             try:
                 data = json.loads(path.read_text(encoding='utf-8'))
+                if not _verify(data):
+                    log.error('License signature invalid — falling back to demo plan')
+                    data = {'plan': 'demo'}
                 _license = License(data)
                 log.info(
                     'License: %s — %d seats, expires %s, telemetry every %.0fh, stale threshold %.0fh',
