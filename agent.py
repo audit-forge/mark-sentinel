@@ -192,6 +192,8 @@ def load_config(path: Path | None = None) -> dict:
         cfg['server'] = os.environ['SENTINEL_SERVER']
     if os.environ.get('SENTINEL_AGENT_TOKEN'):
         cfg['token'] = os.environ['SENTINEL_AGENT_TOKEN']
+    if cfg.get('target', '') in ('~', '.', ''):
+        cfg['target'] = _resolve_home()
     return cfg
 
 
@@ -483,17 +485,99 @@ def self_update(config: dict) -> bool:
         return False
 
 
+# ── On-device OS notification ──────────────────────────────────────────────────
+
+def _notify_critical_findings(report: dict) -> None:
+    """Fire a native OS notification for any new CRITICAL or HIGH findings."""
+    return  # disabled — remove this line to re-enable on-device notifications
+    findings = report.get('findings', [])
+    crits = [f for f in findings if f.get('status') == 'FAIL' and f.get('severity') == 'CRITICAL']
+    highs = [f for f in findings if f.get('status') == 'FAIL' and f.get('severity') == 'HIGH']
+    if not crits and not highs:
+        return
+
+    parts = []
+    if crits:
+        parts.append(f'{len(crits)} Critical')
+    if highs:
+        parts.append(f'{len(highs)} High')
+    summary_line = ', '.join(parts) + ' finding' + ('' if len(crits) + len(highs) == 1 else 's') + ' detected'
+    first = (crits or highs)[0]
+    detail = f"{first.get('check_id', '')} — {first.get('title', '')}"
+
+    try:
+        if sys.platform == 'darwin':
+            import subprocess
+            script = (
+                f'display notification "{detail}" '
+                f'with title "M.A.R.K. Sentinel" '
+                f'subtitle "{summary_line}" '
+                f'sound name "Basso"'
+            )
+            subprocess.run(['osascript', '-e', script], timeout=5,
+                           capture_output=True, check=False)
+        elif sys.platform.startswith('linux'):
+            import subprocess
+            subprocess.run(
+                ['notify-send', '--urgency=critical', '--icon=dialog-warning',
+                 'M.A.R.K. Sentinel', f'{summary_line}\n{detail}'],
+                timeout=5, capture_output=True, check=False,
+            )
+        elif sys.platform == 'win32':
+            import subprocess
+            ps_script = (
+                f'Add-Type -AssemblyName System.Windows.Forms;'
+                f'$n = New-Object System.Windows.Forms.NotifyIcon;'
+                f'$n.Icon = [System.Drawing.SystemIcons]::Warning;'
+                f'$n.Visible = $true;'
+                f'$n.ShowBalloonTip(8000, "M.A.R.K. Sentinel", '
+                f'"{summary_line}: {detail}", '
+                f'[System.Windows.Forms.ToolTipIcon]::Warning);'
+                f'Start-Sleep -s 9; $n.Dispose()'
+            )
+            subprocess.Popen(
+                ['powershell', '-WindowStyle', 'Hidden', '-Command', ps_script],
+                creationflags=0x08000000,  # CREATE_NO_WINDOW
+            )
+    except Exception as e:
+        log.debug('OS notification failed (non-fatal): %s', e)
+
+
 # ── Main scan cycle ────────────────────────────────────────────────────────────
+
+def _usable_dir(path: str) -> bool:
+    """True if path exists, is a directory, and we can actually read+traverse it.
+    A service account's /etc/passwd entry can point at a home directory that was
+    never created (e.g. `useradd --no-create-home`) — Path.home() / pwd lookups
+    happily return that dead path, and the first os.scandir() inside it then
+    blows up with PermissionError/FileNotFoundError. Validate before trusting it."""
+    try:
+        p = Path(path)
+        return p.is_dir() and os.access(path, os.R_OK | os.X_OK)
+    except Exception:
+        return False
+
 
 def _resolve_home() -> str:
     """Return the real user's home directory — works correctly even when the process runs as root."""
+    if os.name != 'posix':
+        # Windows: no pwd/sudo/loginctl — Path.home() already resolves to the
+        # right profile for the account the service runs under.
+        own_home = str(Path.home())
+        if _usable_dir(own_home):
+            return own_home
+        log.warning('No usable home directory found for scan target — defaulting to "C:\\\\"'
+                    ' (set "target" explicitly in agent_config.json to scan a specific path)')
+        return 'C:\\'
     import pwd as _pwd
     # When invoked via sudo, SUDO_USER holds the original user
     for var in ('SUDO_USER', 'LOGNAME', 'USER'):
         user = os.environ.get(var, '')
         if user and user != 'root':
             try:
-                return _pwd.getpwnam(user).pw_dir
+                home = _pwd.getpwnam(user).pw_dir
+                if _usable_dir(home):
+                    return home
             except KeyError:
                 pass
     # macOS: ask the system who owns the console session
@@ -504,7 +588,9 @@ def _resolve_home() -> str:
             capture_output=True, text=True, timeout=2
         ).stdout.strip()
         if user and user != 'root':
-            return _pwd.getpwnam(user).pw_dir
+            home = _pwd.getpwnam(user).pw_dir
+            if _usable_dir(home):
+                return home
     except Exception:
         pass
     # Linux: check loginctl for the active session user
@@ -517,10 +603,108 @@ def _resolve_home() -> str:
             if len(parts) >= 3:
                 user = parts[2]
                 if user and user != 'root':
-                    return _pwd.getpwnam(user).pw_dir
+                    home = _pwd.getpwnam(user).pw_dir
+                    if _usable_dir(home):
+                        return home
     except Exception:
         pass
-    return str(Path.home())
+    # Last resort: the running process's own home, if it actually exists and is
+    # readable (true for real users; false for homeless system/service accounts
+    # like the `sentinel` user created by install.sh's systemd path).
+    own_home = str(Path.home())
+    if _usable_dir(own_home):
+        return own_home
+    # Headless service account with no usable home of its own — fall back to
+    # scanning the filesystem root rather than crashing on a dead path.
+    log.warning('No usable home directory found for scan target — defaulting to "/"'
+                ' (set "target" explicitly in agent_config.json to scan a specific path)')
+    return '/'
+
+
+def _k8s_cluster_context() -> str:
+    """Return kubectl context name if a cluster is reachable, else empty string."""
+    try:
+        r = subprocess.run(
+            ['kubectl', 'config', 'current-context'],
+            capture_output=True, text=True, timeout=5,
+        )
+        if r.returncode != 0:
+            return ''
+        ctx = r.stdout.strip()
+        r2 = subprocess.run(
+            ['kubectl', 'cluster-info', '--context', ctx],
+            capture_output=True, timeout=5,
+        )
+        return ctx if r2.returncode == 0 else ''
+    except Exception:
+        return ''
+
+
+def _k8s_device_id(server_url: str) -> str:
+    """Stable 16-char device ID derived from the cluster's API server URL."""
+    return hashlib.sha256(f'k8s:{server_url}'.encode()).hexdigest()[:16]
+
+
+def run_k8s_scan(context_name: str) -> dict | None:
+    """Run a k8s-mode Sentinel audit and return the parsed JSON report."""
+    audit_script = ROOT / 'audit.py'
+    if not audit_script.exists():
+        return None
+    cmd = [
+        sys.executable, str(audit_script),
+        '--mode', 'k8s',
+        '--profile', 'kubernetes',
+        '--output', 'json',
+        '--quiet',
+    ]
+    log.info('K8s scan: %s (context: %s)', ' '.join(cmd[:5]), context_name)
+    try:
+        proc = subprocess.run(
+            cmd, capture_output=True, text=True, encoding='utf-8',
+            timeout=120, cwd=str(ROOT),
+        )
+    except subprocess.TimeoutExpired:
+        log.error('K8s scan timed out after 120s')
+        return None
+    except Exception as e:
+        log.error('Failed to launch K8s scan: %s', e)
+        return None
+
+    stdout = proc.stdout.strip()
+    if not stdout:
+        log.error('K8s scan produced no output (exit %d): %s',
+                  proc.returncode, (proc.stderr or '')[-300:])
+        return None
+    json_start = stdout.find('{')
+    if json_start > 0:
+        stdout = stdout[json_start:]
+    try:
+        return json.loads(stdout)
+    except json.JSONDecodeError as e:
+        log.error('Could not parse K8s scan JSON: %s', e)
+        return None
+
+
+def run_k8s_cycle(config: dict) -> bool:
+    """Detect a live K8s cluster, scan it, and report findings as a separate device."""
+    ctx_name = _k8s_cluster_context()
+    if not ctx_name:
+        return True  # no cluster reachable — not an error
+
+    from connectors.kubectl_connector import cluster_server_url
+    server_url = cluster_server_url()
+    device_id  = _k8s_device_id(server_url or ctx_name)
+    hostname   = f'k8s:{ctx_name}'
+
+    log.info('K8s cluster detected: %s  Device: %s', ctx_name, device_id)
+    report = run_k8s_scan(ctx_name)
+    if report is None:
+        return False
+
+    summary = report.get('summary', {})
+    log.info('K8s scan complete — FAIL:%d WARN:%d PASS:%d',
+             summary.get('fail', 0), summary.get('warn', 0), summary.get('pass', 0))
+    return report_to_server(report, config, device_id, hostname)
 
 
 def run_cycle(config: dict) -> bool:
@@ -540,6 +724,8 @@ def run_cycle(config: dict) -> bool:
     summary = report.get('summary', {})
     log.info('Scan complete — FAIL:%d WARN:%d PASS:%d',
              summary.get('fail', 0), summary.get('warn', 0), summary.get('pass', 0))
+
+    _notify_critical_findings(report)
 
     return report_to_server(report, config, device_id, hostname)
 
@@ -820,6 +1006,10 @@ def main() -> None:
                 last_scan = time.time()
                 if ok:
                     last_success = last_scan
+                try:
+                    run_k8s_cycle(cfg)
+                except Exception as e:
+                    log.warning('K8s scan cycle error (non-fatal): %s', e)
 
             # Poll for on-demand command
             cmd = poll_for_command(cfg, device_id)
@@ -833,6 +1023,10 @@ def main() -> None:
                 last_scan = time.time()
                 if ok:
                     last_success = last_scan
+                try:
+                    run_k8s_cycle(cfg)
+                except Exception as e:
+                    log.warning('K8s on-demand scan error (non-fatal): %s', e)
             elif cmd and cmd.startswith('scan_profile:'):
                 profile_override = cmd[len('scan_profile:'):]
                 log.info('On-demand scan with profile override: %s', profile_override)

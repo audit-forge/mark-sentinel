@@ -176,7 +176,7 @@ examples:
     )
     parser.add_argument(
         '--mode',
-        choices=['config', 'api', 'local', 'gemini', 'vertex', 'anthropic', 'hash', 'docker', 'kubectl'],
+        choices=['config', 'api', 'local', 'gemini', 'vertex', 'anthropic', 'hash', 'docker', 'kubectl', 'k8s'],
         default='config',
         help='Scan mode (default: config)',
     )
@@ -368,9 +368,50 @@ examples:
     if not args.quiet:
         print(BANNER, file=sys.stderr)
 
-    if args.mode in ('docker', 'kubectl'):
-        print(f"\n[INFO] '{args.mode}' mode will be available in Phase 3. Running config mode scan.\n")
+    if args.mode == 'docker':
+        print(f"\n[INFO] 'docker' mode will be available in a future release. Running config mode scan.\n")
         args.mode = 'config'
+
+    if args.mode in ('kubectl', 'k8s'):
+        from connectors.kubectl_connector import build_k8s_context
+        from checks.kubernetes import run_all as k8s_checks
+        if not args.quiet:
+            print('\nConnecting to Kubernetes cluster...', end='', flush=True, file=sys.stderr)
+        k8s_ctx = build_k8s_context()
+        if k8s_ctx is None:
+            print(' unreachable.\n', file=sys.stderr)
+            print(json.dumps({'error': 'Cluster unreachable — kubectl could not connect',
+                              'results': [], 'summary': {'fail': 0, 'warn': 0, 'pass': 0, 'skip': 0}}))
+            sys.exit(1)
+        if not args.quiet:
+            print(f' connected ({k8s_ctx.context_name}, {len(k8s_ctx.pods)} pods).\n', file=sys.stderr)
+        profile  = load_profile(args.profile if args.profile != 'default' else 'kubernetes')
+        k8s_results = k8s_checks(k8s_ctx)
+        summary  = {'fail': 0, 'warn': 0, 'pass': 0, 'skip': 0}
+        out_list = []
+        for r in k8s_results:
+            summary[r.status.lower() if r.status.lower() in summary else 'skip'] += 1
+            out_list.append({
+                'check_id':    r.check_id,
+                'title':       r.title,
+                'status':      r.status,
+                'severity':    r.severity,
+                'category':    r.category,
+                'details':     r.details,
+                'evidence':    r.evidence,
+                'remediation': r.remediation,
+                'frameworks':  r.frameworks,
+            })
+        report = {
+            'scan_mode':    'k8s',
+            'cluster':      k8s_ctx.context_name,
+            'server_url':   k8s_ctx.server_url,
+            'profile':      profile.get('name', 'Kubernetes'),
+            'results':      out_list,
+            'summary':      summary,
+        }
+        print(json.dumps(report, indent=2))
+        sys.exit(0 if summary['fail'] == 0 else 1)
 
     profile = load_profile(args.profile)
     profile['_slug'] = args.profile
