@@ -15,14 +15,21 @@ RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir nuitka ordered-set
 
 # Copy only the files needed for compilation so layer cache survives server.py changes
-COPY audit.py checks/ profiles/ ./
+COPY audit.py checks/ profiles/ connectors/ ./
+COPY output/ ./output/
 COPY scripts/ ./scripts/
 
 RUN python -m nuitka --onefile --assume-yes-for-downloads \
+    --include-package=checks \
+    --include-package=connectors \
+    --include-package=output \
     --output-dir=/build --output-filename=audit \
     audit.py
 
 RUN python -m nuitka --onefile --assume-yes-for-downloads \
+    --include-package=checks \
+    --include-package=connectors \
+    --include-package=output \
     --output-dir=/build --output-filename=demo \
     scripts/demo.py
 
