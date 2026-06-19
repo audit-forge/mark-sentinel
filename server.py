@@ -671,7 +671,8 @@ def _build_fleet_report_html(devices: list, tier: str, profile: str = '', profil
 
     _rpt_profiles = [('default', 'Base Scan'), ('fedramp', 'FedRAMP'), ('cmmc', 'CMMC 2.0'),
                      ('financial', 'Financial'), ('biotech', 'Biotech'), ('healthcare', 'Healthcare'),
-                     ('professional_services', 'Professional Services')]
+                     ('professional_services', 'Professional Services'),
+                     ('kubernetes', 'Kubernetes'), ('docker', 'Docker')]
     _toolbar_cbs = ' '.join(
         f'<label style="font-size:12px;color:#c9d1d9;white-space:nowrap;cursor:pointer">'
         f'<input type="checkbox" class="rpt-cb" value="{v}"{" checked" if v in active_profiles else ""}> {lbl}</label>'
@@ -2035,7 +2036,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             pass
 
         profiles = [p.strip() for p in (body.get('profiles') or []) if p.strip()]
-        _VALID = {'default', 'fedramp', 'cmmc', 'financial', 'professional_services'}
+        _VALID = {'default', 'fedramp', 'cmmc', 'financial', 'professional_services', 'kubernetes', 'docker'}
         profiles = [p for p in profiles if p in _VALID]
 
         if profiles:
@@ -2475,7 +2476,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             status_filter = ''
         if sev_filter not in ('ch', 'med', 'li', ''):
             sev_filter = ''
-        _VALID_PROFILES = {'default', 'fedramp', 'cmmc', 'financial', 'biotech', 'healthcare', 'lifesciences', 'owasp_agentic', 'eu_ai_act', 'professional_services'}
+        _VALID_PROFILES = {'default', 'fedramp', 'cmmc', 'financial', 'biotech', 'healthcare', 'lifesciences', 'owasp_agentic', 'eu_ai_act', 'professional_services', 'kubernetes', 'docker'}
         profiles = [p for p in profile_raw.split(',') if p in _VALID_PROFILES]
         profile  = ','.join(profiles)
         try:
@@ -2539,7 +2540,8 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         qs = parse_qs(_up(self.path).query)
         profile_raw = (qs.get('profile', [''])[0]).lower().strip()
         _VALID = {'default', 'fedramp', 'cmmc', 'financial', 'biotech', 'healthcare',
-                  'lifesciences', 'owasp_agentic', 'eu_ai_act', 'professional_services'}
+                  'lifesciences', 'owasp_agentic', 'eu_ai_act', 'professional_services',
+                  'kubernetes', 'docker'}
         profiles = [p for p in profile_raw.split(',') if p in _VALID]
         try:
             store = self._store()
@@ -4303,6 +4305,8 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
           <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:#111827;padding:3px 0;cursor:pointer"><input type="checkbox" class="scan-profile-cb" value="biotech" onchange="updateScanProfileBtn()"> Biotech</label>
           <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:#111827;padding:3px 0;cursor:pointer"><input type="checkbox" class="scan-profile-cb" value="owasp_agentic" onchange="updateScanProfileBtn()"> OWASP Agentic AI</label>
           <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:#111827;padding:3px 0;cursor:pointer"><input type="checkbox" class="scan-profile-cb" value="eu_ai_act" onchange="updateScanProfileBtn()"> EU AI Act</label>
+          <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:#111827;padding:3px 0;cursor:pointer"><input type="checkbox" class="scan-profile-cb" value="kubernetes" onchange="updateScanProfileBtn()"> Kubernetes</label>
+          <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:#111827;padding:3px 0;cursor:pointer"><input type="checkbox" class="scan-profile-cb" value="docker" onchange="updateScanProfileBtn()"> Docker</label>
         </div>
       </div>
       <select id="scan-all-stagger" class="form-select" style="font-size:12px;padding:3px 6px;height:28px" title="Scan stagger — spread scans over time to avoid network spikes">
@@ -4543,6 +4547,8 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
         <label style="font-size:13px;color:#111827;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="cfg-profile-cb" value="owasp_agentic"> OWASP Agentic AI Top 10</label>
         <label style="font-size:13px;color:#111827;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="cfg-profile-cb" value="eu_ai_act"> EU AI Act (High-Risk Systems)</label>
         <label style="font-size:13px;color:#111827;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="cfg-profile-cb" value="professional_services"> Professional Services (NIST AI RMF / ISO 42001 / AICPA)</label>
+        <label style="font-size:13px;color:#111827;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="cfg-profile-cb" value="kubernetes"> Kubernetes (CIS K8s Benchmark)</label>
+        <label style="font-size:13px;color:#111827;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="cfg-profile-cb" value="docker"> Docker (Container Security)</label>
       </div>
       <label style="font-size:13px;color:#6B7280">Scan Interval</label>
       <div style="display:flex;align-items:center;gap:8px">
@@ -4649,6 +4655,8 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
       <label style="font-size:13px;color:#374151;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="rpt-profile" value="owasp_agentic"> OWASP Agentic AI</label>
       <label style="font-size:13px;color:#374151;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="rpt-profile" value="eu_ai_act"> EU AI Act</label>
       <label style="font-size:13px;color:#374151;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="rpt-profile" value="professional_services"> Professional Services</label>
+      <label style="font-size:13px;color:#374151;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="rpt-profile" value="kubernetes"> Kubernetes</label>
+      <label style="font-size:13px;color:#374151;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="rpt-profile" value="docker"> Docker</label>
     </div>
     <div style="font-size:11px;color:#9CA3AF;margin-top:8px">Select one or more profiles to filter report content. Leave all unchecked for the full base scan.</div>
   </div>
@@ -5995,6 +6003,8 @@ function renderInventory() {{
   const trs = rows.map(item => {{
     const icon = SRC_ICON[item.source] || '🤖';
     const models = (item.models||[]).slice(0,3).join(', ') || '—';
+    const isLocalHost = /^[0-9a-f]{16}$/i.test(item.host);
+    const hostDisplay = isLocalHost ? (item.reporter_hostname || 'local') : item.host;
     const st = item.approval_status || 'unapproved';
     let badge, actions, attribution;
     if (st === 'approved') {{
@@ -6019,7 +6029,7 @@ function renderInventory() {{
     }}
     return `<tr>
       <td style="font-size:16px">${{icon}}</td>
-      <td style="color:#111827;font-weight:600">${{esc(item.host)}}${{item.port ? ':'+item.port : ''}}</td>
+      <td style="color:#111827;font-weight:600">${{esc(hostDisplay)}}${{item.port ? ':'+item.port : ''}}</td>
       <td style="color:#6B7280">${{esc(item.service||item.source)}}</td>
       <td style="color:#6B7280;font-size:12px">${{esc(models)}}</td>
       <td style="color:#6B7280;font-size:11px">${{esc(item.reporter_hostname||'')}}</td>
@@ -6247,7 +6257,7 @@ const CADENCE_LABELS = {{daily:'Daily',weekly:'Weekly',monthly:'Monthly'}};
 const WEEKDAY_LABELS = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
 const PROFILE_LABELS = {{default:'Base Scan',fedramp:'FedRAMP',cmmc:'CMMC 2.0',financial:'Financial',
   healthcare:'Healthcare',biotech:'Biotech',owasp_agentic:'OWASP Agentic',eu_ai_act:'EU AI Act',
-  professional_services:'Professional Services'}};
+  professional_services:'Professional Services',kubernetes:'Kubernetes',docker:'Docker'}};
 
 async function loadSchedules() {{
   try {{

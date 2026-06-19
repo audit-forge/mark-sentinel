@@ -692,17 +692,52 @@ def run_k8s_cycle(config: dict) -> bool:
         return True  # no cluster reachable — not an error
 
     from connectors.kubectl_connector import cluster_server_url
-    server_url = cluster_server_url()
-    device_id  = _k8s_device_id(server_url or ctx_name)
-    hostname   = f'k8s:{ctx_name}'
+    server_url    = cluster_server_url()
+    device_id     = _k8s_device_id(server_url or ctx_name)
+    machine_host  = os.environ.get('SENTINEL_HOSTNAME', '').strip() or socket.gethostname()
+    hostname      = f'k8s:{ctx_name}@{machine_host}'
 
-    log.info('K8s cluster detected: %s  Device: %s', ctx_name, device_id)
+    log.info('K8s cluster detected: %s  Device: %s  Host: %s', ctx_name, device_id, machine_host)
     report = run_k8s_scan(ctx_name)
     if report is None:
         return False
 
     summary = report.get('summary', {})
     log.info('K8s scan complete — FAIL:%d WARN:%d PASS:%d',
+             summary.get('fail', 0), summary.get('warn', 0), summary.get('pass', 0))
+    return report_to_server(report, config, device_id, hostname)
+
+
+def _docker_running() -> bool:
+    """Return True if a Docker daemon is reachable on this machine."""
+    try:
+        r = subprocess.run(
+            ['docker', 'info', '--format', '{{.ServerVersion}}'],
+            capture_output=True, text=True, timeout=5,
+        )
+        return r.returncode == 0 and bool(r.stdout.strip())
+    except Exception:
+        return False
+
+
+def run_docker_cycle(config: dict) -> bool:
+    """Detect a running Docker daemon and report it as a separate fleet device."""
+    if not _docker_running():
+        return True  # no docker daemon — not an error
+
+    machine_host = os.environ.get('SENTINEL_HOSTNAME', '').strip() or socket.gethostname()
+    device_id    = hashlib.sha256(f'docker:{_hardware_seed()}'.encode()).hexdigest()[:16]
+    hostname     = f'docker:{machine_host}'
+
+    log.info('Docker daemon detected on %s  Device: %s', machine_host, device_id)
+    report = run_scan(config.get('target', '.'), config.get('profile', 'default').split(',')[0].strip() or 'default')
+    if report is None:
+        return False
+
+    report['mode']    = 'docker'
+    report['profile'] = 'docker'
+    summary = report.get('summary', {})
+    log.info('Docker scan complete — FAIL:%d WARN:%d PASS:%d',
              summary.get('fail', 0), summary.get('warn', 0), summary.get('pass', 0))
     return report_to_server(report, config, device_id, hostname)
 
@@ -1010,6 +1045,10 @@ def main() -> None:
                     run_k8s_cycle(cfg)
                 except Exception as e:
                     log.warning('K8s scan cycle error (non-fatal): %s', e)
+                try:
+                    run_docker_cycle(cfg)
+                except Exception as e:
+                    log.warning('Docker scan cycle error (non-fatal): %s', e)
 
             # Poll for on-demand command
             cmd = poll_for_command(cfg, device_id)
@@ -1027,6 +1066,10 @@ def main() -> None:
                     run_k8s_cycle(cfg)
                 except Exception as e:
                     log.warning('K8s on-demand scan error (non-fatal): %s', e)
+                try:
+                    run_docker_cycle(cfg)
+                except Exception as e:
+                    log.warning('Docker on-demand scan error (non-fatal): %s', e)
             elif cmd and cmd.startswith('scan_profile:'):
                 profile_override = cmd[len('scan_profile:'):]
                 log.info('On-demand scan with profile override: %s', profile_override)
