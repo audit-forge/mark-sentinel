@@ -18,12 +18,12 @@ RUN pip install --no-cache-dir --upgrade pip && \
 COPY audit.py checks/ profiles/ ./
 COPY scripts/ ./scripts/
 
-RUN python -m nuitka --standalone --assume-yes-for-downloads \
-    --output-dir=/build/audit --output-filename=audit \
+RUN python -m nuitka --onefile --assume-yes-for-downloads \
+    --output-dir=/build --output-filename=audit \
     audit.py
 
-RUN python -m nuitka --standalone --assume-yes-for-downloads \
-    --output-dir=/build/demo --output-filename=demo \
+RUN python -m nuitka --onefile --assume-yes-for-downloads \
+    --output-dir=/build --output-filename=demo \
     scripts/demo.py
 
 # ── Stage 2: Python runtime with compiled scanners ───────────────────────────
@@ -44,8 +44,8 @@ RUN pip install --no-cache-dir --upgrade pip && \
 COPY . .
 
 # Overwrite audit and demo with compiled binaries from builder
-COPY --from=builder /build/audit/audit.dist/audit /app/audit
-COPY --from=builder /build/demo/demo.dist/demo /app/scripts/demo
+COPY --from=builder /build/audit /app/audit
+COPY --from=builder /build/demo /app/scripts/demo
 RUN chmod +x /app/audit /app/scripts/demo
 
 RUN --mount=type=bind,from=builder,source=/src,target=/build-src \
