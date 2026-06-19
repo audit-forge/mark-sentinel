@@ -19,9 +19,6 @@ COPY audit.py checks/ profiles/ connectors/ ./
 COPY output/ ./output/
 
 RUN python -m nuitka --onefile --assume-yes-for-downloads \
-    --include-package=checks \
-    --include-package=connectors \
-    --include-package=output \
     --output-dir=/build --output-filename=audit \
     audit.py
 
