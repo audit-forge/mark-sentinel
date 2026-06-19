@@ -17,7 +17,6 @@ RUN pip install --no-cache-dir --upgrade pip && \
 # Copy only the files needed for compilation so layer cache survives server.py changes
 COPY audit.py checks/ profiles/ connectors/ ./
 COPY output/ ./output/
-COPY scripts/ ./scripts/
 
 RUN python -m nuitka --onefile --assume-yes-for-downloads \
     --include-package=checks \
@@ -25,13 +24,6 @@ RUN python -m nuitka --onefile --assume-yes-for-downloads \
     --include-package=output \
     --output-dir=/build --output-filename=audit \
     audit.py
-
-RUN python -m nuitka --onefile --assume-yes-for-downloads \
-    --include-package=checks \
-    --include-package=connectors \
-    --include-package=output \
-    --output-dir=/build --output-filename=demo \
-    scripts/demo.py
 
 # ── Stage 2: Python runtime with compiled scanners ───────────────────────────
 FROM --platform=linux/amd64 python:3.12.4-slim
@@ -50,10 +42,9 @@ RUN pip install --no-cache-dir --upgrade pip && \
 # Copy all Python source for the server
 COPY . .
 
-# Overwrite audit and demo with compiled binaries from builder
+# Overwrite audit with compiled binary from builder
 COPY --from=builder /build/audit /app/audit
-COPY --from=builder /build/demo /app/scripts/demo
-RUN chmod +x /app/audit /app/scripts/demo
+RUN chmod +x /app/audit
 
 RUN --mount=type=bind,from=builder,source=/src,target=/build-src \
     cp /build-src/license.json /app/ 2>/dev/null || true
