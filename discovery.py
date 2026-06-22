@@ -110,7 +110,7 @@ def _vendor_from_model(model_id: str) -> str:
     for prefix, vendor in _VENDOR_PREFIXES:
         if name.startswith(prefix.lower()):
             return vendor
-    return 'Unknown'
+    return 'Unclassified'
 
 
 def _classify_models(model_ids: list[str]) -> dict[str, list[str]]:
@@ -366,7 +366,7 @@ async def _discover_async(hosts: list[str]) -> list[dict]:
         async with sem:
             if not await _tcp_open(host, port):
                 return
-            fallback = hint if hint != 'AI service' else f'Unknown service (port {port})'
+            fallback = hint if hint != 'AI service' else f'Unclassified service (port {port})'
             service, models, status = await loop.run_in_executor(
                 None, _multi_probe, host, port, path, fallback
             )
