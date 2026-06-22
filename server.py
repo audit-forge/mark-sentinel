@@ -4941,7 +4941,9 @@ function navTo(page) {{
   const b = document.getElementById('nav-' + page);
   if (b) b.classList.add('sb-active');
   document.getElementById('main').scrollTop = 0;
+  history.replaceState(null, '', '#' + page);
   if (page === 'settings') {{ loadLiveScanConfig(); }}
+  if (page === 'siem') {{ loadSiemConfig(); }}
   if (page === 'users') {{ loadUsers(); loadCustomerInfo(); }}
   if (page === 'probe') {{
     const fr = document.getElementById('probe-iframe');
@@ -4951,6 +4953,12 @@ function navTo(page) {{
     }}
   }}
 }}
+(function() {{
+  const hash = window.location.hash.replace('#', '');
+  const valid = ['overview','shadow','mcp','riskregister','inventory','schedules',
+                 'discovery','findings','reports','siem','settings','users','probe'];
+  if (hash && valid.includes(hash)) {{ navTo(hash); }}
+}})();
 
 function _syncFindingsSelector() {{
   const sel = document.getElementById('findings-device-sel');
