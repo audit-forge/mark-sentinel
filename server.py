@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-M.A.R.K. Sentinel — Dashboard Server
+Arckon by RiskRaven — Dashboard Server
 Serves the live dashboard and runs on-demand scans via a browser UI.
 
 Usage:
@@ -11,7 +11,7 @@ Usage:
 import sys
 if sys.version_info < (3, 11):
     sys.exit(
-        "M.A.R.K. Sentinel requires Python 3.11 or later.\n"
+        "Arckon requires Python 3.11 or later.\n"
         f"Running: Python {sys.version.split()[0]}\n"
         "Install: https://python.org/downloads/"
     )
@@ -424,7 +424,7 @@ def _build_mcp_report_html(servers: list, tier: str) -> str:
     active_btn = 'color:#58a6ff;border-color:#1f6feb'
 
     parts = [f'''<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
-<title>M.A.R.K. Sentinel — MCP & Agent Governance {esc(tier_label)}</title>
+<title>Arckon — MCP & Agent Governance {esc(tier_label)}</title>
 <style>
 *{{box-sizing:border-box;margin:0;padding:0}}
 body{{background:#0d1117;color:#c9d1d9;font-family:system-ui,sans-serif;padding:32px;max-width:1100px;margin:0 auto}}
@@ -457,14 +457,14 @@ function switchTier(t){{location.href='/api/fleet/mcp/report?tier='+t;}}
 {_THEME_EARLY_SCRIPT}
 </head><body>
 <div class="toolbar">
-  <span style="font-size:13px;font-weight:600;color:#c9d1d9;margin-right:6px">M.A.R.K. Sentinel</span>
+  <span style="font-size:13px;font-weight:600;color:#c9d1d9;margin-right:6px">Arckon</span>
   <button onclick="switchTier('executive')" style="{btn_style}{';' + active_btn if tier=='executive' else ''}">Executive</button>
   <button onclick="switchTier('ciso')"      style="{btn_style}{';' + active_btn if tier=='ciso'      else ''}">CISO</button>
   <button onclick="switchTier('technical')" style="{btn_style}{';' + active_btn if tier=='technical' else ''}">Technical</button>
   <button onclick="window.print()" style="{btn_style}">&#128438; Print</button>
   {_THEME_BTN}
 </div>
-<h1>M.A.R.K. Sentinel &mdash; MCP &amp; Agent Governance &mdash; {esc(tier_label)}</h1>
+<h1>Arckon &mdash; MCP &amp; Agent Governance &mdash; {esc(tier_label)}</h1>
 <div class="meta">Generated {esc(now)} &nbsp;&bull;&nbsp; {len(servers)} MCP server(s) discovered &nbsp;&bull;&nbsp; Confidential</div>''']
 
     # Risk banner
@@ -696,7 +696,7 @@ def _build_fleet_report_html(devices: list, tier: str, profile: str = '', profil
     _cnt_li  = sum(1 for f in _all_pre if f.get('severity') in ('LOW', 'INFO'))
 
     parts = [f'''<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
-<title>M.A.R.K. Sentinel — Fleet {esc(tier_label)}</title>
+<title>Arckon — Fleet {esc(tier_label)}</title>
 <style>
 *{{box-sizing:border-box;margin:0;padding:0}}
 body{{background:#0d1117;color:#c9d1d9;font-family:system-ui,sans-serif;padding:32px;max-width:1100px;margin:0 auto}}
@@ -744,7 +744,7 @@ function switchTier(t){{
 {_THEME_EARLY_SCRIPT}
 </head><body>
 <div class="toolbar">
-  <span style="font-size:13px;font-weight:600;color:#c9d1d9;margin-right:6px">M.A.R.K. Sentinel</span>
+  <span style="font-size:13px;font-weight:600;color:#c9d1d9;margin-right:6px">Arckon</span>
   <button onclick="switchTier('executive')" style="{btn_style}{';color:#58a6ff;border-color:#1f6feb' if tier=='executive' else ''}">Executive</button>
   <button onclick="switchTier('ciso')"      style="{btn_style}{';color:#58a6ff;border-color:#1f6feb' if tier=='ciso' else ''}">CISO</button>
   <button onclick="switchTier('technical')" style="{btn_style}{';color:#58a6ff;border-color:#1f6feb' if tier=='technical' else ''}">Technical</button>
@@ -758,7 +758,7 @@ function switchTier(t){{
 </div>
 {'<div style="background:#1c2128;border:1px solid #30363d;border-radius:6px;padding:10px 18px;margin-bottom:20px;display:flex;align-items:center;justify-content:space-between"><span style="font-size:13px;font-weight:600;color:' + ('#f85149' if status_filter=='fail' else '#d29922' if status_filter=='warn' else '#58a6ff') + '">Showing: ' + esc(_status_label) + ' only — across all devices</span></div>' if status_filter else ''}
 {'<div style="background:#3d2000;border:1px solid #bb6800;border-radius:6px;padding:10px 18px;margin-bottom:18px;display:flex;align-items:center;gap:12px"><span style="font-size:15px">⚠️</span><div><span style="font-size:13px;font-weight:700;color:#f0a500">DEMO REPORT — For evaluation purposes only. Not for distribution.</span><span style="font-size:12px;color:#8b949e;margin-left:12px">Contact <a href="mailto:sales@markai.io" style="color:#58a6ff">sales@markai.io</a> to purchase a license.</span></div></div>' if demo else ''}
-<h1>M.A.R.K. Sentinel &mdash; Fleet {esc(tier_label)}</h1>
+<h1>Arckon &mdash; Fleet {esc(tier_label)}</h1>
 <div class="meta">Generated {esc(now)} &nbsp;&bull;&nbsp; {len(devices)} device(s){(' &nbsp;&bull;&nbsp; Profiles: <strong>' + esc(_profile_label) + '</strong>') if _profile_label else ''} &nbsp;&bull;&nbsp; {'DEMO — Not for distribution' if demo else 'Confidential'}</div>
 <div class="cards">
   <div class="card"><div class="card-n score">{fleet_score}%</div><div class="card-l">Fleet Score</div></div>
@@ -1334,10 +1334,10 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         err_html = '<p class="err">Incorrect email or password.</p>' if qs.get('error') else ''
         body = (
             f'<!doctype html><html><head><meta charset="utf-8">'
-            f'<title>M.A.R.K. Sentinel — Sign in</title>'
+            f'<title>Arckon — Sign in</title>'
             f'<style>{self._LOGIN_CSS}</style>'
             f'</head><body><div class="box">'
-            f'<h2>M.A.R.K. Sentinel</h2>'
+            f'<h2>Arckon by RiskRaven</h2>'
             f'<p class="sub">Sign in to your account</p>'
             f'{err_html}'
             f'<form method="POST" action="/login">'
@@ -1348,7 +1348,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             f'<input type="password" name="password" placeholder="••••••••" autocomplete="current-password">'
             f'<button type="submit">Sign in</button>'
             f'</form>'
-            f'<div class="brand">Powered by Hash</div>'
+            f'<div class="brand">Powered by RiskRaven</div>'
             f'</div></body></html>'
         ).encode()
         self.send_response(200)
@@ -1426,10 +1426,10 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         err_html = f'<p class="err">{err_map.get(err_key, "")}</p>' if err_key else ''
         body = (
             f'<!doctype html><html><head><meta charset="utf-8">'
-            f'<title>M.A.R.K. Sentinel — Setup</title>'
+            f'<title>Arckon — Setup</title>'
             f'<style>{self._LOGIN_CSS}</style>'
             f'</head><body><div class="box">'
-            f'<h2>M.A.R.K. Sentinel</h2>'
+            f'<h2>Arckon by RiskRaven</h2>'
             f'<p class="sub">Create your organization and admin account</p>'
             f'{err_html}'
             f'<form method="POST" action="/setup">'
@@ -1443,7 +1443,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             f'<input type="password" name="confirm" placeholder="Re-enter password" autocomplete="new-password">'
             f'<button type="submit">Create &amp; sign in</button>'
             f'</form>'
-            f'<div class="brand">Powered by Hash</div>'
+            f'<div class="brand">Powered by RiskRaven</div>'
             f'</div></body></html>'
         ).encode()
         self.send_response(200)
@@ -2564,12 +2564,12 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             buf = io.BytesIO()
             with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED) as zf:
                 cover = (
-                    f"SENTINEL COMPLIANCE EVIDENCE PACKAGE\n"
+                    f"ARCKON COMPLIANCE EVIDENCE PACKAGE\n"
                     f"{'=' * 50}\n"
                     f"Generated:  {now.strftime('%Y-%m-%d %H:%M UTC')}\n"
                     f"Profile(s): {profile_label}\n"
                     f"Devices:    {len(devices)}\n"
-                    f"Tool:       M.A.R.K. Sentinel — AI Security Audit\n\n"
+                    f"Tool:       Arckon — AI Security Audit\n\n"
                     f"CONTENTS\n--------\n"
                     f"1. cover_letter.txt       — This document\n"
                     f"2. findings.csv           — All findings across all devices\n"
@@ -2579,7 +2579,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                     f"6. ai_asset_inventory.csv     — All discovered AI assets with approval status\n"
                     f"7. ai_asset_approval_log.csv  — Full audit trail: who approved each asset and when\n\n"
                     f"ATTESTATION\n-----------\n"
-                    f"Generated automatically by M.A.R.K. Sentinel. All findings\n"
+                    f"Generated automatically by Arckon by RiskRaven. All findings\n"
                     f"reflect the most recent scan for each enrolled device. Scan\n"
                     f"data is stored locally and has not been transmitted to any\n"
                     f"third party.\n"
@@ -3474,7 +3474,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         body = f'''<!DOCTYPE html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>M.A.R.K. Sentinel - Probe Results</title>
+<title>Arckon - Probe Results</title>
 <style>
 *{{box-sizing:border-box;margin:0;padding:0}}
 body{{background:#0d1117;color:#e6edf3;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;font-size:14px}}
@@ -3539,12 +3539,12 @@ body{{background:#0d1117;color:#e6edf3;font-family:-apple-system,BlinkMacSystemF
 }}
 </style></head><body><div class="wrap">
 <div class="brand-bar">
-  <span class="brand-mark">M.A.R.K.</span>
-  <span class="brand-name">SENTINEL</span>
+  <span class="brand-mark">by RiskRaven</span>
+  <span class="brand-name">ARCKON</span>
   <span class="brand-sub">Probe Results</span>
   <a class="back" href="/probe">Run Another Test</a>
 </div>
-<div class="print-date">M.A.R.K. Sentinel &#8212; AI API Security Report &nbsp;|&nbsp; {__import__('datetime').datetime.now().strftime('%Y-%m-%d %H:%M')}</div>
+<div class="print-date">Arckon &#8212; AI API Security Report &nbsp;|&nbsp; {__import__('datetime').datetime.now().strftime('%Y-%m-%d %H:%M')}</div>
 <div class="model-tag">Model tested: <strong>{e(model)}</strong></div>
 <div class="strip">
   <div class="sc"><div class="sc-n" style="color:#f85149">{summary["fail"]}</div><div class="sc-l">High Risk</div></div>
@@ -3615,7 +3615,7 @@ body{{background:#0d1117;color:#e6edf3;font-family:-apple-system,BlinkMacSystemF
         page = (
             b'<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">'
             b'<meta name="viewport" content="width=device-width,initial-scale=1">'
-            b'<title>M.A.R.K. Sentinel - API Security Tester</title>'
+            b'<title>Arckon - API Security Tester</title>'
             b'<style>'
             b'*{box-sizing:border-box;margin:0;padding:0}'
             b'body{background:#0d1117;color:#e6edf3;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;font-size:14px;min-height:100vh}'
@@ -3639,7 +3639,7 @@ body{{background:#0d1117;color:#e6edf3;font-family:-apple-system,BlinkMacSystemF
             b'#wait{display:none;color:#8b949e;font-size:13px;margin-top:16px}'
             b'</style></head><body>'
             b'<div class="wrap">'
-            b'<div class="bar"><span class="bm">M.A.R.K.</span><span class="bn">SENTINEL</span>'
+            b'<div class="bar"><span class="bm">by RiskRaven</span><span class="bn">ARCKON</span>'
             b'<span class="bs">API Security Tester</span>'
             b'<a href="/" style="margin-left:auto;font-size:12px;color:#8b949e;text-decoration:none;border:1px solid #30363d;border-radius:5px;padding:5px 10px">&#8592; Dashboard</a>'
             b'</div>'
@@ -4120,7 +4120,7 @@ def _build_fleet_html(devices: list[dict], shadow: list[dict] | None = None,
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
-<title>M.A.R.K. Sentinel — Command Center</title>
+<title>Arckon — Command Center</title>
 <style>
 *{{box-sizing:border-box;margin:0;padding:0}}
 body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-serif,"Apple Color Emoji","Segoe UI Emoji";font-size:15px;height:100vh;overflow:hidden}}
@@ -4235,8 +4235,8 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
 <div id="app">
   <aside id="sidebar">
     <div class="sb-logo">
-      <div class="sb-logo-mark">M.A.R.K.</div>
-      <div class="sb-logo-name">SENTINEL</div>
+      <div class="sb-logo-mark">BY RISKRAVEN</div>
+      <div class="sb-logo-name">ARCKON</div>
       <div class="sb-logo-sub">{'<span style="color:#f0a500;font-weight:700;font-size:9px;letter-spacing:1px">⚠ DEMO MODE</span>' if _is_demo() else 'Command Center'}</div>
     </div>
     <nav class="sb-nav">
@@ -6747,7 +6747,7 @@ loadAlertConfig();
 }})();
 </script>
 <div style="margin-top:48px;padding:16px 0 24px;border-top:1px solid #E5E7EB;text-align:center;font-size:11px;color:#9CA3AF">
-  © 2026 M.A.R.K. AI Systems. All rights reserved. Patent Pending.
+  © 2026 RiskRaven. All rights reserved. Patent Pending.
   &nbsp;·&nbsp; <span id="auto-refresh-countdown" style="color:#4F46E5"></span>
 </div>
 </body>
@@ -6756,7 +6756,7 @@ loadAlertConfig();
 
 def main():
     import argparse
-    ap = argparse.ArgumentParser(description='M.A.R.K. Sentinel Dashboard Server')
+    ap = argparse.ArgumentParser(description='Arckon Dashboard Server')
     ap.add_argument('--port', type=int, default=PORT, help=f'Port to listen on (default: {PORT})')
     ap.add_argument('--host', default='0.0.0.0', help='Bind address (default: 0.0.0.0 — all interfaces)')
     ap.add_argument('--no-browser', action='store_true', help="Don't auto-open browser")
@@ -6831,7 +6831,7 @@ def main():
         )
 
     url = f'{scheme}://localhost:{args.port}'
-    print('\n  M.A.R.K. Sentinel  ·  Dashboard Server')
+    print('\n  Arckon by RiskRaven  ·  Dashboard Server')
     print(f'  Project  : {ROOT}')
     print(f'  Dashboard: {url}')
     print(f'  Command Center: {url}/command (also available at {url}/fleet)')
