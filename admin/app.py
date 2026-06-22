@@ -931,6 +931,83 @@ async def api_remove_user(request: Request, user_id: str):
     return JSONResponse({"ok": True})
 
 
+# ── Audit Log ─────────────────────────────────────────────────────────────────
+
+@app.get("/audit-log", response_class=HTMLResponse)
+async def audit_log_page(request: Request):
+    try:
+        user = require_super_admin(request)
+    except HTTPException:
+        return RedirectResponse("/login")
+    customer_id = request.query_params.get("customer_id", "")
+    action      = request.query_params.get("action", "")
+    with get_conn() as conn:
+        customers = [dict(r) for r in conn.execute(
+            "SELECT id, name FROM customers WHERE active=1 ORDER BY name"
+        ).fetchall()]
+        actions = [r[0] for r in conn.execute(
+            "SELECT DISTINCT action FROM audit_log WHERE action IS NOT NULL ORDER BY action"
+        ).fetchall()]
+        q = "SELECT * FROM audit_log"
+        params, clauses = [], []
+        if customer_id:
+            clauses.append("customer_id=?"); params.append(customer_id)
+        if action:
+            clauses.append("action=?"); params.append(action)
+        if clauses:
+            q += " WHERE " + " AND ".join(clauses)
+        q += " ORDER BY occurred_at DESC LIMIT 500"
+        raw = conn.execute(q, params).fetchall()
+    entries = []
+    for r in raw:
+        e = dict(r)
+        try:
+            from datetime import datetime as _dt
+            ts = _dt.fromisoformat(e["occurred_at"].replace("Z", "+00:00"))
+            e["occurred_at_display"] = ts.strftime("%Y-%m-%d %H:%M UTC")
+        except Exception:
+            e["occurred_at_display"] = e.get("occurred_at", "")
+        entries.append(e)
+    return templates.TemplateResponse("audit_log.html", {
+        "request": request, "user": user,
+        "entries": entries, "customers": customers,
+        "actions": actions, "customer_id": customer_id, "action": action,
+    })
+
+
+@app.get("/audit-log/csv")
+async def audit_log_csv(request: Request):
+    try:
+        require_super_admin(request)
+    except HTTPException:
+        return RedirectResponse("/login")
+    import csv, io as _io
+    customer_id = request.query_params.get("customer_id", "")
+    action      = request.query_params.get("action", "")
+    with get_conn() as conn:
+        q = "SELECT occurred_at,actor_name,actor_role,customer_id,action,target,details,ip_address FROM audit_log"
+        params, clauses = [], []
+        if customer_id:
+            clauses.append("customer_id=?"); params.append(customer_id)
+        if action:
+            clauses.append("action=?"); params.append(action)
+        if clauses:
+            q += " WHERE " + " AND ".join(clauses)
+        q += " ORDER BY occurred_at DESC"
+        rows = conn.execute(q, params).fetchall()
+    buf = _io.StringIO()
+    w = csv.writer(buf)
+    w.writerow(["Time", "Actor", "Role", "Customer", "Action", "Target", "Details", "IP Address"])
+    for r in rows:
+        w.writerow(list(r))
+    from fastapi.responses import Response as _Resp
+    return _Resp(
+        content=buf.getvalue(),
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=audit_log.csv"},
+    )
+
+
 # ── DNS Inventory ─────────────────────────────────────────────────────────────
 
 @app.get("/dns-inventory", response_class=HTMLResponse)
