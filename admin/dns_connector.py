@@ -226,6 +226,7 @@ _FMT_PIHOLE   = "pihole"
 _FMT_BIND     = "bind"
 _FMT_UNBOUND  = "unbound"
 _FMT_UMBRELLA = "umbrella_csv"
+_FMT_NEXTDNS  = "nextdns_csv"
 _FMT_WINDDNS  = "windows_dns"
 _FMT_PLAIN    = "plain_domains"
 _FMT_GENERIC  = "generic"
@@ -233,6 +234,7 @@ _FMT_GENERIC  = "generic"
 _RE_PIHOLE   = re.compile(r'dnsmasq\[\d+\].*query\[')
 _RE_BIND     = re.compile(r'client\s+(?:@\S+\s+)?\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}#\d+.*query:')
 _RE_UNBOUND  = re.compile(r'unbound\[\d+')
+_RE_NEXTDNS  = re.compile(r'^timestamp[,\t]domain', re.IGNORECASE)
 _RE_UMBRELLA = re.compile(r'^\s*"?\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}"?,')
 _RE_WINDNS   = re.compile(r'\d+/\d+/\d{4}\s+\d+:\d+:\d+\s+[AP]M')
 _RE_DOMAIN   = re.compile(r'\b((?:[a-zA-Z0-9](?:[a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,})\b')
@@ -246,6 +248,8 @@ def _detect_format(lines: list[str]) -> str:
         return _FMT_BIND
     if _RE_UNBOUND.search(sample):
         return _FMT_UNBOUND
+    if _RE_NEXTDNS.search(sample):
+        return _FMT_NEXTDNS
     if _RE_UMBRELLA.search(sample):
         return _FMT_UMBRELLA
     if _RE_WINDNS.search(sample):
@@ -318,6 +322,34 @@ def _parse_umbrella(lines: list[str]) -> Iterator[_Entry]:
             continue
 
 
+def _parse_nextdns(lines: list[str]) -> Iterator[_Entry]:
+    # NextDNS CSV export (two known column layouts — camelCase and snake_case):
+    # timestamp,domain,query_type,...,client_ip,...,device_name,device_model,device_local_ip,...
+    # Normalise header by lowercasing and stripping underscores for flexible matching.
+    reader = csv.reader(io.StringIO("\n".join(lines)))
+    header: list[str] = []
+    for row in reader:
+        if not row:
+            continue
+        if not header:
+            # normalise: lowercase + strip underscores/spaces
+            header = [h.strip().lower().replace("_", "").replace(" ", "") for h in row]
+            continue
+        try:
+            def col(name: str, fallback: int = -1) -> str:
+                idx = next((i for i, h in enumerate(header) if h == name), fallback)
+                return row[idx].strip() if 0 <= idx < len(row) else ""
+            ts     = col("timestamp", 0)
+            domain = col("domain", 1).rstrip(".")
+            # prefer internal/local IP → device name → public client IP
+            src = (col("devicelocalip") or col("devicename") or
+                   col("clientname") or col("clientip", 5))
+            if domain:
+                yield _Entry(ts=ts, domain=domain, src=src)
+        except (IndexError, ValueError):
+            continue
+
+
 def _parse_windows_dns(lines: list[str]) -> Iterator[_Entry]:
     # 6/15/2026 10:23:45 AM ... api.openai.com
     ts_pat  = re.compile(r'(\d+/\d+/\d{4}\s+\d+:\d+:\d+\s+[AP]M)')
@@ -354,10 +386,11 @@ def _parse_generic(lines: list[str]) -> Iterator[_Entry]:
             yield _Entry(ts="", domain=dom.rstrip('.'), src=ip_m.group(1) if ip_m else "")
 
 
-_PARSERS = {
+_PARSERS: dict = {
     _FMT_PIHOLE:   _parse_pihole,
     _FMT_BIND:     _parse_bind,
     _FMT_UNBOUND:  _parse_unbound,
+    _FMT_NEXTDNS:  _parse_nextdns,
     _FMT_UMBRELLA: _parse_umbrella,
     _FMT_WINDDNS:  _parse_windows_dns,
     _FMT_PLAIN:    _parse_plain,

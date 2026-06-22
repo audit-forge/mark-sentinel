@@ -957,7 +957,7 @@ async def dns_inventory_analyze(request: Request):
         from dns_connector import connect as dns_connect
     except ImportError as e:
         return JSONResponse({"error": f"DNS connector not available: {e}"}, status_code=500)
-    form = await request.form()
+    form = await request.form(max_part_size=200*1024*1024)
     log_content = ""
     upload = form.get("log_file")
     if upload and hasattr(upload, "read"):

@@ -55,7 +55,7 @@
 </div>
 
 <!-- Results -->
-<div id="results">
+<div id="results" style="display:none">
 
   <!-- Summary stats -->
   <div class="grid-stats" id="stats-grid" style="grid-template-columns:repeat(auto-fit,minmax(160px,1fr))"></div>
@@ -138,7 +138,7 @@ function runAnalysis(){
   fd.append('approved_domains', document.getElementById('approved-domains').value);
 
   fetch('/dns-inventory/analyze', { method:'POST', body: fd })
-    .then(function(r){ return r.json(); })
+    .then(function(r){ if(!r.ok && r.status===413){ throw new Error("File too large — try a smaller log excerpt"); } return r.json(); })
     .then(function(data){
       setLoading(false);
       if(data.error){ showError(data.error); return; }
@@ -148,7 +148,7 @@ function runAnalysis(){
 }
 
 function renderResults(d){
-  document.getElementById('results').style.display = '';
+  document.getElementById('results').style.display = 'block';
 
   // Stats
   var hasShadow = d.shadow_ai && d.shadow_ai.length > 0;
@@ -196,14 +196,15 @@ function renderResults(d){
 
   // By-source
   var bySource = d.by_source || {};
-  var srcKeys = Object.keys(bySource);
+  var fullIpRe = /^\d+\.\d+\.\d+\.\d+$/;
+  var srcKeys = Object.keys(bySource).filter(function(ip){ return fullIpRe.test(ip); });
   if(srcKeys.length){
     document.getElementById('sources-section').style.display = '';
     document.getElementById('sources-tbody').innerHTML = srcKeys.map(function(ip){
       var svcs = bySource[ip];
       return '<tr>' +
         '<td class="source-ip">' + esc(ip) + '</td>' +
-        '<td style="font-size:13px">' + svcs.map(function(s){ return '<span class="cat-badge" style="margin-right:4px">' + esc(s) + '</span>'; }).join('') + '</td>' +
+        '<td style="font-size:13px">' + svcs.map(function(s){ return '<span class="cat-badge" style="margin-right:4px">' + esc(s) + '</span>'; }).join(', ') + '</td>' +
         '<td style="font-weight:600">' + svcs.length + '</td>' +
         '</tr>';
     }).join('');
