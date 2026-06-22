@@ -1319,6 +1319,13 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self.send_header('Location', '/setup')
             self.end_headers()
             return
+        # In trusted-proxy mode the user is already authenticated by nginx —
+        # skip the login form and go straight to the dashboard.
+        if self._proxy_session_user():
+            self.send_response(302)
+            self.send_header('Location', '/')
+            self.end_headers()
+            return
         qs = parse_qs(urlparse(self.path).query)
         next_url = qs.get('next', ['/'])[0]
         if not next_url.startswith('/') or '//' in next_url:
