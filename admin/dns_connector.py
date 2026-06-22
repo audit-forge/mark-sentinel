@@ -615,9 +615,9 @@ def connect(
 
     try:
         if log_content is not None:
-            content = log_content
+            content = log_content.lstrip('﻿')  # strip BOM if present
         elif log_path:
-            content = Path(log_path).read_text(encoding="utf-8", errors="replace")
+            content = Path(log_path).read_text(encoding="utf-8-sig", errors="replace")
         else:
             result.errors.append("No log_path or log_content provided.")
             return result.to_dict()

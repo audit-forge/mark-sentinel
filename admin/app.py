@@ -1046,8 +1046,12 @@ async def dns_inventory_analyze(request: Request):
         return JSONResponse({"error": "No log content provided."}, status_code=400)
     approved_raw = form.get("approved_domains", "")
     approved = [d.strip() for d in approved_raw.replace(",", "\n").splitlines() if d.strip()] or None
-    result = dns_connect(log_content=log_content, approved_domains=approved)
-    return JSONResponse(result)
+    try:
+        result = dns_connect(log_content=log_content, approved_domains=approved)
+        return JSONResponse(result)
+    except Exception as exc:
+        import traceback as _tb
+        return JSONResponse({"error": f"Analysis failed: {exc}", "detail": _tb.format_exc()}, status_code=500)
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────

@@ -138,7 +138,13 @@ function runAnalysis(){
   fd.append('approved_domains', document.getElementById('approved-domains').value);
 
   fetch('/dns-inventory/analyze', { method:'POST', body: fd })
-    .then(function(r){ if(!r.ok && r.status===413){ throw new Error("File too large — try a smaller log excerpt"); } return r.json(); })
+    .then(function(r){
+      if(r.status === 413) throw new Error('File too large — try a smaller log excerpt');
+      return r.text().then(function(t){
+        if(!r.ok){ throw new Error('Server error ' + r.status + ': ' + t.substring(0,120)); }
+        try { return JSON.parse(t); } catch(e){ throw new Error('Unexpected response: ' + t.substring(0,120)); }
+      });
+    })
     .then(function(data){
       setLoading(false);
       if(data.error){ showError(data.error); return; }
