@@ -6588,7 +6588,7 @@ function renderRiskRegister() {{
 // ── SIEM integrations ────────────────────────────────────────────────────────
 
 const SIEM_DEFS = [
-  {{id:'splunk',   name:'Splunk',               icon:'&#128200;', color:'#FF6900', status:'Hash task P01',
+  {{id:'splunk',   name:'Splunk',               icon:'&#128200;', color:'#FF6900', status:'HTTP Event Collector',
     desc:'HTTP Event Collector — findings stream to any Splunk index as arckon:finding sourcetype.',
     fields:[
       {{key:'hec_url',    label:'HEC URL',       type:'text',     ph:'https://splunk.example.com:8088'}},
@@ -6597,21 +6597,21 @@ const SIEM_DEFS = [
       {{key:'sourcetype', label:'Sourcetype',    type:'text',     ph:'arckon:finding'}},
       {{key:'verify_ssl', label:'Verify SSL',    type:'toggle'}},
     ]}},
-  {{id:'sentinel', name:'Microsoft Sentinel',   icon:'&#9729;&#65039;', color:'#0078D4', status:'Hash task P02',
+  {{id:'sentinel', name:'Microsoft Sentinel',   icon:'&#9729;&#65039;', color:'#0078D4', status:'Log Analytics API',
     desc:'Azure Monitor HTTP Data Collector API — findings indexed to a custom Log Analytics table.',
     fields:[
       {{key:'workspace_id', label:'Workspace ID',  type:'text',     ph:'xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx'}},
       {{key:'shared_key',   label:'Shared Key',    type:'password', ph:'••••••••'}},
       {{key:'log_type',     label:'Table Name',    type:'text',     ph:'ArckonFindings'}},
     ]}},
-  {{id:'qradar',   name:'IBM QRadar',            icon:'&#128274;', color:'#052FAD', status:'Hash task P03',
+  {{id:'qradar',   name:'IBM QRadar',            icon:'&#128274;', color:'#052FAD', status:'CEF / Syslog',
     desc:'CEF-formatted syslog (TCP/UDP) — findings appear as AI security events in QRadar.',
     fields:[
       {{key:'syslog_host', label:'Syslog Host', type:'text', ph:'qradar.example.com'}},
       {{key:'syslog_port', label:'Port',        type:'text', ph:'514'}},
       {{key:'protocol',    label:'Protocol',    type:'select', opts:['tcp','udp']}},
     ]}},
-  {{id:'elastic',  name:'Elastic Security',      icon:'&#128269;', color:'#FEC514', status:'Hash task P04',
+  {{id:'elastic',  name:'Elastic Security',      icon:'&#128269;', color:'#FEC514', status:'REST API / ECS',
     desc:'Direct Elasticsearch REST API — findings indexed with ECS field mapping for Kibana dashboards.',
     fields:[
       {{key:'endpoint',   label:'Endpoint',  type:'text',     ph:'https://elasticsearch.example.com:9200'}},
@@ -6619,14 +6619,14 @@ const SIEM_DEFS = [
       {{key:'index',      label:'Index',     type:'text',     ph:'arckon-findings'}},
       {{key:'verify_ssl', label:'Verify SSL',type:'toggle'}},
     ]}},
-  {{id:'exabeam',  name:'Exabeam',               icon:'&#128202;', color:'#7B61FF', status:'Hash task P05',
+  {{id:'exabeam',  name:'Exabeam',               icon:'&#128202;', color:'#7B61FF', status:'CEF / Syslog',
     desc:'CEF syslog — same Universal CEF parser as QRadar. Zero additional config once CEF is active.',
     fields:[
       {{key:'syslog_host', label:'Syslog Host', type:'text', ph:'exabeam.example.com'}},
       {{key:'syslog_port', label:'Port',        type:'text', ph:'514'}},
       {{key:'protocol',    label:'Protocol',    type:'select', opts:['udp','tcp']}},
     ]}},
-  {{id:'kaseya',   name:'Kaseya',                icon:'&#128736;', color:'#E31E24', status:'Hash task P06',
+  {{id:'kaseya',   name:'Kaseya',                icon:'&#128736;', color:'#E31E24', status:'VSA / BMS / IT Glue',
     desc:'VSA agent deployment · BMS ticket creation from findings · IT Glue AI inventory sync.',
     fields:[
       {{key:'vsa_url',        label:'VSA URL',        type:'text',     ph:'https://vsa.example.com'}},
@@ -6698,10 +6698,10 @@ function renderSiemCards() {{
           <div style="font-size:12px;color:#6B7280;margin-top:2px">${{def.desc}}</div>
         </div>
         <span style="${{statusStyle}}">${{def.status}}</span>
-        <label class="toggle-wrap" title="Enable / disable">
+        <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:12px;color:#374151;font-weight:600">
           <input type="checkbox" id="siem-enable-${{def.id}}" ${{enabled?'checked':''}}
             onchange="saveSiemConfig('${{def.id}}')">
-          <span class="toggle-track"></span>
+          Enable
         </label>
       </div>
       <div style="padding:14px 18px">
