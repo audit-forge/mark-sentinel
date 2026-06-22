@@ -1124,6 +1124,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             '/command':        lambda: self._redirect('/'),
             '/api/config':           self._api_get_config,
             '/api/alerts/config':    self._api_get_alert_config,
+            '/api/siem/config':      self._api_get_siem_config,
             '/api/live-scan-config': self._api_get_live_scan_config,
             '/api/fleet/live-stats': self._api_fleet_live_stats,
             '/api/fleet/shadow':  self._api_fleet_shadow,
@@ -1227,6 +1228,10 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self._api_set_alert_config()
         elif path == '/api/alerts/test':
             self._api_test_alert()
+        elif path == '/api/siem/config':
+            self._api_set_siem_config()
+        elif path.startswith('/api/siem/test/'):
+            self._api_test_siem(path[len('/api/siem/test/'):].strip('/'))
         elif path == '/api/system/update':
             self._api_system_update()
         elif path == '/api/system/restart-agent':
@@ -1993,6 +1998,21 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                 ).start()
         except Exception as _ae:
             log.error('alerts error: %s', _ae)
+
+        try:
+            from connectors.siem_connector import load_siem_config, send_report as siem_send
+            _siem_cfg = load_siem_config(ROOT / 'siem_config.json')
+            if _siem_cfg:
+                _cid = store._customer_id if hasattr(store, '_customer_id') else 'default'
+                threading.Thread(
+                    target=siem_send,
+                    args=(report,),
+                    kwargs=dict(device_id=device_id, hostname=hostname,
+                                customer_id=_cid, cfg=_siem_cfg),
+                    daemon=True,
+                ).start()
+        except Exception as _se:
+            log.error('siem dispatch error: %s', _se)
 
         resp = {'status': 'accepted', 'device_id': device_id, 'license_status': license_status}
         if duplicate_warning:
@@ -3236,6 +3256,53 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         except Exception as e:
             self._json({'ok': False, 'message': str(e)}, 500)
 
+    # ── SIEM config API ───────────────────────────────────────────────────────
+
+    def _api_get_siem_config(self):
+        try:
+            from connectors.siem_connector import load_siem_config_for_ui
+            self._json(load_siem_config_for_ui(ROOT / 'siem_config.json'))
+        except Exception as e:
+            self._json({'error': str(e)}, 500)
+
+    def _api_set_siem_config(self):
+        length = _content_length(self.headers)
+        if not length:
+            self._send(400, b'Empty body', 'text/plain')
+            return
+        try:
+            body = json.loads(self.rfile.read(length))
+        except json.JSONDecodeError:
+            self._send(400, b'Invalid JSON', 'text/plain')
+            return
+        try:
+            from connectors.siem_connector import load_siem_config, save_siem_config
+            existing = load_siem_config(ROOT / 'siem_config.json')
+            _SECRETS = {'hec_token', 'shared_key', 'api_key', 'vsa_api_key',
+                        'bms_api_key', 'itglue_api_key', 'password'}
+            for siem_id, vals in body.items():
+                if not isinstance(vals, dict):
+                    continue
+                if siem_id not in existing:
+                    existing[siem_id] = {}
+                for k, v in vals.items():
+                    if k in _SECRETS and v == '__set__':
+                        continue  # masked — keep existing secret
+                    existing[siem_id][k] = v
+            save_siem_config(existing, ROOT / 'siem_config.json')
+            self._json({'status': 'saved'})
+        except Exception as e:
+            self._json({'error': str(e)}, 500)
+
+    def _api_test_siem(self, siem_id: str):
+        try:
+            from connectors.siem_connector import load_siem_config, test_connection
+            cfg = load_siem_config(ROOT / 'siem_config.json')
+            ok, msg = test_connection(siem_id, cfg)
+            self._json({'ok': ok, 'message': msg})
+        except Exception as e:
+            self._json({'ok': False, 'message': str(e)}, 500)
+
     def _serve_shortcut(self):
         url = f'http://localhost:{_serve_port}/fleet'
         if sys.platform == 'win32':
@@ -4254,6 +4321,8 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
       <button class="sb-item" id="nav-findings" onclick="navTo('findings')">&#128202; Findings</button>
       <div class="sb-group">Export</div>
       <button class="sb-item" id="nav-reports" onclick="navTo('reports')">&#128196; Reports</button>
+      <div class="sb-group">Integrations</div>
+      <button class="sb-item" id="nav-siem" onclick="navTo('siem')">&#128279; SIEM &amp; Tools</button>
       <div class="sb-group"></div>
       <button class="sb-item" id="nav-settings" onclick="navTo('settings')">&#9881; Settings</button>
       <button class="sb-item" id="nav-users" onclick="navTo('users')">&#128100; Users</button>
@@ -4644,6 +4713,16 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
 
   {_live_scan_settings_html()}
 
+  </div>
+
+  <div class="page" id="page-siem">
+  <div class="sec-hdr" style="margin-top:0;padding-top:0">SIEM &amp; Tool Integrations</div>
+  <p style="color:#6B7280;font-size:14px;margin-top:-12px;margin-bottom:24px">
+    Connect Arckon to your security stack. Findings are forwarded automatically when a scan completes.
+    Configure each integration below, then click Test to verify connectivity.
+  </p>
+  <div id="siem-save-banner" style="display:none;background:#D1FAE5;color:#065F46;border:1px solid #6EE7B7;border-radius:6px;padding:10px 16px;margin-bottom:16px;font-size:13px">&#10003; Settings saved</div>
+  <div id="siem-cards" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(480px,1fr));gap:20px"></div>
   </div>
 
   <div class="page" id="page-reports">
@@ -6505,6 +6584,184 @@ function renderRiskRegister() {{
     <tbody>${{trs}}</tbody>
   </table><div style="font-size:11px;color:#9CA3AF;margin-bottom:8px">${{rows.length}} finding${{rows.length!==1?'s':''}} · hover device count for affected hostnames</div>`;
 }}
+
+// ── SIEM integrations ────────────────────────────────────────────────────────
+
+const SIEM_DEFS = [
+  {{id:'splunk',   name:'Splunk',               icon:'&#128200;', color:'#FF6900', status:'Hash task P01',
+    desc:'HTTP Event Collector — findings stream to any Splunk index as arckon:finding sourcetype.',
+    fields:[
+      {{key:'hec_url',    label:'HEC URL',       type:'text',     ph:'https://splunk.example.com:8088'}},
+      {{key:'hec_token',  label:'HEC Token',     type:'password', ph:'••••••••'}},
+      {{key:'index',      label:'Index',         type:'text',     ph:'arckon'}},
+      {{key:'sourcetype', label:'Sourcetype',    type:'text',     ph:'arckon:finding'}},
+      {{key:'verify_ssl', label:'Verify SSL',    type:'toggle'}},
+    ]}},
+  {{id:'sentinel', name:'Microsoft Sentinel',   icon:'&#9729;&#65039;', color:'#0078D4', status:'Hash task P02',
+    desc:'Azure Monitor HTTP Data Collector API — findings indexed to a custom Log Analytics table.',
+    fields:[
+      {{key:'workspace_id', label:'Workspace ID',  type:'text',     ph:'xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx'}},
+      {{key:'shared_key',   label:'Shared Key',    type:'password', ph:'••••••••'}},
+      {{key:'log_type',     label:'Table Name',    type:'text',     ph:'ArckonFindings'}},
+    ]}},
+  {{id:'qradar',   name:'IBM QRadar',            icon:'&#128274;', color:'#052FAD', status:'Hash task P03',
+    desc:'CEF-formatted syslog (TCP/UDP) — findings appear as AI security events in QRadar.',
+    fields:[
+      {{key:'syslog_host', label:'Syslog Host', type:'text', ph:'qradar.example.com'}},
+      {{key:'syslog_port', label:'Port',        type:'text', ph:'514'}},
+      {{key:'protocol',    label:'Protocol',    type:'select', opts:['tcp','udp']}},
+    ]}},
+  {{id:'elastic',  name:'Elastic Security',      icon:'&#128269;', color:'#FEC514', status:'Hash task P04',
+    desc:'Direct Elasticsearch REST API — findings indexed with ECS field mapping for Kibana dashboards.',
+    fields:[
+      {{key:'endpoint',   label:'Endpoint',  type:'text',     ph:'https://elasticsearch.example.com:9200'}},
+      {{key:'api_key',    label:'API Key',   type:'password', ph:'••••••••'}},
+      {{key:'index',      label:'Index',     type:'text',     ph:'arckon-findings'}},
+      {{key:'verify_ssl', label:'Verify SSL',type:'toggle'}},
+    ]}},
+  {{id:'exabeam',  name:'Exabeam',               icon:'&#128202;', color:'#7B61FF', status:'Hash task P05',
+    desc:'CEF syslog — same Universal CEF parser as QRadar. Zero additional config once CEF is active.',
+    fields:[
+      {{key:'syslog_host', label:'Syslog Host', type:'text', ph:'exabeam.example.com'}},
+      {{key:'syslog_port', label:'Port',        type:'text', ph:'514'}},
+      {{key:'protocol',    label:'Protocol',    type:'select', opts:['udp','tcp']}},
+    ]}},
+  {{id:'kaseya',   name:'Kaseya',                icon:'&#128736;', color:'#E31E24', status:'Hash task P06',
+    desc:'VSA agent deployment · BMS ticket creation from findings · IT Glue AI inventory sync.',
+    fields:[
+      {{key:'vsa_url',        label:'VSA URL',        type:'text',     ph:'https://vsa.example.com'}},
+      {{key:'vsa_api_key',    label:'VSA API Key',    type:'password', ph:'••••••••'}},
+      {{key:'bms_url',        label:'BMS URL',        type:'text',     ph:'https://bms.example.com'}},
+      {{key:'bms_api_key',    label:'BMS API Key',    type:'password', ph:'••••••••'}},
+      {{key:'itglue_api_key', label:'IT Glue Key',    type:'password', ph:'••••••••'}},
+      {{key:'itglue_org_id',  label:'IT Glue Org ID', type:'text',     ph:'123456'}},
+      {{key:'ticket_queue',   label:'Ticket Queue',   type:'text',     ph:'Security'}},
+    ]}},
+];
+
+const SEVERITY_OPTS = ['critical','high','medium','low'];
+var _siemCfg = {{}};
+
+async function loadSiemConfig() {{
+  try {{
+    const r = await fetch('/api/siem/config');
+    if (!r.ok) return;
+    _siemCfg = await r.json();
+    renderSiemCards();
+  }} catch (_) {{}}
+}}
+
+function renderSiemCards() {{
+  const container = document.getElementById('siem-cards');
+  if (!container) return;
+  container.innerHTML = SIEM_DEFS.map(def => {{
+    const cfg = _siemCfg[def.id] || {{}};
+    const enabled = !!cfg.enabled;
+    const sendOn  = cfg.send_on || ['critical','high'];
+
+    const fieldsHtml = def.fields.map(f => {{
+      if (f.type === 'toggle') {{
+        return `<div style="display:flex;align-items:center;gap:10px;padding:6px 0">
+          <label style="font-size:13px;color:#374151;min-width:140px">${{f.label}}</label>
+          <label class="toggle-wrap"><input type="checkbox" class="siem-field" data-siem="${{def.id}}" data-key="${{f.key}}" ${{cfg[f.key]!==false?'checked':''}}><span class="toggle-track"></span></label>
+        </div>`;
+      }}
+      if (f.type === 'select') {{
+        const opts = (f.opts||[]).map(o=>`<option value="${{o}}" ${{cfg[f.key]===o?'selected':''}}>${{o}}</option>`).join('');
+        return `<div style="display:flex;align-items:center;gap:10px;padding:6px 0">
+          <label style="font-size:13px;color:#374151;min-width:140px">${{f.label}}</label>
+          <select class="form-select siem-field" data-siem="${{def.id}}" data-key="${{f.key}}" style="width:120px;font-size:13px">${{opts}}</select>
+        </div>`;
+      }}
+      const val = f.type === 'password' && cfg[f.key] ? '__set__' : (cfg[f.key] || '');
+      return `<div style="display:flex;align-items:center;gap:10px;padding:6px 0">
+        <label style="font-size:13px;color:#374151;min-width:140px">${{f.label}}</label>
+        <input type="${{f.type==='password'?'password':'text'}}" class="form-input siem-field"
+          data-siem="${{def.id}}" data-key="${{f.key}}" value="${{esc(val)}}" placeholder="${{f.ph||''}}"
+          style="flex:1;font-size:13px;font-family:${{f.type==='password'?'monospace':'inherit'}}">
+      </div>`;
+    }}).join('');
+
+    const severityHtml = SEVERITY_OPTS.map(s => `
+      <label style="display:flex;align-items:center;gap:5px;font-size:12px;color:#374151;cursor:pointer">
+        <input type="checkbox" class="siem-severity" data-siem="${{def.id}}" value="${{s}}"
+          ${{sendOn.includes(s)?'checked':''}}> ${{s.charAt(0).toUpperCase()+s.slice(1)}}
+      </label>`).join('');
+
+    const statusStyle = `font-size:10px;padding:2px 8px;border-radius:3px;background:#FEF9C3;color:#92400E;border:1px solid #FDE047`;
+    return `
+    <div style="background:#fff;border:1px solid #E5E7EB;border-radius:8px;overflow:hidden">
+      <div style="display:flex;align-items:center;gap:12px;padding:14px 18px;background:#F9FAFB;border-bottom:1px solid #E5E7EB">
+        <span style="font-size:22px">${{def.icon}}</span>
+        <div style="flex:1">
+          <div style="font-weight:700;font-size:15px;color:#111827">${{def.name}}</div>
+          <div style="font-size:12px;color:#6B7280;margin-top:2px">${{def.desc}}</div>
+        </div>
+        <span style="${{statusStyle}}">${{def.status}}</span>
+        <label class="toggle-wrap" title="Enable / disable">
+          <input type="checkbox" id="siem-enable-${{def.id}}" ${{enabled?'checked':''}}
+            onchange="saveSiemConfig('${{def.id}}')">
+          <span class="toggle-track"></span>
+        </label>
+      </div>
+      <div style="padding:14px 18px">
+        ${{fieldsHtml}}
+        <div style="margin-top:12px">
+          <div style="font-size:12px;color:#6B7280;margin-bottom:6px;font-weight:600">Forward on severity:</div>
+          <div style="display:flex;gap:16px;flex-wrap:wrap">${{severityHtml}}</div>
+        </div>
+        <div style="display:flex;gap:10px;margin-top:16px;align-items:center">
+          <button class="scan-btn" onclick="saveSiemConfig('${{def.id}}')" style="color:#16A34A;border-color:#238636">&#10003; Save</button>
+          <button class="scan-btn" onclick="testSiemConnection('${{def.id}}',this)" style="color:#4F46E5;border-color:#C7D2FE">&#9654; Test</button>
+          <span id="siem-test-${{def.id}}" style="font-size:13px;color:#6B7280"></span>
+        </div>
+      </div>
+    </div>`;
+  }}).join('');
+}}
+
+async function saveSiemConfig(siemId) {{
+  const payload = {{}};
+  document.querySelectorAll(`.siem-field[data-siem="${{siemId}}"]`).forEach(el => {{
+    const key = el.dataset.key;
+    payload[key] = el.type === 'checkbox' ? el.checked : el.value;
+  }});
+  const severities = [...document.querySelectorAll(`.siem-severity[data-siem="${{siemId}}"]:checked`)].map(c=>c.value);
+  payload.send_on  = severities;
+  payload.enabled  = document.getElementById('siem-enable-' + siemId)?.checked ?? false;
+
+  try {{
+    const r = await fetch('/api/siem/config', {{
+      method: 'POST',
+      headers: {{'Content-Type':'application/json'}},
+      body: JSON.stringify({{[siemId]: payload}}),
+    }});
+    if (r.ok) {{
+      _siemCfg[siemId] = {{...(_siemCfg[siemId]||{{}}), ...payload}};
+      const banner = document.getElementById('siem-save-banner');
+      if (banner) {{ banner.style.display=''; setTimeout(()=>banner.style.display='none', 3000); }}
+    }}
+  }} catch(e) {{ alert('Save failed: ' + e); }}
+}}
+
+async function testSiemConnection(siemId, btn) {{
+  const el = document.getElementById('siem-test-' + siemId);
+  if (el) el.textContent = 'Testing…';
+  btn.disabled = true;
+  try {{
+    const r = await fetch('/api/siem/test/' + siemId, {{method:'POST'}});
+    const d = await r.json();
+    if (el) {{
+      el.textContent = d.ok ? '&#10003; ' + d.message : '&#10007; ' + d.message;
+      el.style.color = d.ok ? '#16A34A' : '#DC2626';
+    }}
+  }} catch(e) {{
+    if (el) {{ el.textContent = 'Error: ' + e; el.style.color='#DC2626'; }}
+  }}
+  btn.disabled = false;
+}}
+
+loadSiemConfig();
 
 async function loadConfig() {{
   try {{
