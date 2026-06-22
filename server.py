@@ -3539,8 +3539,8 @@ body{{background:#0d1117;color:#e6edf3;font-family:-apple-system,BlinkMacSystemF
 }}
 </style></head><body><div class="wrap">
 <div class="brand-bar">
-  <span class="brand-mark">by RiskRaven</span>
   <span class="brand-name">ARCKON</span>
+  <span class="brand-mark">by RiskRaven</span>
   <span class="brand-sub">Probe Results</span>
   <a class="back" href="/probe">Run Another Test</a>
 </div>
@@ -3639,7 +3639,7 @@ body{{background:#0d1117;color:#e6edf3;font-family:-apple-system,BlinkMacSystemF
             b'#wait{display:none;color:#8b949e;font-size:13px;margin-top:16px}'
             b'</style></head><body>'
             b'<div class="wrap">'
-            b'<div class="bar"><span class="bm">by RiskRaven</span><span class="bn">ARCKON</span>'
+            b'<div class="bar"><span class="bn">ARCKON</span><span class="bm">by RiskRaven</span>'
             b'<span class="bs">API Security Tester</span>'
             b'<a href="/" style="margin-left:auto;font-size:12px;color:#8b949e;text-decoration:none;border:1px solid #30363d;border-radius:5px;padding:5px 10px">&#8592; Dashboard</a>'
             b'</div>'
@@ -4235,9 +4235,8 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
 <div id="app">
   <aside id="sidebar">
     <div class="sb-logo">
-      <div class="sb-logo-mark">BY RISKRAVEN</div>
       <div class="sb-logo-name">ARCKON</div>
-      <div class="sb-logo-sub">{'<span style="color:#f0a500;font-weight:700;font-size:9px;letter-spacing:1px">⚠ DEMO MODE</span>' if _is_demo() else 'Command Center'}</div>
+      <div class="sb-logo-sub">{'<span style="color:#f0a500;font-weight:700;font-size:9px;letter-spacing:1px">⚠ DEMO MODE</span>' if _is_demo() else '<span style="color:#6366F1;font-size:9px;letter-spacing:1px;font-weight:700">by RiskRaven</span> &nbsp;·&nbsp; Command Center'}</div>
     </div>
     <nav class="sb-nav">
       <div class="sb-group">Overview</div>
