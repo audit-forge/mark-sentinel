@@ -796,7 +796,7 @@ def send_report(report: dict, device_id: str = '', hostname: str = '',
         cfg = load_siem_config()
     if not cfg:
         return
-    results = report.get('results', [])
+    results = report.get('findings', report.get('results', []))
     scan_date = report.get('scan_date', '')
     profile   = report.get('profile', '')
     connectors = _build_connectors(cfg)
