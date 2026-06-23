@@ -6802,14 +6802,25 @@ async function saveConfig() {{
       body: JSON.stringify(body),
     }});
     const d = await r.json();
+
+    // Immediately dispatch Scan All with the same profiles so the fleet table
+    // updates within minutes instead of waiting for the next automatic cycle.
+    if (checked.length && d.pushed_to_agents > 0) {{
+      await fetch('/api/fleet/scan/all', {{
+        method: 'POST',
+        headers: {{'Content-Type': 'application/json'}},
+        body: JSON.stringify({{profiles: checked, stagger: 'normal'}}),
+      }});
+    }}
+
     const el = document.getElementById('cfg-saved');
     if (el) {{
       const n = d.pushed_to_agents || 0;
       el.textContent = n > 0
-        ? `✓ Saved — pushed to ${{n}} connected agent${{n !== 1 ? 's' : ''}}`
-        : '✓ Saved — takes effect on next scan';
+        ? `✓ Saved and scan dispatched to ${{n}} agent${{n !== 1 ? 's' : ''}} — profile column updates shortly`
+        : '✓ Saved — connect an agent to apply the profile';
       el.style.display = 'block';
-      setTimeout(() => el.style.display = 'none', 4000);
+      setTimeout(() => el.style.display = 'none', 6000);
     }}
   }} catch (e) {{ alert('Save failed: ' + e); }}
 }}
