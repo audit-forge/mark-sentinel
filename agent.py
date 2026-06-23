@@ -621,19 +621,41 @@ def _resolve_home() -> str:
     return '/'
 
 
+def _k8s_env() -> dict:
+    """Return env vars that help kubectl find the right kubeconfig when running as root.
+    Rancher Desktop and Docker Desktop install kubeconfig under the user's home, not /root."""
+    env = os.environ.copy()
+    if os.geteuid() == 0 and 'KUBECONFIG' not in env:
+        # Search for kubeconfig in all user home directories
+        search_roots = [Path('/Users'), Path('/home')]
+        for base in search_roots:
+            if not base.exists():
+                continue
+            for home in base.iterdir():
+                cfg = home / '.kube' / 'config'
+                if cfg.exists():
+                    env['KUBECONFIG'] = str(cfg)
+                    env['HOME'] = str(home)
+                    break
+            if 'KUBECONFIG' in env:
+                break
+    return env
+
+
 def _k8s_cluster_context() -> str:
     """Return kubectl context name if a cluster is reachable, else empty string."""
     try:
+        env = _k8s_env()
         r = subprocess.run(
             ['kubectl', 'config', 'current-context'],
-            capture_output=True, text=True, timeout=5,
+            capture_output=True, text=True, timeout=5, env=env,
         )
         if r.returncode != 0:
             return ''
         ctx = r.stdout.strip()
         r2 = subprocess.run(
             ['kubectl', 'cluster-info', '--context', ctx],
-            capture_output=True, timeout=5,
+            capture_output=True, timeout=5, env=env,
         )
         return ctx if r2.returncode == 0 else ''
     except Exception:
@@ -708,12 +730,26 @@ def run_k8s_cycle(config: dict) -> bool:
     return report_to_server(report, config, device_id, hostname)
 
 
+def _docker_env() -> dict:
+    """Return env vars that help docker CLI find Docker Desktop's socket when running as root.
+    On macOS, Docker Desktop exposes its socket under the user's home dir, not /var/run/docker.sock."""
+    env = os.environ.copy()
+    if sys.platform == 'darwin' and os.geteuid() == 0:
+        # Try each logged-in user's Docker Desktop socket
+        for home in Path('/Users').iterdir():
+            sock = home / '.docker' / 'run' / 'docker.sock'
+            if sock.exists():
+                env['DOCKER_HOST'] = f'unix://{sock}'
+                break
+    return env
+
+
 def _docker_running() -> bool:
     """Return True if a Docker daemon is reachable on this machine."""
     try:
         r = subprocess.run(
             ['docker', 'info', '--format', '{{.ServerVersion}}'],
-            capture_output=True, text=True, timeout=5,
+            capture_output=True, text=True, timeout=5, env=_docker_env(),
         )
         return r.returncode == 0 and bool(r.stdout.strip())
     except Exception:
