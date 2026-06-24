@@ -623,8 +623,18 @@ def _resolve_home() -> str:
 
 def _k8s_env() -> dict:
     """Return env vars that help kubectl find the right kubeconfig when running as root.
-    Rancher Desktop and Docker Desktop install kubeconfig under the user's home, not /root."""
+    Rancher Desktop and Docker Desktop install kubeconfig under the user's home, not /root.
+    Also ensures kubectl is in PATH by adding common homebrew locations."""
     env = os.environ.copy()
+
+    # Add homebrew kubectl to PATH if not present
+    homebrew_paths = ['/opt/homebrew/bin', '/usr/local/bin']
+    current_path = env.get('PATH', '')
+    for hb_path in homebrew_paths:
+        if hb_path not in current_path:
+            env['PATH'] = f"{hb_path}:{current_path}"
+            break
+
     if os.geteuid() == 0 and 'KUBECONFIG' not in env:
         # Search for kubeconfig in all user home directories
         search_roots = [Path('/Users'), Path('/home')]
