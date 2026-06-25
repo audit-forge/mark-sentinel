@@ -1,0 +1,146 @@
+---
+# Arckon by RiskRaven — Ansible deployment playbook
+#
+# Deploys the Arckon agent to Docker hosts and/or Kubernetes clusters.
+#
+# Usage:
+#   ansible-playbook -i inventory.example.yml deploy-arckon.yml
+#
+# Target specific groups:
+#   ansible-playbook -i inventory.example.yml deploy-arckon.yml --limit docker_hosts
+#   ansible-playbook -i inventory.example.yml deploy-arckon.yml --limit k8s_hosts
+#
+# Required variables (set in inventory or pass with -e):
+#   arckon_server   — full URL of the Arckon server, e.g. http://192.168.1.146:7331
+#   arckon_token    — agent token from agent_token.txt on the server
+#   arckon_profile  — scan profile: default, fedramp, cmmc, financial, smb
+
+
+# ── Play 1: Docker hosts ────────────────────────────────────────────────────
+- name: Deploy Arckon Agent (Docker)
+  hosts: docker_hosts
+  become: true
+
+  vars:
+    arckon_install_dir: /opt/arckon
+    arckon_image: ghcr.io/hash-ai/arckon-agent:1.0.0-phase2-audit
+
+  tasks:
+
+    - name: Create install directory
+      file:
+        path: "{{ arckon_install_dir }}"
+        state: directory
+        mode: "0755"
+
+    - name: Copy docker-compose file
+      copy:
+        src: ../docker-compose.yml
+        dest: "{{ arckon_install_dir }}/docker-compose.yml"
+        mode: "0644"
+
+    - name: Write .env file
+      copy:
+        dest: "{{ arckon_install_dir }}/.env"
+        mode: "0600"
+        content: |
+          ARCKON_SERVER={{ arckon_server }}
+          ARCKON_TOKEN={{ arckon_token }}
+          ARCKON_PROFILE={{ arckon_profile | default('default') }}
+
+    - name: Pull latest agent image
+      community.docker.docker_image:
+        name: "{{ arckon_image }}"
+        source: pull
+        force_source: true
+
+    - name: Start arckon containers
+      community.docker.docker_compose_v2:
+        project_src: "{{ arckon_install_dir }}"
+        state: present
+        pull: always
+
+    - name: Show running containers
+      community.docker.docker_compose_v2:
+        project_src: "{{ arckon_install_dir }}"
+        state: present
+      register: compose_result
+
+    - name: Report container status
+      debug:
+        msg: "{{ item.key }} — {{ item.value.state.status }}"
+      loop: "{{ compose_result.containers | default([]) }}"
+      loop_control:
+        label: "{{ item.key }}"
+
+
+# ── Play 2: Kubernetes clusters ─────────────────────────────────────────────
+- name: Deploy Arckon Agent (Kubernetes)
+  hosts: k8s_hosts
+
+  vars:
+    arckon_namespace: arckon
+    # k8s_overlay: path to a kustomize overlay directory.
+    # Defaults to base (production image from ghcr.io).
+    # Override for local kind testing:
+    #   -e k8s_overlay=../k8s/overlays/local
+    k8s_overlay: "{{ playbook_dir }}/../k8s/base"
+
+  tasks:
+
+    - name: Create arckon namespace
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: v1
+          kind: Namespace
+          metadata:
+            name: "{{ arckon_namespace }}"
+            labels:
+              app.kubernetes.io/name: arckon-agent
+              app.kubernetes.io/managed-by: ansible
+
+    - name: Create agent secret
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: v1
+          kind: Secret
+          metadata:
+            name: arckon-agent-secret
+            namespace: "{{ arckon_namespace }}"
+          stringData:
+            server: "{{ arckon_server }}"
+            token:  "{{ arckon_token }}"
+
+    - name: Apply DaemonSet via kustomize overlay
+      command: kubectl apply -k {{ k8s_overlay }}
+      changed_when: true
+
+    - name: Wait for DaemonSet pods to be ready
+      kubernetes.core.k8s_info:
+        kind: DaemonSet
+        name: arckon-agent
+        namespace: "{{ arckon_namespace }}"
+      register: ds_info
+      until: >
+        ds_info.resources | length > 0 and
+        (ds_info.resources[0].status.numberReady | default(0)) ==
+        (ds_info.resources[0].status.desiredNumberScheduled | default(1))
+      retries: 20
+      delay: 10
+
+    - name: Report pod status
+      kubernetes.core.k8s_info:
+        kind: Pod
+        namespace: "{{ arckon_namespace }}"
+        label_selectors:
+          - app.kubernetes.io/name=arckon-agent
+      register: pod_info
+
+    - name: Show pod names and phase
+      debug:
+        msg: "{{ item.metadata.name }} — {{ item.status.phase }}"
+      loop: "{{ pod_info.resources }}"
+      loop_control:
+        label: "{{ item.metadata.name }}"
