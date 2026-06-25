@@ -2286,18 +2286,21 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                 warn = d.get('warn_count', 0) or 0
                 pas  = d.get('pass_count', 0) or 0
                 age  = _age(d.get('last_seen'))
-                rc   = 'r-fail' if fail > 0 else ('r-warn' if warn > 0 else 'r-pass')
+                no_data = (fail == 0 and warn == 0 and pas == 0)
+                rc   = 'r-nodata' if no_data else ('r-fail' if fail > 0 else ('r-warn' if warn > 0 else 'r-pass'))
                 did  = d.get('device_id', '')
+                hostname = d.get('hostname', 'unknown')
+                profile  = d.get('profile', '') or ('kubernetes' if hostname.startswith('k8s:') else '')
                 rows += f"""
         <tr class="dev-row" onclick="selectDevice('{did}')">
-          <td class="dev-host">{d.get('hostname','unknown')}</td>
+          <td class="dev-host">{hostname}</td>
           <td>{d.get('platform','')}</td>
-          <td class="c-red">{fail}</td>
-          <td class="c-yellow">{warn}</td>
-          <td class="c-green">{pas}</td>
-          <td>{d.get('profile','')}</td>
+          <td class="c-red">{fail if not no_data else '—'}</td>
+          <td class="c-yellow">{warn if not no_data else '—'}</td>
+          <td class="c-green">{pas if not no_data else '—'}</td>
+          <td>{profile}</td>
           <td>{age}</td>
-          <td><span class="risk-dot {rc}"></span></td>
+          <td><span class="risk-dot {rc}" title="{'No scan data yet' if no_data else ''}"></span></td>
           <td onclick="event.stopPropagation()" style="white-space:nowrap">
             <button class="scan-btn" id="sb-{did}" onclick="openScanModal('{did}',this)">Scan &#9662;</button>
             <button class="scan-btn" id="ub-{did}" onclick="updateDevice('{did}')"
@@ -4115,7 +4118,9 @@ def _build_fleet_html(devices: list[dict], shadow: list[dict] | None = None,
             return f'{secs // 3600}h ago'
         return f'{secs // 86400}d ago'
 
-    def _risk_cls(fail: int, warn: int) -> str:
+    def _risk_cls(fail: int, warn: int, pas: int) -> str:
+        if fail == 0 and warn == 0 and pas == 0:
+            return 'r-nodata'
         if fail > 0:
             return 'r-fail'
         if warn > 0:
@@ -4128,18 +4133,21 @@ def _build_fleet_html(devices: list[dict], shadow: list[dict] | None = None,
         warn = d.get('warn_count', 0) or 0
         pas  = d.get('pass_count', 0) or 0
         age  = _age(d.get('last_seen'))
-        rc   = _risk_cls(fail, warn)
+        no_data = (fail == 0 and warn == 0 and pas == 0)
+        rc   = _risk_cls(fail, warn, pas)
         did  = d.get('device_id', '')
+        hostname = d.get('hostname', 'unknown')
+        profile  = d.get('profile', '') or ('kubernetes' if hostname.startswith('k8s:') else '')
         rows += f"""
         <tr class="dev-row" onclick="selectDevice('{did}')">
-          <td class="dev-host">{d.get('hostname','unknown')}</td>
+          <td class="dev-host">{hostname}</td>
           <td>{d.get('platform','')}</td>
-          <td class="c-red">{fail}</td>
-          <td class="c-yellow">{warn}</td>
-          <td class="c-green">{pas}</td>
-          <td>{d.get('profile','')}</td>
+          <td class="c-red">{fail if not no_data else '—'}</td>
+          <td class="c-yellow">{warn if not no_data else '—'}</td>
+          <td class="c-green">{pas if not no_data else '—'}</td>
+          <td>{profile}</td>
           <td>{age}</td>
-          <td><span class="risk-dot {rc}"></span></td>
+          <td><span class="risk-dot {rc}" title="{'No scan data yet' if no_data else ''}"></span></td>
           <td onclick="event.stopPropagation()" style="white-space:nowrap">
             <button class="scan-btn" id="sb-{did}" onclick="openScanModal('{did}',this)">Scan ▾</button>
             <button class="scan-btn" id="ub-{did}" onclick="updateDevice('{did}')"
@@ -4260,7 +4268,7 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
 .dev-row:hover td{{background:#F5F3FF}}
 .dev-host{{font-weight:600;color:#111827}}
 .risk-dot{{display:inline-block;width:10px;height:10px;border-radius:50%}}
-.risk-dot.r-fail{{background:#DC2626}}.risk-dot.r-warn{{background:#F97316}}.risk-dot.r-pass{{background:#16A34A}}
+.risk-dot.r-fail{{background:#DC2626}}.risk-dot.r-warn{{background:#F97316}}.risk-dot.r-pass{{background:#16A34A}}.risk-dot.r-nodata{{background:#D1D5DB;border:1px solid #9CA3AF}}
 .scan-btn{{background:#fff;border:1px solid #D1D5DB;color:#4F46E5;border-radius:6px;padding:4px 10px;font-size:12px;cursor:pointer;white-space:nowrap;font-family:inherit;font-weight:500;transition:background .1s,border-color .1s}}
 .scan-btn:hover{{background:#EEF2FF;border-color:#4F46E5}}
 .scan-btn:disabled{{color:#9CA3AF;border-color:#E5E7EB;cursor:default;background:#F9FAFB}}
@@ -5045,7 +5053,8 @@ function _age(ts) {{
   return Math.floor(s/86400) + 'd ago';
 }}
 
-function _riskCls(fail, warn) {{
+function _riskCls(fail, warn, pas) {{
+  if (fail === 0 && warn === 0 && (pas === 0 || pas === undefined)) return 'r-nodata';
   return fail > 0 ? 'r-fail' : warn > 0 ? 'r-warn' : 'r-pass';
 }}
 
@@ -5129,17 +5138,20 @@ function renderDevicePage() {{
     const fail = d.fail_count || 0;
     const warn = d.warn_count || 0;
     const pas  = d.pass_count || 0;
-    const rc   = _riskCls(fail, warn);
+    const noData = (fail === 0 && warn === 0 && pas === 0);
+    const rc   = _riskCls(fail, warn, pas);
     const age  = _age(d.last_seen);
+    const hostname = d.hostname || 'unknown';
+    const profile  = d.profile || (hostname.startsWith('k8s:') ? 'kubernetes' : '');
     return `<tr class="dev-row" onclick="selectDevice('${{esc(did)}}')" >
-      <td class="dev-host">${{esc(d.hostname||'unknown')}}</td>
+      <td class="dev-host">${{esc(hostname)}}</td>
       <td>${{esc(d.platform||'')}}</td>
-      <td class="c-red">${{fail}}</td>
-      <td class="c-yellow">${{warn}}</td>
-      <td class="c-green">${{pas}}</td>
-      <td>${{esc(d.profile||'')}}</td>
+      <td class="c-red">${{noData ? '—' : fail}}</td>
+      <td class="c-yellow">${{noData ? '—' : warn}}</td>
+      <td class="c-green">${{noData ? '—' : pas}}</td>
+      <td>${{esc(profile)}}</td>
       <td>${{age}}</td>
-      <td><span class="risk-dot ${{rc}}"></span></td>
+      <td><span class="risk-dot ${{rc}}" title="${{noData ? 'No scan data yet' : ''}}"></span></td>
       <td onclick="event.stopPropagation()" style="white-space:nowrap">
         <button class="scan-btn" id="sb-${{esc(did)}}" onclick="openScanModal('${{esc(did)}}',this)">Scan ▾</button>
         <button class="scan-btn" id="ub-${{esc(did)}}" onclick="updateDevice('${{esc(did)}}')"
