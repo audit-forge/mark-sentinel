@@ -693,7 +693,7 @@ def run_k8s_scan(context_name: str) -> dict | None:
     try:
         proc = subprocess.run(
             cmd, capture_output=True, text=True, encoding='utf-8',
-            timeout=120, cwd=str(ROOT),
+            timeout=120, cwd=str(ROOT), env=_k8s_env(),
         )
     except subprocess.TimeoutExpired:
         log.error('K8s scan timed out after 120s')
@@ -711,10 +711,16 @@ def run_k8s_scan(context_name: str) -> dict | None:
     if json_start > 0:
         stdout = stdout[json_start:]
     try:
-        return json.loads(stdout)
+        report = json.loads(stdout)
     except json.JSONDecodeError as e:
         log.error('Could not parse K8s scan JSON: %s', e)
         return None
+    # Discard reports where audit.py reported cluster unreachable (exit 1, empty results)
+    if report.get('error') or not report.get('results'):
+        log.warning('K8s scan returned no results: %s',
+                    report.get('error', 'empty results — cluster may have been unreachable during scan'))
+        return None
+    return report
 
 
 def run_k8s_cycle(config: dict) -> bool:
