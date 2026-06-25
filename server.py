@@ -2031,10 +2031,13 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         if not device_id:
             self._json({'command': None})
             return
-        if not self._check_agent_bearer():
+        cust = self._get_agent_customer()
+        if cust is None and _agent_token():
             self._send(401, b'Unauthorized', 'text/plain')
             return
-        store = self._store()
+        # Use the customer store from the agent token, not the dashboard session
+        cust_id = cust['id'] if cust else 'default'
+        store = _get_store(cust_id)
         store.touch_device(device_id)
         command = store.claim_command(device_id)
         self._json({'command': command})
