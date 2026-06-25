@@ -128,6 +128,41 @@ def _get_store(customer_id: str = 'default'):
     return _store_cache[customer_id]
 
 
+_device_store_map: dict[str, str] = {}  # device_id → customer_id
+_device_store_map_lock = threading.Lock()
+
+def _get_store_for_device(device_id: str):
+    """Return the AgentStore that owns device_id, searching all customer dirs if needed."""
+    with _device_store_map_lock:
+        if device_id in _device_store_map:
+            return _get_store(_device_store_map[device_id])
+
+    # Check default first (fast path for single-tenant setups)
+    default_store = _get_store('default')
+    if default_store.is_known_device(device_id):
+        with _device_store_map_lock:
+            _device_store_map[device_id] = 'default'
+        return default_store
+
+    # Scan all customer directories for the device
+    customers_dir = ROOT / 'data' / 'customers'
+    if customers_dir.exists():
+        for cust_dir in customers_dir.iterdir():
+            if not cust_dir.is_dir() or cust_dir.name == 'default':
+                continue
+            db = cust_dir / 'agents.db'
+            if not db.exists():
+                continue
+            store = _get_store(cust_dir.name)
+            if store.is_known_device(device_id):
+                with _device_store_map_lock:
+                    _device_store_map[device_id] = cust_dir.name
+                return store
+
+    # Fall back to default (will create device there on touch)
+    return default_store
+
+
 # ── license (loaded once at startup) ─────────────────────────────────────────
 def _load_license() -> None:
     from license import load_license
@@ -1940,8 +1975,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                 return
             _report_last_seen[device_id] = now
 
-        _cust = self._get_agent_customer()
-        store = _get_store(_cust['id'] if _cust else 'default')
+        store = _get_store_for_device(device_id)
         is_new = not store.is_known_device(device_id)
 
         # Duplicate hostname detection — warn when a new device_id uses an existing hostname
@@ -2031,13 +2065,10 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         if not device_id:
             self._json({'command': None})
             return
-        cust = self._get_agent_customer()
-        if cust is None and _agent_token():
+        if not self._check_agent_bearer():
             self._send(401, b'Unauthorized', 'text/plain')
             return
-        # Use the customer store from the agent token, not the dashboard session
-        cust_id = cust['id'] if cust else 'default'
-        store = _get_store(cust_id)
+        store = _get_store_for_device(device_id)
         store.touch_device(device_id)
         command = store.claim_command(device_id)
         self._json({'command': command})
