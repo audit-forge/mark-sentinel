@@ -67,7 +67,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlparse
 
-PORT = 7331
+PORT = 7001
 
 
 def _compiled_cmd(script: Path) -> list:
