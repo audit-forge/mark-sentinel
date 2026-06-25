@@ -2098,12 +2098,13 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         _VALID = {'default', 'fedramp', 'cmmc', 'financial', 'professional_services', 'kubernetes', 'docker'}
         profiles = [p for p in profiles if p in _VALID]
 
+        cmd_store = _get_store_for_device(device_id)
         if profiles:
-            cmd_ids = [store.enqueue_command(device_id, f'scan_profile:{p}') for p in profiles]
+            cmd_ids = [cmd_store.enqueue_command(device_id, f'scan_profile:{p}') for p in profiles]
             self._json({'status': 'queued', 'device_id': device_id,
                         'profiles': profiles, 'command_ids': cmd_ids})
         else:
-            cmd_id = store.enqueue_command(device_id, 'scan_now')
+            cmd_id = cmd_store.enqueue_command(device_id, 'scan_now')
             self._json({'status': 'queued', 'device_id': device_id, 'command_id': cmd_id})
 
     def _api_fleet_scan_all(self):
@@ -2139,11 +2140,12 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             for i in range(0, total, batch_size):
                 batch = ids[i:i + batch_size]
                 for did in batch:
+                    cs = _get_store_for_device(did)
                     if profiles:
                         for p in profiles:
-                            store.enqueue_command(did, f'scan_profile:{p}')
+                            cs.enqueue_command(did, f'scan_profile:{p}')
                     else:
-                        store.enqueue_command(did, 'scan_now')
+                        cs.enqueue_command(did, 'scan_now')
                 if sleep_secs and i + batch_size < total:
                     time.sleep(sleep_secs)
 
@@ -2161,7 +2163,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         if store.get_device(device_id) is None:
             self._json({'error': 'device not found'}, 404)
             return
-        cmd_id = store.enqueue_command(device_id, 'update_self')
+        cmd_id = _get_store_for_device(device_id).enqueue_command(device_id, 'update_self')
         self._json({'status': 'queued', 'device_id': device_id, 'command_id': cmd_id})
 
     def _api_fleet_update_all(self):
@@ -2172,7 +2174,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         for d in devices:
             did = d.get('device_id', '')
             if did:
-                store.enqueue_command(did, 'update_self')
+                _get_store_for_device(did).enqueue_command(did, 'update_self')
                 queued.append(did)
         self._json({'status': 'queued', 'count': len(queued), 'devices': queued})
 
@@ -2197,7 +2199,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         for d in devices:
             did = d.get('device_id', '')
             if did:
-                store.enqueue_command(did, f'set_config:{cmd_payload}')
+                _get_store_for_device(did).enqueue_command(did, f'set_config:{cmd_payload}')
                 queued.append(did)
         log.info('Token push queued for %d devices (customer %s)', len(queued), cust.get('id'))
         self._json({'status': 'queued', 'device_count': len(queued)})
@@ -2276,7 +2278,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         for d in devices:
             did = d.get('device_id', '')
             if did:
-                store.enqueue_command(did, 'discover_network')
+                _get_store_for_device(did).enqueue_command(did, 'discover_network')
                 queued.append(did)
         self._json({'status': 'queued', 'count': len(queued), 'devices': queued})
 
@@ -2290,7 +2292,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         if store.get_device(device_id) is None:
             self._json({'error': 'device not found'}, 404)
             return
-        store.enqueue_command(device_id, 'discover_network')
+        _get_store_for_device(device_id).enqueue_command(device_id, 'discover_network')
         self._json({'status': 'queued', 'device_id': device_id})
 
     def _api_fleet_live_stats(self):
@@ -2482,7 +2484,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         for d in devices:
             did = d.get('device_id', '')
             if did:
-                store.enqueue_command(did, 'discover_mcp')
+                _get_store_for_device(did).enqueue_command(did, 'discover_mcp')
                 queued.append(did)
         self._json({'status': 'queued', 'count': len(queued), 'devices': queued})
 
@@ -3243,7 +3245,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                 for d in store.list_devices():
                     did = d.get('device_id', '')
                     if did:
-                        store.enqueue_command(did, f'set_config:{cmd_payload}')
+                        _get_store_for_device(did).enqueue_command(did, f'set_config:{cmd_payload}')
                         pushed += 1
             except Exception:
                 pass
@@ -7199,10 +7201,10 @@ def main():
                             if device_id == 'all':
                                 devices = _st.list_devices()
                                 for d in devices:
-                                    _st.enqueue_command(d['device_id'], 'scan_now')
+                                    _get_store_for_device(d['device_id']).enqueue_command(d['device_id'], 'scan_now')
                                 log.info('schedule %s fired for customer %s: %d devices', sched['id'], cid, len(devices))
                             else:
-                                _st.enqueue_command(device_id, 'scan_now')
+                                _get_store_for_device(device_id).enqueue_command(device_id, 'scan_now')
                                 log.info('schedule %s fired for customer %s: device %s', sched['id'], cid, device_id)
                             _st.mark_schedule_fired(sched['id'])
                     except Exception as _ce:
