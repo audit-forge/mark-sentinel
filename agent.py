@@ -458,6 +458,7 @@ def self_update(config: dict) -> bool:
         if expected_hash and actual_hash != expected_hash:
             log.error('self_update: bundle hash mismatch (expected %s got %s)', expected_hash, actual_hash)
             return False
+        agent_binary_updated = False
         with tarfile.open(fileobj=io.BytesIO(data), mode='r:gz') as tar:
             for member in tar.getmembers():
                 # strip leading 'sentinel/' prefix from archive paths
@@ -478,8 +479,20 @@ def self_update(config: dict) -> bool:
                 dest.parent.mkdir(parents=True, exist_ok=True)
                 with tar.extractfile(member) as src, open(dest, 'wb') as dst:
                     dst.write(src.read())
+                # Mark executable bits for compiled binaries
+                if rel.name in ('agent', 'audit') and len(rel.parts) == 1:
+                    dest.chmod(0o755)
+                    if rel.name == 'agent':
+                        agent_binary_updated = True
+
         log.info('self_update: bundle extracted — restarting')
-        os.execv(sys.executable, [sys.executable] + sys.argv)
+        # If a compiled agent binary was shipped, exec it directly.
+        # Otherwise fall back to re-running with the Python interpreter.
+        agent_bin = ROOT / 'agent'
+        if agent_binary_updated and agent_bin.exists() and os.access(agent_bin, os.X_OK):
+            os.execv(str(agent_bin), [str(agent_bin)] + sys.argv[1:])
+        else:
+            os.execv(sys.executable, [sys.executable] + sys.argv)
     except Exception as e:
         log.error('self_update failed: %s', e)
         return False

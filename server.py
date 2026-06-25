@@ -1742,16 +1742,46 @@ class _Handler(http.server.BaseHTTPRequestHandler):
 
     def _serve_bundle(self):
         """GET /bundle.tar.gz — serve a minimal Sentinel bundle for remote agents.
-        Includes everything needed to run agent.py + audit.py on a remote machine.
-        Excludes: output/, benchmarks/, docs/, test/, .git, __pycache__, *.db, *.log.
+
+        If compiled binaries exist (agent, audit), the bundle contains those and
+        excludes the corresponding Python source files — customers receive binaries only.
+        Falls back to shipping Python source when binaries are not present (dev mode).
+
+        Always excludes: output/, benchmarks/, docs/, test/, .git, __pycache__,
+        *.db, *.log, agent_token.txt.
         """
         _SKIP_DIRS  = {'benchmarks', 'docs', 'test', '.git', '__pycache__',
                        '.sentinel_db', 'node_modules'}
         _SKIP_EXTS  = {'.db', '.log', '.pyc', '.egg-info'}
         _SKIP_FILES = {'agent_token.txt'}
 
+        agent_bin = ROOT / 'agent'
+        audit_bin = ROOT / 'audit'
+        has_agent_bin = agent_bin.exists() and os.access(agent_bin, os.X_OK)
+        has_audit_bin = audit_bin.exists() and os.access(audit_bin, os.X_OK)
+
+        # Python source files replaced by compiled binaries — exclude from bundle
+        # when the corresponding binary is present.
+        _COMPILED_SOURCE: set[str] = set()
+        if has_agent_bin:
+            _COMPILED_SOURCE.update({
+                'agent.py', 'discovery.py',
+            })
+            # Exclude connectors/ source — embedded in agent binary
+            _SKIP_DIRS = _SKIP_DIRS | {'connectors'}
+        if has_audit_bin:
+            _COMPILED_SOURCE.update({'audit.py'})
+            # checks/ embedded in audit binary
+            _SKIP_DIRS = _SKIP_DIRS | {'checks'}
+
         buf = io.BytesIO()
         with tarfile.open(fileobj=buf, mode='w:gz') as tar:
+            # Add compiled binaries first if present
+            if has_agent_bin:
+                tar.add(agent_bin, arcname='sentinel/agent')
+            if has_audit_bin:
+                tar.add(audit_bin, arcname='sentinel/audit')
+
             for path in sorted(ROOT.rglob('*')):
                 if not path.is_file():
                     continue
@@ -1763,10 +1793,16 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                     continue
                 if path.name in _SKIP_FILES:
                     continue
+                if path.name in _COMPILED_SOURCE:
+                    continue
+                # Skip the binaries themselves — already added above
+                if path.name in ('agent', 'audit') and len(parts) == 1:
+                    continue
                 # From output/ only ship the Python modules, not scan result dirs
                 if parts[0] == 'output' and (len(parts) > 2 or path.suffix != '.py'):
                     continue
                 tar.add(path, arcname=str(Path('sentinel') / rel))
+
         data = buf.getvalue()
         import hashlib as _hashlib
         bundle_sha256 = _hashlib.sha256(data).hexdigest()
@@ -1775,6 +1811,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         self.send_header('Content-Disposition', 'attachment; filename="sentinel.tar.gz"')
         self.send_header('Content-Length', str(len(data)))
         self.send_header('X-Bundle-SHA256', bundle_sha256)
+        self.send_header('X-Agent-Binary', '1' if has_agent_bin else '0')
         self.end_headers()
         self.wfile.write(data)
 

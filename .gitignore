@@ -74,3 +74,4 @@ sentinel.crt
 stdout.txt
 stderr.txt
 output/.device_id
+dist/
