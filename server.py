@@ -2031,12 +2031,9 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         if not device_id:
             self._json({'command': None})
             return
-        expected = _agent_token()
-        if expected:
-            auth = self.headers.get('Authorization', '')
-            if auth != f'Bearer {expected}':
-                self._send(401, b'Unauthorized', 'text/plain')
-                return
+        if not self._check_agent_bearer():
+            self._send(401, b'Unauthorized', 'text/plain')
+            return
         store = self._store()
         store.touch_device(device_id)
         command = store.claim_command(device_id)

@@ -868,12 +868,61 @@ async def _discover_mcp_async(hosts: list[str]) -> list[dict]:
     return results
 
 
+def _scan_mcp_k8s() -> list[dict]:
+    """Scan Kubernetes services and pod envs for MCP server signatures via kubectl."""
+    results: list[dict] = []
+    try:
+        import subprocess, json as _json
+        # Get all services with their cluster IPs and ports
+        r = subprocess.run(
+            ['kubectl', 'get', 'services', '--all-namespaces', '-o', 'json'],
+            capture_output=True, text=True, timeout=10,
+        )
+        if r.returncode != 0:
+            return results
+        svcs = _json.loads(r.stdout).get('items', [])
+        mcp_sigs = re.compile(r'mcp|model.context|modelcontextprotocol', re.IGNORECASE)
+        for svc in svcs:
+            meta = svc.get('metadata', {})
+            name = meta.get('name', '')
+            ns   = meta.get('namespace', 'default')
+            spec = svc.get('spec', {})
+            svc_type   = spec.get('type', 'ClusterIP')
+            cluster_ip = spec.get('clusterIP', '')
+            ports      = spec.get('ports', [])
+            # Match by name or label
+            labels = meta.get('labels', {})
+            label_str = ' '.join(f'{k}={v}' for k, v in labels.items())
+            if not mcp_sigs.search(name + ' ' + label_str):
+                continue
+            for p in ports:
+                port_num = p.get('port') or p.get('nodePort')
+                if not port_num:
+                    continue
+                host = 'localhost' if svc_type == 'NodePort' else cluster_ip
+                probe_port = p.get('nodePort', port_num) if svc_type == 'NodePort' else port_num
+                info = _probe_mcp_http(host, probe_port) or {}
+                results.append({
+                    'source':       'mcp_k8s',
+                    'host':         f'{ns}/{name}',
+                    'port':         probe_port,
+                    'server_name':  info.get('server_name', '') or f'k8s:{ns}/{name}',
+                    'tools':        info.get('tools', []),
+                    'auth_status':  info.get('auth_status', 'unknown'),
+                    'process_info': f'Kubernetes {svc_type} service ({cluster_ip}:{port_num})',
+                })
+    except Exception as exc:
+        logger.debug('K8s MCP scan error: %s', exc)
+    return results
+
+
 def discover_mcp_servers(hosts: list[str] | None = None) -> list[dict]:
     """
-    Scan for MCP (Model Context Protocol) servers via network probe + process scan.
+    Scan for MCP (Model Context Protocol) servers via network probe + process scan
+    + Kubernetes service discovery.
 
     Returns list of dicts with:
-      source       — 'mcp_network' | 'mcp_process'
+      source       — 'mcp_network' | 'mcp_process' | 'mcp_k8s'
       host / port  — location (host='localhost' for process findings)
       server_name  — name from initialize handshake
       tools        — list of tool names the server exposes
@@ -887,11 +936,13 @@ def discover_mcp_servers(hosts: list[str] | None = None) -> list[dict]:
     finally:
         loop.close()
     proc_results = _scan_mcp_processes()
-    results = net_results + proc_results
-    logger.info('MCP discovery: %d servers (%d network, %d process)',
+    k8s_results  = _scan_mcp_k8s()
+    results = net_results + proc_results + k8s_results
+    logger.info('MCP discovery: %d servers (%d network, %d process, %d k8s)',
                 len(results),
                 sum(1 for r in results if r['source'] == 'mcp_network'),
-                sum(1 for r in results if r['source'] == 'mcp_process'))
+                sum(1 for r in results if r['source'] == 'mcp_process'),
+                sum(1 for r in results if r['source'] == 'mcp_k8s'))
     return results
 
 
