@@ -1127,6 +1127,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             '/api/siem/config':      self._api_get_siem_config,
             '/api/live-scan-config': self._api_get_live_scan_config,
             '/api/fleet/live-stats': self._api_fleet_live_stats,
+            '/api/fleet/k8s-status': self._api_fleet_k8s_status,
             '/api/fleet/shadow':  self._api_fleet_shadow,
             '/api/fleet/mcp':        self._api_fleet_mcp,
             '/api/fleet/mcp/report': self._api_fleet_mcp_report,
@@ -2340,6 +2341,32 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                 'rows_html': rows,
                 'ts':        ts_now,
             })
+        except Exception as e:
+            self._json({'error': str(e)}, 500)
+
+    def _api_fleet_k8s_status(self):
+        """GET /api/fleet/k8s-status — return k8s cluster connection state."""
+        try:
+            store   = self._store()
+            devices = store.list_devices()
+            k8s_devices = [d for d in devices if (d.get('hostname') or '').startswith('k8s:')]
+            if not k8s_devices:
+                self._json({'connected': False, 'clusters': []})
+                return
+            clusters = []
+            for d in k8s_devices:
+                hostname = d.get('hostname', '')
+                # hostname format: k8s:{context}@{machine}
+                label = hostname[4:] if hostname.startswith('k8s:') else hostname
+                clusters.append({
+                    'device_id':  d.get('device_id', ''),
+                    'label':      label,
+                    'fail':       d.get('fail_count', 0) or 0,
+                    'warn':       d.get('warn_count', 0) or 0,
+                    'pass':       d.get('pass_count', 0) or 0,
+                    'last_seen':  d.get('last_seen'),
+                })
+            self._json({'connected': True, 'clusters': clusters})
         except Exception as e:
             self._json({'error': str(e)}, 500)
 
@@ -4422,6 +4449,17 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
     </div>
     <div id="page-btns" style="display:flex;gap:4px;align-items:center;flex-wrap:wrap"></div>
   </div>
+
+  <!-- Kubernetes cluster status widget -->
+  <div style="margin-top:20px;background:#ffffff;border:1px solid #E5E7EB;border-radius:8px;padding:14px 18px">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+      <span style="font-size:12px;font-weight:700;color:#374151;text-transform:uppercase;letter-spacing:.06em">⊞ Kubernetes Clusters</span>
+      <button onclick="loadK8sStatus()" style="font-size:11px;color:#6B7280;background:none;border:none;cursor:pointer;padding:0">↻</button>
+    </div>
+    <div id="k8s-status-panel">
+      <div style="font-size:12px;color:#9CA3AF">Loading…</div>
+    </div>
+  </div>
   </div>
 
   <div class="page" id="page-shadow">
@@ -4987,12 +5025,13 @@ let _currentPage = 1;
 const _note = document.getElementById('refresh-note');
 setInterval(() => {{
   _countdown--;
-  if (_countdown <= 0) {{ _countdown = 60; refreshDevices(); refreshShadow(); refreshMcp(); }}
+  if (_countdown <= 0) {{ _countdown = 60; refreshDevices(); refreshShadow(); refreshMcp(); loadK8sStatus(); }}
   _note.textContent = 'Devices refresh in ' + _countdown + 's';
 }}, 1000);
 refreshDevices();
 refreshShadow();
 refreshMcp();
+loadK8sStatus();
 loadRiskRegister();
 loadInventory();
 loadSchedules();
@@ -5599,6 +5638,49 @@ const _SHADOW_SRC = {{
   process:   {{icon:'&#9881;',   color:'#f0883e', label:'Process'}},
   docker:    {{icon:'&#128051;', color:'#16A34A', label:'Container'}},
 }};
+
+async function loadK8sStatus() {{
+  const panel = document.getElementById('k8s-status-panel');
+  if (!panel) return;
+  try {{
+    const resp = await fetch('/api/fleet/k8s-status');
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    const data = await resp.json();
+    if (!data.connected) {{
+      panel.innerHTML = `
+        <div style="display:flex;align-items:center;gap:12px;padding:4px 0">
+          <span style="font-size:22px;opacity:.5">⊞</span>
+          <div>
+            <div style="font-size:13px;font-weight:600;color:#374151">No cluster connected</div>
+            <div style="font-size:12px;color:#9CA3AF;margin-top:2px">
+              Install the Arckon agent on a machine with <code style="font-size:11px;background:#F3F4F6;padding:1px 5px;border-radius:3px">kubectl</code> configured.
+              The agent detects and scans the cluster automatically.
+            </div>
+          </div>
+        </div>`;
+      return;
+    }}
+    const rows = (data.clusters || []).map(c => {{
+      const risk = c.fail > 0 ? '#EF4444' : (c.warn > 0 ? '#F59E0B' : '#10B981');
+      return `<div style="display:flex;align-items:center;gap:14px;padding:6px 0;border-bottom:1px solid #F3F4F6">
+        <span style="font-size:16px">⊞</span>
+        <div style="flex:1;min-width:0">
+          <div style="font-size:13px;font-weight:600;color:#111827;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${{esc(c.label)}}</div>
+          <div style="font-size:11px;color:#9CA3AF;margin-top:1px">last seen ${{c.last_seen ? new Date(c.last_seen*1000).toLocaleString() : 'never'}}</div>
+        </div>
+        <div style="display:flex;gap:10px;font-size:12px;font-weight:600;white-space:nowrap">
+          <span style="color:#EF4444">${{c.fail}} fail</span>
+          <span style="color:#F59E0B">${{c.warn}} warn</span>
+          <span style="color:#10B981">${{c.pass}} pass</span>
+        </div>
+        <span style="width:8px;height:8px;border-radius:50%;background:${{risk}};flex-shrink:0"></span>
+      </div>`;
+    }}).join('');
+    panel.innerHTML = rows || '<div style="font-size:12px;color:#9CA3AF">No cluster data yet.</div>';
+  }} catch(e) {{
+    panel.innerHTML = '<div style="font-size:12px;color:#9CA3AF">Could not load cluster status.</div>';
+  }}
+}}
 
 async function refreshShadow() {{
   try {{
