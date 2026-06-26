@@ -33,7 +33,6 @@ import time
 import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
 
 log = logging.getLogger('arckon.siem')
 
@@ -610,7 +609,7 @@ class KaseyaConnector(BaseSiemConnector):
             "Content-Type": "application/json"
         }
         url = f"{bms_url.rstrip('/')}/api/v1/servicetickets"
-        
+
         status, body = self._kaseya_request('POST', url, headers, ticket_body)
 
         if status in (200, 201):
@@ -653,7 +652,7 @@ class KaseyaConnector(BaseSiemConnector):
         itglue_base = "https://api.itglue.com"
         headers = {"x-api-key": itglue_api_key, "Content-Type": "application/json"}
         synced_count = 0
-        
+
         # Step 1: Find or create "AI Inventory" Flexible Asset Type
         asset_type_id = None
         url = f"{itglue_base}/flexible_asset_types?filter[name]=AI+Inventory"

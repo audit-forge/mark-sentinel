@@ -89,7 +89,7 @@ def _section_header(pdf: _PDF, title: str):
 
 
 def _device_row(pdf: _PDF, hostname: str, platform: str, fail: int, warn: int, passed: int, score: int, last_seen):
-    total = fail + warn + passed
+    fail + warn + passed
     pdf.set_font('Helvetica', 'B', 10)
     pdf.set_text_color(201, 209, 217)
     pdf.cell(70, 6, _safe(hostname), ln=False)

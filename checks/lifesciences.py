@@ -13,7 +13,7 @@ AI-LS-005: Clinical decision human oversight     — config mode
 AI-LS-006: AI model validation documentation     — config mode
 """
 import re
-from . import CheckResult, PASS, FAIL, WARN, SKIP, NA
+from . import CheckResult, PASS, FAIL, WARN, SKIP
 from connectors.config_connector import ScanContext
 
 CATEGORY = "AI-LS"

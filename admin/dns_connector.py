@@ -22,7 +22,6 @@ import json
 import re
 from collections import defaultdict
 from dataclasses import dataclass, field
-from datetime import datetime
 from pathlib import Path
 from typing import Iterator
 
@@ -638,7 +637,6 @@ def connect(
 # ---------------------------------------------------------------------------
 if __name__ == "__main__":
     import argparse
-    import sys
 
     parser = argparse.ArgumentParser(description="Arckon DNS Log Connector")
     parser.add_argument("log", help="Path to DNS log file")

@@ -104,21 +104,21 @@ def main():
     args = ap.parse_args()
 
     auth_label = 'AUTH REQUIRED' if args.auth else 'NO AUTH (will appear as high-risk in Sentinel)'
-    print(f'\nFake MCP server starting:')
+    print('\nFake MCP server starting:')
     print(f'  Name  : {args.name}')
     print(f'  Listen: http://{args.host}:{args.port}')
     print(f'  Auth  : {auth_label}')
     print(f'  Tools : {len(TOOLS)} tools exposed')
-    print(f'\nExpected Sentinel behavior:')
-    print(f'  - Click "Scan MCP Servers" on the dashboard')
-    print(f'  - Wait ~45s for agents to complete the scan')
-    print(f'  - A new card should appear in MCP & Agent Governance')
+    print('\nExpected Sentinel behavior:')
+    print('  - Click "Scan MCP Servers" on the dashboard')
+    print('  - Wait ~45s for agents to complete the scan')
+    print('  - A new card should appear in MCP & Agent Governance')
     print(f'  - It will show this host:{args.port}, "{args.name}", and the tool list')
     if not args.auth:
-        print(f'  - The card will have a RED "No Auth" badge and a warning')
+        print('  - The card will have a RED "No Auth" badge and a warning')
     else:
-        print(f'  - The card will have a GREEN "Auth OK" badge')
-    print(f'\nPress Ctrl+C to stop.\n')
+        print('  - The card will have a GREEN "Auth OK" badge')
+    print('\nPress Ctrl+C to stop.\n')
 
     handler = make_handler(args.name, args.auth)
     server  = HTTPServer((args.host, args.port), handler)

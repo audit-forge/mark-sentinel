@@ -3,9 +3,6 @@ import threading
 import time
 from datetime import datetime, timezone
 
-import urllib.request
-import urllib.error
-import json
 
 from db import get_conn
 from mailer import send_alert

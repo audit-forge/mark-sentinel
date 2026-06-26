@@ -981,7 +981,8 @@ async def audit_log_csv(request: Request):
         require_super_admin(request)
     except HTTPException:
         return RedirectResponse("/login")
-    import csv, io as _io
+    import csv
+    import io as _io
     customer_id = request.query_params.get("customer_id", "")
     action      = request.query_params.get("action", "")
     with get_conn() as conn:
@@ -1022,10 +1023,11 @@ async def dns_inventory_page(request: Request):
 @app.post("/dns-inventory/analyze")
 async def dns_inventory_analyze(request: Request):
     try:
-        user = get_current_user(request)
+        get_current_user(request)
     except HTTPException:
         return JSONResponse({"error": "unauthorized"}, status_code=401)
-    import sys, os as _os
+    import sys
+    import os as _os
     _base = _os.path.dirname(_os.path.abspath(__file__))
     _connector_path = _os.path.join(_base, "dns_connector.py")
     if _os.path.isfile(_connector_path) and _base not in sys.path:
@@ -1075,7 +1077,7 @@ def _write_license_file(customer_id: str, name: str, tier: str, expires: str, ma
     licenses_dir = os.environ.get("LICENSES_DIR", "/licenses")
     customer_dir = os.path.join(licenses_dir, customer_id)
     os.makedirs(customer_dir, exist_ok=True)
-    telemetry_url = f"http://sentinel-admin:8000/api/telemetry"
+    telemetry_url = "http://sentinel-admin:8000/api/telemetry"
     payload = {
         "customer_id":        customer_id,
         "licensed_to":        name,
