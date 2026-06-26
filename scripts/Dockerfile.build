@@ -16,15 +16,17 @@ RUN pip install --no-cache-dir --upgrade pip setuptools wheel && \
 COPY audit.py checks/ profiles/ output/ ./
 COPY connectors/ ./connectors/
 
-# Compile scanner binary (audit.py + checks/)
+# Compile scanner binary (audit.py + checks/ + profiles/)
 RUN python -m nuitka --onefile --assume-yes-for-downloads \
+    --include-data-dir=profiles=profiles \
+    --include-data-dir=output=output \
     --output-dir=/out --output-filename=audit \
     audit.py
 
 # Copy agent source files
 COPY agent.py discovery.py ./
 
-# Compile agent binary (agent.py + discovery + connectors)
+# Compile agent binary (agent.py + discovery.py + connectors/)
 RUN python -m nuitka --onefile --assume-yes-for-downloads \
     --include-module=discovery \
     --include-package=connectors \
