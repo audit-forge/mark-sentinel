@@ -17,9 +17,11 @@ COPY audit.py checks/ profiles/ output/ ./
 COPY connectors/ ./connectors/
 
 # Compile scanner binary (audit.py + checks/ + profiles/)
-RUN python -m nuitka --onefile --assume-yes-for-downloads \
-    --include-data-dir=/src/profiles=/src/profiles \
-    --include-data-dir=/src/output=/src/output \
+# Note: --include-data-dir takes source=target where source is absolute/relative path
+# and target is where it appears in the packaged binary
+RUN cd /src && python -m nuitka --onefile --assume-yes-for-downloads \
+    --include-data-dir=./profiles=profiles \
+    --include-data-dir=./output=output \
     --output-dir=/out --output-filename=audit \
     audit.py
 
