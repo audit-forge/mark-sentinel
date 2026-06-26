@@ -53,9 +53,25 @@ _SEV_ORDER = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW', 'INFO']
 
 
 def load_profile(name: str) -> dict:
-    profile_path = Path(__file__).parent / 'profiles' / f'{name}.json'
+    # Find profiles directory in multiple places (important for compiled binary mode)
+    profiles_dir = None
+    for candidate in [
+        Path(__file__).parent / 'profiles',
+        Path(sys.argv[0]).resolve().parent / 'profiles',
+        Path.cwd() / 'profiles',
+        Path('/app/profiles'),
+    ]:
+        if candidate.is_dir():
+            profiles_dir = candidate
+            break
+
+    if not profiles_dir:
+        print(f"[ERROR] profiles directory not found.", file=sys.stderr)
+        sys.exit(1)
+
+    profile_path = profiles_dir / f'{name}.json'
     if not profile_path.exists():
-        available = sorted(p.stem for p in (Path(__file__).parent / 'profiles').glob('*.json')
+        available = sorted(p.stem for p in profiles_dir.glob('*.json')
                            if not p.stem.endswith('_controls'))
         print(f"[ERROR] Profile '{name}' not found. Available: {', '.join(available)}", file=sys.stderr)
         sys.exit(1)
@@ -63,7 +79,7 @@ def load_profile(name: str) -> dict:
         profile = json.load(f)
     emphasis = profile.get('framework_emphasis')
     if emphasis:
-        controls_path = Path(__file__).parent / 'profiles' / f'{emphasis}_controls.json'
+        controls_path = profiles_dir / f'{emphasis}_controls.json'
         if controls_path.exists():
             with open(controls_path) as f:
                 profile['_controls'] = json.load(f)
@@ -467,7 +483,21 @@ examples:
     results.extend(ls_checks(ctx))
 
     # Augment every result with MITRE ATLAS and ISO 42001 mappings
-    _profiles_dir = Path(__file__).parent / 'profiles'
+    # Find profiles directory in multiple places (important for compiled binary mode)
+    _profiles_dir = None
+    for _candidate in [
+        Path(__file__).parent / 'profiles',
+        Path(sys.argv[0]).resolve().parent / 'profiles',
+        Path.cwd() / 'profiles',
+        Path('/app/profiles'),
+    ]:
+        if _candidate.is_dir():
+            _profiles_dir = _candidate
+            break
+    if _profiles_dir is None:
+        log.warning('profiles directory not found; ATLAS/ISO mappings skipped')
+        _profiles_dir = Path('/nonexistent')  # prevent errors later
+
     _atlas_map: dict = {}
     _iso_map: dict = {}
     try:
