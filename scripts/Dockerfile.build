@@ -10,10 +10,11 @@ RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-reco
 COPY requirements.txt ./
 RUN pip install --no-cache-dir --upgrade pip setuptools wheel && \
     pip install --no-cache-dir -r requirements.txt && \
-    pip install --no-cache-dir nuitka ordered-set
+    pip install --no-cache-dir "nuitka[onefile]" ordered-set zstandard
 
-# Copy source files needed for compilation
-COPY audit.py checks/ profiles/ connectors/ output/ ./
+# Copy source files — connectors must be a package directory, not flattened
+COPY audit.py checks/ profiles/ output/ ./
+COPY connectors/ ./connectors/
 
 # Compile scanner binary (audit.py + checks/)
 RUN python -m nuitka --onefile --assume-yes-for-downloads \
