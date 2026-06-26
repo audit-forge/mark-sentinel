@@ -53,7 +53,11 @@ from pathlib import Path
 from urllib import error as _urlerr
 from urllib import request as _urlreq
 
-ROOT = Path(__file__).parent
+# When running as a Nuitka onefile compiled binary, __file__ points to a temp
+# directory, not the directory where the binary actually is. Use sys.argv[0]
+# to find the executable location instead.
+_exec_path = Path(sys.argv[0]).resolve()
+ROOT = _exec_path.parent if _exec_path.is_file() else Path(__file__).parent
 DEFAULT_CONFIG = ROOT / 'agent_config.json'
 VERSION = '1.0.0'
 _PROCESS_NAME = 'sentinel-agent'
