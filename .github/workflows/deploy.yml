@@ -56,7 +56,6 @@ jobs:
             --zone=us-central1-a \
             --project=infra-analyzer-496922-p0 \
             --tunnel-through-iap \
-            --ssh-flag="-o StrictHostKeyChecking=no" \
             --quiet
 
       - name: Deploy to sentinel container
@@ -65,7 +64,6 @@ jobs:
             --zone=us-central1-a \
             --project=infra-analyzer-496922-p0 \
             --tunnel-through-iap \
-            --ssh-flag="-o StrictHostKeyChecking=no" \
             --quiet \
             --command="
               set -e
