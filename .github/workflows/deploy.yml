@@ -44,36 +44,17 @@ jobs:
 
       - name: Set up gcloud CLI
         uses: google-github-actions/setup-gcloud@v2
-        with:
-          install_components: beta
 
-      - name: Upload binaries and source to GCP
+      - name: Upload to GCS deploy bucket
         run: |
-          gcloud compute scp \
-            dist/agent dist/audit \
+          # Upload all deployment artifacts to GCS
+          gsutil cp dist/agent dist/audit \
             server.py discovery.py agent.py \
-            mark-sentinel:/tmp/ \
-            --zone=us-central1-a \
-            --project=infra-analyzer-496922-p0 \
-            --tunnel-through-iap \
-            --quiet
+            gs://arckon-deploy-artifacts/latest/
 
-      - name: Deploy to sentinel container
-        run: |
-          gcloud compute ssh mark-sentinel \
-            --zone=us-central1-a \
-            --project=infra-analyzer-496922-p0 \
-            --tunnel-through-iap \
-            --quiet \
-            --command="
-              set -e
-              sudo docker cp /tmp/agent     sentinel-mfdynamicsllc:/app/agent
-              sudo docker cp /tmp/audit     sentinel-mfdynamicsllc:/app/audit
-              sudo docker cp /tmp/server.py sentinel-mfdynamicsllc:/app/server.py
-              sudo docker cp /tmp/discovery.py sentinel-mfdynamicsllc:/app/discovery.py
-              sudo docker cp /tmp/agent.py  sentinel-mfdynamicsllc:/app/agent.py
-              sudo docker restart sentinel-mfdynamicsllc
-              sleep 4
-              sudo docker ps --filter name=sentinel-mfdynamicsllc --format 'Status: {{.Status}}'
-              rm -f /tmp/agent /tmp/audit /tmp/server.py /tmp/discovery.py /tmp/agent.py
-            "
+          # Write a deploy manifest so the GCP instance knows a new deploy is ready
+          echo "{\"sha\":\"${{ github.sha }}\",\"ref\":\"${{ github.ref_name }}\",\"ts\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}" \
+            | gsutil cp - gs://arckon-deploy-artifacts/latest/manifest.json
+
+          echo "=== Uploaded to gs://arckon-deploy-artifacts/latest/ ==="
+          gsutil ls -l gs://arckon-deploy-artifacts/latest/
