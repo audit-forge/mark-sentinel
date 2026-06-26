@@ -369,7 +369,7 @@ examples:
         print(BANNER, file=sys.stderr)
 
     if args.mode == 'docker':
-        print(f"\n[INFO] 'docker' mode will be available in a future release. Running config mode scan.\n")
+        print("\n[INFO] 'docker' mode will be available in a future release. Running config mode scan.\n")
         args.mode = 'config'
 
     if args.mode in ('kubectl', 'k8s'):
@@ -684,7 +684,8 @@ examples:
         try:
             from storage import AgentStore
             from output.json_report import format_json as _fmt_json
-            import hashlib, platform as _platform
+            import hashlib
+            import platform as _platform
             _store = AgentStore(Path(args.store_db))
             _device_id = args.store_device_id or hashlib.sha256(socket.gethostname().encode()).hexdigest()[:16]
             _report_dict = json.loads(_fmt_json(results, profile, str(target), args.mode))

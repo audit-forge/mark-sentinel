@@ -18,6 +18,7 @@ import re
 import socket
 import subprocess
 import sys
+from pathlib import Path
 from urllib import request as _urlreq
 
 logger = logging.getLogger(__name__)
@@ -872,7 +873,8 @@ def _scan_mcp_k8s() -> list[dict]:
     """Scan Kubernetes services and pod envs for MCP server signatures via kubectl."""
     results: list[dict] = []
     try:
-        import subprocess, json as _json
+        import subprocess
+        import json as _json
         # Get all services with their cluster IPs and ports
         r = subprocess.run(
             ['kubectl', 'get', 'services', '--all-namespaces', '-o', 'json'],

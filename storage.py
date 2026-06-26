@@ -950,14 +950,16 @@ class CustomerRegistry:
 
     @staticmethod
     def _hash_pw(password: str) -> str:
-        import hashlib, secrets
+        import hashlib
+        import secrets
         salt = secrets.token_hex(16)
         dk = hashlib.pbkdf2_hmac('sha256', password.encode('utf-8'), salt.encode(), 260_000)
         return f'pbkdf2:sha256:260000:{salt}:{dk.hex()}'
 
     @staticmethod
     def _verify_pw(password: str, stored: str) -> bool:
-        import hashlib, hmac as _hmac
+        import hashlib
+        import hmac as _hmac
         try:
             _, algo, iters, salt, dk_hex = stored.split(':')
             dk = hashlib.pbkdf2_hmac(algo, password.encode('utf-8'), salt.encode(), int(iters))
@@ -974,7 +976,8 @@ class CustomerRegistry:
             ).fetchone() is not None
 
     def create_customer(self, name: str) -> dict:
-        import uuid, secrets
+        import uuid
+        import secrets
         cid = str(uuid.uuid4())
         token = secrets.token_urlsafe(32)
         now = int(time.time())

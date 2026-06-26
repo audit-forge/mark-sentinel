@@ -29,3 +29,25 @@ mark-sentinel = "server:main"
 [tool.hatch.build.targets.wheel]
 include = ["**/*"]
 
+
+[tool.ruff]
+target-version = "py312"
+exclude = [
+    "server.py",          # contains embedded JS f-string templates that confuse ruff
+    "admin/",             # separate admin app — not part of sentinel core
+    "test/",
+    "tests/",
+    ".git",
+    "__pycache__",
+]
+
+[tool.ruff.lint]
+# Only enforce clear-cut errors; ignore style opinions
+select = ["E", "F", "W"]
+ignore = [
+    "E501",   # line too long — server.py HTML/JS lines are intentionally long
+    "E402",   # module-level import not at top — used in conditional imports
+    "E702",   # multiple statements on one line — intentional in storage queries
+    "E741",   # ambiguous variable name — l used in list comprehensions
+    "F401",   # unused import — some are re-exported
+]

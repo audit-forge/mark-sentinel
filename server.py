@@ -24,7 +24,10 @@ if hasattr(sys.stderr, 'reconfigure'):
 # functionality. Runs with the same Python binary that launched the server so
 # app-bundle and venv environments get the right site-packages.
 def _ensure_packages():
-    import importlib, subprocess as _sp, os as _os, time as _time
+    import importlib
+    import subprocess as _sp
+    import os as _os
+    import time as _time
     _needed = [('fpdf', 'fpdf2'), ('yaml', 'pyyaml')]
     installed_any = False
     for module, package in _needed:
@@ -447,8 +450,8 @@ def _build_mcp_report_html(servers: list, tier: str) -> str:
     no_auth      = [s for s in servers if s.get('auth_status') == 'none']
     unknown_auth = [s for s in servers if s.get('auth_status') == 'unknown']
     auth_ok      = [s for s in servers if s.get('auth_status') == 'required']
-    net_servers  = [s for s in servers if s.get('source') == 'network']
-    proc_servers = [s for s in servers if s.get('source') == 'process']
+    [s for s in servers if s.get('source') == 'network']
+    [s for s in servers if s.get('source') == 'process']
     all_tools    = sorted({t for s in servers for t in (s.get('tools') or [])})
 
     risk_level  = 'CRITICAL' if no_auth else 'MEDIUM' if unknown_auth else 'LOW'
@@ -511,8 +514,8 @@ function switchTier(t){{location.href='/api/fleet/mcp/report?tier='+t;}}
         parts.append(f'<div class="risk-banner" style="background:#2a1f0a;border:1px solid #d29922;color:#d29922">'
                      f'&#9888;&nbsp; REVIEW REQUIRED — {len(unknown_auth)} MCP server{"s" if len(unknown_auth)>1 else ""} with unverified authentication.</div>')
     else:
-        parts.append(f'<div class="risk-banner" style="background:#0f2a1a;border:1px solid #3fb950;color:#3fb950">'
-                     f'&#10003;&nbsp; All MCP servers require authentication.</div>')
+        parts.append('<div class="risk-banner" style="background:#0f2a1a;border:1px solid #3fb950;color:#3fb950">'
+                     '&#10003;&nbsp; All MCP servers require authentication.</div>')
 
     # Summary cards
     parts.append(f'''<div class="cards">
@@ -633,9 +636,9 @@ function switchTier(t){{location.href='/api/fleet/mcp/report?tier='+t;}}
                 fix = hint
                 break
 
-        parts.append(f'<div class="block">')
+        parts.append('<div class="block">')
         parts.append(f'<h3>&#128279; {esc(loc)} &mdash; {esc(server_name)}</h3>')
-        parts.append(f'<table style="margin-bottom:12px"><tbody>')
+        parts.append('<table style="margin-bottom:12px"><tbody>')
         parts.append(f'<tr><td style="color:#6e7681;width:160px">Auth Status</td><td><strong style="color:{auth_color}">{esc(auth_label)}</strong></td></tr>')
         parts.append(f'<tr><td style="color:#6e7681">Source</td><td>{"Network probe" if s.get("source")=="network" else "Process scan"}</td></tr>')
         parts.append(f'<tr><td style="color:#6e7681">Reporter</td><td>{esc(s.get("reporter_hostname",""))}</td></tr>')
@@ -650,8 +653,8 @@ function switchTier(t){{location.href='/api/fleet/mcp/report?tier='+t;}}
             parts.append('<div style="margin-bottom:12px">' + ''.join(f'<span class="tag">{esc(t)}</span>' for t in tools) + '</div>')
             high_risk_tools = [t for t in tools if any(kw in t.lower() for kw in ('exec', 'code', 'shell', 'run', 'write', 'delete', 'email', 'send', 'database', 'db', 'sql'))]
             if high_risk_tools and auth == 'none':
-                parts.append(f'<div style="background:#2d0f0f;border:1px solid #f85149;border-radius:4px;padding:8px 12px;font-size:12px;margin-bottom:10px;color:#f85149">'
-                             f'&#9888; High-risk tools accessible with no auth: '
+                parts.append('<div style="background:#2d0f0f;border:1px solid #f85149;border-radius:4px;padding:8px 12px;font-size:12px;margin-bottom:10px;color:#f85149">'
+                             '&#9888; High-risk tools accessible with no auth: '
                              + ''.join(f'<code style="background:#0d1117;padding:1px 6px;border-radius:3px;margin:0 3px">{esc(t)}</code>' for t in high_risk_tools)
                              + '</div>')
         else:
@@ -1407,7 +1410,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         client_ip = self.client_address[0]
         if not _login_allowed(client_ip):
             self.send_response(302)
-            self.send_header('Location', f'/login?error=ratelimit')
+            self.send_header('Location', '/login?error=ratelimit')
             self.end_headers()
             return
         params = parse_qs(self.rfile.read(length).decode(errors='ignore'))
@@ -1448,7 +1451,6 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         self.end_headers()
 
     def _serve_setup(self):
-        import html as _html
         from urllib.parse import parse_qs
         if _get_registry().has_customers():
             self.send_response(302)
@@ -1544,7 +1546,8 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         return os.environ.get('SENTINEL_ADMIN_URL', 'http://user-manager:8000')
 
     def _proxy_to_admin(self, path: str, method: str = 'GET', body: bytes = b'') -> None:
-        import urllib.request, urllib.error
+        import urllib.request
+        import urllib.error
         url = self._admin_panel_url() + path
         cookie = self.headers.get('Cookie', '')
         req = urllib.request.Request(url, data=body or None, method=method,
@@ -2661,7 +2664,9 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         if not _has_evidence_package():
             self._send(402, b'Evidence Package requires a Plus license. Contact sales@markai.io to upgrade.', 'text/plain')
             return
-        import io, zipfile, csv
+        import io
+        import zipfile
+        import csv
         from urllib.parse import parse_qs, urlparse as _up
         from datetime import datetime as _dt
         qs = parse_qs(_up(self.path).query)
@@ -2829,7 +2834,8 @@ class _Handler(http.server.BaseHTTPRequestHandler):
 
     def _api_risk_register_csv(self):
         """GET /api/fleet/risk-register/csv — download risk register as CSV."""
-        import io, csv
+        import io
+        import csv
         from datetime import datetime as _dt
         try:
             store = self._store()
@@ -3470,7 +3476,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self.send_header('Access-Control-Allow-Origin', '*')
             self.end_headers()
             self.wfile.write(body)
-            print(f'[SENTINEL] _serve_fleet: sent OK', flush=True)
+            print('[SENTINEL] _serve_fleet: sent OK', flush=True)
         except Exception as _e:
             print(f'[SENTINEL] _serve_fleet: send error: {_e}', flush=True)
             log.error('_serve_fleet: send failed: %s', _e, exc_info=True)
@@ -3577,7 +3583,6 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         log.info('probe-run start: provider=%s endpoint=%s', provider, endpoint or '(default)')
         try:
             sys.path.insert(0, str(ROOT))
-            from dataclasses import asdict
             from checks.input_safety import (
                 check_inp_001, check_inp_002, check_inp_003, check_inp_004,
             )
@@ -3945,7 +3950,7 @@ def _build_shadow_section(shadow: list[dict], ts_now: int) -> str:
                                if detail else '')
                 sub_html = device_html + detail_html
             model_html = _model_tags(models) if models else (
-                f'<span style="font-size:11px;color:#484f58">No model details available</span>'
+                '<span style="font-size:11px;color:#484f58">No model details available</span>'
             )
             card_parts.append(
                 f'<div class="shadow-card" style="border-left-color:{color}">'
@@ -3985,7 +3990,7 @@ def _build_shadow_section(shadow: list[dict], ts_now: int) -> str:
                 models = d.get('models') or []
                 age    = _age(d.get('last_seen'))
                 model_html = _model_tags(models) if models else (
-                    f'<span style="font-size:11px;color:#484f58">No model details available</span>'
+                    '<span style="font-size:11px;color:#484f58">No model details available</span>'
                 )
                 port_html   = (f'<span style="font-size:11px;color:#484f58;font-family:monospace">'
                                f':{port}</span>') if port else ''
@@ -4031,9 +4036,9 @@ def _build_shadow_section(shadow: list[dict], ts_now: int) -> str:
              f'{len(shadow)}</span>') if shadow else ''
 
     dismiss_all_btn = (
-        f'<button class="scan-btn" onclick="dismissAllShadow()" '
-        f'style="font-size:11px;color:#6e7681;border-color:#30363d;margin-left:8px">'
-        f'Dismiss All</button>'
+        '<button class="scan-btn" onclick="dismissAllShadow()" '
+        'style="font-size:11px;color:#6e7681;border-color:#30363d;margin-left:8px">'
+        'Dismiss All</button>'
     ) if shadow else ''
 
     return (f'<div id="shadow-section" style="margin-top:32px">'
@@ -4097,24 +4102,24 @@ def _build_mcp_section(servers: list[dict], ts_now: int) -> str:
             is_process = (src == 'process')
 
             if is_process:
-                location_html = (f'<span style="font-weight:700;color:#e6edf3;font-size:14px">'
-                                 f'MCP Server Process</span>')
+                location_html = ('<span style="font-weight:700;color:#e6edf3;font-size:14px">'
+                                 'MCP Server Process</span>')
                 sub_html = (f'<span style="font-size:11px;color:#6e7681;font-family:monospace">'
                             f'{process_info[:80]}</span>') if process_info else ''
             else:
-                display = server_name or f'MCP Server'
+                display = server_name or 'MCP Server'
                 location_html = (f'<span style="font-weight:700;color:#e6edf3;font-size:14px">'
                                  f'{host}:{port}</span>')
                 sub_html = (f'<span style="font-size:12px;color:#58a6ff">{display}</span>')
 
             tool_html = _tool_tags(tools) if tools else (
-                f'<span style="font-size:11px;color:#484f58">No tools enumerated</span>'
+                '<span style="font-size:11px;color:#484f58">No tools enumerated</span>'
             )
 
             risk_note = ''
             if auth_status == 'none':
-                risk_note = (f'<div style="font-size:11px;color:#f85149;margin-top:4px;font-weight:600">'
-                             f'&#9888; Unauthenticated — any AI agent can connect to this server</div>')
+                risk_note = ('<div style="font-size:11px;color:#f85149;margin-top:4px;font-weight:600">'
+                             '&#9888; Unauthenticated — any AI agent can connect to this server</div>')
 
             card_parts.append(
                 f'<div class="shadow-card" style="border-left-color:{auth_color}">'
@@ -4153,9 +4158,9 @@ def _build_mcp_section(servers: list[dict], ts_now: int) -> str:
                   f'&#9888; {no_auth_count} unauthenticated</span>') if no_auth_count else ''
 
     dismiss_all_btn = (
-        f'<button class="scan-btn" onclick="dismissAllMcp()" '
-        f'style="font-size:11px;color:#6e7681;border-color:#30363d;margin-left:8px">'
-        f'Dismiss All</button>'
+        '<button class="scan-btn" onclick="dismissAllMcp()" '
+        'style="font-size:11px;color:#6e7681;border-color:#30363d;margin-left:8px">'
+        'Dismiss All</button>'
     ) if servers else ''
 
     return (f'<div id="mcp-section" style="margin-top:32px">'
