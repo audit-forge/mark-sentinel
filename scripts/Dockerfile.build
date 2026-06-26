@@ -16,8 +16,10 @@ RUN pip install --no-cache-dir --upgrade pip setuptools wheel && \
 COPY audit.py checks/ profiles/ output/ ./
 COPY connectors/ ./connectors/
 
-# Compile scanner binary (audit.py + checks/ + profiles/)
+# Compile scanner binary (audit.py + checks/ + output/ + profiles/)
 RUN python -m nuitka --onefile --assume-yes-for-downloads \
+    --include-package=checks \
+    --include-package=output \
     --output-dir=/out --output-filename=audit \
     audit.py
 
