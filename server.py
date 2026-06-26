@@ -1774,8 +1774,8 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             _SKIP_DIRS = _SKIP_DIRS | {'connectors'}
         if has_audit_bin:
             _COMPILED_SOURCE.update({'audit.py'})
-            # checks/ embedded in audit binary
-            _SKIP_DIRS = _SKIP_DIRS | {'checks'}
+            # Note: checks/ and output/ are NOT embedded in the binary
+            # They're shipped in the bundle alongside the compiled audit binary
 
         buf = io.BytesIO()
         with tarfile.open(fileobj=buf, mode='w:gz') as tar:
