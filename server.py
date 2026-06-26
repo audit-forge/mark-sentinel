@@ -2094,10 +2094,14 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             resp['warning'] = duplicate_warning
         # If this agent is still using the old rollover token, deliver the new one
         # in the response body so the agent self-updates without any manual intervention.
-        if _cust and _cust.get('using_old_token') and _cust.get('new_token'):
-            resp['token_update'] = {'token': _cust['new_token']}
-            log.info('Token rollover delivery: sent new token to device %s (%s)',
-                     device_id, hostname)
+        try:
+            cust_cfg = store.get_customer_config() if hasattr(store, 'get_customer_config') else {}
+            if cust_cfg and cust_cfg.get('using_old_token') and cust_cfg.get('new_token'):
+                resp['token_update'] = {'token': cust_cfg['new_token']}
+                log.info('Token rollover delivery: sent new token to device %s (%s)',
+                         device_id, hostname)
+        except Exception:
+            pass  # Token rollover is optional; don't fail the whole report
         self._json(resp)
 
     def _api_agent_commands(self, device_id: str):
