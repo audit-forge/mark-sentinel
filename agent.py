@@ -205,18 +205,30 @@ def run_scan(target: str, profile: str) -> dict | None:
     Captures stdout (JSON) separately from stderr (progress output).
     """
     audit_script = ROOT / 'audit.py'
-    if not audit_script.exists():
-        log.error('audit.py not found at %s', audit_script)
-        return None
+    audit_binary = ROOT / 'audit'
 
-    cmd = [
-        sys.executable, str(audit_script),
-        '--mode', 'config',
-        '--target', target,
-        '--profile', profile,
-        '--output', 'json',
-        '--quiet',
-    ]
+    # Use compiled binary if available, fall back to Python script
+    if audit_binary.exists() and os.access(audit_binary, os.X_OK):
+        cmd = [
+            str(audit_binary),
+            '--mode', 'config',
+            '--target', target,
+            '--profile', profile,
+            '--output', 'json',
+            '--quiet',
+        ]
+    elif audit_script.exists():
+        cmd = [
+            sys.executable, str(audit_script),
+            '--mode', 'config',
+            '--target', target,
+            '--profile', profile,
+            '--output', 'json',
+            '--quiet',
+        ]
+    else:
+        log.error('Neither audit binary nor audit.py found at %s', ROOT)
+        return None
     log.info('Scan: %s', ' '.join(cmd))
 
     try:
@@ -693,15 +705,27 @@ def _k8s_device_id(server_url: str) -> str:
 def run_k8s_scan(context_name: str) -> dict | None:
     """Run a k8s-mode Sentinel audit and return the parsed JSON report."""
     audit_script = ROOT / 'audit.py'
-    if not audit_script.exists():
+    audit_binary = ROOT / 'audit'
+
+    # Use compiled binary if available, fall back to Python script
+    if audit_binary.exists() and os.access(audit_binary, os.X_OK):
+        cmd = [
+            str(audit_binary),
+            '--mode', 'k8s',
+            '--profile', 'kubernetes',
+            '--output', 'json',
+            '--quiet',
+        ]
+    elif audit_script.exists():
+        cmd = [
+            sys.executable, str(audit_script),
+            '--mode', 'k8s',
+            '--profile', 'kubernetes',
+            '--output', 'json',
+            '--quiet',
+        ]
+    else:
         return None
-    cmd = [
-        sys.executable, str(audit_script),
-        '--mode', 'k8s',
-        '--profile', 'kubernetes',
-        '--output', 'json',
-        '--quiet',
-    ]
     log.info('K8s scan: %s (context: %s)', ' '.join(cmd[:5]), context_name)
     try:
         proc = subprocess.run(
