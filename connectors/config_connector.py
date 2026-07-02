@@ -48,6 +48,36 @@ SKIP_PATH_FRAGMENTS = (
     '.claude/paste-cache',
     '.npm/_npx',
     '.npm/cache',
+    # Google Cloud SDK Python venv — ~900 files, never contains AI project config
+    '.config/gcloud/virtenv',
+    # Downloaded archives — not primary AI project config
+    'Downloads',
+    # macOS system Python site-packages — ~1600+ files, never AI project config
+    'Library/Python',
+    # Other macOS system Library paths not caught by existing fragments
+    'Library/IdentityServices',
+    'Library/Mobile Documents',
+    'Library/Passes',
+    'Library/Application Support/Code',
+    'Library/Application Support/Docker Desktop',
+    'Library/DoNotDisturb',
+    'Library/Photos',
+    'Library/Biome',
+    'Library/Shortcuts',
+    # Go module cache — third-party source, not the project being assessed
+    'go/pkg',
+    # Media and misc home dirs — never contain AI project config
+    'Pictures',
+    'Movies',
+    'Music',
+    'Public',
+    # App caches / data dirs
+    '.openclaw',
+    '.opencode',
+    '.ollama/models',
+    'snap',
+    # Separate product deployments — assessed independently, not part of this scan target
+    'project-pharaoh',
 )
 TEXT_EXTS = frozenset({
     '.py', '.json', '.yml', '.yaml', '.txt', '.md', '.env',

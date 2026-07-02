@@ -31,9 +31,9 @@ _PLACEHOLDER_FRAGMENTS = (
 _CRED_RE = [
     (re.compile(r'(?im)^(?:export\s+)?(?:DB|DATABASE|MYSQL|POSTGRES|MONGODB)_PASSWORD\s*=\s*(?!\$\{)(?!\$\()(?!\s*$)(.+)$'), 'Database password'),
     (re.compile(r'(?im)^(?:export\s+)?REDIS_PASSWORD\s*=\s*(?!\$)(?!\s*$)(.+)$'), 'Redis password'),
-    (re.compile(r'(?i)postgres(?:ql)?://[^:\s]+:([^@\s]{4,})@'), 'PostgreSQL URL with password'),
-    (re.compile(r'(?i)mysql://[^:\s]+:([^@\s]{4,})@'), 'MySQL URL with password'),
-    (re.compile(r'(?i)mongodb://[^:\s]+:([^@\s]{4,})@'), 'MongoDB URL with password'),
+    (re.compile(r'(?i)postgres(?:ql)?://[^:\s]+:(?!\$\{)(?!\$\()([^@\s]{4,})@'), 'PostgreSQL URL with password'),
+    (re.compile(r'(?i)mysql://[^:\s]+:(?!\$\{)(?!\$\()([^@\s]{4,})@'), 'MySQL URL with password'),
+    (re.compile(r'(?i)mongodb://[^:\s]+:(?!\$\{)(?!\$\()([^@\s]{4,})@'), 'MongoDB URL with password'),
     (re.compile(r'(?i)"password"\s*:\s*"(?!\$\{)([^"$]{4,})"'), 'Password in JSON'),
 ]
 
