@@ -1,13 +1,15 @@
 """
 M.A.R.K. Sentinel — Alert delivery module.
 
-Delivers alerts to Slack, email (SMTP), and generic webhooks.
-Zero external dependencies — Python stdlib only.
+Delivers alerts to Slack, Google Chat, Microsoft Teams, email (SMTP),
+and generic webhooks. Zero external dependencies — Python stdlib only.
 
 Config file: alerts_config.json (sits next to server.py)
 {
-  "slack_webhook": "https://hooks.slack.com/services/...",
-  "webhook_url":   "https://your-endpoint.com/alerts",
+  "slack_webhook":  "https://hooks.slack.com/services/...",
+  "gchat_webhook":  "https://chat.googleapis.com/v1/spaces/.../messages?key=...",
+  "teams_webhook":  "https://yourorg.webhook.office.com/webhookb2/...",
+  "webhook_url":    "https://your-endpoint.com/alerts",
   "email": {
     "smtp_host": "smtp.gmail.com",
     "smtp_port": 587,
@@ -25,6 +27,9 @@ Config file: alerts_config.json (sits next to server.py)
 
 Gmail note: use an App Password (myaccount.google.com/apppasswords),
 not your account password. Requires 2FA enabled on the account.
+
+Google Chat: Space → Apps & integrations → Webhooks → Add webhook.
+Teams: Channel → Connectors → Incoming Webhook → configure → copy URL.
 """
 import json
 import logging
@@ -38,9 +43,10 @@ from typing import Optional
 log = logging.getLogger('sentinel.alerts')
 
 _DEFAULT_TRIGGERS = {
-    'new_critical':  True,
-    'new_high':      True,
-    'new_shadow_ai': True,
+    'new_critical':         True,
+    'new_high':             True,
+    'new_shadow_ai':        True,
+    'alert_unapproved_only': False,
 }
 _PASS_MASK = '__set__'
 
@@ -62,8 +68,10 @@ def load_alert_config_for_ui(path: Path) -> dict:
     """Load config with password masked for safe return to the browser."""
     cfg = load_alert_config(path) or {}
     result = {
-        'slack_webhook': cfg.get('slack_webhook', ''),
-        'webhook_url':   cfg.get('webhook_url', ''),
+        'slack_webhook':  cfg.get('slack_webhook', ''),
+        'gchat_webhook':  cfg.get('gchat_webhook', ''),
+        'teams_webhook':  cfg.get('teams_webhook', ''),
+        'webhook_url':    cfg.get('webhook_url', ''),
         'email': {
             'smtp_host': cfg.get('email', {}).get('smtp_host', ''),
             'smtp_port': cfg.get('email', {}).get('smtp_port', 587),
@@ -92,8 +100,10 @@ def save_alert_config(path: Path, new_data: dict, existing_path: Path) -> None:
 
     triggers_raw = new_data.get('triggers', {})
     clean = {
-        'slack_webhook': str(new_data.get('slack_webhook', '')).strip(),
-        'webhook_url':   str(new_data.get('webhook_url', '')).strip(),
+        'slack_webhook':  str(new_data.get('slack_webhook', '')).strip(),
+        'gchat_webhook':  str(new_data.get('gchat_webhook', '')).strip(),
+        'teams_webhook':  str(new_data.get('teams_webhook', '')).strip(),
+        'webhook_url':    str(new_data.get('webhook_url', '')).strip(),
         'email': {
             'smtp_host': str(email_new.get('smtp_host', '')).strip(),
             'smtp_port': int(email_new.get('smtp_port', 587)),
@@ -103,9 +113,10 @@ def save_alert_config(path: Path, new_data: dict, existing_path: Path) -> None:
             'to':        str(email_new.get('to', '')).strip(),
         },
         'triggers': {
-            'new_critical':  bool(triggers_raw.get('new_critical', True)),
-            'new_high':      bool(triggers_raw.get('new_high', True)),
-            'new_shadow_ai': bool(triggers_raw.get('new_shadow_ai', True)),
+            'new_critical':          bool(triggers_raw.get('new_critical', True)),
+            'new_high':              bool(triggers_raw.get('new_high', True)),
+            'new_shadow_ai':         bool(triggers_raw.get('new_shadow_ai', True)),
+            'alert_unapproved_only': bool(triggers_raw.get('alert_unapproved_only', False)),
         },
     }
     path.write_text(json.dumps(clean, indent=2), encoding='utf-8')
@@ -156,24 +167,66 @@ def fire_alerts(report: dict, device_id: str, hostname: str,
                 })
 
     for msg in messages:
-        _dispatch(alert_cfg, msg)
+        if store is not None:
+            try:
+                if store.was_alert_recently_fired(msg['event'], hostname, msg.get('check_id', '')):
+                    log.info('alert suppressed (24h cooldown): %s %s on %s',
+                             msg['severity'], msg.get('check_id', ''), hostname)
+                    continue
+            except Exception as e:
+                log.error('alert dedup check error: %s', e)
+        fired = _dispatch(alert_cfg, msg)
         log.info('alert fired: %s %s on %s', msg['severity'], msg['check_id'], hostname)
+        if store is not None:
+            try:
+                store.log_alert_event(
+                    event_type=msg['event'],
+                    severity=msg['severity'],
+                    device=hostname,
+                    check_id=msg.get('check_id', ''),
+                    title=msg.get('title', ''),
+                    channels=', '.join(fired),
+                )
+            except Exception as e:
+                log.error('alert event log error: %s', e)
 
 
 def fire_shadow_alert(reporter_hostname: str, service: str,
-                      host: str, alert_cfg: dict) -> None:
-    """Called when a brand-new shadow AI asset is discovered for the first time."""
+                      host: str, alert_cfg: dict, source: str = 'network',
+                      store=None) -> None:
+    """Called when a brand-new unapproved shadow AI asset is discovered."""
     triggers = {**_DEFAULT_TRIGGERS, **alert_cfg.get('triggers', {})}
     if not triggers.get('new_shadow_ai'):
         return
-    _dispatch(alert_cfg, {
+    if store is not None:
+        try:
+            if store.was_alert_recently_fired('new_shadow_ai', reporter_hostname, service):
+                log.info('shadow AI alert suppressed (24h cooldown): %s on %s', service, reporter_hostname)
+                return
+        except Exception as e:
+            log.error('alert dedup check error: %s', e)
+    fired = _dispatch(alert_cfg, {
         'event':    'new_shadow_ai',
         'severity': 'HIGH',
         'device':   reporter_hostname,
         'service':  service,
         'host':     host,
+        'source':   source,
     })
-    log.info('shadow AI alert: %s at %s via %s', service, host, reporter_hostname)
+    log.info('shadow AI alert: %s at %s via %s (source: %s)', service, host, reporter_hostname, source)
+    if store is not None:
+        try:
+            store.log_alert_event(
+                event_type='new_shadow_ai',
+                severity='HIGH',
+                device=reporter_hostname,
+                service=service,
+                host=host,
+                source=source,
+                channels=', '.join(fired),
+            )
+        except Exception as e:
+            log.error('alert event log error: %s', e)
 
 
 def send_test_alert(alert_cfg: dict, channel: str) -> tuple[bool, str]:
@@ -203,32 +256,62 @@ def send_test_alert(alert_cfg: dict, channel: str) -> tuple[bool, str]:
             return False, 'No webhook URL configured'
         ok = _post_webhook(url, payload)
         return ok, 'Test sent to webhook' if ok else 'Webhook delivery failed — check the URL'
+    if channel == 'gchat':
+        url = alert_cfg.get('gchat_webhook', '').strip()
+        if not url:
+            return False, 'No Google Chat webhook URL configured'
+        ok = _post_gchat(url, _format_text(payload))
+        return ok, 'Test sent to Google Chat' if ok else 'Google Chat delivery failed — check the webhook URL'
+    if channel == 'teams':
+        url = alert_cfg.get('teams_webhook', '').strip()
+        if not url:
+            return False, 'No Teams webhook URL configured'
+        ok = _post_teams(url, _format_text(payload))
+        return ok, 'Test sent to Microsoft Teams' if ok else 'Teams delivery failed — check the webhook URL'
     return False, f'Unknown channel: {channel}'
 
 
 # ── Delivery backends ─────────────────────────────────────────────────────────
 
-def _dispatch(alert_cfg: dict, payload: dict) -> None:
+def _dispatch(alert_cfg: dict, payload: dict) -> list[str]:
+    """Deliver alert to all configured channels. Returns list of channel names fired."""
     slack_url   = alert_cfg.get('slack_webhook', '').strip()
+    gchat_url   = alert_cfg.get('gchat_webhook', '').strip()
+    teams_url   = alert_cfg.get('teams_webhook', '').strip()
     webhook_url = alert_cfg.get('webhook_url', '').strip()
     email_cfg   = alert_cfg.get('email', {})
     text        = _format_text(payload)
+    fired: list[str] = []
     if slack_url:
         _post_slack(slack_url, text, payload)
+        fired.append('slack')
+    if gchat_url:
+        _post_gchat(gchat_url, text)
+        fired.append('google_chat')
+    if teams_url:
+        _post_teams(teams_url, text)
+        fired.append('teams')
     if webhook_url:
         _post_webhook(webhook_url, payload)
+        fired.append('webhook')
     if email_cfg.get('smtp_host') and email_cfg.get('to'):
         _send_email(email_cfg, _alert_subject(payload), text)
+        fired.append('email')
+    return fired
 
 
 def _post_slack(webhook_url: str, text: str, payload: dict) -> bool:
     color = '#d73a49' if payload.get('severity') == 'CRITICAL' else '#e3b341'
+    lines = text.split('\n', 1)
+    title = lines[0]
+    body  = lines[1] if len(lines) > 1 else ''
     data = json.dumps({
         'attachments': [{
-            'color':  color,
-            'text':   text,
-            'footer': 'M.A.R.K. Sentinel',
-            'ts':     int(time.time()),
+            'color':     color,
+            'title':     title,
+            'text':      body,
+            'footer':    'RiskRaven: Arckon',
+            'ts':        int(time.time()),
         }]
     }).encode()
     req = urllib.request.Request(
@@ -241,6 +324,45 @@ def _post_slack(webhook_url: str, text: str, payload: dict) -> bool:
             return 200 <= r.status < 300
     except Exception as e:
         log.error('Slack POST failed: %s', e)
+        return False
+
+
+def _post_gchat(url: str, text: str) -> bool:
+    data = json.dumps({'text': text}).encode()
+    req = urllib.request.Request(
+        url, data=data,
+        headers={'Content-Type': 'application/json'},
+        method='POST',
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=10) as r:
+            return 200 <= r.status < 300
+    except Exception as e:
+        log.error('Google Chat POST failed: %s', e)
+        return False
+
+
+def _post_teams(url: str, text: str) -> bool:
+    lines = text.split('\n', 1)
+    title = lines[0]
+    body  = lines[1].replace('\n', '<br>') if len(lines) > 1 else ''
+    data = json.dumps({
+        '@type':    'MessageCard',
+        '@context': 'http://schema.org/extensions',
+        'themeColor': 'd73a49',
+        'summary': title,
+        'sections': [{'activityTitle': title, 'text': body}],
+    }).encode()
+    req = urllib.request.Request(
+        url, data=data,
+        headers={'Content-Type': 'application/json'},
+        method='POST',
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=10) as r:
+            return 200 <= r.status < 300
+    except Exception as e:
+        log.error('Teams POST failed: %s', e)
         return False
 
 
@@ -295,25 +417,40 @@ def _format_text(payload: dict) -> str:
     ev     = payload.get('event', '')
     device = payload.get('device', 'unknown')
     if ev == 'new_shadow_ai':
-        return (f"Shadow AI Detected on {device}\n"
-                f"Service: {payload.get('service', '')} at {payload.get('host', '')}\n"
-                f"Review in the Sentinel Asset Inventory and approve or remove this asset.")
+        service = payload.get('service', 'Unknown AI service')
+        host    = payload.get('host', '')
+        source  = payload.get('source', 'network')
+        if source == 'saas_ai':
+            return (f"RiskRaven: Arckon — Unauthorized SaaS AI Access\n"
+                    f"Device: {device}\n"
+                    f"Service: {service}\n"
+                    f"An employee on {device} was detected accessing {service}. "
+                    f"Review in the AI Asset Inventory and approve or block this service.")
+        return (f"RiskRaven: Arckon — Shadow AI Detected\n"
+                f"Device: {device}\n"
+                f"Service: {service}" + (f" ({host})" if host else '') + "\n"
+                f"Review in the AI Asset Inventory and approve or remove this asset.")
     if ev == 'test_alert':
-        return payload.get('title', 'Test alert from M.A.R.K. Sentinel')
+        return f"RiskRaven: Arckon — Test alert. Alerts are working correctly."
     sev    = payload.get('severity', 'HIGH')
     prefix = 'CRITICAL Finding' if sev == 'CRITICAL' else 'HIGH Finding'
-    return (f"{prefix} on {device}\n"
-            f"{payload.get('check_id', '')} — {payload.get('title', '')}\n"
-            f"Log in to Sentinel to view full details and remediation steps.")
+    check  = payload.get('check_id', '')
+    title  = payload.get('title', '')
+    return (f"RiskRaven: Arckon — {prefix}\n"
+            f"Device: {device}\n"
+            + (f"Check: {check}" + (f" — {title}" if title else '') + "\n" if check else (f"{title}\n" if title else ''))
+            + "Log in to RiskRaven: Arckon to view full details and remediation steps.")
 
 
 def _alert_subject(payload: dict) -> str:
     ev     = payload.get('event', '')
     device = payload.get('device', 'unknown')
     if ev == 'new_shadow_ai':
-        return f'[Sentinel] Shadow AI detected on {device}'
+        service = payload.get('service', 'Unknown AI service')
+        return f'[RiskRaven: Arckon] Unauthorized AI Access — {service} on {device}'
     sev = payload.get('severity', 'HIGH')
-    return f'[Sentinel] {sev}: {payload.get("check_id", "Finding")} on {device}'
+    check = payload.get('check_id', 'Finding')
+    return f'[RiskRaven: Arckon] {sev}: {check} on {device}'
 
 
 def _now_iso() -> str:

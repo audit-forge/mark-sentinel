@@ -1090,10 +1090,19 @@ function renderScan(){
         <span class="form-label" style="padding-top:3px">Profiles</span>
         <div style="display:flex;flex-direction:column;gap:6px">
           ${[
-            ['default',   'Base Scan',                      'Essential checks — plain language, highest-impact controls'],
-            ['fedramp',   'FedRAMP / NIST 800-53',        'FedRAMP Moderate controls'],
-            ['cmmc',      'CMMC 2.0',                     'Cybersecurity Maturity Model'],
-            ['financial', 'Financial Services',           'NIST AI RMF / SR 26-2'],
+            ['default',      'Base Scan',              'Essential checks — plain language, highest-impact controls'],
+            ['iso42001',     'ISO 42001',              'ISO/IEC 42001:2023 AI Management System — international standard'],
+            ['atlas',        'MITRE ATLAS',            'Adversarial ML threats — prompt injection, model exfiltration, supply chain'],
+            ['fedramp',      'FedRAMP / NIST 800-53',  'FedRAMP Moderate controls'],
+            ['cmmc',         'CMMC 2.0',               'Cybersecurity Maturity Model'],
+            ['financial',    'Financial Services',     'NIST AI RMF / SR 26-2'],
+            ['healthcare',   'Healthcare',             'HIPAA / HITECH / FDA SaMD'],
+            ['biotech',      'Biotech',                'FDA 21 CFR Part 11 / GxP'],
+            ['lifesciences', 'Life Sciences',          'BioMedical / clinical AI'],
+            ['owasp_agentic','OWASP Agentic',          'OWASP Top 10 for Agentic AI (2026)'],
+            ['eu_ai_act',    'EU AI Act',              'Articles 9-15 — mandatory for high-risk AI in Europe'],
+            ['kubernetes',   'Kubernetes',             'CIS K8s Benchmark / NSA-CISA hardening'],
+            ['docker',       'Docker Security',        'CIS Docker Benchmark — container isolation and runtime'],
           ].map(([v,l,d])=>`
             <label style="display:flex;align-items:flex-start;gap:8px;cursor:pointer">
               <input type="checkbox" class="profile-cb" value="${v}" ${v==='default'?'checked':''}

@@ -10,8 +10,8 @@ CATEGORY = "AI-DEPLOY"
 
 # API key patterns — only match values that look like real keys (long, opaque)
 _API_KEY_RE = [
-    (re.compile(r'sk-[a-zA-Z0-9_-]{20,}'), 'OpenAI API key'),
-    (re.compile(r'sk-ant-api\d+-[a-zA-Z0-9_-]{20,}'), 'Anthropic API key'),
+    (re.compile(r'(?<![a-zA-Z])sk-[a-zA-Z0-9_-]{20,}'), 'OpenAI API key'),
+    (re.compile(r'(?<![a-zA-Z])sk-ant-api\d+-[a-zA-Z0-9_-]{20,}'), 'Anthropic API key'),
     (re.compile(r'AIza[a-zA-Z0-9_-]{35}'), 'Google/Gemini API key'),
     (re.compile(r'hf_[a-zA-Z0-9]{30,}'), 'HuggingFace token'),
     (re.compile(r'gsk_[a-zA-Z0-9]{40,}'), 'Groq API key'),

@@ -710,6 +710,8 @@ def _build_fleet_report_html(devices: list, tier: str, profile: str = '', profil
     _rpt_profiles = [('default', 'Base Scan'), ('fedramp', 'FedRAMP'), ('cmmc', 'CMMC 2.0'),
                      ('financial', 'Financial'), ('biotech', 'Biotech'), ('healthcare', 'Healthcare'),
                      ('professional_services', 'Professional Services'),
+                     ('owasp_agentic', 'OWASP Agentic'), ('eu_ai_act', 'EU AI Act'),
+                     ('iso42001', 'ISO 42001'), ('atlas', 'MITRE ATLAS'),
                      ('kubernetes', 'Kubernetes'), ('docker', 'Docker')]
     _toolbar_cbs = ' '.join(
         f'<label style="font-size:12px;color:#c9d1d9;white-space:nowrap;cursor:pointer">'
@@ -1162,6 +1164,9 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             '/command':        lambda: self._redirect('/'),
             '/api/config':           self._api_get_config,
             '/api/alerts/config':    self._api_get_alert_config,
+            '/api/alerts/events':    self._api_get_alert_events,
+            '/api/alerts/active-issues': self._api_get_active_issues,
+            '/api/alerts/unreviewed-count': self._api_unreviewed_alert_count,
             '/api/siem/config':      self._api_get_siem_config,
             '/api/live-scan-config': self._api_get_live_scan_config,
             '/api/fleet/live-stats': self._api_fleet_live_stats,
@@ -1194,6 +1199,8 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self._api_risk_register_csv()
         elif path == '/api/fleet/risk-register/overrides':
             self._api_rr_overrides_list()
+        elif path == '/api/fleet/shadow/csv':
+            self._api_shadow_csv()
         elif path == '/api/fleet/inventory':
             self._api_inventory()
         elif path.startswith('/api/fleet/inventory/history/'):
@@ -1267,6 +1274,11 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self._api_set_alert_config()
         elif path == '/api/alerts/test':
             self._api_test_alert()
+        elif path == '/api/alerts/events/review-all':
+            self._api_review_all_alerts()
+        elif path.startswith('/api/alerts/events/') and path.endswith('/review'):
+            _eid = path[len('/api/alerts/events/'):-len('/review')]
+            self._api_review_alert(_eid)
         elif path == '/api/siem/config':
             self._api_set_siem_config()
         elif path.startswith('/api/siem/test/'):
@@ -1310,6 +1322,10 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self._api_inventory_set_status(path[len('/api/fleet/inventory/review/'):], 'under_review')
         elif path.startswith('/api/fleet/inventory/unapprove/'):
             self._api_inventory_set_status(path[len('/api/fleet/inventory/unapprove/'):], 'unapproved')
+        elif path.startswith('/api/fleet/inventory/false-positive/'):
+            self._api_inventory_false_positive(path[len('/api/fleet/inventory/false-positive/'):])
+        elif path == '/api/fleet/inventory/approve-service':
+            self._api_approve_service_globally()
         elif path == '/api/schedules':
             self._api_schedules_create()
         elif path.startswith('/api/schedules/') and path.endswith('/toggle'):
@@ -2015,7 +2031,21 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                 return
             _report_last_seen[device_id] = now
 
-        store = _get_store_for_device(device_id)
+        # Prefer the customer's own store (resolved from bearer token) for new devices.
+        # _get_store_for_device falls back to 'default' for unknown devices, which causes
+        # reports to land in the wrong store when the agent uses a customer-specific token.
+        _agent_cust = self._get_agent_customer()
+        _cust_id = _agent_cust.get('id') if _agent_cust else None
+        if _cust_id and _cust_id != 'default':
+            store = _get_store(_cust_id)
+            if not store.is_known_device(device_id):
+                # Device not in customer store yet — check all stores first
+                store = _get_store_for_device(device_id)
+                # If still in wrong store, migrate to customer store
+                if store is not _get_store(_cust_id):
+                    store = _get_store(_cust_id)
+        else:
+            store = _get_store_for_device(device_id)
         is_new = not store.is_known_device(device_id)
 
         # Duplicate hostname detection — warn when a new device_id uses an existing hostname
@@ -2064,7 +2094,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
 
         try:
             from alerts import load_alert_config, fire_alerts
-            alert_cfg = load_alert_config(ROOT / 'alerts_config.json')
+            alert_cfg = load_alert_config(ROOT / 'data' / 'alerts_config.json')
             if alert_cfg:
                 threading.Thread(
                     target=fire_alerts,
@@ -2112,7 +2142,13 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         if not self._check_agent_bearer():
             self._send(401, b'Unauthorized', 'text/plain')
             return
-        store = _get_store_for_device(device_id)
+        # Route to the customer store derived from the agent's token, not the default store.
+        _agent_cust = self._get_agent_customer()
+        _cust_id = _agent_cust.get('id') if _agent_cust else None
+        if _cust_id and _cust_id != 'default':
+            store = _get_store(_cust_id)
+        else:
+            store = _get_store_for_device(device_id)
         store.touch_device(device_id)
         command = store.claim_command(device_id)
         self._json({'command': command})
@@ -2139,7 +2175,9 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             pass
 
         profiles = [p.strip() for p in (body.get('profiles') or []) if p.strip()]
-        _VALID = {'default', 'fedramp', 'cmmc', 'financial', 'professional_services', 'kubernetes', 'docker'}
+        _VALID = {'default', 'fedramp', 'cmmc', 'financial', 'professional_services',
+                  'healthcare', 'biotech', 'lifesciences', 'owasp_agentic', 'eu_ai_act',
+                  'iso42001', 'atlas', 'kubernetes', 'docker'}
         profiles = [p for p in profiles if p in _VALID]
 
         cmd_store = _get_store_for_device(device_id)
@@ -2164,7 +2202,9 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         except Exception:
             pass
 
-        _VALID = {'default', 'fedramp', 'cmmc', 'financial', 'professional_services'}
+        _VALID = {'default', 'fedramp', 'cmmc', 'financial', 'professional_services',
+                  'healthcare', 'biotech', 'lifesciences', 'owasp_agentic', 'eu_ai_act',
+                  'iso42001', 'atlas', 'kubernetes', 'docker'}
         profiles = [p for p in (body.get('profiles') or []) if p in _VALID]
         stagger  = body.get('stagger', 'normal')
 
@@ -2185,17 +2225,14 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                 batch = ids[i:i + batch_size]
                 for did in batch:
                     cs = _get_store_for_device(did)
-                    if profiles:
-                        for p in profiles:
-                            cs.enqueue_command(did, f'scan_profile:{p}')
-                    else:
-                        cs.enqueue_command(did, 'scan_now')
+                    for p in (profiles or ['default', 'iso42001']):
+                        cs.enqueue_command(did, f'scan_profile:{p}')
                 if sleep_secs and i + batch_size < total:
                     time.sleep(sleep_secs)
 
         threading.Thread(target=_dispatch, daemon=True, name='scan-all-dispatch').start()
         self._json({'status': 'dispatching', 'total': total,
-                    'profiles': profiles or ['default'], 'stagger': stagger,
+                    'profiles': profiles or ['default', 'iso42001'], 'stagger': stagger,
                     'batch_size': batch_size, 'sleep_secs': sleep_secs})
 
     def _api_fleet_update(self, device_id: str):
@@ -2298,14 +2335,14 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                 device_id, reporter_host, host, int(port), service, models, source, detail
             )
             stored += 1
-            if is_new:
+            if is_new and not store.is_service_approved(service):
                 try:
                     from alerts import load_alert_config, fire_shadow_alert
-                    _acfg = load_alert_config(ROOT / 'alerts_config.json')
+                    _acfg = load_alert_config(ROOT / 'data' / 'alerts_config.json')
                     if _acfg:
                         threading.Thread(
                             target=fire_shadow_alert,
-                            args=(reporter_host, service, host, _acfg),
+                            args=(reporter_host, service, host, _acfg, source, store),
                             daemon=True,
                         ).start()
                 except Exception as _ae:
@@ -2610,7 +2647,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             status_filter = ''
         if sev_filter not in ('ch', 'med', 'li', ''):
             sev_filter = ''
-        _VALID_PROFILES = {'default', 'fedramp', 'cmmc', 'financial', 'biotech', 'healthcare', 'lifesciences', 'owasp_agentic', 'eu_ai_act', 'professional_services', 'kubernetes', 'docker'}
+        _VALID_PROFILES = {'default', 'fedramp', 'cmmc', 'financial', 'biotech', 'healthcare', 'lifesciences', 'owasp_agentic', 'eu_ai_act', 'professional_services', 'iso42001', 'atlas', 'kubernetes', 'docker'}
         profiles = [p for p in profile_raw.split(',') if p in _VALID_PROFILES]
         profile  = ','.join(profiles)
         try:
@@ -2677,7 +2714,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         profile_raw = (qs.get('profile', [''])[0]).lower().strip()
         _VALID = {'default', 'fedramp', 'cmmc', 'financial', 'biotech', 'healthcare',
                   'lifesciences', 'owasp_agentic', 'eu_ai_act', 'professional_services',
-                  'kubernetes', 'docker'}
+                  'iso42001', 'atlas', 'kubernetes', 'docker'}
         profiles = [p for p in profile_raw.split(',') if p in _VALID]
         try:
             store = self._store()
@@ -2883,8 +2920,8 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             body = json.loads(self.rfile.read(cl)) if cl else {}
             check_id = (body.get('check_id') or '').strip()
             action   = (body.get('action') or '').strip()
-            if not check_id or action not in ('accepted', 'assigned'):
-                self._json({'error': 'check_id and action (accepted|assigned) required'}, 400)
+            if not check_id or action not in ('accepted', 'assigned', 'false_positive'):
+                self._json({'error': 'check_id and action (accepted|assigned|false_positive) required'}, 400)
                 return
             assignee   = (body.get('assignee') or '').strip()
             note       = (body.get('note') or '').strip()
@@ -2951,6 +2988,31 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             log.error('inventory set status error: %s', e, exc_info=True)
             self._json({'error': str(e)}, 500)
 
+    def _api_inventory_false_positive(self, shadow_id_str: str):
+        """POST /api/fleet/inventory/false-positive/<id> — mark/unmark as false positive."""
+        try:
+            shadow_id = int(shadow_id_str.strip('/'))
+            cl = _content_length(self.headers)
+            body = json.loads(self.rfile.read(cl)) if cl else {}
+            is_fp = bool(body.get('false_positive', True))
+            notes = str(body.get('notes', '')).strip()
+            user = self._session_user()
+            changed_by = user['email'] if user else 'Unknown'
+            ip_address = (
+                self.headers.get('X-Forwarded-For', '').split(',')[0].strip()
+                or self.client_address[0]
+            )
+            ok = self._store().set_false_positive(
+                shadow_id, is_fp, notes=notes,
+                changed_by=changed_by, ip_address=ip_address,
+            )
+            self._json({'ok': ok})
+        except (ValueError, TypeError):
+            self._json({'error': 'invalid id'}, 400)
+        except Exception as e:
+            log.error('false positive error: %s', e, exc_info=True)
+            self._json({'error': str(e)}, 500)
+
     def _api_inventory_history(self, shadow_id_str: str):
         """GET /api/fleet/inventory/history/<id> — approval event log for one asset."""
         try:
@@ -2962,6 +3024,66 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self._json({'error': 'invalid id'}, 400)
         except Exception as e:
             log.error('inventory history error: %s', e, exc_info=True)
+            self._json({'error': str(e)}, 500)
+
+    def _api_shadow_csv(self):
+        """GET /api/fleet/shadow/csv — download Shadow AI inventory as CSV."""
+        import csv as _csv
+        import io
+        from datetime import datetime as _dt
+        try:
+            store = self._store()
+            items = store.list_inventory()
+            buf = io.StringIO()
+            writer = _csv.writer(buf)
+            writer.writerow(['Service', 'Source', 'Host / IP', 'Port', 'Detail',
+                             'Reported By', 'First Seen', 'Last Seen', 'Status'])
+            def _fmt(ts):
+                return _dt.utcfromtimestamp(ts).strftime('%Y-%m-%d %H:%M UTC') if ts else ''
+            for item in items:
+                writer.writerow([
+                    item.get('service', ''),
+                    item.get('source', ''),
+                    item.get('host', ''),
+                    item.get('port', '') or '',
+                    item.get('detail', ''),
+                    item.get('reporter_hostname', ''),
+                    _fmt(item.get('first_seen')),
+                    _fmt(item.get('last_seen')),
+                    item.get('approval_status', 'unapproved'),
+                ])
+            data = buf.getvalue().encode('utf-8')
+            fname = f'shadow_ai_{_dt.utcnow().strftime("%Y%m%d")}.csv'
+            self.send_response(200)
+            self.send_header('Content-Type', 'text/csv; charset=utf-8')
+            self.send_header('Content-Disposition', f'attachment; filename="{fname}"')
+            self.send_header('Content-Length', str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+        except Exception as e:
+            log.error('shadow CSV error: %s', e, exc_info=True)
+            self._json({'error': str(e)}, 500)
+
+    def _api_approve_service_globally(self):
+        """POST /api/fleet/inventory/approve-service — globally approve or unapprove a service name."""
+        try:
+            length = _content_length(self.headers)
+            body = json.loads(self.rfile.read(length)) if length else {}
+            service = str(body.get('service', '')).strip()
+            action  = str(body.get('action', 'approve')).strip()
+            if not service:
+                self._json({'error': 'missing service'}, 400)
+                return
+            user = self._session_user()
+            by = user['email'] if user else 'Dashboard user'
+            store = self._store()
+            if action == 'unapprove':
+                store.unapprove_service_globally(service)
+            else:
+                store.approve_service_globally(service, by)
+            self._json({'ok': True, 'service': service, 'action': action})
+        except Exception as e:
+            log.error('approve-service error: %s', e, exc_info=True)
             self._json({'error': str(e)}, 500)
 
     def _api_verify_signature(self):
@@ -3327,7 +3449,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
 
     def _api_get_alert_config(self):
         from alerts import load_alert_config_for_ui
-        self._json(load_alert_config_for_ui(ROOT / 'alerts_config.json'))
+        self._json(load_alert_config_for_ui(ROOT / 'data' / 'alerts_config.json'))
 
     def _api_set_alert_config(self):
         length = _content_length(self.headers)
@@ -3341,7 +3463,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             return
         try:
             from alerts import save_alert_config
-            path = ROOT / 'alerts_config.json'
+            path = ROOT / 'data' / 'alerts_config.json'
             save_alert_config(path, body, path)
             self._json({'status': 'saved'})
         except Exception as e:
@@ -3357,14 +3479,64 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         except json.JSONDecodeError:
             self._send(400, b'Invalid JSON', 'text/plain')
             return
-        channel = body.get('channel', '')
+        channel  = body.get('channel', '')
+        live_url = body.get('url', '').strip()
         try:
             from alerts import load_alert_config, send_test_alert
-            cfg = load_alert_config(ROOT / 'alerts_config.json') or {}
+            cfg = load_alert_config(ROOT / 'data' / 'alerts_config.json') or {}
+            if live_url:
+                _url_key = {'slack': 'slack_webhook', 'gchat': 'gchat_webhook',
+                            'teams': 'teams_webhook', 'webhook': 'webhook_url'}.get(channel)
+                if _url_key:
+                    cfg[_url_key] = live_url
             ok, msg = send_test_alert(cfg, channel)
             self._json({'ok': ok, 'message': msg})
         except Exception as e:
             self._json({'ok': False, 'message': str(e)}, 500)
+
+    # ── Alert event log API ───────────────────────────────────────────────────
+
+    def _api_get_alert_events(self):
+        import urllib.parse as _up
+        qs = _up.parse_qs(_up.urlparse(self.path).query)
+        unreviewed_only = qs.get('unreviewed', [''])[0].lower() in ('1', 'true', 'yes')
+        store = self._store()
+        try:
+            events = store.get_alert_events(limit=300, unreviewed_only=unreviewed_only)
+            self._json({'events': events})
+        except Exception as e:
+            self._json({'events': [], 'error': str(e)})
+
+    def _api_get_active_issues(self):
+        store = self._store()
+        try:
+            issues = store.get_active_critical_high_findings()
+            self._json({'issues': issues})
+        except Exception as e:
+            self._json({'issues': [], 'error': str(e)})
+
+    def _api_unreviewed_alert_count(self):
+        store = self._store()
+        try:
+            self._json({'count': store.count_unreviewed_alerts()})
+        except Exception as e:
+            self._json({'count': 0})
+
+    def _api_review_alert(self, event_id_str: str):
+        store = self._store()
+        try:
+            store.mark_alert_reviewed(int(event_id_str))
+            self._json({'ok': True})
+        except Exception as e:
+            self._json({'ok': False, 'error': str(e)}, 400)
+
+    def _api_review_all_alerts(self):
+        store = self._store()
+        try:
+            store.mark_all_alerts_reviewed()
+            self._json({'ok': True})
+        except Exception as e:
+            self._json({'ok': False, 'error': str(e)}, 500)
 
     # ── SIEM config API ───────────────────────────────────────────────────────
 
@@ -3895,6 +4067,7 @@ def _build_shadow_section(shadow: list[dict], ts_now: int) -> str:
         'cloud_api': ('&#9729;',   '#58a6ff', 'Cloud API', 'Cloud AI API key found on a managed device'),
         'process':   ('&#9881;',   '#f0883e', 'Process',   'AI process running locally on a managed device'),
         'docker':    ('&#128051;', '#3fb950', 'Container', 'AI running inside a Docker container'),
+        'saas_ai':   ('&#128101;', '#f78166', 'SaaS AI',   'Employee actively accessing a cloud AI service'),
     }
 
     def _age(ts: int | None) -> str:
@@ -4370,6 +4543,8 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
 .rr-save-btn:hover{{background:#2ea043}}
 .rr-clear-btn{{background:none;border:1px solid #D1D5DB;border-radius:4px;color:#6B7280;font-size:12px;padding:5px 10px;cursor:pointer;font-family:inherit;margin-left:6px}}
 .rr-row-accepted td{{opacity:0.6}}
+.rr-row-fp td{{opacity:0.5;text-decoration:line-through;text-decoration-color:#9CA3AF}}
+.rr-fp{{background:#F3F4F6;color:#6B7280;border:1px solid #E5E7EB;border-radius:10px;padding:2px 8px;font-size:11px;font-weight:600}}
 .inv-badge-approved{{background:#DCFCE7;color:#16A34A;border:1px solid #BBF7D0;border-radius:10px;padding:2px 8px;font-size:11px;font-weight:600}}
 .inv-badge-review{{background:#FEF9C3;color:#CA8A04;border:1px solid #FDE047;border-radius:10px;padding:2px 8px;font-size:11px;font-weight:600}}
 .inv-badge-unapp{{background:#FEE2E2;color:#DC2626;border:1px solid #FECACA;border-radius:10px;padding:2px 8px;font-size:11px;font-weight:600}}
@@ -4424,6 +4599,7 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
       <button class="sb-item sb-active" id="nav-overview" onclick="navTo('overview')">&#8962; Home</button>
       <div class="sb-group">Fleet</div>
       <button class="sb-item" id="nav-shadow" onclick="navTo('shadow')">&#9888; Shadow AI</button>
+      <button class="sb-item" id="nav-alerts" onclick="navTo('alerts')">&#128276; Alerts <span id="alert-badge" style="display:none;background:#DC2626;color:#fff;border-radius:10px;font-size:10px;padding:1px 6px;margin-left:4px;font-weight:700"></span></button>
       <button class="sb-item" id="nav-mcp" onclick="navTo('mcp')">&#128279; MCP Servers</button>
       <div class="sb-group">Security</div>
       <button class="sb-item" id="nav-riskregister" onclick="navTo('riskregister')">&#128203; Risk Register</button>
@@ -4482,10 +4658,12 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
       {_btn_technical_report}
       {'<button id="btn-evidence-export" class="scan-btn" onclick="downloadEvidencePackage(this)" style="color:#a371f7;border-color:#E5E7EB;font-size:12px">&#8659; Evidence Package</button>' if _has_evidence_package() else '<button disabled title="Evidence Package requires a Plus license" class="scan-btn" style="color:#9CA3AF;border-color:#F3F4F6;font-size:12px;cursor:default">&#128274; Evidence Pkg (Plus)</button>'}
       <div style="position:relative;display:inline-block">
-        <button id="scan-profile-btn" onclick="toggleScanProfileMenu(event)" class="form-select" style="font-size:12px;padding:3px 10px;height:28px;cursor:pointer;min-width:130px;text-align:left;background:#fff">Base Scan &#9660;</button>
+        <button id="scan-profile-btn" onclick="toggleScanProfileMenu(event)" class="form-select" style="font-size:12px;padding:3px 10px;height:28px;cursor:pointer;min-width:160px;text-align:left;background:#fff">Base Scan + ISO 42001 &#9660;</button>
         <div id="scan-profile-menu" style="display:none;position:absolute;top:31px;left:0;z-index:200;background:#fff;border:1px solid #E5E7EB;border-radius:6px;box-shadow:0 4px 16px rgba(0,0,0,0.12);padding:8px 12px;min-width:240px">
           <div style="font-size:10px;color:#9CA3AF;font-weight:600;text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">Run profiles on all devices</div>
           <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:#111827;padding:3px 0;cursor:pointer"><input type="checkbox" class="scan-profile-cb" value="default" checked onchange="updateScanProfileBtn()"> Base Scan</label>
+          <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:#111827;padding:3px 0;cursor:pointer"><input type="checkbox" class="scan-profile-cb" value="iso42001" checked onchange="updateScanProfileBtn()"> ISO 42001</label>
+          <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:#111827;padding:3px 0;cursor:pointer"><input type="checkbox" class="scan-profile-cb" value="atlas" onchange="updateScanProfileBtn()"> MITRE ATLAS</label>
           <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:#111827;padding:3px 0;cursor:pointer"><input type="checkbox" class="scan-profile-cb" value="professional_services" onchange="updateScanProfileBtn()"> Professional Services</label>
           <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:#111827;padding:3px 0;cursor:pointer"><input type="checkbox" class="scan-profile-cb" value="financial" onchange="updateScanProfileBtn()"> Financial Services</label>
           <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:#111827;padding:3px 0;cursor:pointer"><input type="checkbox" class="scan-profile-cb" value="fedramp" onchange="updateScanProfileBtn()"> FedRAMP / NIST 800-53</label>
@@ -4537,22 +4715,14 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
     <div id="page-btns" style="display:flex;gap:4px;align-items:center;flex-wrap:wrap"></div>
   </div>
 
-  <!-- Kubernetes cluster status widget -->
-  <div style="margin-top:20px;background:#ffffff;border:1px solid #E5E7EB;border-radius:8px;padding:14px 18px">
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
-      <span style="font-size:12px;font-weight:700;color:#374151;text-transform:uppercase;letter-spacing:.06em">⊞ Kubernetes Clusters</span>
-      <button onclick="loadK8sStatus()" style="font-size:11px;color:#6B7280;background:none;border:none;cursor:pointer;padding:0">↻</button>
-    </div>
-    <div id="k8s-status-panel">
-      <div style="font-size:12px;color:#9CA3AF">Loading…</div>
-    </div>
-  </div>
   </div>
 
   <div class="page" id="page-shadow">
   <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:8px">
     <div>
-      <div class="sec-hdr" style="margin:0;padding:0">Shadow AI</div>
+      <div class="sec-hdr" style="margin:0;padding:0;display:flex;align-items:center;gap:10px">Shadow AI
+    <a href="/api/fleet/shadow/csv" download style="font-size:12px;color:#16A34A;text-decoration:none;border:1px solid #238636;border-radius:4px;padding:3px 10px;font-weight:400;margin-left:auto">&#8659; Export CSV</a>
+  </div>
       <div style="font-size:12px;color:#6B7280;margin-top:4px">Unmanaged AI devices and services detected on your network</div>
     </div>
     <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
@@ -4563,6 +4733,38 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
     </div>
   </div>
   {_build_shadow_section(shadow, ts_now)}
+  </div>
+
+  <div class="page" id="page-alerts">
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:8px">
+    <div>
+      <div class="sec-hdr" style="margin:0;padding:0">Alerts</div>
+      <div style="font-size:12px;color:#9CA3AF;margin-top:2px">Active critical/high issues across your fleet, plus event history for new discoveries.</div>
+    </div>
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+      <button class="scan-btn" onclick="loadActiveIssues();loadAlertEvents();" style="font-size:12px;color:#4F46E5;border-color:#E5E7EB">&#8635; Refresh</button>
+    </div>
+  </div>
+
+  <div style="margin-bottom:20px">
+    <div style="font-size:12px;font-weight:600;color:#374151;text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">Active Issues</div>
+    <div id="active-issues-feed" style="display:flex;flex-direction:column;gap:6px">
+      <div style="color:#9CA3AF;font-size:13px;padding:12px 0">Loading…</div>
+    </div>
+  </div>
+
+  <div style="border-top:1px solid #F3F4F6;padding-top:16px">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;flex-wrap:wrap;gap:6px">
+      <div style="font-size:12px;font-weight:600;color:#374151;text-transform:uppercase;letter-spacing:.05em">Alert History</div>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <label style="font-size:12px;color:#6B7280;display:flex;align-items:center;gap:6px;cursor:pointer">
+          <input type="checkbox" id="alerts-unreviewed-only" onchange="loadAlertEvents()"> Unreviewed only
+        </label>
+        <button class="scan-btn" onclick="markAllAlertsReviewed()" style="font-size:12px;color:#6B7280;border-color:#E5E7EB">Mark all reviewed</button>
+      </div>
+    </div>
+    <div id="alerts-feed" style="display:flex;flex-direction:column;gap:8px"></div>
+  </div>
   </div>
 
   <div class="page" id="page-mcp">
@@ -4590,6 +4792,7 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
     <button class="rr-fil" onclick="rrFilter('MEDIUM',this)">Medium</button>
     <button class="rr-fil" onclick="rrFilter('LOW',this)">Low</button>
     <button class="rr-fil" onclick="rrFilter('accepted',this)" style="margin-left:auto">Accepted Risk</button>
+    <button class="rr-fil" onclick="rrFilter('false_positive',this)" style="color:#6B7280">&#128683; False Positives</button>
   </div>
   <div id="rr-body">
     <div style="color:#6B7280;font-size:13px;padding:16px 0">Loading risk register…</div>
@@ -4597,9 +4800,10 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
   </div>
 
   <div class="page" id="page-inventory">
-  <div class="sec-hdr" style="margin-top:0;padding-top:0">
+  <div class="sec-hdr" style="margin-top:0;padding-top:0;display:flex;align-items:center;gap:10px">
     AI Asset Inventory
     <span style="font-size:12px;font-weight:400;color:#6B7280;margin-left:8px">Formal record of all AI in the environment · approve or flag each asset</span>
+    <a href="/api/fleet/shadow/csv" download style="font-size:12px;color:#16A34A;text-decoration:none;border:1px solid #238636;border-radius:4px;padding:3px 10px;margin-left:auto">&#8659; Export CSV</a>
   </div>
   <div id="inv-counts" style="display:flex;gap:12px;margin-bottom:8px;flex-wrap:wrap"></div>
   <div id="inv-reviewer-bar" style="margin-bottom:10px;font-size:12px;color:#6B7280"></div>
@@ -4608,6 +4812,7 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
     <button class="rr-fil" onclick="invFilter('unapproved',this)">Unapproved</button>
     <button class="rr-fil" onclick="invFilter('under_review',this)">Under Review</button>
     <button class="rr-fil" onclick="invFilter('approved',this)">Approved</button>
+    <button class="rr-fil" onclick="invFilter('false_positive',this)" style="margin-left:auto;color:#6B7280">&#128683; False Positives</button>
   </div>
   <div id="inv-body">
     <div style="color:#6B7280;font-size:13px;padding:16px 0">Loading inventory…</div>
@@ -4739,6 +4944,8 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
       <label style="font-size:13px;color:#6B7280;align-self:start;padding-top:4px">Compliance Profile</label>
       <div id="cfg-profile-group" style="display:flex;flex-wrap:wrap;gap:8px 24px">
         <label style="font-size:13px;color:#111827;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="cfg-profile-cb" value="default"> Base Scan</label>
+        <label style="font-size:13px;color:#111827;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="cfg-profile-cb" value="iso42001"> ISO 42001 (AI Management System)</label>
+        <label style="font-size:13px;color:#111827;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="cfg-profile-cb" value="atlas"> MITRE ATLAS (Adversarial ML)</label>
         <label style="font-size:13px;color:#111827;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="cfg-profile-cb" value="financial"> Financial Services</label>
         <label style="font-size:13px;color:#111827;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="cfg-profile-cb" value="fedramp"> FedRAMP / NIST 800-53</label>
         <label style="font-size:13px;color:#111827;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="cfg-profile-cb" value="cmmc"> CMMC 2.0</label>
@@ -4746,7 +4953,7 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
         <label style="font-size:13px;color:#111827;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="cfg-profile-cb" value="healthcare"> Healthcare (HIPAA / HITECH / FDA SaMD)</label>
         <label style="font-size:13px;color:#111827;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="cfg-profile-cb" value="owasp_agentic"> OWASP Agentic AI Top 10</label>
         <label style="font-size:13px;color:#111827;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="cfg-profile-cb" value="eu_ai_act"> EU AI Act (High-Risk Systems)</label>
-        <label style="font-size:13px;color:#111827;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="cfg-profile-cb" value="professional_services"> Professional Services (NIST AI RMF / ISO 42001 / AICPA)</label>
+        <label style="font-size:13px;color:#111827;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="cfg-profile-cb" value="professional_services"> Professional Services (NIST AI RMF / AICPA)</label>
         <label style="font-size:13px;color:#111827;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="cfg-profile-cb" value="kubernetes"> Kubernetes (CIS K8s Benchmark)</label>
         <label style="font-size:13px;color:#111827;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="cfg-profile-cb" value="docker"> Docker (Container Security)</label>
       </div>
@@ -4791,6 +4998,26 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
         <button class="scan-btn" onclick="testAlert('webhook')" style="font-size:11px;padding:3px 10px;color:#4F46E5;border-color:#E5E7EB">Test</button>
       </div>
 
+      <label style="font-size:13px;color:#6B7280;padding-top:4px">Google Chat Webhook</label>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <input id="alert-gchat" type="url" class="form-input" placeholder="https://chat.googleapis.com/v1/spaces/..."
+               style="flex:1;min-width:280px;font-family:monospace;font-size:12px">
+        <button class="scan-btn" onclick="testAlert('gchat')" style="font-size:11px;padding:3px 10px;color:#4F46E5;border-color:#E5E7EB">Test</button>
+      </div>
+
+      <div style="font-size:11px;color:#9CA3AF;padding-top:2px">Space → Apps &amp; integrations → Webhooks → Add webhook</div>
+      <div></div>
+
+      <label style="font-size:13px;color:#6B7280;padding-top:4px">Teams Webhook</label>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <input id="alert-teams" type="url" class="form-input" placeholder="https://yourorg.webhook.office.com/webhookb2/..."
+               style="flex:1;min-width:280px;font-family:monospace;font-size:12px">
+        <button class="scan-btn" onclick="testAlert('teams')" style="font-size:11px;padding:3px 10px;color:#4F46E5;border-color:#E5E7EB">Test</button>
+      </div>
+
+      <div style="font-size:11px;color:#9CA3AF;padding-top:2px">Channel → Connectors → Incoming Webhook → configure → copy URL</div>
+      <div></div>
+
       <div style="font-size:11px;color:#9CA3AF;grid-column:1/-1;border-top:1px solid #F3F4F6;margin:6px 0;padding-top:10px">Email (SMTP) — Gmail: use an App Password from myaccount.google.com/apppasswords</div>
 
       <label style="font-size:13px;color:#6B7280">SMTP Host</label>
@@ -4827,6 +5054,9 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
         </label>
         <label style="font-size:13px;color:#111827;display:flex;align-items:center;gap:8px;cursor:pointer">
           <input type="checkbox" id="trig-shadow"> New <span style="color:#4F46E5;font-weight:700">Shadow AI</span> asset discovered
+        </label>
+        <label style="font-size:13px;color:#111827;display:flex;align-items:center;gap:8px;cursor:pointer;margin-left:24px">
+          <input type="checkbox" id="trig-unapproved-only"> Only alert on <span style="color:#f78166;font-weight:700">unapproved</span> services (skip globally approved)
         </label>
       </div>
 
@@ -5070,6 +5300,7 @@ function navTo(page) {{
   if (page === 'settings') {{ loadLiveScanConfig(); }}
   if (page === 'siem') {{ loadSiemConfig(); }}
   if (page === 'users') {{ loadUsers(); loadCustomerInfo(); }}
+  if (page === 'alerts') {{ loadActiveIssues(); loadAlertEvents(); }}
   if (page === 'probe') {{
     const fr = document.getElementById('probe-iframe');
     if (fr && fr.getAttribute('data-loaded') === '0') {{
@@ -5080,7 +5311,7 @@ function navTo(page) {{
 }}
 (function() {{
   const hash = window.location.hash.replace('#', '');
-  const valid = ['overview','shadow','mcp','riskregister','inventory','schedules',
+  const valid = ['overview','shadow','alerts','mcp','riskregister','inventory','schedules',
                  'discovery','findings','reports','siem','settings','users','probe'];
   if (hash && valid.includes(hash)) {{ navTo(hash); }}
 }})();
@@ -5195,10 +5426,60 @@ async function refreshDevices() {{
   }} catch (_) {{ /* silently ignore refresh errors */ }}
 }}
 
+function _deviceRow(d) {{
+  const did    = d.device_id || '';
+  const fail   = d.fail_count || 0;
+  const warn   = d.warn_count || 0;
+  const pas    = d.pass_count || 0;
+  const noData = (fail === 0 && warn === 0 && pas === 0);
+  const rc     = _riskCls(fail, warn, pas);
+  const age    = _age(d.last_seen);
+  const hostname = d.hostname || 'unknown';
+  const profile  = d.profile || (hostname.startsWith('k8s:') ? 'kubernetes' : hostname.startsWith('docker:') ? 'docker' : '');
+  const displayName = hostname.startsWith('docker:') ? hostname.slice(7)
+                    : hostname.startsWith('k8s:')    ? hostname.slice(4)
+                    : hostname;
+  const typeBadge = hostname.startsWith('docker:')
+    ? '<span style="font-size:10px;background:#DBEAFE;color:#1D4ED8;border-radius:3px;padding:1px 5px;margin-left:6px;font-weight:600;vertical-align:middle">DOCKER</span>'
+    : hostname.startsWith('k8s:')
+    ? '<span style="font-size:10px;background:#D1FAE5;color:#065F46;border-radius:3px;padding:1px 5px;margin-left:6px;font-weight:600;vertical-align:middle">K8S</span>'
+    : '';
+  return `<tr class="dev-row" onclick="selectDevice('${{esc(did)}}')" >
+    <td class="dev-host">${{esc(displayName)}}${{typeBadge}}</td>
+    <td>${{esc(d.platform||'')}}</td>
+    <td class="c-red">${{noData ? '—' : fail}}</td>
+    <td class="c-yellow">${{noData ? '—' : warn}}</td>
+    <td class="c-green">${{noData ? '—' : pas}}</td>
+    <td>${{esc(profile)}}</td>
+    <td>${{age}}</td>
+    <td><span class="risk-dot ${{rc}}" title="${{noData ? 'No scan data yet' : ''}}"></span></td>
+    <td onclick="event.stopPropagation()" style="white-space:nowrap">
+      <button class="scan-btn" id="sb-${{esc(did)}}" onclick="openScanModal('${{esc(did)}}',this)">Scan ▾</button>
+      <button class="scan-btn" id="ub-${{esc(did)}}" onclick="updateDevice('${{esc(did)}}')"
+              style="margin-left:4px;color:#CA8A04;border-color:#E5E7EB">Update</button>
+      <a href="/fleet/device/${{esc(did)}}/dashboard" target="_blank"
+         style="margin-left:8px;background:#ffffff;border:1px solid #E5E7EB;color:#6B7280;
+                border-radius:4px;padding:3px 10px;font-size:12px;text-decoration:none;display:inline-block"
+         onmouseover="this.style.borderColor='#4F46E5';this.style.color='#374151'"
+         onmouseout="this.style.borderColor='#E5E7EB';this.style.color='#6B7280'">Full Report</a>
+      <button class="scan-btn" onclick="removeDevice('${{esc(did)}}','${{esc(d.hostname||'')}}')"
+              style="margin-left:4px;color:#DC2626;border-color:#E5E7EB;font-size:11px">Remove</button>
+    </td>
+  </tr>`;
+}}
+
+function _groupHeader(label, icon, count) {{
+  return `<tr><td colspan="9" style="background:#F9FAFB;border-top:1px solid #E5E7EB;border-bottom:1px solid #E5E7EB;
+    padding:6px 12px;font-size:11px;font-weight:700;color:#6B7280;text-transform:uppercase;letter-spacing:.06em">
+    ${{icon}} ${{label}} <span style="font-weight:400;color:#9CA3AF;margin-left:4px">${{count}}</span>
+  </td></tr>`;
+}}
+
 function renderDevicePage() {{
   const tbody   = document.getElementById('device-tbody');
   const pgEl    = document.getElementById('device-pagination');
   const visible = _visibleDevices();
+
   if (!_allDevices.length) {{
     tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:32px;color:#9CA3AF">No agents have reported yet.</td></tr>';
     pgEl.style.display = 'none';
@@ -5210,42 +5491,28 @@ function renderDevicePage() {{
     pgEl.style.display = 'none';
     return;
   }}
-  const start = (_currentPage - 1) * _pageSize;
-  const page  = visible.slice(start, start + _pageSize);
-  tbody.innerHTML = page.map(d => {{
-    const did  = d.device_id || '';
-    const fail = d.fail_count || 0;
-    const warn = d.warn_count || 0;
-    const pas  = d.pass_count || 0;
-    const noData = (fail === 0 && warn === 0 && pas === 0);
-    const rc   = _riskCls(fail, warn, pas);
-    const age  = _age(d.last_seen);
-    const hostname = d.hostname || 'unknown';
-    const profile  = d.profile || (hostname.startsWith('k8s:') ? 'kubernetes' : '');
-    return `<tr class="dev-row" onclick="selectDevice('${{esc(did)}}')" >
-      <td class="dev-host">${{esc(hostname)}}</td>
-      <td>${{esc(d.platform||'')}}</td>
-      <td class="c-red">${{noData ? '—' : fail}}</td>
-      <td class="c-yellow">${{noData ? '—' : warn}}</td>
-      <td class="c-green">${{noData ? '—' : pas}}</td>
-      <td>${{esc(profile)}}</td>
-      <td>${{age}}</td>
-      <td><span class="risk-dot ${{rc}}" title="${{noData ? 'No scan data yet' : ''}}"></span></td>
-      <td onclick="event.stopPropagation()" style="white-space:nowrap">
-        <button class="scan-btn" id="sb-${{esc(did)}}" onclick="openScanModal('${{esc(did)}}',this)">Scan ▾</button>
-        <button class="scan-btn" id="ub-${{esc(did)}}" onclick="updateDevice('${{esc(did)}}')"
-                style="margin-left:4px;color:#CA8A04;border-color:#E5E7EB">Update</button>
-        <a href="/fleet/device/${{esc(did)}}/dashboard" target="_blank"
-           style="margin-left:8px;background:#ffffff;border:1px solid #E5E7EB;color:#6B7280;
-                  border-radius:4px;padding:3px 10px;font-size:12px;text-decoration:none;display:inline-block"
-           onmouseover="this.style.borderColor='#4F46E5';this.style.color='#374151'"
-           onmouseout="this.style.borderColor='#E5E7EB';this.style.color='#6B7280'">Full Report</a>
-        <button class="scan-btn" onclick="removeDevice('${{esc(did)}}','${{esc(d.hostname||'')}}')"
-                style="margin-left:4px;color:#DC2626;border-color:#E5E7EB;font-size:11px">Remove</button>
-      </td>
-    </tr>`;
-  }}).join('');
-  renderPagination();
+
+  const endpoints = visible.filter(d => !((d.hostname||'').startsWith('k8s:') || (d.hostname||'').startsWith('docker:')));
+  const dockers   = visible.filter(d =>  (d.hostname||'').startsWith('docker:'));
+  const k8s       = visible.filter(d =>  (d.hostname||'').startsWith('k8s:'));
+  const multiGroup = (endpoints.length > 0) + (dockers.length > 0) + (k8s.length > 0) > 1;
+
+  let html = '';
+  if (endpoints.length) {{
+    if (multiGroup) html += _groupHeader('Endpoints', '&#128187;', endpoints.length);
+    html += endpoints.map(_deviceRow).join('');
+  }}
+  if (dockers.length) {{
+    if (multiGroup) html += _groupHeader('Docker', '&#128022;', dockers.length);
+    html += dockers.map(_deviceRow).join('');
+  }}
+  if (k8s.length) {{
+    if (multiGroup) html += _groupHeader('Kubernetes', '&#9096;', k8s.length);
+    html += k8s.map(_deviceRow).join('');
+  }}
+
+  tbody.innerHTML = html;
+  pgEl.style.display = 'none';
 }}
 
 function renderPagination() {{
@@ -5512,7 +5779,9 @@ async function runDiscovery() {{
 }}
 
 const _SCAN_PROFILES = [
-  {{id:'default',       label:'Base Scan', desc:'Essential AI security checks — plain language, highest-impact controls first. Best starting point for any organization before moving to a compliance-specific profile.'}},
+  {{id:'default',       label:'Base Scan',           desc:'Essential AI security checks — plain language, highest-impact controls first. Best starting point for any organization before moving to a compliance-specific profile.'}},
+  {{id:'iso42001',      label:'ISO 42001',           desc:'ISO/IEC 42001:2023 — the international AI Management System standard. Covers governance, lifecycle, supply chain, risk assessment, and monitoring across all industries.'}},
+  {{id:'atlas',         label:'MITRE ATLAS',         desc:'MITRE ATLAS adversarial ML threat framework — prompt injection, jailbreak, supply chain compromise, inference API abuse, model exfiltration, and cost harvesting attacks.'}},
   {{id:'fedramp',       label:'FedRAMP',             desc:'FedRAMP Moderate — NIST 800-53 control mappings. Required for federal cloud systems and agency deployments.'}},
   {{id:'cmmc',          label:'CMMC 2.0',            desc:'Cybersecurity Maturity Model Certification — required for DoD contractors handling CUI.'}},
   {{id:'financial',     label:'Financial Services',  desc:'Financial sector AI controls — SOC 2, FFIEC, SR 11-7 model risk guidance.'}},
@@ -6258,61 +6527,100 @@ function invFilter(status, btn) {{
 }}
 
 function renderInventory() {{
-  const rows = _invStatus === 'all' ? _invData : _invData.filter(i => i.approval_status === _invStatus);
+  const isFPView = _invStatus === 'false_positive';
+  const activeItems = _invData.filter(i => !i.false_positive);
+  const fpItems     = _invData.filter(i =>  i.false_positive);
+  let rows;
+  if (isFPView)                rows = fpItems;
+  else if (_invStatus === 'all') rows = activeItems;
+  else                         rows = activeItems.filter(i => i.approval_status === _invStatus);
+
   const el = document.getElementById('inv-body');
   if (!rows.length) {{
-    el.innerHTML = '<div style="color:#6B7280;font-size:13px;padding:16px 0">' +
-      (_invData.length ? 'No assets at this status.' : 'No AI assets discovered yet. Run Shadow AI discovery first.') + '</div>';
+    const fallback = isFPView ? 'No false positives recorded.'
+      : (_invData.length ? 'No assets at this status.' : 'No AI assets discovered yet. Run Shadow AI discovery first.');
+    el.innerHTML = '<div style="color:#6B7280;font-size:13px;padding:16px 0">' + fallback + '</div>';
+    if (!isFPView && fpItems.length) el.innerHTML += `<div style="font-size:11px;color:#9CA3AF;margin-top:8px">&#128683; ${{fpItems.length}} false positive${{fpItems.length!==1?'s':''}} hidden — <button class="inv-action" onclick="invFilter('false_positive',document.querySelector('#inv-filters .rr-fil:last-child'))">View</button></div>`;
     return;
   }}
   const SRC_ICON = {{network:'🌐',cloud:'☁️',dns:'🔍',process:'⚙️',container:'🐳'}};
   const trs = rows.map(item => {{
     const icon = SRC_ICON[item.source] || '🤖';
     const models = (item.models||[]).slice(0,3).join(', ') || '—';
-    const isLocalHost = /^[0-9a-f]{16}$/i.test(item.host);
+    const isLocalHost = /^[0-9a-f]{{16}}$/i.test(item.host);
+    // For local discoveries (process/DNS) host is the agent's own device ID — show hostname.
+    // For network discoveries host is the remote IP — show IP with agent as secondary label.
+    const isNetwork = !isLocalHost && item.host && item.host !== item.reporter_hostname;
     const hostDisplay = isLocalHost ? (item.reporter_hostname || 'local') : item.host;
+    const agentLabel = isNetwork
+      ? `<div style="font-size:10px;color:#9CA3AF;margin-top:1px">via ${{esc(item.reporter_hostname||'')}} agent</div>`
+      : '';
     const st = item.approval_status || 'unapproved';
+    const isFP = !!item.false_positive;
     let badge, actions, attribution;
-    if (st === 'approved') {{
+    if (isFP) {{
+      badge = '<span style="font-size:11px;background:#F3F4F6;color:#6B7280;border:1px solid #D1D5DB;border-radius:3px;padding:1px 6px;font-weight:600">&#128683; False Positive</span>';
+      actions = `<button class="inv-action" onclick="invClearFP(${{item.id}},this)" style="color:#6B7280">Clear FP</button>`;
+    }} else if (st === 'approved') {{
       badge = '<span class="inv-badge-approved">Approved</span>';
       actions = `<button class="inv-action" onclick="invSetStatus(${{item.id}},'under_review',this)">→ Review</button>
-                 <button class="inv-action" onclick="invSetStatus(${{item.id}},'unapproved',this)">Unapprove</button>`;
+                 <button class="inv-action" onclick="invSetStatus(${{item.id}},'unapproved',this)">Unapprove</button>
+                 <button class="inv-action" onclick="invMarkFP(${{item.id}},this)" style="color:#6B7280">&#128683; False Positive</button>`;
     }} else if (st === 'under_review') {{
       badge = '<span class="inv-badge-review">Under Review</span>';
       actions = `<button class="inv-action" onclick="invSetStatus(${{item.id}},'approved',this)">Approve</button>
-                 <button class="inv-action" onclick="invSetStatus(${{item.id}},'unapproved',this)">Unapprove</button>`;
+                 <button class="inv-action" onclick="invSetStatus(${{item.id}},'unapproved',this)">Unapprove</button>
+                 <button class="inv-action" onclick="invMarkFP(${{item.id}},this)" style="color:#6B7280">&#128683; False Positive</button>`;
     }} else {{
       badge = '<span class="inv-badge-unapp">Unapproved</span>';
       actions = `<button class="inv-action" onclick="invSetStatus(${{item.id}},'approved',this)">Approve</button>
-                 <button class="inv-action" onclick="invSetStatus(${{item.id}},'under_review',this)">Flag for Review</button>`;
+                 <button class="inv-action" onclick="invSetStatus(${{item.id}},'under_review',this)">Flag for Review</button>
+                 <button class="inv-action" onclick="invMarkFP(${{item.id}},this)" style="color:#6B7280">&#128683; False Positive</button>`;
     }}
     if (item.approved_by && item.approved_at) {{
-      attribution = `<span style="font-size:10px;color:#6B7280" title="Full history: click History">${{esc(item.approved_by)}} · ${{_fmtTs(item.approved_at)}}</span>`;
+      const noteTip = item.notes ? esc(item.notes)+' · ' : '';
+      attribution = `<span style="font-size:10px;color:#6B7280" title="${{noteTip}}Full history: click History">${{esc(item.approved_by)}} · ${{_fmtTs(item.approved_at)}}${{item.notes ? ' 📝' : ''}}</span>`;
     }} else if (item.approved_by) {{
-      attribution = `<span style="font-size:10px;color:#6B7280">${{esc(item.approved_by)}}</span>`;
+      attribution = `<span style="font-size:10px;color:#6B7280" title="${{esc(item.notes||'')}}">${{esc(item.approved_by)}}${{item.notes ? ' 📝' : ''}}</span>`;
     }} else {{
       attribution = '<span style="font-size:10px;color:#D1D5DB">—</span>';
     }}
-    return `<tr>
+    return `<tr style="${{isFP ? 'opacity:0.55' : ''}}">
       <td style="font-size:16px">${{icon}}</td>
-      <td style="color:#111827;font-weight:600">${{esc(hostDisplay)}}${{item.port ? ':'+item.port : ''}}</td>
+      <td style="color:#111827;font-weight:600">${{esc(hostDisplay)}}${{item.port ? ':'+item.port : ''}}${{agentLabel}}</td>
       <td style="color:#6B7280">${{esc(item.service||item.source)}}</td>
       <td style="color:#6B7280;font-size:12px">${{esc(models)}}</td>
       <td style="color:#6B7280;font-size:11px">${{esc(item.reporter_hostname||'')}}</td>
       <td>${{badge}}</td>
       <td>${{attribution}}</td>
-      <td style="white-space:nowrap;display:flex;gap:4px">
+      <td style="white-space:nowrap;display:flex;gap:4px;flex-wrap:wrap">
         ${{actions}}
+        ${{!isFP ? `<button class="inv-action" data-service="${{esc(item.service)}}" onclick="invApproveGlobally(this.dataset.service,this)" style="color:#7c3aed" title="Approve this service on all devices, now and in future">&#9733; Approve globally</button>` : ''}}
         <button class="inv-action" onclick="invShowHistory(${{item.id}},this)" style="color:#6B7280">History</button>
       </td>
     </tr>`;
   }}).join('');
+  const fpNote = (!isFPView && fpItems.length) ? `<div style="font-size:11px;color:#9CA3AF;margin-top:4px">&#128683; ${{fpItems.length}} false positive${{fpItems.length!==1?'s':''}} excluded — <button class="inv-action" onclick="invFilter('false_positive',document.querySelector('#inv-filters .rr-fil:last-child'))">View</button></div>` : '';
   el.innerHTML = `<table class="rr-table">
-    <thead><tr><th></th><th>Host</th><th>Service</th><th>Models</th><th>Reported by</th><th>Status</th><th>Reviewer · Timestamp</th><th>Actions</th></tr></thead>
+    <thead><tr><th></th><th>Device / IP</th><th>Service</th><th>Models</th><th>Detected by</th><th>Status</th><th>Reviewer · Notes</th><th>Actions</th></tr></thead>
     <tbody>${{trs}}</tbody>
-  </table><div style="font-size:11px;color:#9CA3AF;margin-bottom:8px">${{rows.length}} asset${{rows.length!==1?'s':''}} · approval records are included in the Evidence Package export</div>
-  <div id="inv-history-panel" style="display:none;margin-top:12px;background:#F9FAFB;border:1px solid #E5E7EB;border-radius:6px;padding:12px"></div>`;
+  </table><div style="font-size:11px;color:#9CA3AF;margin-bottom:4px">${{rows.length}} asset${{rows.length!==1?'s':''}} · approval records are included in the Evidence Package export</div>${{fpNote}}
+  <div id="inv-history-panel" style="display:none;margin-top:12px;background:#F9FAFB;border:1px solid #E5E7EB;border-radius:6px;padding:12px"></div>
+  <div id="inv-fp-modal" style="display:none;margin-top:12px;background:#FEF9C3;border:1px solid #FDE047;border-radius:6px;padding:14px;max-width:520px">
+    <div style="font-weight:600;font-size:13px;margin-bottom:8px">&#128683; Mark as False Positive</div>
+    <div style="font-size:12px;color:#6B7280;margin-bottom:8px">Add a note explaining why this is a false positive. This creates an audit trail entry.</div>
+    <textarea id="inv-fp-notes" rows="3" style="width:100%;font-size:12px;border:1px solid #D1D5DB;border-radius:4px;padding:6px;resize:vertical;box-sizing:border-box" placeholder="Describe why this is a false positive…"></textarea>
+    <div style="display:flex;gap:8px;margin-top:8px">
+      <button class="inv-action" id="inv-fp-confirm" style="background:#1F2937;color:#fff;border-color:#1F2937">Confirm False Positive</button>
+      <button class="inv-action" onclick="invCloseFPModal()">Cancel</button>
+    </div>
+  </div>`;
+  if (window._invFPPendingId) {{
+    const btn = document.getElementById('inv-fp-confirm');
+    if (btn) btn.onclick = () => invSubmitFP(window._invFPPendingId);
+  }}
 }}
+
 
 async function invSetStatus(id, status, btn) {{
   const orig = btn.textContent;
@@ -6322,6 +6630,68 @@ async function invSetStatus(id, status, btn) {{
     const r = await fetch('/api/fleet/inventory/' + slug + '/' + id, {{method:'POST'}});
     const d = await r.json();
     if (d.ok) {{ await loadInventory(); }} else {{ btn.disabled=false; btn.textContent=orig; }}
+  }} catch(e) {{ btn.disabled=false; btn.textContent=orig; }}
+}}
+
+function invMarkFP(id, btn) {{
+  window._invFPPendingId = id;
+  const modal = document.getElementById('inv-fp-modal');
+  if (!modal) {{ renderInventory(); return; }}
+  modal.style.display = 'block';
+  const confirmBtn = document.getElementById('inv-fp-confirm');
+  if (confirmBtn) confirmBtn.onclick = () => invSubmitFP(id);
+  const ta = document.getElementById('inv-fp-notes');
+  if (ta) {{ ta.value = ''; ta.focus(); }}
+}}
+
+function invCloseFPModal() {{
+  window._invFPPendingId = null;
+  const modal = document.getElementById('inv-fp-modal');
+  if (modal) modal.style.display = 'none';
+}}
+
+async function invSubmitFP(id) {{
+  const notes = (document.getElementById('inv-fp-notes') || {{}}).value || '';
+  const btn = document.getElementById('inv-fp-confirm');
+  if (btn) {{ btn.disabled = true; btn.textContent = '…'; }}
+  try {{
+    const r = await fetch('/api/fleet/inventory/false-positive/' + id, {{
+      method: 'POST',
+      headers: {{'Content-Type': 'application/json'}},
+      body: JSON.stringify({{false_positive: true, notes}}),
+    }});
+    const d = await r.json();
+    if (d.ok) {{ invCloseFPModal(); await loadInventory(); }}
+    else {{ if (btn) {{ btn.disabled=false; btn.textContent='Confirm False Positive'; }} }}
+  }} catch(e) {{ if (btn) {{ btn.disabled=false; btn.textContent='Confirm False Positive'; }} }}
+}}
+
+async function invClearFP(id, btn) {{
+  const orig = btn.textContent;
+  btn.disabled = true; btn.textContent = '…';
+  try {{
+    const r = await fetch('/api/fleet/inventory/false-positive/' + id, {{
+      method: 'POST',
+      headers: {{'Content-Type': 'application/json'}},
+      body: JSON.stringify({{false_positive: false, notes: ''}}),
+    }});
+    const d = await r.json();
+    if (d.ok) {{ await loadInventory(); }} else {{ btn.disabled=false; btn.textContent=orig; }}
+  }} catch(e) {{ btn.disabled=false; btn.textContent=orig; }}
+}}
+
+async function invApproveGlobally(service, btn) {{
+  if (!confirm(`Approve "${{service}}" globally?\n\nThis will:\n• Mark all current detections of this service as Approved\n• Auto-approve any future detections on any device\n• Suppress alerts for this service\n\nYou can undo this per-entry or via the API.`)) return;
+  const orig = btn.textContent;
+  btn.disabled = true; btn.textContent = '…';
+  try {{
+    const r = await fetch('/api/fleet/inventory/approve-service', {{
+      method: 'POST',
+      headers: {{'Content-Type': 'application/json'}},
+      body: JSON.stringify({{service, action: 'approve'}}),
+    }});
+    const d = await r.json();
+    if (d.ok) {{ await loadInventory(); }} else {{ btn.disabled=false; btn.textContent=orig; alert('Failed: ' + (d.error||'unknown')); }}
   }} catch(e) {{ btn.disabled=false; btn.textContent=orig; }}
 }}
 
@@ -6670,11 +7040,17 @@ function rrToggleForm(checkId, action) {{
     ? `<div style="margin-bottom:8px"><label style="font-size:11px;color:#6B7280;display:block;margin-bottom:3px">Assign to</label>
        <input class="rr-input" id="rr-assignee-${{checkId.replace(/[^a-z0-9]/gi,'_')}}" placeholder="Name or email" value="${{esc(e.override_assignee||'')}}" style="width:220px"></div>`
     : '';
+  const actionLabel = action === 'false_positive' ? 'Mark as False Positive'
+                    : action === 'accepted' ? 'Accept Risk' : 'Assign Finding';
+  const notePlaceholder = action === 'false_positive'
+    ? 'Explain why this is a false positive (e.g. regex matched a filename, not a real key)…'
+    : 'Reason, ticket #, etc.';
   formRow.innerHTML = `<td colspan="8" class="rr-form-row" style="padding:12px 16px">
+    <div style="font-size:12px;font-weight:600;color:#374151;margin-bottom:10px">${{actionLabel}}: <code style="font-size:11px;color:#6B7280">${{esc(checkId)}}</code></div>
     <div style="display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end">
       ${{assigneeField}}
-      <div style="flex:1;min-width:200px"><label style="font-size:11px;color:#6B7280;display:block;margin-bottom:3px">Note <span style="color:#9CA3AF">(optional)</span></label>
-       <input class="rr-input" id="rr-note-${{checkId.replace(/[^a-z0-9]/gi,'_')}}" placeholder="Reason, ticket #, etc." value="${{esc(e.override_note||'')}}"></div>
+      <div style="flex:1;min-width:200px"><label style="font-size:11px;color:#6B7280;display:block;margin-bottom:3px">Note ${{action === 'false_positive' ? '' : '<span style="color:#9CA3AF">(optional)</span>'}}</label>
+       <input class="rr-input" id="rr-note-${{checkId.replace(/[^a-z0-9]/gi,'_')}}" placeholder="${{notePlaceholder}}" value="${{esc(e.override_note||'')}}"></div>
       <div><label style="font-size:11px;color:#6B7280;display:block;margin-bottom:3px">Expires <span style="color:#9CA3AF">(optional)</span></label>
        <input class="rr-input" id="rr-exp-${{checkId.replace(/[^a-z0-9]/gi,'_')}}" type="date" style="width:140px" value="${{e.override_expires ? new Date(e.override_expires*1000).toISOString().slice(0,10) : ''}}"></div>
       <div style="display:flex;gap:6px;padding-bottom:1px">
@@ -6718,18 +7094,26 @@ function renderRiskRegister() {{
   let rows;
   if (_rrSev === 'accepted') {{
     rows = _rrData.filter(e => e.override_action === 'accepted');
+  }} else if (_rrSev === 'false_positive') {{
+    rows = _rrData.filter(e => e.override_action === 'false_positive');
   }} else if (_rrSev === 'all') {{
-    rows = _rrData;
+    rows = _rrData.filter(e => e.override_action !== 'false_positive');
   }} else {{
-    rows = _rrData.filter(e => e.severity === _rrSev);
+    rows = _rrData.filter(e => e.severity === _rrSev && e.override_action !== 'false_positive');
   }}
   const el = document.getElementById('rr-body');
+  const fpCount = _rrData.filter(e => e.override_action === 'false_positive').length;
   if (!rows.length) {{
-    el.innerHTML = '<div style="color:#6B7280;font-size:13px;padding:16px 0">' +
-      (_rrSev === 'accepted' ? 'No accepted risks.' : (_rrData.length ? 'No findings at this severity.' : 'No open findings — fleet is clean.')) + '</div>';
+    let msg = _rrSev === 'accepted' ? 'No accepted risks.'
+            : _rrSev === 'false_positive' ? 'No false positives recorded.'
+            : _rrData.length ? 'No findings at this severity.' : 'No open findings — fleet is clean.';
+    el.innerHTML = '<div style="color:#6B7280;font-size:13px;padding:16px 0">' + msg + '</div>';
     return;
   }}
   const SEV_CLS = {{CRITICAL:'critical',HIGH:'high',MEDIUM:'medium',LOW:'low'}};
+  const fpNote = (_rrSev !== 'false_positive' && fpCount)
+    ? `<div style="font-size:11px;color:#9CA3AF;margin-bottom:6px">&#128683; ${{fpCount}} false positive${{fpCount!==1?'s':''}} hidden — <button class="rr-fil" style="font-size:11px;padding:1px 8px" onclick="rrFilter('false_positive',document.querySelector('#rr-filters .rr-fil:last-child'))">View</button></div>`
+    : '';
   const trs = rows.map(e => {{
     const trendBadge = e.trend === 'Recurring'
       ? '<span class="rr-recurring">Recurring</span>'
@@ -6738,10 +7122,15 @@ function renderRiskRegister() {{
       ? '<span class="rr-accepted">&#10003; Accepted</span>'
       : e.override_action === 'assigned'
         ? `<span class="rr-assigned">&#128100; ${{esc(e.override_assignee||'Assigned')}}</span>`
-        : '';
+        : e.override_action === 'false_positive'
+          ? '<span class="rr-fp">&#128683; False Positive</span>'
+          : '';
     const devTip = e.affected_devices.join(', ');
-    const rowClass = e.override_action === 'accepted' ? 'rr-row-accepted' : '';
+    const rowClass = e.override_action === 'accepted' ? 'rr-row-accepted'
+                   : e.override_action === 'false_positive' ? 'rr-row-fp' : '';
     const cid = e.check_id;
+    const fpLabel = e.override_action === 'false_positive' ? 'Unmark FP' : 'False Positive';
+    const fpAction = e.override_action === 'false_positive' ? `rrClearOverride('${{esc(cid)}}')` : `rrToggleForm('${{esc(cid)}}','false_positive')`;
     return `<tr class="${{rowClass}}" data-cid="${{esc(cid)}}">
       <td><span class="badge ${{SEV_CLS[e.severity]||'low'}}">${{esc(e.severity)}}</span></td>
       <td style="font-family:monospace;font-size:12px;color:#6B7280">${{esc(cid)}}</td>
@@ -6753,14 +7142,15 @@ function renderRiskRegister() {{
       <td style="white-space:nowrap">
         <button class="rr-act-btn" onclick="rrToggleForm('${{esc(cid)}}','accepted')" title="Accept this risk">Accept</button>
         <button class="rr-act-btn" onclick="rrToggleForm('${{esc(cid)}}','assigned')" title="Assign to someone">Assign</button>
+        <button class="rr-act-btn" onclick="${{fpAction}}" title="Mark as false positive" style="color:#6B7280">${{fpLabel}}</button>
       </td>
     </tr>`;
   }}).join('');
-  el.innerHTML = `<table class="rr-table">
+  el.innerHTML = fpNote + `<table class="rr-table">
     <thead><tr>
       <th>Severity</th><th>Check ID</th><th>Finding</th>
       <th title="Hover for device list">Devices</th><th>Trend</th><th>Open</th>
-      <th>Override</th><th>Actions</th>
+      <th>Status</th><th>Actions</th>
     </tr></thead>
     <tbody>${{trs}}</tbody>
   </table><div style="font-size:11px;color:#9CA3AF;margin-bottom:8px">${{rows.length}} finding${{rows.length!==1?'s':''}} · hover device count for affected hostnames</div>`;
@@ -7006,8 +7396,10 @@ async function loadAlertConfig() {{
     if (!r.ok) return;
     const c = await r.json();
     const v = (id, val) => {{ const el = document.getElementById(id); if (el) el.value = val || ''; }};
-    v('alert-slack',     c.slack_webhook || '');
-    v('alert-webhook',   c.webhook_url   || '');
+    v('alert-slack',   c.slack_webhook  || '');
+    v('alert-gchat',   c.gchat_webhook  || '');
+    v('alert-teams',   c.teams_webhook  || '');
+    v('alert-webhook', c.webhook_url    || '');
     v('alert-smtp-host', c.email?.smtp_host || '');
     const portEl = document.getElementById('alert-smtp-port');
     if (portEl) portEl.value = c.email?.smtp_port || 587;
@@ -7017,9 +7409,10 @@ async function loadAlertConfig() {{
     v('alert-email-to',   c.email?.to   || '');
     const t = c.triggers || {{}};
     const cb = (id, val) => {{ const el = document.getElementById(id); if (el) el.checked = val !== false; }};
-    cb('trig-crit',   t.new_critical);
-    cb('trig-high',   t.new_high);
-    cb('trig-shadow', t.new_shadow_ai);
+    cb('trig-crit',           t.new_critical);
+    cb('trig-high',           t.new_high);
+    cb('trig-shadow',         t.new_shadow_ai);
+    cb('trig-unapproved-only', t.alert_unapproved_only);
   }} catch (_) {{}}
 }}
 
@@ -7105,8 +7498,10 @@ async function runLiveScan(btn) {{
 async function saveAlertConfig() {{
   const gv = id => document.getElementById(id)?.value?.trim() || '';
   const body = {{
-    slack_webhook: gv('alert-slack'),
-    webhook_url:   gv('alert-webhook'),
+    slack_webhook:  gv('alert-slack'),
+    gchat_webhook:  gv('alert-gchat'),
+    teams_webhook:  gv('alert-teams'),
+    webhook_url:    gv('alert-webhook'),
     email: {{
       smtp_host: gv('alert-smtp-host'),
       smtp_port: parseInt(document.getElementById('alert-smtp-port')?.value || '587', 10),
@@ -7116,9 +7511,10 @@ async function saveAlertConfig() {{
       to:        gv('alert-email-to'),
     }},
     triggers: {{
-      new_critical:  document.getElementById('trig-crit')?.checked  ?? true,
-      new_high:      document.getElementById('trig-high')?.checked  ?? true,
-      new_shadow_ai: document.getElementById('trig-shadow')?.checked ?? true,
+      new_critical:          document.getElementById('trig-crit')?.checked           ?? true,
+      new_high:              document.getElementById('trig-high')?.checked           ?? true,
+      new_shadow_ai:         document.getElementById('trig-shadow')?.checked         ?? true,
+      alert_unapproved_only: document.getElementById('trig-unapproved-only')?.checked ?? false,
     }},
   }};
   try {{
@@ -7134,10 +7530,12 @@ async function saveAlertConfig() {{
 async function testAlert(channel) {{
   const el = document.getElementById('alert-test-result');
   if (el) {{ el.style.display = 'block'; el.style.color = '#6B7280'; el.textContent = 'Sending test…'; }}
+  const urlFields = {{slack:'alert-slack',gchat:'alert-gchat',teams:'alert-teams',webhook:'alert-webhook'}};
+  const liveUrl = (document.getElementById(urlFields[channel] || '')?.value || '').trim();
   try {{
     const r = await fetch('/api/alerts/test', {{
       method: 'POST', headers: {{'Content-Type': 'application/json'}},
-      body: JSON.stringify({{channel}}),
+      body: JSON.stringify({{channel, url: liveUrl}}),
     }});
     const d = await r.json();
     if (el) {{
@@ -7151,6 +7549,162 @@ async function testAlert(channel) {{
 }}
 
 loadAlertConfig();
+
+// ── Active issues (current CRITICAL/HIGH FAILs from latest reports) ──────────
+async function loadActiveIssues() {{
+  const feed = document.getElementById('active-issues-feed');
+  if (!feed) return;
+  try {{
+    const r = await fetch('/api/alerts/active-issues');
+    if (!r.ok) throw new Error(r.status);
+    const d = await r.json();
+    const issues = d.issues || [];
+    if (!issues.length) {{
+      feed.innerHTML = '<div style="color:#16A34A;font-size:13px;padding:12px 0;display:flex;align-items:center;gap:6px"><span style="font-size:16px">✓</span> No active critical or high issues across your fleet.</div>';
+      return;
+    }}
+    feed.innerHTML = issues.map(iss => {{
+      const sev = iss.severity || 'HIGH';
+      const sevColor = sev === 'CRITICAL' ? '#DC2626' : '#CA8A04';
+      const sevBg    = sev === 'CRITICAL' ? '#FEF2F2' : '#FFFBEB';
+      const ts = new Date(iss.last_seen * 1000);
+      const timeStr = 'Last seen ' + ts.toLocaleDateString() + ' ' + ts.toLocaleTimeString([], {{hour:'2-digit',minute:'2-digit'}});
+      const cid = iss.check_id.replace(/'/g, '');
+      return `<div style="background:#fff;border:1px solid ${{sevBg}};border-left:3px solid ${{sevColor}};border-radius:6px;padding:10px 14px;display:flex;gap:10px;align-items:flex-start">
+        <div style="min-width:64px;text-align:center;flex-shrink:0">
+          <div style="font-size:10px;font-weight:700;color:${{sevColor}};background:${{sevBg}};border-radius:4px;padding:2px 6px;white-space:nowrap">${{sev}}</div>
+          <div style="font-size:10px;color:#6B7280;margin-top:3px">Active</div>
+        </div>
+        <div style="flex:1;min-width:0">
+          <div style="font-size:13px;color:#111827"><strong>${{iss.check_id}}</strong> on <strong>${{iss.hostname}}</strong> — ${{iss.title}}</div>
+          <div style="font-size:11px;color:#9CA3AF;margin-top:4px">${{timeStr}}</div>
+          <div style="margin-top:8px;display:flex;gap:6px">
+            <button onclick="issueAction('${{cid}}','false_positive')" style="font-size:11px;padding:3px 10px;border-radius:4px;border:1px solid #D1D5DB;background:#F9FAFB;cursor:pointer;color:#374151">False Positive</button>
+            <button onclick="issueAction('${{cid}}','accepted')" style="font-size:11px;padding:3px 10px;border-radius:4px;border:1px solid #D1D5DB;background:#F9FAFB;cursor:pointer;color:#374151">Accept Risk</button>
+          </div>
+        </div>
+      </div>`;
+    }}).join('');
+  }} catch (e) {{
+    if (feed) feed.innerHTML = '<div style="color:#DC2626;font-size:13px">Failed to load active issues: ' + e + '</div>';
+  }}
+}}
+
+async function issueAction(checkId, action) {{
+  const label = action === 'false_positive' ? 'false positive' : 'accepted risk';
+  const note = window.prompt('Optional note for marking as ' + label + ':') ?? '';
+  if (note === null) return;
+  try {{
+    const r = await fetch('/api/fleet/risk-register/override', {{
+      method: 'POST',
+      headers: {{'Content-Type': 'application/json'}},
+      body: JSON.stringify({{check_id: checkId, action, note, assignee: '', expires_at: null}})
+    }});
+    if (r.ok) {{
+      loadActiveIssues();
+    }} else {{
+      alert('Failed to save (' + r.status + ')');
+    }}
+  }} catch (e) {{
+    alert('Error: ' + e);
+  }}
+}}
+
+// ── Alert history feed ────────────────────────────────────────────────────────
+async function loadAlertEvents() {{
+  const unreviewedOnly = document.getElementById('alerts-unreviewed-only')?.checked;
+  const feed = document.getElementById('alerts-feed');
+  if (!feed) return;
+  feed.innerHTML = '<div style="color:#9CA3AF;font-size:13px;padding:16px 0">Loading…</div>';
+  try {{
+    const r = await fetch('/api/alerts/events' + (unreviewedOnly ? '?unreviewed=1' : ''));
+    if (!r.ok) throw new Error(r.status);
+    const d = await r.json();
+    const events = d.events || [];
+    if (!events.length) {{
+      feed.innerHTML = '<div style="color:#9CA3AF;font-size:13px;padding:16px 0">No history yet. New discoveries and newly-detected critical/high findings will appear here going forward.</div>';
+      return;
+    }}
+    feed.innerHTML = events.map(ev => {{
+      const sev = ev.severity || 'HIGH';
+      const sevColor = sev === 'CRITICAL' ? '#DC2626' : sev === 'HIGH' ? '#CA8A04' : '#4F46E5';
+      const sevBg    = sev === 'CRITICAL' ? '#FEF2F2' : sev === 'HIGH' ? '#FFFBEB' : '#EEF2FF';
+      const ts = new Date(ev.ts * 1000);
+      const timeStr = ts.toLocaleDateString() + ' ' + ts.toLocaleTimeString([], {{hour:'2-digit',minute:'2-digit'}});
+      let title = '';
+      if (ev.event_type === 'new_shadow_ai') {{
+        const srcLabel = ev.source === 'saas_ai' ? 'SaaS AI (active session)' : ev.source || 'network';
+        title = `<strong>${{ev.service || 'Unknown service'}}</strong> detected on <strong>${{ev.device}}</strong>`;
+        if (ev.host) title += ` — ${{ev.host}}`;
+        title += `<span style="font-size:11px;color:#6B7280;margin-left:8px">via ${{srcLabel}}</span>`;
+      }} else {{
+        title = `<strong>${{ev.check_id || ev.event_type}}</strong> on <strong>${{ev.device}}</strong>`;
+        if (ev.title) title += ` — ${{ev.title}}`;
+      }}
+      const channelBadges = (ev.channels || '').split(',').filter(Boolean).map(c =>
+        `<span style="font-size:10px;background:#F3F4F6;color:#374151;border-radius:4px;padding:1px 6px;white-space:nowrap">${{c.trim()}}</span>`
+      ).join(' ');
+      const reviewedStyle = ev.reviewed ? 'opacity:0.55;' : '';
+      return `<div style="${{reviewedStyle}}background:#fff;border:1px solid ${{ev.reviewed ? '#F3F4F6' : sevBg}};border-left:3px solid ${{ev.reviewed ? '#E5E7EB' : sevColor}};border-radius:6px;padding:12px 16px;display:flex;gap:12px;align-items:flex-start">
+        <div style="min-width:64px;text-align:center">
+          <div style="font-size:10px;font-weight:700;color:${{sevColor}};background:${{sevBg}};border-radius:4px;padding:2px 6px;white-space:nowrap">${{sev}}</div>
+          ${{ev.event_type === 'new_shadow_ai' ? '<div style="font-size:10px;color:#6B7280;margin-top:3px">Shadow AI</div>' : '<div style="font-size:10px;color:#6B7280;margin-top:3px">Finding</div>'}}
+        </div>
+        <div style="flex:1;min-width:0">
+          <div style="font-size:13px;color:#111827;line-height:1.4">${{title}}</div>
+          <div style="margin-top:6px;display:flex;gap:6px;flex-wrap:wrap;align-items:center">
+            <span style="font-size:11px;color:#9CA3AF">${{timeStr}}</span>
+            ${{channelBadges || '<span style="font-size:11px;color:#9CA3AF;font-style:italic">no channels configured</span>'}}
+          </div>
+        </div>
+        <div>
+          ${{ev.reviewed
+            ? '<span style="font-size:11px;color:#9CA3AF">Reviewed</span>'
+            : `<button class="scan-btn" onclick="markAlertReviewed(${{ev.id}}, this)" style="font-size:11px;padding:3px 10px;color:#16A34A;border-color:#E5E7EB;white-space:nowrap">Mark reviewed</button>`
+          }}
+        </div>
+      </div>`;
+    }}).join('');
+    updateAlertBadge();
+  }} catch (e) {{
+    feed.innerHTML = '<div style="color:#DC2626;font-size:13px;padding:16px 0">Failed to load alerts: ' + e + '</div>';
+  }}
+}}
+
+async function markAlertReviewed(id, btn) {{
+  if (btn) {{ btn.disabled = true; btn.textContent = '…'; }}
+  try {{
+    await fetch('/api/alerts/events/' + id + '/review', {{method:'POST'}});
+    loadAlertEvents();
+    updateAlertBadge();
+  }} catch(e) {{ if (btn) {{ btn.disabled = false; btn.textContent = 'Mark reviewed'; }} }}
+}}
+
+async function markAllAlertsReviewed() {{
+  try {{
+    await fetch('/api/alerts/events/review-all', {{method:'POST'}});
+    loadAlertEvents();
+    updateAlertBadge();
+  }} catch(e) {{}}
+}}
+
+async function updateAlertBadge() {{
+  try {{
+    const r = await fetch('/api/alerts/unreviewed-count');
+    if (!r.ok) return;
+    const d = await r.json();
+    const badge = document.getElementById('alert-badge');
+    if (!badge) return;
+    if (d.count > 0) {{
+      badge.textContent = d.count;
+      badge.style.display = 'inline';
+    }} else {{
+      badge.style.display = 'none';
+    }}
+  }} catch(_) {{}}
+}}
+
+updateAlertBadge();
 
 // ── Auto-refresh (lightweight poll — no full page reload) ──
 (function() {{

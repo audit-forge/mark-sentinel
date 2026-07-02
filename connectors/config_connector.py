@@ -25,6 +25,8 @@ SKIP_DIRS = frozenset({
     'CoreData', 'CloudKit', 'Containers',
     # IDE / editor artifacts
     '.idea', '.vscode', '.DS_Store',
+    # AI assistant conversation caches — not project config, can cause false positives
+    '.claude', '.cursor', '.aider',
 })
 
 # Path fragments that indicate a directory subtree to skip entirely.

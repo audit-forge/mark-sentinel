@@ -787,6 +787,13 @@ def run_k8s_cycle(config: dict) -> bool:
     return report_to_server(report, config, device_id, hostname)
 
 
+_DOCKER_BIN = next(
+    (p for p in ['/usr/local/bin/docker', '/usr/bin/docker', '/opt/homebrew/bin/docker']
+     if Path(p).exists()),
+    'docker',
+)
+
+
 def _docker_env() -> dict:
     """Return env vars that help docker CLI find Docker Desktop's socket when running as root.
     On macOS, Docker Desktop exposes its socket under the user's home dir, not /var/run/docker.sock."""
@@ -805,7 +812,7 @@ def _docker_running() -> bool:
     """Return True if a Docker daemon is reachable on this machine."""
     try:
         r = subprocess.run(
-            ['docker', 'info', '--format', '{{.ServerVersion}}'],
+            [_DOCKER_BIN, 'info', '--format', '{{.ServerVersion}}'],
             capture_output=True, text=True, timeout=5, env=_docker_env(),
         )
         return r.returncode == 0 and bool(r.stdout.strip())
@@ -813,8 +820,54 @@ def _docker_running() -> bool:
         return False
 
 
+def run_docker_security_scan() -> dict | None:
+    """Run docker-mode audit and return parsed JSON report."""
+    audit_script = ROOT / 'audit.py'
+    audit_binary = ROOT / 'audit'
+    if audit_binary.exists() and os.access(audit_binary, os.X_OK):
+        cmd = [str(audit_binary), '--mode', 'docker', '--profile', 'docker',
+               '--output', 'json', '--quiet']
+    elif audit_script.exists():
+        cmd = [sys.executable, str(audit_script), '--mode', 'docker', '--profile', 'docker',
+               '--output', 'json', '--quiet']
+    else:
+        log.error('Neither audit binary nor audit.py found at %s', ROOT)
+        return None
+    log.info('Docker security scan: %s', ' '.join(cmd[:5]))
+    try:
+        env = os.environ.copy()
+        if sys.platform == 'darwin' and os.geteuid() == 0:
+            from pathlib import Path as _Path
+            for home in _Path('/Users').iterdir():
+                sock = home / '.docker' / 'run' / 'docker.sock'
+                if sock.exists():
+                    env['DOCKER_HOST'] = f'unix://{sock}'
+                    break
+        proc = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8',
+                              timeout=120, cwd=str(ROOT), env=env)
+    except subprocess.TimeoutExpired:
+        log.error('Docker scan timed out')
+        return None
+    except Exception as e:
+        log.error('Failed to launch docker scan: %s', e)
+        return None
+    stdout = proc.stdout.strip()
+    if not stdout:
+        log.error('Docker scan produced no output (exit %d): %s',
+                  proc.returncode, (proc.stderr or '')[-300:])
+        return None
+    json_start = stdout.find('{')
+    if json_start > 0:
+        stdout = stdout[json_start:]
+    try:
+        return json.loads(stdout)
+    except json.JSONDecodeError as e:
+        log.error('Could not parse docker scan JSON: %s', e)
+        return None
+
+
 def run_docker_cycle(config: dict) -> bool:
-    """Detect a running Docker daemon and report it as a separate fleet device."""
+    """Detect a running Docker daemon, run container security checks, report as a fleet device."""
     if not _docker_running():
         return True  # no docker daemon — not an error
 
@@ -823,38 +876,96 @@ def run_docker_cycle(config: dict) -> bool:
     hostname     = f'docker:{machine_host}'
 
     log.info('Docker daemon detected on %s  Device: %s', machine_host, device_id)
-    report = run_scan(config.get('target', '.'), config.get('profile', 'default').split(',')[0].strip() or 'default')
+    report = run_docker_security_scan()
     if report is None:
         return False
 
-    report['mode']    = 'docker'
-    report['profile'] = 'docker'
     summary = report.get('summary', {})
     log.info('Docker scan complete — FAIL:%d WARN:%d PASS:%d',
              summary.get('fail', 0), summary.get('warn', 0), summary.get('pass', 0))
     return report_to_server(report, config, device_id, hostname)
 
 
-def run_cycle(config: dict) -> bool:
-    target      = _resolve_home() if config.get('target', '~') in ('.', '~', '') else config.get('target')
-    profile_raw = config.get('profile', 'default')
-    profile     = profile_raw.split(',')[0].strip() or 'default'
-    device_id   = _device_id()
+def run_ai_connections_cycle(config: dict) -> bool:
+    """Scan active TCP connections for known SaaS AI services and report as shadow_devices."""
+    device_id = _device_id()
     hostname  = os.environ.get('SENTINEL_HOSTNAME', '').strip() or socket.gethostname()
+    try:
+        sys.path.insert(0, str(ROOT))
+        from checks.ai_connections import scan as _ai_scan
+        results = _ai_scan()
+    except Exception as e:
+        log.warning('AI connection scan error (non-fatal): %s', e)
+        return True  # non-fatal
+    if results:
+        log.info('AI connections: %d active SaaS AI sessions detected', len(results))
+        report_discovery(results, config, device_id, hostname)
+    return True
 
-    log.info('Device: %s  Hostname: %s  Target: %s  Profile: %s',
-             device_id, hostname, target, profile)
 
-    report = run_scan(target, profile)
-    if report is None:
+def _merge_reports(reports: list[dict]) -> dict:
+    """Merge multiple profile scan reports into one combined report."""
+    if len(reports) == 1:
+        return reports[0]
+    seen_checks: set[str] = set()
+    merged_findings: list[dict] = []
+    summary = {'total_evaluated': 0, 'pass': 0, 'warn': 0, 'fail': 0, 'skip': 0,
+               'has_critical_fail': False, 'critical_count': 0}
+    profile_names: list[str] = []
+    base = reports[0]
+    for rpt in reports:
+        pname = rpt.get('profile', '')
+        if pname and pname not in profile_names:
+            profile_names.append(pname)
+        for finding in rpt.get('findings', []):
+            cid = finding.get('check_id', '')
+            if cid in seen_checks:
+                continue
+            seen_checks.add(cid)
+            merged_findings.append(finding)
+            status = finding.get('status', '')
+            if status == 'PASS':
+                summary['pass'] += 1
+            elif status == 'WARN':
+                summary['warn'] += 1
+            elif status == 'FAIL':
+                summary['fail'] += 1
+                if finding.get('severity') == 'CRITICAL':
+                    summary['critical_count'] += 1
+                    summary['has_critical_fail'] = True
+            summary['total_evaluated'] += 1
+    merged = dict(base)
+    merged['profile'] = ', '.join(profile_names)
+    merged['findings'] = merged_findings
+    merged['summary'] = summary
+    return merged
+
+
+def run_cycle(config: dict) -> bool:
+    target     = _resolve_home() if config.get('target', '~') in ('.', '~', '') else config.get('target')
+    profiles   = [p.strip() for p in config.get('profile', 'default').split(',') if p.strip()] or ['default']
+    device_id  = _device_id()
+    hostname   = os.environ.get('SENTINEL_HOSTNAME', '').strip() or socket.gethostname()
+
+    log.info('Device: %s  Hostname: %s  Target: %s  Profiles: %s',
+             device_id, hostname, target, ', '.join(profiles))
+
+    reports: list[dict] = []
+    for profile in profiles:
+        rpt = run_scan(target, profile)
+        if rpt is None:
+            log.warning('Scan failed for profile %s — skipping', profile)
+            continue
+        s = rpt.get('summary', {})
+        log.info('Profile %s — FAIL:%d WARN:%d PASS:%d', profile,
+                 s.get('fail', 0), s.get('warn', 0), s.get('pass', 0))
+        reports.append(rpt)
+
+    if not reports:
         return False
 
-    summary = report.get('summary', {})
-    log.info('Scan complete — FAIL:%d WARN:%d PASS:%d',
-             summary.get('fail', 0), summary.get('warn', 0), summary.get('pass', 0))
-
+    report = _merge_reports(reports)
     _notify_critical_findings(report)
-
     return report_to_server(report, config, device_id, hostname)
 
 
@@ -1142,6 +1253,10 @@ def main() -> None:
                     run_docker_cycle(cfg)
                 except Exception as e:
                     log.warning('Docker scan cycle error (non-fatal): %s', e)
+                try:
+                    run_ai_connections_cycle(cfg)
+                except Exception as e:
+                    log.warning('AI connection scan cycle error (non-fatal): %s', e)
 
             # Poll for on-demand command
             cmd = poll_for_command(cfg, device_id)
@@ -1163,6 +1278,10 @@ def main() -> None:
                     run_docker_cycle(cfg)
                 except Exception as e:
                     log.warning('Docker on-demand scan error (non-fatal): %s', e)
+                try:
+                    run_ai_connections_cycle(cfg)
+                except Exception as e:
+                    log.warning('AI connection on-demand scan error (non-fatal): %s', e)
             elif cmd and cmd.startswith('scan_profile:'):
                 profile_override = cmd[len('scan_profile:'):]
                 log.info('On-demand scan with profile override: %s', profile_override)

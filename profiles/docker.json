@@ -1,0 +1,29 @@
+{
+  "name": "Docker Container Security",
+  "description": "Live security checks against running Docker containers and daemon configuration. Covers CIS Docker Benchmark controls, NIST SP 800-190 container security guidance, and AI-specific risks including model API exposure and supply chain integrity. Requires Docker daemon access — run on any host with Docker installed.",
+  "checks": [
+    "AI-DOCKER-001",
+    "AI-DOCKER-002",
+    "AI-DOCKER-003",
+    "AI-DOCKER-004",
+    "AI-DOCKER-005",
+    "AI-DOCKER-006",
+    "AI-DOCKER-007",
+    "AI-DOCKER-008",
+    "AI-DOCKER-009",
+    "AI-DOCKER-010"
+  ],
+  "framework_emphasis": "docker",
+  "default_output": "plain",
+  "include_remediation": true,
+  "include_frameworks": true,
+  "severity_threshold": "LOW",
+  "docker_mapping": {
+    "container_isolation":   ["AI-DOCKER-001", "AI-DOCKER-003", "AI-DOCKER-004", "AI-DOCKER-009"],
+    "identity_and_access":   ["AI-DOCKER-002", "AI-DOCKER-007"],
+    "secrets_management":    ["AI-DOCKER-006"],
+    "network_exposure":      ["AI-DOCKER-008"],
+    "supply_chain":          ["AI-DOCKER-005"],
+    "resource_controls":     ["AI-DOCKER-010"]
+  }
+}

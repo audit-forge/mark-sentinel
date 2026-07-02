@@ -205,7 +205,7 @@ examples:
     parser.add_argument(
         '--profile',
         default='default',
-        help='Audit profile: default, fedramp, cmmc, financial, healthcare, biotech, owasp_agentic, eu_ai_act (default: default)',
+        help='Audit profile: default, fedramp, cmmc, financial, healthcare, biotech, lifesciences, professional_services, owasp_agentic, eu_ai_act, iso42001, atlas, kubernetes, docker (default: default)',
     )
     parser.add_argument(
         '--output',
@@ -385,8 +385,57 @@ examples:
         print(BANNER, file=sys.stderr)
 
     if args.mode == 'docker':
-        print("\n[INFO] 'docker' mode will be available in a future release. Running config mode scan.\n")
-        args.mode = 'config'
+        from checks.docker import build_docker_context, run_all as docker_checks
+        if not args.quiet:
+            print('\nConnecting to Docker daemon...', end='', flush=True, file=sys.stderr)
+        docker_bin = next(
+            (p for p in ['/usr/local/bin/docker', '/usr/bin/docker', '/opt/homebrew/bin/docker']
+             if __import__('pathlib').Path(p).exists()),
+            'docker',
+        )
+        dctx = build_docker_context(docker_bin=docker_bin)
+        if dctx is None:
+            if not args.quiet:
+                print(' unreachable.\n', file=sys.stderr)
+            print(json.dumps({'error': 'Docker daemon unreachable',
+                              'results': [], 'findings': [],
+                              'summary': {'fail': 0, 'warn': 0, 'pass': 0, 'skip': 0}}))
+            sys.exit(1)
+        if not args.quiet:
+            print(f' connected (daemon {dctx.daemon_version}, {len(dctx.containers)} container(s)).\n',
+                  file=sys.stderr)
+        profile   = load_profile(args.profile if args.profile not in ('default', 'config') else 'docker')
+        d_results = docker_checks(dctx)
+        summary   = {'fail': 0, 'warn': 0, 'pass': 0, 'skip': 0}
+        out_list  = []
+        for r in d_results:
+            summary[r.status.lower() if r.status.lower() in summary else 'skip'] += 1
+            d = {
+                'check_id':    r.check_id,
+                'title':       r.title,
+                'status':      r.status,
+                'severity':    r.severity,
+                'category':    r.category,
+                'details':     r.details,
+                'evidence':    r.evidence,
+                'remediation': r.remediation,
+                'frameworks':  r.frameworks,
+            }
+            controls = profile.get('_controls', {}).get(r.check_id)
+            if controls:
+                d['emphasis_controls'] = controls
+            out_list.append(d)
+        report = {
+            'scan_mode':       'docker',
+            'daemon_version':  dctx.daemon_version,
+            'containers_checked': len(dctx.containers),
+            'profile':         profile.get('name', 'Docker Container Security'),
+            'findings':        out_list,
+            'results':         out_list,
+            'summary':         summary,
+        }
+        print(json.dumps(report, indent=2))
+        sys.exit(0 if summary['fail'] == 0 else 1)
 
     if args.mode in ('kubectl', 'k8s'):
         from connectors.kubectl_connector import build_k8s_context

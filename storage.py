@@ -171,6 +171,27 @@ class AgentStore:
                     updated_at  INTEGER NOT NULL
                 );
 
+                CREATE TABLE IF NOT EXISTS approved_services (
+                    service     TEXT PRIMARY KEY,
+                    approved_by TEXT NOT NULL DEFAULT '',
+                    approved_at INTEGER NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS alert_events (
+                    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                    ts          INTEGER NOT NULL,
+                    event_type  TEXT NOT NULL,
+                    severity    TEXT NOT NULL DEFAULT 'HIGH',
+                    device      TEXT NOT NULL DEFAULT '',
+                    service     TEXT NOT NULL DEFAULT '',
+                    host        TEXT NOT NULL DEFAULT '',
+                    check_id    TEXT NOT NULL DEFAULT '',
+                    title       TEXT NOT NULL DEFAULT '',
+                    source      TEXT NOT NULL DEFAULT '',
+                    channels    TEXT NOT NULL DEFAULT '',
+                    reviewed    INTEGER NOT NULL DEFAULT 0
+                );
+
             """)
             # Migrations
             cols = {r[1] for r in conn.execute("PRAGMA table_info(devices)")}
@@ -188,6 +209,14 @@ class AgentStore:
             if 'approved_at' not in sh_cols:
                 conn.execute(
                     "ALTER TABLE shadow_devices ADD COLUMN approved_at INTEGER"
+                )
+            if 'false_positive' not in sh_cols:
+                conn.execute(
+                    "ALTER TABLE shadow_devices ADD COLUMN false_positive INTEGER NOT NULL DEFAULT 0"
+                )
+            if 'notes' not in sh_cols:
+                conn.execute(
+                    "ALTER TABLE shadow_devices ADD COLUMN notes TEXT NOT NULL DEFAULT ''"
                 )
             sc_cols = {r[1] for r in conn.execute("PRAGMA table_info(scan_schedules)")}
             if 'interval_hours' not in sc_cols:
@@ -492,6 +521,44 @@ class AgentStore:
             result.append(rep)
         return result
 
+    def get_active_critical_high_findings(self) -> list[dict]:
+        """Return CRITICAL/HIGH FAILs from the latest report per device, excluding overridden findings."""
+        with self._lock, self._conn() as conn:
+            overrides = {
+                row['check_id']: row['action']
+                for row in conn.execute("SELECT check_id, action FROM risk_overrides").fetchall()
+            }
+            rows = conn.execute("""
+                SELECT r.device_id, d.hostname, r.received_at, r.report_json
+                FROM reports r
+                JOIN devices d ON d.device_id = r.device_id
+                WHERE r.received_at = (
+                    SELECT MAX(received_at) FROM reports r2
+                    WHERE r2.device_id = r.device_id
+                )
+                ORDER BY r.received_at DESC
+            """).fetchall()
+        issues = []
+        for row in rows:
+            rep = json.loads(row['report_json'])
+            for f in rep.get('findings', []):
+                if (f.get('status') == 'FAIL'
+                        and f.get('severity', '').upper() in ('CRITICAL', 'HIGH')):
+                    check_id = f.get('check_id', '')
+                    if overrides.get(check_id) in ('false_positive', 'accepted'):
+                        continue
+                    issues.append({
+                        'device_id':  row['device_id'],
+                        'hostname':   row['hostname'],
+                        'last_seen':  row['received_at'],
+                        'check_id':   check_id,
+                        'title':      f.get('title', ''),
+                        'severity':   f.get('severity', '').upper(),
+                        'description': f.get('description', ''),
+                    })
+        issues.sort(key=lambda x: (0 if x['severity'] == 'CRITICAL' else 1, x['hostname']))
+        return issues
+
     def device_count(self) -> int:
         with self._lock, self._conn() as conn:
             return conn.execute("SELECT COUNT(*) FROM devices").fetchone()[0]
@@ -612,6 +679,12 @@ class AgentStore:
         """Upsert a shadow device. Returns True if this is a brand-new discovery."""
         now = int(time.time())
         with self._lock, self._conn() as conn:
+            # New entries auto-approve if the service is on the global approved list
+            globally_approved = conn.execute(
+                "SELECT 1 FROM approved_services WHERE service=?", (service,)
+            ).fetchone() is not None
+            auto_status = 'approved' if globally_approved else 'unapproved'
+
             existing = conn.execute(
                 "SELECT id FROM shadow_devices WHERE source=? AND reporter_device_id=? AND host=? AND port=?",
                 (source, reporter_device_id, host, port)
@@ -620,8 +693,9 @@ class AgentStore:
             conn.execute("""
                 INSERT INTO shadow_devices
                     (reporter_device_id, reporter_hostname, host, port, service,
-                     models_json, source, detail, first_seen, last_seen, dismissed)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+                     models_json, source, detail, first_seen, last_seen, dismissed,
+                     approval_status)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)
                 ON CONFLICT(source, reporter_device_id, host, port) DO UPDATE SET
                     reporter_hostname  = excluded.reporter_hostname,
                     service            = excluded.service,
@@ -630,18 +704,19 @@ class AgentStore:
                     last_seen          = excluded.last_seen,
                     dismissed          = 0
             """, (reporter_device_id, reporter_hostname, host, port, service,
-                  json.dumps(models), source, detail, now, now))
+                  json.dumps(models), source, detail, now, now, auto_status))
         return is_new
 
-    def list_shadow_devices(self) -> list[dict]:
+    def list_shadow_devices(self, max_age_days: int = 7) -> list[dict]:
+        cutoff = int(time.time()) - (max_age_days * 86400)
         with self._lock, self._conn() as conn:
             rows = conn.execute("""
                 SELECT id, reporter_device_id, reporter_hostname, host, port,
                        service, models_json, source, detail, first_seen, last_seen
                 FROM shadow_devices
-                WHERE dismissed = 0
+                WHERE dismissed = 0 AND last_seen >= ?
                 ORDER BY source ASC, last_seen DESC
-            """).fetchall()
+            """, (cutoff,)).fetchall()
         result = []
         for row in rows:
             d = dict(row)
@@ -746,9 +821,10 @@ class AgentStore:
             rows = conn.execute("""
                 SELECT id, reporter_hostname, host, port, service, models_json,
                        source, detail, first_seen, last_seen, dismissed,
-                       approval_status, approved_by, approved_at
+                       approval_status, approved_by, approved_at,
+                       false_positive, notes
                 FROM shadow_devices
-                ORDER BY approval_status ASC, last_seen DESC
+                ORDER BY false_positive ASC, approval_status ASC, last_seen DESC
             """).fetchall()
         result = []
         for row in rows:
@@ -787,6 +863,36 @@ class AgentStore:
             )
             return True
 
+    def set_false_positive(self, shadow_id: int, is_fp: bool,
+                           notes: str = '', changed_by: str = '',
+                           ip_address: str = '') -> bool:
+        """Mark/unmark a shadow device as a false positive with an optional note."""
+        now = int(time.time())
+        actor = changed_by.strip() or 'Dashboard user'
+        with self._lock, self._conn() as conn:
+            row = conn.execute(
+                "SELECT approval_status FROM shadow_devices WHERE id = ?", (shadow_id,)
+            ).fetchone()
+            if row is None:
+                return False
+            from_status = row['approval_status'] or 'unapproved'
+            to_status = 'false_positive' if is_fp else from_status
+            conn.execute(
+                """UPDATE shadow_devices
+                   SET false_positive = ?, notes = ?, approved_by = ?, approved_at = ?
+                   WHERE id = ?""",
+                (1 if is_fp else 0, notes.strip(), actor, now, shadow_id),
+            )
+            conn.execute(
+                """INSERT INTO approval_events
+                       (shadow_id, from_status, to_status, changed_by, ip_address, changed_at)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                (shadow_id, from_status,
+                 'false_positive' if is_fp else 'fp_cleared',
+                 actor, ip_address, now),
+            )
+            return True
+
     def get_approval_history(self, shadow_id: int) -> list[dict]:
         """Return full approval event history for one asset, newest first."""
         with self._lock, self._conn() as conn:
@@ -810,6 +916,93 @@ class AgentStore:
                    ORDER BY ae.changed_at DESC""",
             ).fetchall()
         return [dict(r) for r in rows]
+
+    def is_service_approved(self, service: str) -> bool:
+        with self._lock, self._conn() as conn:
+            return conn.execute(
+                "SELECT 1 FROM approved_services WHERE service=?", (service,)
+            ).fetchone() is not None
+
+    def approve_service_globally(self, service: str, approved_by: str = '') -> None:
+        now = int(time.time())
+        with self._lock, self._conn() as conn:
+            conn.execute(
+                """INSERT INTO approved_services (service, approved_by, approved_at) VALUES (?,?,?)
+                   ON CONFLICT(service) DO UPDATE SET approved_by=excluded.approved_by, approved_at=excluded.approved_at""",
+                (service, approved_by, now),
+            )
+            # Bulk-approve all existing unapproved entries for this service name
+            conn.execute(
+                "UPDATE shadow_devices SET approval_status='approved', approved_by=?, approved_at=? WHERE service=? AND approval_status='unapproved'",
+                (approved_by, now, service),
+            )
+
+    def unapprove_service_globally(self, service: str) -> None:
+        with self._lock, self._conn() as conn:
+            conn.execute("DELETE FROM approved_services WHERE service=?", (service,))
+
+    def list_approved_services(self) -> list[str]:
+        with self._lock, self._conn() as conn:
+            return [r[0] for r in conn.execute(
+                "SELECT service FROM approved_services ORDER BY service"
+            ).fetchall()]
+
+    # ── Alert event log ───────────────────────────────────────────────────────
+
+    def log_alert_event(self, event_type: str, severity: str, device: str,
+                        service: str = '', host: str = '', check_id: str = '',
+                        title: str = '', source: str = '', channels: str = '') -> None:
+        with self._lock, self._conn() as conn:
+            conn.execute(
+                """INSERT INTO alert_events
+                       (ts, event_type, severity, device, service, host,
+                        check_id, title, source, channels)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (int(time.time()), event_type, severity, device,
+                 service, host, check_id, title, source, channels),
+            )
+
+    def was_alert_recently_fired(self, event_type: str, device: str,
+                                  dedup_key: str, within_seconds: int = 86400) -> bool:
+        """Return True if the same alert already fired within the cooldown window."""
+        cutoff = int(time.time()) - within_seconds
+        with self._lock, self._conn() as conn:
+            row = conn.execute(
+                """SELECT 1 FROM alert_events
+                   WHERE event_type=? AND device=? AND (service=? OR check_id=?) AND ts>?
+                   LIMIT 1""",
+                (event_type, device, dedup_key, dedup_key, cutoff),
+            ).fetchone()
+        return row is not None
+
+    def get_alert_events(self, limit: int = 300, unreviewed_only: bool = False) -> list[dict]:
+        sql = ("SELECT id, ts, event_type, severity, device, service, host, "
+               "check_id, title, source, channels, reviewed FROM alert_events")
+        if unreviewed_only:
+            sql += " WHERE reviewed=0"
+        sql += " ORDER BY ts DESC LIMIT ?"
+        with self._lock, self._conn() as conn:
+            rows = conn.execute(sql, (limit,)).fetchall()
+        return [
+            {'id': r[0], 'ts': r[1], 'event_type': r[2], 'severity': r[3],
+             'device': r[4], 'service': r[5], 'host': r[6], 'check_id': r[7],
+             'title': r[8], 'source': r[9], 'channels': r[10], 'reviewed': bool(r[11])}
+            for r in rows
+        ]
+
+    def count_unreviewed_alerts(self) -> int:
+        with self._lock, self._conn() as conn:
+            return conn.execute(
+                "SELECT COUNT(*) FROM alert_events WHERE reviewed=0"
+            ).fetchone()[0]
+
+    def mark_alert_reviewed(self, event_id: int) -> None:
+        with self._lock, self._conn() as conn:
+            conn.execute("UPDATE alert_events SET reviewed=1 WHERE id=?", (event_id,))
+
+    def mark_all_alerts_reviewed(self) -> None:
+        with self._lock, self._conn() as conn:
+            conn.execute("UPDATE alert_events SET reviewed=1 WHERE reviewed=0")
 
     def upsert_mcp_server(self, reporter_device_id: str, reporter_hostname: str,
                           host: str, port: int, server_name: str, tools: list,

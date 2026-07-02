@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
+# Provision a new customer container + nginx vhost.
+# Usage: provision_customer.sh <customer_id> [public_ip] [tier] [expires] [max_seats] [customer_name] [port] [agent_token]
 set -euo pipefail
 
 CUSTOMER_ID="$1"
-PUBLIC_IP="${2:-35.255.19.236}"
+PUBLIC_IP="${2:-$(curl -sf http://metadata.google.internal/computeMetadata/v1/instance/network-interfaces/0/access-configs/0/external-ip -H 'Metadata-Flavor: Google' || echo '34.58.90.147')}"
 TIER="${3:-standard}"
 EXPIRES="${4:-}"
 MAX_SEATS="${5:-5}"
@@ -10,7 +12,6 @@ CUSTOMER_NAME="${6:-$CUSTOMER_ID}"
 PORT="${7:-7001}"
 CONTAINER_NAME="sentinel-${CUSTOMER_ID}"
 NGINX_CONF_DIR="/opt/sentinel/deploy/gcp/nginx"
-# Use the host-side path (admin container maps /opt/licenses → /licenses internally)
 HOST_LICENSES_DIR="${HOST_LICENSES_DIR:-/opt/licenses}"
 LICENSE_FILE="${HOST_LICENSES_DIR}/${CUSTOMER_ID}/license.json"
 DATA_DIR="/opt/sentinel-data/${CUSTOMER_ID}"
@@ -27,6 +28,12 @@ if [ -z "$AGENT_TOKEN" ]; then
   echo "$AGENT_TOKEN" > "${DATA_DIR}/agent_token.txt"
 fi
 
+# Build docker run args — conditionally mount license.json only if it exists
+LICENSE_MOUNT=""
+if [ -f "$LICENSE_FILE" ]; then
+  LICENSE_MOUNT="-v ${LICENSE_FILE}:/app/license.json:ro"
+fi
+
 docker run -d \
   --name "$CONTAINER_NAME" \
   --network sentinel-net \
@@ -35,10 +42,13 @@ docker run -d \
   --label "sentinel.tier=${TIER}" \
   -e "SENTINEL_AGENT_TOKEN=${AGENT_TOKEN}" \
   -e "SENTINEL_TRUSTED_PROXY=1" \
-  -v "${LICENSE_FILE}:/app/license.json:ro" \
+  ${LICENSE_MOUNT} \
   -v "${DATA_DIR}:/app/data" \
   mark-sentinel:latest \
   python3 server.py --no-browser --port 7331
+
+# Connect to arckon-net so nginx can reach sentinel-admin for auth_request
+docker network connect arckon-net "$CONTAINER_NAME"
 
 mkdir -p "$NGINX_CONF_DIR"
 cat > "${NGINX_CONF_DIR}/${CUSTOMER_ID}.conf" <<EOF
@@ -48,7 +58,7 @@ server {
 
     location = /_auth {
         internal;
-        proxy_pass http://user-manager:8000/auth/verify;
+        proxy_pass http://sentinel-admin:8000/auth/verify;
         proxy_pass_request_body off;
         proxy_set_header Content-Length "";
         proxy_set_header X-Customer-ID ${CUSTOMER_ID};
@@ -72,7 +82,7 @@ server {
     }
 
     location /install/ {
-        proxy_pass http://user-manager:8000;
+        proxy_pass http://sentinel-admin:8000;
         proxy_set_header Host \$host;
         proxy_set_header X-Real-IP \$remote_addr;
     }
@@ -88,9 +98,9 @@ server {
         proxy_set_header Host \$host;
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Sentinel-User-Email    \$sentinel_user_email;
-        proxy_set_header X-Sentinel-User-Role     \$sentinel_user_role;
-        proxy_set_header X-Sentinel-Customer-ID   \$sentinel_customer_id;
+        proxy_set_header X-Sentinel-User-Email   \$sentinel_user_email;
+        proxy_set_header X-Sentinel-User-Role    \$sentinel_user_role;
+        proxy_set_header X-Sentinel-Customer-ID  \$sentinel_customer_id;
         proxy_read_timeout 300;
         proxy_buffering off;
     }
@@ -102,4 +112,4 @@ server {
 EOF
 
 docker exec sentinel-nginx nginx -s reload
-echo "Provisioned: http://${PUBLIC_IP}:${PORT} (${TIER})"
+echo "Provisioned: ${CUSTOMER_ID} at http://${PUBLIC_IP}:${PORT} (${TIER})"

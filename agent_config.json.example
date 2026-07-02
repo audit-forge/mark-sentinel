@@ -2,6 +2,6 @@
   "server":   "http://10.0.1.50:7331",
   "token":    "replace-with-your-secret-token",
   "target":   "~",
-  "profile":  "default",
+  "profile":  "default,iso42001",
   "interval": 3600
 }
