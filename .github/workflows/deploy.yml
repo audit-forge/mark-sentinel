@@ -8,6 +8,8 @@ on:
       - 'discovery.py'
       - 'server.py'
       - 'audit.py'
+      - 'alerts.py'
+      - 'eu_ai_act_report.py'
       - 'checks/**'
       - 'connectors/**'
       - 'profiles/**'
@@ -49,8 +51,10 @@ jobs:
         run: |
           # Upload all deployment artifacts to GCS
           gsutil cp dist/agent dist/audit \
-            server.py discovery.py agent.py \
+            server.py discovery.py agent.py alerts.py eu_ai_act_report.py \
             gs://arckon-deploy-artifacts/latest/
+          gsutil cp connectors/psa_connector.py \
+            gs://arckon-deploy-artifacts/latest/connectors/psa_connector.py
 
           # Write a deploy manifest so the GCP instance knows a new deploy is ready
           echo "{\"sha\":\"${{ github.sha }}\",\"ref\":\"${{ github.ref_name }}\",\"ts\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}" \
