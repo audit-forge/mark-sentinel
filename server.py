@@ -3548,6 +3548,14 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                     'ticket_type_id': hp.get('ticket_type_id', 1),
                     'priority_id':    hp.get('priority_id', 1),
                 },
+                'jira': {
+                    'enabled':      psa.get('provider') == 'jira',
+                    'site':         psa.get('jira', {}).get('site', ''),
+                    'email':        psa.get('jira', {}).get('email', ''),
+                    'api_token':    _M if psa.get('jira', {}).get('api_token') else '',
+                    'project_key':  psa.get('jira', {}).get('project_key', ''),
+                    'issue_type':   psa.get('jira', {}).get('issue_type', 'Bug'),
+                },
             })
         except Exception as e:
             self._json({'error': str(e)}, 500)
@@ -3608,6 +3616,14 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                     'client_secret':  _restore(fields.get('client_secret', ''), existing_sub.get('client_secret', '')),
                     'ticket_type_id': int(fields.get('ticket_type_id', 1)),
                     'priority_id':    int(fields.get('priority_id', 1)),
+                }
+            elif psa_id == 'jira':
+                psa['jira'] = {
+                    'site':        str(fields.get('site', '')).strip(),
+                    'email':       str(fields.get('email', '')).strip(),
+                    'api_token':   _restore(fields.get('api_token', ''), existing_sub.get('api_token', '')),
+                    'project_key': str(fields.get('project_key', '')).strip().upper(),
+                    'issue_type':  str(fields.get('issue_type', 'Bug')).strip() or 'Bug',
                 }
             path.write_text(json.dumps(cfg, indent=2), encoding='utf-8')
             self._json({'ok': True})
@@ -7358,6 +7374,16 @@ const PSA_DEFS = [
       {{key:'client_id',      label:'Client ID',      type:'text',     ph:'OAuth2 client ID'}},
       {{key:'client_secret',  label:'Client Secret',  type:'password', ph:'OAuth2 client secret'}},
       {{key:'ticket_type_id', label:'Ticket Type ID', type:'text',     ph:'1'}},
+    ]}},
+  {{id:'jira', name:'Jira', icon:'&#128031;', color:'#0052CC',
+    desc:'Auto-create Jira issues when new CRITICAL/HIGH AI security findings are detected.',
+    howto:'id.atlassian.com → Security → API tokens → Create API token. Use your Atlassian email + token for auth.',
+    fields:[
+      {{key:'site',        label:'Site',         type:'text',     ph:'yourcompany  (before .atlassian.net)'}},
+      {{key:'email',       label:'Email',        type:'text',     ph:'you@yourcompany.com'}},
+      {{key:'api_token',   label:'API Token',    type:'password', ph:'Atlassian API token'}},
+      {{key:'project_key', label:'Project Key',  type:'text',     ph:'IT  (e.g. IT, SEC, OPS)'}},
+      {{key:'issue_type',  label:'Issue Type',   type:'text',     ph:'Bug  (Bug, Task, Story, etc.)'}},
     ]}},
 ];
 

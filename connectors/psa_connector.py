@@ -52,6 +52,8 @@ def create_ticket(psa_cfg: dict, finding: dict, hostname: str) -> tuple[bool, st
         return _at_create_ticket(psa_cfg.get('autotask', {}), finding, hostname)
     if provider == 'halopsa':
         return _halo_create_ticket(psa_cfg.get('halopsa', {}), finding, hostname)
+    if provider == 'jira':
+        return _jira_create_ticket(psa_cfg.get('jira', {}), finding, hostname)
     return False, f'Unknown PSA provider: {provider!r}'
 
 
@@ -64,6 +66,8 @@ def test_connection(psa_cfg: dict) -> tuple[bool, str]:
         return _at_test(psa_cfg.get('autotask', {}))
     if provider == 'halopsa':
         return _halo_test(psa_cfg.get('halopsa', {}))
+    if provider == 'jira':
+        return _jira_test(psa_cfg.get('jira', {}))
     return False, f'Unknown PSA provider: {provider!r}'
 
 
@@ -256,6 +260,81 @@ def _halo_test(cfg: dict) -> tuple[bool, str]:
                 else (False, f'HaloPSA returned HTTP {r.status}')
     except Exception as e:
         return False, f'HaloPSA connection failed: {e}'
+
+
+# ── Jira ─────────────────────────────────────────────────────────────────────
+
+def _jira_base_url(cfg: dict) -> str:
+    site = cfg.get('site', '').rstrip('/')
+    if not site.startswith('http'):
+        site = f'https://{site}.atlassian.net'
+    return f'{site}/rest/api/3'
+
+
+def _jira_headers(cfg: dict) -> dict:
+    token = base64.b64encode(
+        f'{cfg.get("email", "")}:{cfg.get("api_token", "")}'.encode()
+    ).decode()
+    return {
+        'Authorization': f'Basic {token}',
+        'Content-Type':  'application/json',
+        'Accept':        'application/json',
+    }
+
+
+def _jira_create_ticket(cfg: dict, finding: dict, hostname: str) -> tuple[bool, str]:
+    required = ('site', 'email', 'api_token', 'project_key')
+    if missing := [k for k in required if not cfg.get(k)]:
+        return False, f'Jira config missing: {", ".join(missing)}'
+
+    sev        = finding.get('severity', 'HIGH')
+    check_id   = finding.get('check_id', '')
+    title      = finding.get('title', '')
+    desc       = finding.get('description', finding.get('remediation', ''))
+    issue_type = cfg.get('issue_type', 'Bug')
+    priority   = 'Highest' if sev == 'CRITICAL' else 'High'
+
+    summary = f'[Arckon] {sev}: {check_id}' + (f' — {title}' if title else '') + f' on {hostname}'
+    detail  = (
+        f'Arckon AI Security scan detected a {sev} finding on {hostname}.\n\n'
+        f'Check ID: {check_id}\nTitle: {title}\n\n'
+        + (f'Details:\n{desc}\n\n' if desc else '')
+        + 'Log in to Arckon to view full details and remediation steps.'
+    )
+
+    body = {
+        'fields': {
+            'project':   {'key': cfg['project_key']},
+            'summary':   summary[:255],
+            'issuetype': {'name': issue_type},
+            'priority':  {'name': priority},
+            'description': {
+                'type':    'doc',
+                'version': 1,
+                'content': [{'type': 'paragraph', 'content': [{'type': 'text', 'text': detail}]}],
+            },
+        }
+    }
+    return _http_post(f'{_jira_base_url(cfg)}/issue', body, _jira_headers(cfg), 'Jira')
+
+
+def _jira_test(cfg: dict) -> tuple[bool, str]:
+    required = ('site', 'email', 'api_token')
+    if missing := [k for k in required if not cfg.get(k)]:
+        return False, f'Jira config missing: {", ".join(missing)}'
+    try:
+        req = urllib.request.Request(
+            f'{_jira_base_url(cfg)}/myself',
+            headers=_jira_headers(cfg),
+        )
+        with urllib.request.urlopen(req, timeout=10) as r:
+            if 200 <= r.status < 300:
+                data = json.loads(r.read().decode())
+                name = data.get('displayName') or data.get('emailAddress', '')
+                return True, f'Jira connection successful (authenticated as {name})'
+            return False, f'Jira returned HTTP {r.status}'
+    except Exception as e:
+        return False, f'Jira connection failed: {e}'
 
 
 # ── HTTP helper ───────────────────────────────────────────────────────────────
