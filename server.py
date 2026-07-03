@@ -7370,7 +7370,7 @@ const PSA_DEFS = [
     desc:'Auto-create HaloPSA tickets when new CRITICAL/HIGH AI security findings are detected.',
     howto:'HaloPSA → Configuration → Integrations → HaloPSA API → New Application → Client Credentials.',
     fields:[
-      {{key:'tenant',         label:'Tenant',         type:'text',     ph:'yourcompany  (before .halopsa.com)'}},
+      {{key:'tenant',         label:'Instance URL',   type:'text',     ph:'mfdtest.trial.usehalo.com  or  yourco.halopsa.com'}},
       {{key:'client_id',      label:'Client ID',      type:'text',     ph:'OAuth2 client ID'}},
       {{key:'client_secret',  label:'Client Secret',  type:'password', ph:'OAuth2 client secret'}},
       {{key:'ticket_type_id', label:'Ticket Type ID', type:'text',     ph:'1'}},

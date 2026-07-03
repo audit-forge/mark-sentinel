@@ -186,16 +186,30 @@ def _at_test(cfg: dict) -> tuple[bool, str]:
 # ── HaloPSA ───────────────────────────────────────────────────────────────────
 
 def _halo_base_url(cfg: dict) -> str:
-    return f'https://{cfg.get("tenant", "").rstrip("/")}.halopsa.com/api'
+    tenant = cfg.get('tenant', '').rstrip('/')
+    if tenant.startswith('http'):
+        return tenant.rstrip('/') + '/api'
+    if '.' in tenant:
+        return f'https://{tenant}/api'
+    return f'https://{tenant}.halopsa.com/api'
+
+
+def _halo_root_url(cfg: dict) -> str:
+    tenant = cfg.get('tenant', '').rstrip('/')
+    if tenant.startswith('http'):
+        return tenant.rstrip('/')
+    if '.' in tenant:
+        return f'https://{tenant}'
+    return f'https://{tenant}.halopsa.com'
 
 
 def _halo_get_token(cfg: dict) -> Optional[str]:
-    url  = f'https://{cfg.get("tenant", "")}.halopsa.com/auth/token'
+    url  = _halo_root_url(cfg) + '/auth/token'
     data = urllib.parse.urlencode({
         'grant_type':    'client_credentials',
         'client_id':     cfg.get('client_id', ''),
         'client_secret': cfg.get('client_secret', ''),
-        'scope':         'all:standard',
+        'scope':         'read:tickets edit:tickets',
     }).encode()
     try:
         req = urllib.request.Request(
