@@ -1175,6 +1175,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             '/api/fleet/mcp':        self._api_fleet_mcp,
             '/api/fleet/mcp/report': self._api_fleet_mcp_report,
             '/api/fleet/eu-ai-act-report': self._api_eu_ai_act_report,
+            '/api/branding':               self._api_get_branding,
             '/api/psa/config':             self._api_get_psa_config,
             '/download/shortcut': self._serve_shortcut,
         }
@@ -1276,6 +1277,8 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self._api_set_alert_config()
         elif path == '/api/alerts/test':
             self._api_test_alert()
+        elif path == '/api/branding':
+            self._api_set_branding()
         elif path == '/api/alerts/psa/test':
             self._api_test_psa()
         elif path == '/api/psa/config':
@@ -3663,6 +3666,25 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         except Exception as e:
             self._json({'ok': False, 'message': str(e)}, 500)
 
+    def _api_get_branding(self):
+        path = ROOT / 'data' / 'branding.json'
+        try:
+            data = json.loads(path.read_text()) if path.exists() else {}
+        except Exception:
+            data = {}
+        self._json(data)
+
+    def _api_set_branding(self):
+        try:
+            body = json.loads(self.rfile.read(int(self.headers.get('Content-Length', 0))))
+            allowed = {'msp_name', 'logo_url', 'footer_text'}
+            data = {k: str(v).strip() for k, v in body.items() if k in allowed}
+            path = ROOT / 'data' / 'branding.json'
+            path.write_text(json.dumps(data, indent=2))
+            self._json({'ok': True})
+        except Exception as e:
+            self._json({'ok': False, 'error': str(e)}, 500)
+
     def _api_eu_ai_act_report(self):
         try:
             import urllib.parse as _up
@@ -3674,8 +3696,10 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             for d in devices:
                 rep = store.get_latest_report(d['device_id'])
                 enriched.append({**d, '_report': rep})
+            branding_path = ROOT / 'data' / 'branding.json'
+            branding = json.loads(branding_path.read_text()) if branding_path.exists() else {}
             from eu_ai_act_report import generate_eu_ai_act_report
-            html_out = generate_eu_ai_act_report(enriched, org_name)
+            html_out = generate_eu_ai_act_report(enriched, org_name, branding)
             self._send(200, html_out.encode(), 'text/html; charset=utf-8')
         except Exception as e:
             self._send(500, f'Report generation failed: {e}'.encode(), 'text/plain')
@@ -5160,6 +5184,31 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
   </div>
 
   <div class="content-panel" style="background:#ffffff;border:1px solid #F3F4F6;border-radius:8px;padding:20px;margin-bottom:16px">
+    <div class="panel-sub-hdr" style="font-size:12px;color:#6B7280;font-weight:600;text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px">Report Branding</div>
+    <div style="font-size:12px;color:#9CA3AF;margin-bottom:14px">White-label the EU AI Act Readiness Report with your company name, logo, and footer. Clients will see your branding instead of Arckon&#39;s.</div>
+    <div id="branding-saved" style="display:none;color:#16A34A;font-size:12px;margin-bottom:10px">&#10003; Branding saved</div>
+    <div style="display:grid;grid-template-columns:160px 1fr;gap:10px 16px;align-items:center;max-width:640px">
+      <label style="font-size:13px;color:#6B7280">Company Name</label>
+      <input id="brand-msp-name" class="form-input" type="text" placeholder="Your MSP or Company Name" style="max-width:340px">
+      <label style="font-size:13px;color:#6B7280">Logo URL</label>
+      <div>
+        <input id="brand-logo-url" class="form-input" type="url" placeholder="https://yourcompany.com/logo.png" style="max-width:400px">
+        <div style="font-size:11px;color:#9CA3AF;margin-top:4px">PNG or SVG, max 160×40 px in the report header. Host on any public URL.</div>
+      </div>
+      <label style="font-size:13px;color:#6B7280">Report Footer</label>
+      <div>
+        <input id="brand-footer-text" class="form-input" type="text" placeholder="Prepared by Your Company · yourcompany.com" style="max-width:400px">
+        <div style="font-size:11px;color:#9CA3AF;margin-top:4px">&#8220;Powered by Arckon&#8221; is appended automatically.</div>
+      </div>
+    </div>
+    <div style="margin-top:16px;display:flex;align-items:center;gap:12px">
+      <button class="scan-btn" onclick="saveBranding()" style="color:#16A34A;border-color:#E5E7EB">Save Branding</button>
+      <a id="brand-preview-link" href="/api/fleet/eu-ai-act-report" target="_blank"
+         style="font-size:12px;color:#4F46E5;text-decoration:none">&#8599; Preview Report</a>
+    </div>
+  </div>
+
+  <div class="content-panel" style="background:#ffffff;border:1px solid #F3F4F6;border-radius:8px;padding:20px;margin-bottom:16px">
     <div class="panel-sub-hdr" style="font-size:12px;color:#6B7280;font-weight:600;text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px">Alert Notifications</div>
     <div style="font-size:12px;color:#9CA3AF;margin-bottom:14px">Notify your team on Slack or email when new critical findings or shadow AI are detected. Zero cost — uses Slack&#39;s free incoming webhooks and your existing email.</div>
     <div id="alert-saved" style="display:none;color:#16A34A;font-size:12px;margin-bottom:10px">&#10003; Alert settings saved</div>
@@ -5503,7 +5552,7 @@ function navTo(page) {{
   if (b) b.classList.add('sb-active');
   document.getElementById('main').scrollTop = 0;
   history.replaceState(null, '', '#' + page);
-  if (page === 'settings') {{ loadLiveScanConfig(); }}
+  if (page === 'settings') {{ loadLiveScanConfig(); loadBranding(); }}
   if (page === 'siem') {{ loadSiemConfig(); loadPsaConfig(); }}
   if (page === 'users') {{ loadUsers(); loadCustomerInfo(); }}
   if (page === 'alerts') {{ loadActiveIssues(); loadAlertEvents(); }}
@@ -7803,6 +7852,37 @@ function liveModeChanged() {{
     epInput.placeholder = 'https://api.openai.com/v1';
     modelInput.placeholder = 'gpt-4o';
   }}
+}}
+
+async function loadBranding() {{
+  try {{
+    const r = await fetch('/api/branding');
+    if (!r.ok) return;
+    const d = await r.json();
+    const set = (id, val) => {{ const el = document.getElementById(id); if (el && val) el.value = val; }};
+    set('brand-msp-name',   d.msp_name);
+    set('brand-logo-url',   d.logo_url);
+    set('brand-footer-text', d.footer_text);
+  }} catch (_) {{}}
+}}
+
+async function saveBranding() {{
+  const gv = id => document.getElementById(id)?.value?.trim() || '';
+  try {{
+    const r = await fetch('/api/branding', {{
+      method: 'POST',
+      headers: {{'Content-Type': 'application/json'}},
+      body: JSON.stringify({{
+        msp_name:    gv('brand-msp-name'),
+        logo_url:    gv('brand-logo-url'),
+        footer_text: gv('brand-footer-text'),
+      }}),
+    }});
+    if (r.ok) {{
+      const b = document.getElementById('branding-saved');
+      if (b) {{ b.style.display = ''; setTimeout(() => b.style.display = 'none', 3000); }}
+    }} else {{ alert('Save failed'); }}
+  }} catch (e) {{ alert('Save failed: ' + e); }}
 }}
 
 async function loadLiveScanConfig() {{
