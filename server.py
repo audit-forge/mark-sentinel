@@ -1175,6 +1175,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             '/api/fleet/mcp':        self._api_fleet_mcp,
             '/api/fleet/mcp/report': self._api_fleet_mcp_report,
             '/api/fleet/eu-ai-act-report': self._api_eu_ai_act_report,
+            '/api/psa/config':             self._api_get_psa_config,
             '/download/shortcut': self._serve_shortcut,
         }
         if path in static:
@@ -1277,6 +1278,10 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self._api_test_alert()
         elif path == '/api/alerts/psa/test':
             self._api_test_psa()
+        elif path == '/api/psa/config':
+            self._api_set_psa_config()
+        elif path.startswith('/api/psa/test/'):
+            self._api_test_psa_provider(path[len('/api/psa/test/'):].strip('/'))
         elif path == '/api/alerts/events/review-all':
             self._api_review_all_alerts()
         elif path.startswith('/api/alerts/events/') and path.endswith('/review'):
@@ -3506,6 +3511,121 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         except Exception as e:
             self._json({'ok': False, 'message': str(e)}, 500)
 
+    def _api_get_psa_config(self):
+        try:
+            from alerts import load_alert_config
+            cfg  = load_alert_config(ROOT / 'data' / 'alerts_config.json') or {}
+            psa  = cfg.get('psa', {})
+            _M   = '__set__'
+            cw   = psa.get('connectwise', {})
+            at   = psa.get('autotask', {})
+            hp   = psa.get('halopsa', {})
+            self._json({
+                'connectwise': {
+                    'enabled':       psa.get('provider') == 'connectwise',
+                    'site':          cw.get('site', ''),
+                    'company_id':    cw.get('company_id', ''),
+                    'public_key':    cw.get('public_key', ''),
+                    'private_key':   _M if cw.get('private_key') else '',
+                    'client_id':     cw.get('client_id', ''),
+                    'service_board': cw.get('service_board', ''),
+                    'company_name':  cw.get('company_name', ''),
+                },
+                'autotask': {
+                    'enabled':     psa.get('provider') == 'autotask',
+                    'zone':        at.get('zone', 'webservices2'),
+                    'username':    at.get('username', ''),
+                    'api_key':     _M if at.get('api_key') else '',
+                    'account_id':  str(at.get('account_id', '')),
+                    'queue_id':    str(at.get('queue_id', '')),
+                    'priority_id': at.get('priority_id', 1),
+                },
+                'halopsa': {
+                    'enabled':        psa.get('provider') == 'halopsa',
+                    'tenant':         hp.get('tenant', ''),
+                    'client_id':      hp.get('client_id', ''),
+                    'client_secret':  _M if hp.get('client_secret') else '',
+                    'ticket_type_id': hp.get('ticket_type_id', 1),
+                    'priority_id':    hp.get('priority_id', 1),
+                },
+            })
+        except Exception as e:
+            self._json({'error': str(e)}, 500)
+
+    def _api_set_psa_config(self):
+        length = _content_length(self.headers)
+        if not length:
+            self._send(400, b'Empty body', 'text/plain')
+            return
+        try:
+            body = json.loads(self.rfile.read(length))
+        except json.JSONDecodeError:
+            self._send(400, b'Invalid JSON', 'text/plain')
+            return
+        try:
+            from alerts import load_alert_config
+            path = ROOT / 'data' / 'alerts_config.json'
+            cfg  = load_alert_config(path) or {}
+            _M   = '__set__'
+
+            psa_id = body.get('id', '')
+            fields = body.get('fields', {})
+            enabled = body.get('enabled', False)
+
+            psa = cfg.setdefault('psa', {})
+            if enabled:
+                psa['provider'] = psa_id
+            elif psa.get('provider') == psa_id:
+                psa['provider'] = ''
+
+            def _restore(incoming, saved):
+                return saved if incoming == _M else (incoming or '')
+
+            existing_sub = psa.get(psa_id, {})
+            if psa_id == 'connectwise':
+                psa['connectwise'] = {
+                    'site':          str(fields.get('site', '')).strip(),
+                    'company_id':    str(fields.get('company_id', '')).strip(),
+                    'public_key':    str(fields.get('public_key', '')).strip(),
+                    'private_key':   _restore(fields.get('private_key', ''), existing_sub.get('private_key', '')),
+                    'client_id':     str(fields.get('client_id', '')).strip(),
+                    'service_board': str(fields.get('service_board', '')).strip(),
+                    'company_name':  str(fields.get('company_name', '')).strip(),
+                }
+            elif psa_id == 'autotask':
+                psa['autotask'] = {
+                    'zone':        str(fields.get('zone', 'webservices2')).strip(),
+                    'username':    str(fields.get('username', '')).strip(),
+                    'api_key':     _restore(fields.get('api_key', ''), existing_sub.get('api_key', '')),
+                    'account_id':  fields.get('account_id', ''),
+                    'queue_id':    fields.get('queue_id', ''),
+                    'priority_id': int(fields.get('priority_id', 1)),
+                }
+            elif psa_id == 'halopsa':
+                psa['halopsa'] = {
+                    'tenant':         str(fields.get('tenant', '')).strip(),
+                    'client_id':      str(fields.get('client_id', '')).strip(),
+                    'client_secret':  _restore(fields.get('client_secret', ''), existing_sub.get('client_secret', '')),
+                    'ticket_type_id': int(fields.get('ticket_type_id', 1)),
+                    'priority_id':    int(fields.get('priority_id', 1)),
+                }
+            path.write_text(json.dumps(cfg, indent=2), encoding='utf-8')
+            self._json({'ok': True})
+        except Exception as e:
+            self._json({'ok': False, 'error': str(e)}, 500)
+
+    def _api_test_psa_provider(self, psa_id: str):
+        try:
+            from alerts import load_alert_config
+            cfg = load_alert_config(ROOT / 'data' / 'alerts_config.json') or {}
+            psa = cfg.get('psa', {})
+            from connectors.psa_connector import test_connection
+            psa_cfg = {'provider': psa_id, psa_id: psa.get(psa_id, {})}
+            ok, msg = test_connection(psa_cfg)
+            self._json({'ok': ok, 'message': msg})
+        except Exception as e:
+            self._json({'ok': False, 'message': str(e)}, 500)
+
     def _api_eu_ai_act_report(self):
         try:
             import urllib.parse as _up
@@ -5071,68 +5191,6 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
         <button class="scan-btn" onclick="testAlert('email')" style="font-size:11px;padding:3px 10px;color:#4F46E5;border-color:#E5E7EB">Test</button>
       </div>
 
-      <div style="font-size:11px;color:#9CA3AF;grid-column:1/-1;border-top:1px solid #F3F4F6;margin:6px 0;padding-top:10px">PSA Ticketing — auto-create tickets when CRITICAL/HIGH findings are detected</div>
-
-      <label style="font-size:13px;color:#6B7280">PSA Provider</label>
-      <select id="psa-provider" class="form-input" style="width:220px" onchange="psaProviderChanged()">
-        <option value="">— Disabled —</option>
-        <option value="connectwise">ConnectWise Manage</option>
-        <option value="autotask">Autotask PSA</option>
-        <option value="halopsa">HaloPSA</option>
-      </select>
-
-      <div id="psa-cw" style="display:none;grid-column:1/-1">
-        <div style="display:grid;grid-template-columns:160px 1fr;gap:8px 16px;align-items:start;max-width:680px;margin-top:4px">
-          <label style="font-size:13px;color:#6B7280">Site</label>
-          <input id="psa-cw-site" type="text" class="form-input" placeholder="na.myconnectwise.net" style="width:280px;font-family:monospace;font-size:12px">
-          <label style="font-size:13px;color:#6B7280">Company ID</label>
-          <input id="psa-cw-company-id" type="text" class="form-input" placeholder="YourCompanyId" style="width:280px;font-family:monospace;font-size:12px">
-          <label style="font-size:13px;color:#6B7280">Public Key</label>
-          <input id="psa-cw-public-key" type="text" class="form-input" placeholder="Public API key" style="width:280px;font-family:monospace;font-size:12px">
-          <label style="font-size:13px;color:#6B7280">Private Key</label>
-          <input id="psa-cw-private-key" type="password" class="form-input" placeholder="Private API key" style="width:280px;font-family:monospace;font-size:12px">
-          <label style="font-size:13px;color:#6B7280">Client ID</label>
-          <input id="psa-cw-client-id" type="text" class="form-input" placeholder="UUID from developer.connectwise.com" style="width:280px;font-family:monospace;font-size:12px">
-          <label style="font-size:13px;color:#6B7280">Service Board</label>
-          <input id="psa-cw-board" type="text" class="form-input" placeholder="Service Requests" style="width:280px;font-family:monospace;font-size:12px">
-          <label style="font-size:13px;color:#6B7280">Company Name</label>
-          <input id="psa-cw-company-name" type="text" class="form-input" placeholder="Client company identifier" style="width:280px;font-family:monospace;font-size:12px">
-        </div>
-      </div>
-
-      <div id="psa-at" style="display:none;grid-column:1/-1">
-        <div style="display:grid;grid-template-columns:160px 1fr;gap:8px 16px;align-items:start;max-width:680px;margin-top:4px">
-          <label style="font-size:13px;color:#6B7280">Zone</label>
-          <input id="psa-at-zone" type="text" class="form-input" placeholder="webservices2" style="width:180px;font-family:monospace;font-size:12px">
-          <label style="font-size:13px;color:#6B7280">Username</label>
-          <input id="psa-at-username" type="text" class="form-input" placeholder="api@yourcompany.com" style="width:280px;font-family:monospace;font-size:12px">
-          <label style="font-size:13px;color:#6B7280">API Key</label>
-          <input id="psa-at-api-key" type="password" class="form-input" placeholder="Autotask API key" style="width:280px;font-family:monospace;font-size:12px">
-          <label style="font-size:13px;color:#6B7280">Account ID</label>
-          <input id="psa-at-account-id" type="text" class="form-input" placeholder="Numeric client account ID" style="width:200px;font-family:monospace;font-size:12px">
-          <label style="font-size:13px;color:#6B7280">Queue ID</label>
-          <input id="psa-at-queue-id" type="text" class="form-input" placeholder="Numeric queue ID" style="width:200px;font-family:monospace;font-size:12px">
-        </div>
-      </div>
-
-      <div id="psa-hp" style="display:none;grid-column:1/-1">
-        <div style="display:grid;grid-template-columns:160px 1fr;gap:8px 16px;align-items:start;max-width:680px;margin-top:4px">
-          <label style="font-size:13px;color:#6B7280">Tenant</label>
-          <input id="psa-hp-tenant" type="text" class="form-input" placeholder="yourcompany (before .halopsa.com)" style="width:280px;font-family:monospace;font-size:12px">
-          <label style="font-size:13px;color:#6B7280">Client ID</label>
-          <input id="psa-hp-client-id" type="text" class="form-input" placeholder="OAuth2 client ID" style="width:280px;font-family:monospace;font-size:12px">
-          <label style="font-size:13px;color:#6B7280">Client Secret</label>
-          <input id="psa-hp-client-secret" type="password" class="form-input" placeholder="OAuth2 client secret" style="width:280px;font-family:monospace;font-size:12px">
-          <label style="font-size:13px;color:#6B7280">Ticket Type ID</label>
-          <input id="psa-hp-type-id" type="text" class="form-input" placeholder="1" style="width:120px;font-family:monospace;font-size:12px">
-        </div>
-      </div>
-
-      <div id="psa-test-row" style="display:none;grid-column:1/-1;margin-top:4px">
-        <button class="scan-btn" onclick="testPsa()" style="font-size:11px;padding:3px 10px;color:#4F46E5;border-color:#E5E7EB">Test PSA Connection</button>
-        <span id="psa-test-result" style="display:none;font-size:12px;margin-left:10px"></span>
-      </div>
-
       <div style="font-size:11px;color:#9CA3AF;grid-column:1/-1;border-top:1px solid #F3F4F6;margin:6px 0;padding-top:10px">Trigger Events</div>
 
       <label style="font-size:13px;color:#6B7280">Alert when</label>
@@ -5167,6 +5225,13 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
     Connect Arckon to your security stack. Findings are forwarded automatically when a scan completes.
     Configure each integration below, then click Test to verify connectivity.
   </p>
+
+  <div style="font-size:11px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:#6B7280;margin-bottom:12px">PSA &amp; Ticketing</div>
+  <p style="color:#6B7280;font-size:13px;margin-top:-8px;margin-bottom:16px">Auto-create service tickets when new CRITICAL or HIGH findings are detected. Enable one PSA to activate.</p>
+  <div id="psa-save-banner" style="display:none;background:#D1FAE5;color:#065F46;border:1px solid #6EE7B7;border-radius:6px;padding:10px 16px;margin-bottom:16px;font-size:13px">&#10003; PSA settings saved</div>
+  <div id="psa-cards" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(480px,1fr));gap:20px;margin-bottom:32px"></div>
+
+  <div style="font-size:11px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:#6B7280;margin-bottom:12px">SIEM &amp; Log Management</div>
   <div id="siem-save-banner" style="display:none;background:#D1FAE5;color:#065F46;border:1px solid #6EE7B7;border-radius:6px;padding:10px 16px;margin-bottom:16px;font-size:13px">&#10003; Settings saved</div>
   <div id="siem-cards" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(480px,1fr));gap:20px"></div>
   </div>
@@ -5402,7 +5467,7 @@ function navTo(page) {{
   document.getElementById('main').scrollTop = 0;
   history.replaceState(null, '', '#' + page);
   if (page === 'settings') {{ loadLiveScanConfig(); }}
-  if (page === 'siem') {{ loadSiemConfig(); }}
+  if (page === 'siem') {{ loadSiemConfig(); loadPsaConfig(); }}
   if (page === 'users') {{ loadUsers(); loadCustomerInfo(); }}
   if (page === 'alerts') {{ loadActiveIssues(); loadAlertEvents(); }}
   if (page === 'probe') {{
@@ -7260,6 +7325,136 @@ function renderRiskRegister() {{
   </table><div style="font-size:11px;color:#9CA3AF;margin-bottom:8px">${{rows.length}} finding${{rows.length!==1?'s':''}} · hover device count for affected hostnames</div>`;
 }}
 
+// ── PSA integrations ─────────────────────────────────────────────────────────
+
+const PSA_DEFS = [
+  {{id:'connectwise', name:'ConnectWise Manage', icon:'&#128736;', color:'#E31837',
+    desc:'Auto-create service tickets on new CRITICAL/HIGH findings. Uses the ConnectWise Manage REST API.',
+    howto:'Settings → My Company → API Keys. Register a client ID at developer.connectwise.com.',
+    fields:[
+      {{key:'site',          label:'Site',           type:'text',     ph:'na.myconnectwise.net'}},
+      {{key:'company_id',    label:'Company ID',     type:'text',     ph:'YourCompanyId'}},
+      {{key:'public_key',    label:'Public Key',     type:'text',     ph:'API public key'}},
+      {{key:'private_key',   label:'Private Key',    type:'password', ph:'API private key'}},
+      {{key:'client_id',     label:'Client ID',      type:'text',     ph:'UUID from developer.connectwise.com'}},
+      {{key:'service_board', label:'Service Board',  type:'text',     ph:'Service Requests'}},
+      {{key:'company_name',  label:'Company Name',   type:'text',     ph:'Client company identifier'}},
+    ]}},
+  {{id:'autotask', name:'Autotask PSA', icon:'&#128203;', color:'#0077CC',
+    desc:'Auto-create tickets in Autotask when new CRITICAL/HIGH AI security findings are detected.',
+    howto:'Admin → Resources → API User (not system) → Add resource. Enable API access and copy the generated key.',
+    fields:[
+      {{key:'zone',        label:'Zone',        type:'text', ph:'webservices2  (check your login URL)'}},
+      {{key:'username',    label:'Username',    type:'text', ph:'api-user@yourcompany.com'}},
+      {{key:'api_key',     label:'API Key',     type:'password', ph:'API secret key'}},
+      {{key:'account_id',  label:'Account ID',  type:'text', ph:'Numeric client account ID'}},
+      {{key:'queue_id',    label:'Queue ID',    type:'text', ph:'Numeric ticket queue ID'}},
+    ]}},
+  {{id:'halopsa', name:'HaloPSA', icon:'&#128994;', color:'#00B050',
+    desc:'Auto-create HaloPSA tickets when new CRITICAL/HIGH AI security findings are detected.',
+    howto:'HaloPSA → Configuration → Integrations → HaloPSA API → New Application → Client Credentials.',
+    fields:[
+      {{key:'tenant',         label:'Tenant',         type:'text',     ph:'yourcompany  (before .halopsa.com)'}},
+      {{key:'client_id',      label:'Client ID',      type:'text',     ph:'OAuth2 client ID'}},
+      {{key:'client_secret',  label:'Client Secret',  type:'password', ph:'OAuth2 client secret'}},
+      {{key:'ticket_type_id', label:'Ticket Type ID', type:'text',     ph:'1'}},
+    ]}},
+];
+
+var _psaCfg = {{}};
+
+async function loadPsaConfig() {{
+  try {{
+    const r = await fetch('/api/psa/config');
+    if (!r.ok) return;
+    _psaCfg = await r.json();
+    renderPsaCards();
+  }} catch (_) {{}}
+}}
+
+function renderPsaCards() {{
+  const container = document.getElementById('psa-cards');
+  if (!container) return;
+  container.innerHTML = PSA_DEFS.map(def => {{
+    const cfg     = _psaCfg[def.id] || {{}};
+    const enabled = !!cfg.enabled;
+
+    const fieldsHtml = def.fields.map(f => {{
+      const val = f.type === 'password' && cfg[f.key] ? '__set__' : (cfg[f.key] || '');
+      return `<div style="display:flex;align-items:center;gap:10px;padding:5px 0">
+        <label style="font-size:13px;color:#374151;min-width:140px;flex-shrink:0">${{f.label}}</label>
+        <input type="${{f.type === 'password' ? 'password' : 'text'}}" class="form-input psa-field"
+          data-psa="${{def.id}}" data-key="${{f.key}}" value="${{esc(String(val))}}" placeholder="${{f.ph || ''}}"
+          style="flex:1;font-size:13px;font-family:${{f.type === 'password' ? 'monospace' : 'inherit'}}">
+      </div>`;
+    }}).join('');
+
+    return `
+    <div style="background:#fff;border:1px solid #E5E7EB;border-radius:8px;overflow:hidden">
+      <div style="display:flex;align-items:center;gap:12px;padding:14px 18px;background:#F9FAFB;border-bottom:1px solid #E5E7EB">
+        <span style="font-size:22px">${{def.icon}}</span>
+        <div style="flex:1">
+          <div style="font-weight:700;font-size:15px;color:#111827">${{def.name}}</div>
+          <div style="font-size:12px;color:#6B7280;margin-top:2px">${{def.desc}}</div>
+        </div>
+        <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:12px;color:#374151;font-weight:600;white-space:nowrap">
+          <input type="checkbox" id="psa-enable-${{def.id}}" ${{enabled ? 'checked' : ''}}
+            onchange="savePsaConfig('${{def.id}}')">
+          Enable
+        </label>
+      </div>
+      <div style="padding:14px 18px">
+        ${{fieldsHtml}}
+        <div style="font-size:11px;color:#9CA3AF;margin-top:10px;line-height:1.5">${{def.howto}}</div>
+        <div style="display:flex;gap:10px;margin-top:14px;align-items:center">
+          <button class="scan-btn" onclick="savePsaConfig('${{def.id}}')" style="color:#16A34A;border-color:#238636">&#10003; Save</button>
+          <button class="scan-btn" onclick="testPsaConnection('${{def.id}}',this)" style="color:#4F46E5;border-color:#C7D2FE">&#9654; Test</button>
+          <span id="psa-test-${{def.id}}" style="font-size:13px;color:#6B7280"></span>
+        </div>
+      </div>
+    </div>`;
+  }}).join('');
+}}
+
+async function savePsaConfig(psaId) {{
+  const fields = {{}};
+  document.querySelectorAll(`.psa-field[data-psa="${{psaId}}"]`).forEach(el => {{
+    fields[el.dataset.key] = el.value;
+  }});
+  const enabled = document.getElementById('psa-enable-' + psaId)?.checked ?? false;
+  try {{
+    const r = await fetch('/api/psa/config', {{
+      method: 'POST',
+      headers: {{'Content-Type': 'application/json'}},
+      body: JSON.stringify({{id: psaId, enabled, fields}}),
+    }});
+    if (r.ok) {{
+      _psaCfg[psaId] = {{...(_psaCfg[psaId] || {{}}), ...fields, enabled}};
+      const banner = document.getElementById('psa-save-banner');
+      if (banner) {{ banner.style.display = ''; setTimeout(() => banner.style.display = 'none', 3000); }}
+    }} else {{ alert('Save failed'); }}
+  }} catch (e) {{ alert('Save failed: ' + e); }}
+}}
+
+async function testPsaConnection(psaId, btn) {{
+  const el = document.getElementById('psa-test-' + psaId);
+  if (el) el.textContent = 'Testing…';
+  btn.disabled = true;
+  try {{
+    const r = await fetch('/api/psa/test/' + psaId, {{method: 'POST'}});
+    const d = await r.json();
+    if (el) {{
+      el.textContent = (d.ok ? '&#10003; ' : '&#10007; ') + d.message;
+      el.style.color = d.ok ? '#16A34A' : '#DC2626';
+    }}
+  }} catch (e) {{
+    if (el) {{ el.textContent = 'Error: ' + e; el.style.color = '#DC2626'; }}
+  }}
+  btn.disabled = false;
+}}
+
+loadPsaConfig();
+
 // ── SIEM integrations ────────────────────────────────────────────────────────
 
 const SIEM_DEFS = [
@@ -7511,28 +7706,6 @@ async function loadAlertConfig() {{
     v('alert-smtp-pass', c.email?.smtp_pass || '');
     v('alert-email-from', c.email?.from || '');
     v('alert-email-to',   c.email?.to   || '');
-    const psa = c.psa || {{}};
-    const provEl = document.getElementById('psa-provider');
-    if (provEl) {{ provEl.value = psa.provider || ''; psaProviderChanged(); }}
-    const cw = psa.connectwise || {{}};
-    v('psa-cw-site',         cw.site          || '');
-    v('psa-cw-company-id',   cw.company_id    || '');
-    v('psa-cw-public-key',   cw.public_key    || '');
-    v('psa-cw-private-key',  cw.private_key   || '');
-    v('psa-cw-client-id',    cw.client_id     || '');
-    v('psa-cw-board',        cw.service_board || '');
-    v('psa-cw-company-name', cw.company_name  || '');
-    const at = psa.autotask || {{}};
-    v('psa-at-zone',       at.zone       || 'webservices2');
-    v('psa-at-username',   at.username   || '');
-    v('psa-at-api-key',    at.api_key    || '');
-    v('psa-at-account-id', at.account_id || '');
-    v('psa-at-queue-id',   at.queue_id   || '');
-    const hp = psa.halopsa || {{}};
-    v('psa-hp-tenant',        hp.tenant         || '');
-    v('psa-hp-client-id',     hp.client_id      || '');
-    v('psa-hp-client-secret', hp.client_secret  || '');
-    v('psa-hp-type-id',       hp.ticket_type_id || '1');
     const t = c.triggers || {{}};
     const cb = (id, val) => {{ const el = document.getElementById(id); if (el) el.checked = val !== false; }};
     cb('trig-crit',           t.new_critical);
@@ -7621,31 +7794,6 @@ async function runLiveScan(btn) {{
   finally {{ btn.disabled = false; btn.textContent = orig; }}
 }}
 
-function psaProviderChanged() {{
-  const prov = document.getElementById('psa-provider')?.value || '';
-  const show = (id, vis) => {{ const el = document.getElementById(id); if (el) el.style.display = vis ? '' : 'none'; }};
-  show('psa-cw',       prov === 'connectwise');
-  show('psa-at',       prov === 'autotask');
-  show('psa-hp',       prov === 'halopsa');
-  show('psa-test-row', prov !== '');
-}}
-
-async function testPsa() {{
-  const res = document.getElementById('psa-test-result');
-  if (res) {{ res.style.display = 'inline'; res.style.color = '#6B7280'; res.textContent = 'Testing…'; }}
-  try {{
-    const r = await fetch('/api/alerts/psa/test', {{ method: 'POST', headers: {{'Content-Type': 'application/json'}}, body: '{{}}' }});
-    const d = await r.json();
-    if (res) {{
-      res.style.color = d.ok ? '#16A34A' : '#DC2626';
-      res.textContent = (d.ok ? '✓ ' : '✗ ') + d.message;
-      setTimeout(() => res.style.display = 'none', 8000);
-    }}
-  }} catch(e) {{
-    if (res) {{ res.style.color = '#DC2626'; res.textContent = '✗ ' + e; }}
-  }}
-}}
-
 async function saveAlertConfig() {{
   const gv = id => document.getElementById(id)?.value?.trim() || '';
   const body = {{
@@ -7660,31 +7808,6 @@ async function saveAlertConfig() {{
       smtp_pass: document.getElementById('alert-smtp-pass')?.value || '',
       from:      gv('alert-email-from'),
       to:        gv('alert-email-to'),
-    }},
-    psa: {{
-      provider: gv('psa-provider'),
-      connectwise: {{
-        site:          gv('psa-cw-site'),
-        company_id:    gv('psa-cw-company-id'),
-        public_key:    gv('psa-cw-public-key'),
-        private_key:   document.getElementById('psa-cw-private-key')?.value || '',
-        client_id:     gv('psa-cw-client-id'),
-        service_board: gv('psa-cw-board'),
-        company_name:  gv('psa-cw-company-name'),
-      }},
-      autotask: {{
-        zone:       gv('psa-at-zone') || 'webservices2',
-        username:   gv('psa-at-username'),
-        api_key:    document.getElementById('psa-at-api-key')?.value || '',
-        account_id: gv('psa-at-account-id'),
-        queue_id:   gv('psa-at-queue-id'),
-      }},
-      halopsa: {{
-        tenant:         gv('psa-hp-tenant'),
-        client_id:      gv('psa-hp-client-id'),
-        client_secret:  document.getElementById('psa-hp-client-secret')?.value || '',
-        ticket_type_id: parseInt(gv('psa-hp-type-id') || '1', 10),
-      }},
     }},
     triggers: {{
       new_critical:          document.getElementById('trig-crit')?.checked           ?? true,
