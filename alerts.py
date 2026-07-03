@@ -526,9 +526,9 @@ def _format_text(payload: dict) -> str:
         return (f"RiskRaven: Arckon — Shadow AI Detected\n"
                 f"Device: {device}\n"
                 f"Service: {service}" + (f" ({host})" if host else '') + "\n"
-                f"Review in the AI Asset Inventory and approve or remove this asset.")
+                "Review in the AI Asset Inventory and approve or remove this asset.")
     if ev == 'test_alert':
-        return f"RiskRaven: Arckon — Test alert. Alerts are working correctly."
+        return "RiskRaven: Arckon — Test alert. Alerts are working correctly."
     sev    = payload.get('severity', 'HIGH')
     prefix = 'CRITICAL Finding' if sev == 'CRITICAL' else 'HIGH Finding'
     check  = payload.get('check_id', '')

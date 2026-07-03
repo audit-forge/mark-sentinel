@@ -68,7 +68,6 @@ def generate_eu_ai_act_report(devices: list[dict], org_name: str = '') -> str:
 
     # Score each article
     article_rows = []
-    total_articles = len(_ARTICLES)
     compliant_count = 0
     gap_count = 0
     atrisk_count = 0
