@@ -195,7 +195,7 @@ def _halo_get_token(cfg: dict) -> Optional[str]:
         'grant_type':    'client_credentials',
         'client_id':     cfg.get('client_id', ''),
         'client_secret': cfg.get('client_secret', ''),
-        'scope':         'all',
+        'scope':         'all:standard',
     }).encode()
     try:
         req = urllib.request.Request(
