@@ -1174,6 +1174,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             '/api/fleet/shadow':  self._api_fleet_shadow,
             '/api/fleet/mcp':        self._api_fleet_mcp,
             '/api/fleet/mcp/report': self._api_fleet_mcp_report,
+            '/api/fleet/eu-ai-act-report': self._api_eu_ai_act_report,
             '/download/shortcut': self._serve_shortcut,
         }
         if path in static:
@@ -1274,6 +1275,8 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self._api_set_alert_config()
         elif path == '/api/alerts/test':
             self._api_test_alert()
+        elif path == '/api/alerts/psa/test':
+            self._api_test_psa()
         elif path == '/api/alerts/events/review-all':
             self._api_review_all_alerts()
         elif path.startswith('/api/alerts/events/') and path.endswith('/review'):
@@ -3494,6 +3497,32 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         except Exception as e:
             self._json({'ok': False, 'message': str(e)}, 500)
 
+    def _api_test_psa(self):
+        try:
+            from alerts import load_alert_config, send_test_psa
+            cfg = load_alert_config(ROOT / 'data' / 'alerts_config.json') or {}
+            ok, msg = send_test_psa(cfg)
+            self._json({'ok': ok, 'message': msg})
+        except Exception as e:
+            self._json({'ok': False, 'message': str(e)}, 500)
+
+    def _api_eu_ai_act_report(self):
+        try:
+            import urllib.parse as _up
+            qs       = _up.parse_qs(_up.urlparse(self.path).query)
+            org_name = qs.get('org', [''])[0]
+            store    = self._store()
+            devices  = store.get_fleet_device_list()
+            enriched = []
+            for d in devices:
+                rep = store.get_latest_report(d['device_id'])
+                enriched.append({**d, '_report': rep})
+            from eu_ai_act_report import generate_eu_ai_act_report
+            html_out = generate_eu_ai_act_report(enriched, org_name)
+            self._send(200, html_out.encode(), 'text/html; charset=utf-8')
+        except Exception as e:
+            self._send(500, f'Report generation failed: {e}'.encode(), 'text/plain')
+
     # ── Alert event log API ───────────────────────────────────────────────────
 
     def _api_get_alert_events(self):
@@ -5042,6 +5071,68 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
         <button class="scan-btn" onclick="testAlert('email')" style="font-size:11px;padding:3px 10px;color:#4F46E5;border-color:#E5E7EB">Test</button>
       </div>
 
+      <div style="font-size:11px;color:#9CA3AF;grid-column:1/-1;border-top:1px solid #F3F4F6;margin:6px 0;padding-top:10px">PSA Ticketing — auto-create tickets when CRITICAL/HIGH findings are detected</div>
+
+      <label style="font-size:13px;color:#6B7280">PSA Provider</label>
+      <select id="psa-provider" class="form-input" style="width:220px" onchange="psaProviderChanged()">
+        <option value="">— Disabled —</option>
+        <option value="connectwise">ConnectWise Manage</option>
+        <option value="autotask">Autotask PSA</option>
+        <option value="halopsa">HaloPSA</option>
+      </select>
+
+      <div id="psa-cw" style="display:none;grid-column:1/-1">
+        <div style="display:grid;grid-template-columns:160px 1fr;gap:8px 16px;align-items:start;max-width:680px;margin-top:4px">
+          <label style="font-size:13px;color:#6B7280">Site</label>
+          <input id="psa-cw-site" type="text" class="form-input" placeholder="na.myconnectwise.net" style="width:280px;font-family:monospace;font-size:12px">
+          <label style="font-size:13px;color:#6B7280">Company ID</label>
+          <input id="psa-cw-company-id" type="text" class="form-input" placeholder="YourCompanyId" style="width:280px;font-family:monospace;font-size:12px">
+          <label style="font-size:13px;color:#6B7280">Public Key</label>
+          <input id="psa-cw-public-key" type="text" class="form-input" placeholder="Public API key" style="width:280px;font-family:monospace;font-size:12px">
+          <label style="font-size:13px;color:#6B7280">Private Key</label>
+          <input id="psa-cw-private-key" type="password" class="form-input" placeholder="Private API key" style="width:280px;font-family:monospace;font-size:12px">
+          <label style="font-size:13px;color:#6B7280">Client ID</label>
+          <input id="psa-cw-client-id" type="text" class="form-input" placeholder="UUID from developer.connectwise.com" style="width:280px;font-family:monospace;font-size:12px">
+          <label style="font-size:13px;color:#6B7280">Service Board</label>
+          <input id="psa-cw-board" type="text" class="form-input" placeholder="Service Requests" style="width:280px;font-family:monospace;font-size:12px">
+          <label style="font-size:13px;color:#6B7280">Company Name</label>
+          <input id="psa-cw-company-name" type="text" class="form-input" placeholder="Client company identifier" style="width:280px;font-family:monospace;font-size:12px">
+        </div>
+      </div>
+
+      <div id="psa-at" style="display:none;grid-column:1/-1">
+        <div style="display:grid;grid-template-columns:160px 1fr;gap:8px 16px;align-items:start;max-width:680px;margin-top:4px">
+          <label style="font-size:13px;color:#6B7280">Zone</label>
+          <input id="psa-at-zone" type="text" class="form-input" placeholder="webservices2" style="width:180px;font-family:monospace;font-size:12px">
+          <label style="font-size:13px;color:#6B7280">Username</label>
+          <input id="psa-at-username" type="text" class="form-input" placeholder="api@yourcompany.com" style="width:280px;font-family:monospace;font-size:12px">
+          <label style="font-size:13px;color:#6B7280">API Key</label>
+          <input id="psa-at-api-key" type="password" class="form-input" placeholder="Autotask API key" style="width:280px;font-family:monospace;font-size:12px">
+          <label style="font-size:13px;color:#6B7280">Account ID</label>
+          <input id="psa-at-account-id" type="text" class="form-input" placeholder="Numeric client account ID" style="width:200px;font-family:monospace;font-size:12px">
+          <label style="font-size:13px;color:#6B7280">Queue ID</label>
+          <input id="psa-at-queue-id" type="text" class="form-input" placeholder="Numeric queue ID" style="width:200px;font-family:monospace;font-size:12px">
+        </div>
+      </div>
+
+      <div id="psa-hp" style="display:none;grid-column:1/-1">
+        <div style="display:grid;grid-template-columns:160px 1fr;gap:8px 16px;align-items:start;max-width:680px;margin-top:4px">
+          <label style="font-size:13px;color:#6B7280">Tenant</label>
+          <input id="psa-hp-tenant" type="text" class="form-input" placeholder="yourcompany (before .halopsa.com)" style="width:280px;font-family:monospace;font-size:12px">
+          <label style="font-size:13px;color:#6B7280">Client ID</label>
+          <input id="psa-hp-client-id" type="text" class="form-input" placeholder="OAuth2 client ID" style="width:280px;font-family:monospace;font-size:12px">
+          <label style="font-size:13px;color:#6B7280">Client Secret</label>
+          <input id="psa-hp-client-secret" type="password" class="form-input" placeholder="OAuth2 client secret" style="width:280px;font-family:monospace;font-size:12px">
+          <label style="font-size:13px;color:#6B7280">Ticket Type ID</label>
+          <input id="psa-hp-type-id" type="text" class="form-input" placeholder="1" style="width:120px;font-family:monospace;font-size:12px">
+        </div>
+      </div>
+
+      <div id="psa-test-row" style="display:none;grid-column:1/-1;margin-top:4px">
+        <button class="scan-btn" onclick="testPsa()" style="font-size:11px;padding:3px 10px;color:#4F46E5;border-color:#E5E7EB">Test PSA Connection</button>
+        <span id="psa-test-result" style="display:none;font-size:12px;margin-left:10px"></span>
+      </div>
+
       <div style="font-size:11px;color:#9CA3AF;grid-column:1/-1;border-top:1px solid #F3F4F6;margin:6px 0;padding-top:10px">Trigger Events</div>
 
       <label style="font-size:13px;color:#6B7280">Alert when</label>
@@ -5129,6 +5220,19 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
         {_btn_technical_pdf}
       </div>
     </div>
+  </div>
+
+  <div style="font-size:11px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:#6B7280;margin-bottom:12px">Regulatory Reports</div>
+  <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:16px;margin-bottom:28px">
+
+    <div style="background:#ffffff;border:1px solid #F3F4F6;border-radius:8px;padding:20px">
+      <div style="font-size:15px;font-weight:700;color:#111827;margin-bottom:6px">&#127466;&#127482; EU AI Act Readiness</div>
+      <div style="font-size:12px;color:#6B7280;line-height:1.6;margin-bottom:16px">One-page compliance readiness report mapping scan findings to EU AI Act articles (Art. 9–53). Printable PDF for auditors and clients.</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="scan-btn" onclick="window.open('/api/fleet/eu-ai-act-report','_blank')" style="color:#16A34A;border-color:#238636;font-size:12px">&#128065; Open Report</button>
+      </div>
+    </div>
+
   </div>
 
   <div style="font-size:11px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:#6B7280;margin-bottom:12px">MCP &amp; Agent Governance Reports</div>
@@ -7407,6 +7511,28 @@ async function loadAlertConfig() {{
     v('alert-smtp-pass', c.email?.smtp_pass || '');
     v('alert-email-from', c.email?.from || '');
     v('alert-email-to',   c.email?.to   || '');
+    const psa = c.psa || {{}};
+    const provEl = document.getElementById('psa-provider');
+    if (provEl) {{ provEl.value = psa.provider || ''; psaProviderChanged(); }}
+    const cw = psa.connectwise || {{}};
+    v('psa-cw-site',         cw.site          || '');
+    v('psa-cw-company-id',   cw.company_id    || '');
+    v('psa-cw-public-key',   cw.public_key    || '');
+    v('psa-cw-private-key',  cw.private_key   || '');
+    v('psa-cw-client-id',    cw.client_id     || '');
+    v('psa-cw-board',        cw.service_board || '');
+    v('psa-cw-company-name', cw.company_name  || '');
+    const at = psa.autotask || {{}};
+    v('psa-at-zone',       at.zone       || 'webservices2');
+    v('psa-at-username',   at.username   || '');
+    v('psa-at-api-key',    at.api_key    || '');
+    v('psa-at-account-id', at.account_id || '');
+    v('psa-at-queue-id',   at.queue_id   || '');
+    const hp = psa.halopsa || {{}};
+    v('psa-hp-tenant',        hp.tenant         || '');
+    v('psa-hp-client-id',     hp.client_id      || '');
+    v('psa-hp-client-secret', hp.client_secret  || '');
+    v('psa-hp-type-id',       hp.ticket_type_id || '1');
     const t = c.triggers || {{}};
     const cb = (id, val) => {{ const el = document.getElementById(id); if (el) el.checked = val !== false; }};
     cb('trig-crit',           t.new_critical);
@@ -7495,6 +7621,31 @@ async function runLiveScan(btn) {{
   finally {{ btn.disabled = false; btn.textContent = orig; }}
 }}
 
+function psaProviderChanged() {{
+  const prov = document.getElementById('psa-provider')?.value || '';
+  const show = (id, vis) => {{ const el = document.getElementById(id); if (el) el.style.display = vis ? '' : 'none'; }};
+  show('psa-cw',       prov === 'connectwise');
+  show('psa-at',       prov === 'autotask');
+  show('psa-hp',       prov === 'halopsa');
+  show('psa-test-row', prov !== '');
+}}
+
+async function testPsa() {{
+  const res = document.getElementById('psa-test-result');
+  if (res) {{ res.style.display = 'inline'; res.style.color = '#6B7280'; res.textContent = 'Testing…'; }}
+  try {{
+    const r = await fetch('/api/alerts/psa/test', {{ method: 'POST', headers: {{'Content-Type': 'application/json'}}, body: '{{}}' }});
+    const d = await r.json();
+    if (res) {{
+      res.style.color = d.ok ? '#16A34A' : '#DC2626';
+      res.textContent = (d.ok ? '✓ ' : '✗ ') + d.message;
+      setTimeout(() => res.style.display = 'none', 8000);
+    }}
+  }} catch(e) {{
+    if (res) {{ res.style.color = '#DC2626'; res.textContent = '✗ ' + e; }}
+  }}
+}}
+
 async function saveAlertConfig() {{
   const gv = id => document.getElementById(id)?.value?.trim() || '';
   const body = {{
@@ -7509,6 +7660,31 @@ async function saveAlertConfig() {{
       smtp_pass: document.getElementById('alert-smtp-pass')?.value || '',
       from:      gv('alert-email-from'),
       to:        gv('alert-email-to'),
+    }},
+    psa: {{
+      provider: gv('psa-provider'),
+      connectwise: {{
+        site:          gv('psa-cw-site'),
+        company_id:    gv('psa-cw-company-id'),
+        public_key:    gv('psa-cw-public-key'),
+        private_key:   document.getElementById('psa-cw-private-key')?.value || '',
+        client_id:     gv('psa-cw-client-id'),
+        service_board: gv('psa-cw-board'),
+        company_name:  gv('psa-cw-company-name'),
+      }},
+      autotask: {{
+        zone:       gv('psa-at-zone') || 'webservices2',
+        username:   gv('psa-at-username'),
+        api_key:    document.getElementById('psa-at-api-key')?.value || '',
+        account_id: gv('psa-at-account-id'),
+        queue_id:   gv('psa-at-queue-id'),
+      }},
+      halopsa: {{
+        tenant:         gv('psa-hp-tenant'),
+        client_id:      gv('psa-hp-client-id'),
+        client_secret:  document.getElementById('psa-hp-client-secret')?.value || '',
+        ticket_type_id: parseInt(gv('psa-hp-type-id') || '1', 10),
+      }},
     }},
     triggers: {{
       new_critical:          document.getElementById('trig-crit')?.checked           ?? true,

@@ -65,8 +65,12 @@ def load_alert_config(path: Path) -> Optional[dict]:
 
 
 def load_alert_config_for_ui(path: Path) -> dict:
-    """Load config with password masked for safe return to the browser."""
+    """Load config with password/secret masked for safe return to the browser."""
     cfg = load_alert_config(path) or {}
+    psa_raw = cfg.get('psa', {})
+    cw  = psa_raw.get('connectwise', {})
+    at  = psa_raw.get('autotask', {})
+    hp  = psa_raw.get('halopsa', {})
     result = {
         'slack_webhook':  cfg.get('slack_webhook', ''),
         'gchat_webhook':  cfg.get('gchat_webhook', ''),
@@ -80,23 +84,54 @@ def load_alert_config_for_ui(path: Path) -> dict:
             'from':      cfg.get('email', {}).get('from', ''),
             'to':        cfg.get('email', {}).get('to', ''),
         },
+        'psa': {
+            'provider': psa_raw.get('provider', ''),
+            'connectwise': {
+                'site':          cw.get('site', ''),
+                'company_id':    cw.get('company_id', ''),
+                'public_key':    cw.get('public_key', ''),
+                'private_key':   _PASS_MASK if cw.get('private_key') else '',
+                'client_id':     cw.get('client_id', ''),
+                'service_board': cw.get('service_board', ''),
+                'company_name':  cw.get('company_name', ''),
+            },
+            'autotask': {
+                'zone':        at.get('zone', 'webservices2'),
+                'username':    at.get('username', ''),
+                'api_key':     _PASS_MASK if at.get('api_key') else '',
+                'account_id':  at.get('account_id', ''),
+                'queue_id':    at.get('queue_id', ''),
+                'priority_id': at.get('priority_id', 1),
+            },
+            'halopsa': {
+                'tenant':         hp.get('tenant', ''),
+                'client_id':      hp.get('client_id', ''),
+                'client_secret':  _PASS_MASK if hp.get('client_secret') else '',
+                'ticket_type_id': hp.get('ticket_type_id', 1),
+                'priority_id':    hp.get('priority_id', 1),
+            },
+        },
         'triggers': {**_DEFAULT_TRIGGERS, **cfg.get('triggers', {})},
     }
     return result
 
 
 def save_alert_config(path: Path, new_data: dict, existing_path: Path) -> None:
-    """Save alert config, preserving the SMTP password if masked placeholder sent."""
-    existing = load_alert_config(existing_path) or {}
-    email_new = new_data.get('email', {})
-    email_existing = existing.get('email', {})
+    """Save alert config, preserving masked secrets (SMTP password, PSA keys)."""
+    existing   = load_alert_config(existing_path) or {}
+    email_new  = new_data.get('email', {})
+    email_old  = existing.get('email', {})
+    psa_new    = new_data.get('psa', {})
+    psa_old    = existing.get('psa', {})
+    cw_new     = psa_new.get('connectwise', {})
+    cw_old     = psa_old.get('connectwise', {})
+    at_new     = psa_new.get('autotask', {})
+    at_old     = psa_old.get('autotask', {})
+    hp_new     = psa_new.get('halopsa', {})
+    hp_old     = psa_old.get('halopsa', {})
 
-    saved_pass = email_existing.get('smtp_pass', '')
-    incoming_pass = email_new.get('smtp_pass', '')
-    if incoming_pass == _PASS_MASK:
-        email_new['smtp_pass'] = saved_pass
-    elif incoming_pass == '':
-        email_new['smtp_pass'] = ''
+    def _restore(incoming, saved):
+        return saved if incoming == _PASS_MASK else (incoming or '')
 
     triggers_raw = new_data.get('triggers', {})
     clean = {
@@ -108,9 +143,36 @@ def save_alert_config(path: Path, new_data: dict, existing_path: Path) -> None:
             'smtp_host': str(email_new.get('smtp_host', '')).strip(),
             'smtp_port': int(email_new.get('smtp_port', 587)),
             'smtp_user': str(email_new.get('smtp_user', '')).strip(),
-            'smtp_pass': email_new.get('smtp_pass', ''),
+            'smtp_pass': _restore(email_new.get('smtp_pass', ''), email_old.get('smtp_pass', '')),
             'from':      str(email_new.get('from', '')).strip(),
             'to':        str(email_new.get('to', '')).strip(),
+        },
+        'psa': {
+            'provider': str(psa_new.get('provider', '')).strip(),
+            'connectwise': {
+                'site':          str(cw_new.get('site', '')).strip(),
+                'company_id':    str(cw_new.get('company_id', '')).strip(),
+                'public_key':    str(cw_new.get('public_key', '')).strip(),
+                'private_key':   _restore(cw_new.get('private_key', ''), cw_old.get('private_key', '')),
+                'client_id':     str(cw_new.get('client_id', '')).strip(),
+                'service_board': str(cw_new.get('service_board', '')).strip(),
+                'company_name':  str(cw_new.get('company_name', '')).strip(),
+            },
+            'autotask': {
+                'zone':        str(at_new.get('zone', 'webservices2')).strip(),
+                'username':    str(at_new.get('username', '')).strip(),
+                'api_key':     _restore(at_new.get('api_key', ''), at_old.get('api_key', '')),
+                'account_id':  at_new.get('account_id', ''),
+                'queue_id':    at_new.get('queue_id', ''),
+                'priority_id': int(at_new.get('priority_id', 1)),
+            },
+            'halopsa': {
+                'tenant':         str(hp_new.get('tenant', '')).strip(),
+                'client_id':      str(hp_new.get('client_id', '')).strip(),
+                'client_secret':  _restore(hp_new.get('client_secret', ''), hp_old.get('client_secret', '')),
+                'ticket_type_id': int(hp_new.get('ticket_type_id', 1)),
+                'priority_id':    int(hp_new.get('priority_id', 1)),
+            },
         },
         'triggers': {
             'new_critical':          bool(triggers_raw.get('new_critical', True)),
@@ -273,6 +335,18 @@ def send_test_alert(alert_cfg: dict, channel: str) -> tuple[bool, str]:
 
 # ── Delivery backends ─────────────────────────────────────────────────────────
 
+def send_test_psa(alert_cfg: dict) -> tuple[bool, str]:
+    """Test PSA connectivity. Returns (ok, message)."""
+    psa_cfg = alert_cfg.get('psa', {})
+    if not psa_cfg.get('provider'):
+        return False, 'No PSA provider configured'
+    try:
+        from connectors.psa_connector import test_connection
+        return test_connection(psa_cfg)
+    except Exception as e:
+        return False, f'PSA test failed: {e}'
+
+
 def _dispatch(alert_cfg: dict, payload: dict) -> list[str]:
     """Deliver alert to all configured channels. Returns list of channel names fired."""
     slack_url   = alert_cfg.get('slack_webhook', '').strip()
@@ -280,6 +354,7 @@ def _dispatch(alert_cfg: dict, payload: dict) -> list[str]:
     teams_url   = alert_cfg.get('teams_webhook', '').strip()
     webhook_url = alert_cfg.get('webhook_url', '').strip()
     email_cfg   = alert_cfg.get('email', {})
+    psa_cfg     = alert_cfg.get('psa', {})
     text        = _format_text(payload)
     fired: list[str] = []
     if slack_url:
@@ -297,7 +372,29 @@ def _dispatch(alert_cfg: dict, payload: dict) -> list[str]:
     if email_cfg.get('smtp_host') and email_cfg.get('to'):
         _send_email(email_cfg, _alert_subject(payload), text)
         fired.append('email')
+    if psa_cfg.get('provider') and payload.get('event', '').startswith('new_'):
+        _create_psa_ticket(psa_cfg, payload)
+        fired.append(f'psa_{psa_cfg["provider"]}')
     return fired
+
+
+def _create_psa_ticket(psa_cfg: dict, payload: dict) -> None:
+    try:
+        from connectors.psa_connector import create_ticket
+        finding = {
+            'check_id':    payload.get('check_id', ''),
+            'title':       payload.get('title', ''),
+            'severity':    payload.get('severity', 'HIGH'),
+            'description': payload.get('title', ''),
+        }
+        hostname = payload.get('device', 'Unknown')
+        ok, msg = create_ticket(psa_cfg, finding, hostname)
+        if ok:
+            log.info('PSA ticket created: %s', msg)
+        else:
+            log.error('PSA ticket creation failed: %s', msg)
+    except Exception as e:
+        log.error('PSA dispatch error: %s', e)
 
 
 def _post_slack(webhook_url: str, text: str, payload: dict) -> bool:
