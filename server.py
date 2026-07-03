@@ -1280,6 +1280,8 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self._api_test_psa()
         elif path == '/api/psa/config':
             self._api_set_psa_config()
+        elif path.startswith('/api/psa/test-ticket/'):
+            self._api_test_psa_ticket(path[len('/api/psa/test-ticket/'):].strip('/'))
         elif path.startswith('/api/psa/test/'):
             self._api_test_psa_provider(path[len('/api/psa/test/'):].strip('/'))
         elif path == '/api/alerts/events/review-all':
@@ -3638,6 +3640,25 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             from connectors.psa_connector import test_connection
             psa_cfg = {'provider': psa_id, psa_id: psa.get(psa_id, {})}
             ok, msg = test_connection(psa_cfg)
+            self._json({'ok': ok, 'message': msg})
+        except Exception as e:
+            self._json({'ok': False, 'message': str(e)}, 500)
+
+    def _api_test_psa_ticket(self, psa_id: str):
+        try:
+            from alerts import load_alert_config
+            cfg = load_alert_config(ROOT / 'data' / 'alerts_config.json') or {}
+            psa = cfg.get('psa', {})
+            from connectors.psa_connector import create_ticket
+            psa_cfg = {'provider': psa_id, psa_id: psa.get(psa_id, {})}
+            dummy_finding = {
+                'check_id':    'AI-DEPLOY-001',
+                'severity':    'HIGH',
+                'title':       'Test finding from Arckon',
+                'description': 'This is a test ticket created from the Arckon dashboard to verify PSA integration.',
+                'status':      'FAIL',
+            }
+            ok, msg = create_ticket(psa_cfg, dummy_finding, 'arckon-test')
             self._json({'ok': ok, 'message': msg})
         except Exception as e:
             self._json({'ok': False, 'message': str(e)}, 500)
@@ -7435,6 +7456,7 @@ function renderPsaCards() {{
         <div style="display:flex;gap:10px;margin-top:14px;align-items:center">
           <button class="scan-btn" onclick="savePsaConfig('${{def.id}}')" style="color:#16A34A;border-color:#238636">&#10003; Save</button>
           <button class="scan-btn" onclick="testPsaConnection('${{def.id}}',this)" style="color:#4F46E5;border-color:#C7D2FE">&#9654; Test</button>
+          <button class="scan-btn" onclick="testPsaTicket('${{def.id}}',this)" style="color:#CA8A04;border-color:#FDE68A">&#128203; Test Ticket</button>
           <span id="psa-test-${{def.id}}" style="font-size:13px;color:#6B7280"></span>
         </div>
       </div>
@@ -7471,6 +7493,23 @@ async function testPsaConnection(psaId, btn) {{
     const d = await r.json();
     if (el) {{
       el.textContent = (d.ok ? '&#10003; ' : '&#10007; ') + d.message;
+      el.style.color = d.ok ? '#16A34A' : '#DC2626';
+    }}
+  }} catch (e) {{
+    if (el) {{ el.textContent = 'Error: ' + e; el.style.color = '#DC2626'; }}
+  }}
+  btn.disabled = false;
+}}
+
+async function testPsaTicket(psaId, btn) {{
+  const el = document.getElementById('psa-test-' + psaId);
+  if (el) el.textContent = 'Creating test ticket…';
+  btn.disabled = true;
+  try {{
+    const r = await fetch('/api/psa/test-ticket/' + psaId, {{method: 'POST'}});
+    const d = await r.json();
+    if (el) {{
+      el.innerHTML = (d.ok ? '&#10003; ' : '&#10007; ') + d.message;
       el.style.color = d.ok ? '#16A34A' : '#DC2626';
     }}
   }} catch (e) {{
