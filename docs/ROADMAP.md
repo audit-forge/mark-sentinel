@@ -1,4 +1,4 @@
-# M.A.R.K. Sentinel — Product Roadmap
+# Arckon by RiskRaven — Product Roadmap
 
 This document captures planned features and the reasoning behind them.
 Items are organised by phase and theme. Priorities shift based on
@@ -54,13 +54,13 @@ assets with three states: **Approved**, **Under Review**, and **Unapproved**.
 Security teams can approve items directly from the dashboard; approvals are
 timestamped and attributed to the reviewer for audit trail purposes.
 
-This positions Sentinel directly against Credo AI, Govix, and ModelOp in the
+This positions Arckon directly against Credo AI, Govix, and ModelOp in the
 AI inventory category without adding new discovery infrastructure.
 
 ### Compliance Evidence Package Export
 Every compliance audit requires the same artifacts: scan history, framework
 mappings, finding details, and a signed attestation. Today those exist in
-Sentinel but require manual assembly. This feature bundles them into a
+Arckon but require manual assembly. This feature bundles them into a
 single downloadable ZIP containing:
 
 - All reports for the selected date range (PDF format)
@@ -75,7 +75,7 @@ for FedRAMP ATOs, HIPAA assessments, and SOC 2 audits.
 Two high-value framework additions added to existing check definitions:
 
 - **MITRE ATLAS** — the adversarial ML threat framework maintained by MITRE,
-  analogous to MITRE ATT&CK for AI systems. Maps Sentinel checks to specific
+  analogous to MITRE ATT&CK for AI systems. Maps Arckon checks to specific
   ATLAS tactics and techniques. Directly competitive with Ducara's ATLAS
   positioning.
 - **ISO/IEC 42001** — the international AI management system standard.
@@ -110,10 +110,10 @@ The agent communication infrastructure already supports on-demand scans;
 this adds scheduling state to the server and a simple UI configuration form.
 
 ### Cryptographic Report Signing
-Reports exported from Sentinel (PDF and HTML) are signed with a
+Reports exported from Arckon (PDF and HTML) are signed with a
 server-generated key. The signature is embedded in the document footer and
 verifiable against a published public key. This gives exported compliance
-evidence tamper-evidence — the document proves it came from Sentinel and has
+evidence tamper-evidence — the document proves it came from Arckon and has
 not been altered since export.
 
 Directly addresses the "cryptographic audit trails" capability from Claw GRC,
@@ -145,7 +145,7 @@ as "Coming Soon" in the probe tester; check infrastructure and UI are in place.
 A structured assessment workflow for evaluating the AI security posture of
 third-party vendors and AI service providers. The customer distributes a
 questionnaire; responses are scored against the AI-STIG framework and stored
-in Sentinel alongside internal scan data.
+in Arckon alongside internal scan data.
 
 This directly addresses Govix's "vendor AI assessment" capability and is a
 critical gap in the market — most organizations use AI APIs from third parties
@@ -166,7 +166,7 @@ pull-and-review overhead for teams running continuous compliance programmes.
 ---
 
 ## Phase 3 — Strategic (180+ Days)
-*Platform-level capabilities that expand Sentinel's total addressable market.*
+*Platform-level capabilities that expand Arckon's total addressable market.*
 
 ### AI Agent Identity Registry
 As organizations deploy more autonomous AI agents, managing agent identities
@@ -185,22 +185,22 @@ against configured AI endpoints — not just checking whether defenses exist
 (passive check), but actually probing them. Results show which defenses hold
 and which fail under real attack conditions.
 
-Competitive with Lakera, Protect AI, and Ducara. This moves Sentinel from
+Competitive with Lakera, Protect AI, and Ducara. This moves Arckon from
 audit-and-governance into active security testing — a meaningfully larger
 market.
 
 ### Network-Level DNS Query Integration
 **What it solves:** Even with agents installed on every managed device, any
-device without an agent is invisible to Sentinel — it can detect server-mode
+device without an agent is invisible to Arckon — it can detect server-mode
 AI via network probe, but cannot see outbound connections made by client-side
 AI tools (Claude CLI, Gemini CLI, ChatGPT, Copilot, etc.) on unmanaged
 machines.
 
 **How it works:** Most enterprise networks run a central DNS server. Every
 device on the network queries that DNS server before making any outbound
-connection. Sentinel integrates with the DNS server to identify every device
+connection. Arckon integrates with the DNS server to identify every device
 that contacted a known AI endpoint in a configurable lookback window — even
-devices with no Sentinel agent installed.
+devices with no Arckon agent installed.
 
 Supported integrations: Pi-hole, pfSense/OPNsense, Cisco Meraki, Ubiquiti
 UniFi, Windows DNS Server, Cisco Umbrella.
@@ -227,7 +227,7 @@ and a core positioning theme for next-generation AI governance platforms.
 A lightweight browser extension that can detect active connections to AI
 services from within the browser session — catching ChatGPT, Claude.ai,
 Gemini, Copilot and other web-based AI tools that have no local process or
-API key to detect. Reports back to the Sentinel agent on the same machine.
+API key to detect. Reports back to the Arckon agent on the same machine.
 Requires user consent and is opt-in per device.
 
 ### Router/Firewall API Polling (Network Appliance Sensor)

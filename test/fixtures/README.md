@@ -1,4 +1,4 @@
-# M.A.R.K. Sentinel — Test Fixture Specifications
+# Arckon by RiskRaven — Test Fixture Specifications
 
 **Purpose:** Define safe, self-contained test targets for each check category  
 **Phase:** Phase 0 — Design specs only (no code yet)  
@@ -8,7 +8,7 @@
 
 ## Overview
 
-M.A.R.K. Sentinel uses test fixtures to verify that checks produce correct results against known-good and known-bad configurations. Each fixture is a minimal, self-contained deployment representing a specific security state.
+Arckon by RiskRaven uses test fixtures to verify that checks produce correct results against known-good and known-bad configurations. Each fixture is a minimal, self-contained deployment representing a specific security state.
 
 ### Fixture Types
 
@@ -306,7 +306,7 @@ python test/run_fixture_validation.py --fixture deploy-hardened --expect-all-pas
 
 ### Canary Infrastructure
 The following canary domains/endpoints are reserved for fixture testing:
-- `canary.mark-sentinel.test` — local DNS entry for exfiltration detection tests
+- `canary.arckon.test` — local DNS entry for exfiltration detection tests
 - `127.0.0.100` — loopback alias for simulating blocked external endpoints
 
 These are local-only test addresses that can never accidentally reach the real internet.

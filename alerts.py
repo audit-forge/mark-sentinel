@@ -37,6 +37,8 @@ import smtplib
 import time
 import urllib.request
 from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+from email.mime.application import MIMEApplication
 from pathlib import Path
 from typing import Optional
 
@@ -505,6 +507,41 @@ def _send_email(cfg: dict, subject: str, body: str) -> bool:
         return True
     except Exception as e:
         log.error('email send failed: %s', e)
+        return False
+
+
+def send_email_with_attachment(cfg: dict, to_addr: str, subject: str, body_text: str,
+                                attachment_bytes: bytes, attachment_filename: str) -> bool:
+    """Same SMTP config shape as _send_email's 'email' block, but delivers
+    to an explicit recipient (to_addr) with a binary attachment — used for
+    scheduled per-client PDF report delivery, where the recipient is the
+    client org's own report_email, not the customer-wide alert 'to'."""
+    host      = cfg.get('smtp_host', 'smtp.gmail.com')
+    port      = int(cfg.get('smtp_port', 587))
+    user      = cfg.get('smtp_user', '')
+    password  = cfg.get('smtp_pass', '')
+    from_addr = cfg.get('from', user)
+    if not to_addr or not host or not user:
+        log.warning('send_email_with_attachment: SMTP not configured or no recipient — skipping "%s"', subject)
+        return False
+    msg = MIMEMultipart()
+    msg['Subject'] = subject
+    msg['From']    = from_addr
+    msg['To']      = to_addr
+    msg.attach(MIMEText(body_text, 'plain'))
+    part = MIMEApplication(attachment_bytes, Name=attachment_filename)
+    part['Content-Disposition'] = f'attachment; filename="{attachment_filename}"'
+    msg.attach(part)
+    try:
+        with smtplib.SMTP(host, port, timeout=30) as smtp:
+            smtp.ehlo()
+            smtp.starttls()
+            if user and password:
+                smtp.login(user, password)
+            smtp.sendmail(from_addr, [to_addr], msg.as_string())
+        return True
+    except Exception as e:
+        log.error('email with attachment send failed: %s', e)
         return False
 
 

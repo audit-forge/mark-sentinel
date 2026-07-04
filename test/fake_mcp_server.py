@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
 """
-Fake MCP server for Sentinel testing.
+Fake MCP server for Arckon testing.
 
 Simulates a real MCP (Model Context Protocol) server so you can verify
-that Sentinel's MCP discovery finds and inventories it correctly.
+that Arckon's MCP discovery finds and inventories it correctly.
 
-Run on any machine the Sentinel agent can reach:
+Run on any machine the Arckon agent can reach:
     python fake_mcp_server.py                  # default: port 3000, no auth
     python fake_mcp_server.py --port 8080      # different port
     python fake_mcp_server.py --auth           # require Authorization header
     python fake_mcp_server.py --name "CRM Bot" # custom server name
 
-Then click "Scan MCP Servers" on the Sentinel dashboard.
+Then click "Scan MCP Servers" on the Arckon dashboard.
 Expected result: a new entry in MCP & Agent Governance section showing
 this server's host:port, name, and the tools it exposes.
 """
@@ -96,29 +96,29 @@ def make_handler(server_name: str, require_auth: bool):
 
 
 def main():
-    ap = argparse.ArgumentParser(description='Fake MCP server for Sentinel testing')
+    ap = argparse.ArgumentParser(description='Fake MCP server for Arckon testing')
     ap.add_argument('--port', type=int, default=3000, help='Port to listen on (default: 3000)')
     ap.add_argument('--host', default='0.0.0.0', help='Bind address (default: 0.0.0.0)')
-    ap.add_argument('--auth', action='store_true', help='Require Bearer token auth (shows as Auth OK in Sentinel)')
-    ap.add_argument('--name', default='Fake MCP Server', help='Server name shown in Sentinel')
+    ap.add_argument('--auth', action='store_true', help='Require Bearer token auth (shows as Auth OK in Arckon)')
+    ap.add_argument('--name', default='Fake MCP Server', help='Server name shown in Arckon')
     args = ap.parse_args()
 
-    auth_label = 'AUTH REQUIRED' if args.auth else 'NO AUTH (will appear as high-risk in Sentinel)'
-    print('\nFake MCP server starting:')
+    auth_label = 'AUTH REQUIRED' if args.auth else 'NO AUTH (will appear as high-risk in Arckon)'
+    print(f'\nFake MCP server starting:')
     print(f'  Name  : {args.name}')
     print(f'  Listen: http://{args.host}:{args.port}')
     print(f'  Auth  : {auth_label}')
     print(f'  Tools : {len(TOOLS)} tools exposed')
-    print('\nExpected Sentinel behavior:')
-    print('  - Click "Scan MCP Servers" on the dashboard')
-    print('  - Wait ~45s for agents to complete the scan')
-    print('  - A new card should appear in MCP & Agent Governance')
+    print(f'\nExpected Arckon behavior:')
+    print(f'  - Click "Scan MCP Servers" on the dashboard')
+    print(f'  - Wait ~45s for agents to complete the scan')
+    print(f'  - A new card should appear in MCP & Agent Governance')
     print(f'  - It will show this host:{args.port}, "{args.name}", and the tool list')
     if not args.auth:
-        print('  - The card will have a RED "No Auth" badge and a warning')
+        print(f'  - The card will have a RED "No Auth" badge and a warning')
     else:
-        print('  - The card will have a GREEN "Auth OK" badge')
-    print('\nPress Ctrl+C to stop.\n')
+        print(f'  - The card will have a GREEN "Auth OK" badge')
+    print(f'\nPress Ctrl+C to stop.\n')
 
     handler = make_handler(args.name, args.auth)
     server  = HTTPServer((args.host, args.port), handler)

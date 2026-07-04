@@ -1,6 +1,6 @@
 # SMB Guide — Quick Start (Plain English)
 
-This guide helps a non-technical user run a basic M.A.R.K. Sentinel check and
+This guide helps a non-technical user run a basic Arckon by RiskRaven check and
 understand the results.
 
 Prerequisites

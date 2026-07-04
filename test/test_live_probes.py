@@ -319,7 +319,7 @@ class TestFullPipelineApiMode:
         sarif = json.loads(result.stdout)
         assert sarif["version"] == "2.1.0"
         run = sarif["runs"][0]
-        assert run["tool"]["driver"]["name"] == "M.A.R.K. Sentinel"
+        assert run["tool"]["driver"]["name"] == "Arckon by RiskRaven"
 
     def test_connection_error_graceful(self):
         """Unreachable endpoint should not crash — checks fall through to SKIP/error."""

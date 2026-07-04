@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>AUDIT LOG</h1>
+
+<div class="card">
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;flex-wrap:wrap;gap:10px">
+    <div class="card-title" style="margin-bottom:0">Platform Activity ({{ entries|length }})</div>
+    <a href="/audit-log/csv?customer_id={{ customer_id }}&action={{ action }}" download
+       style="font-size:12px;color:#16A34A;text-decoration:none;border:1px solid #238636;border-radius:4px;padding:5px 12px">&#8659; Export CSV</a>
+    <form method="get" action="/audit-log" style="display:flex;gap:8px;align-items:center">
+      <label style="font-size:14px;color:#6B7280;margin-bottom:0">Customer:</label>
+      <select name="customer_id" onchange="this.form.submit()" style="width:auto;padding:6px 12px;font-size:14px">
+        <option value="">All</option>
+        {% for c in customers %}
+        <option value="{{ c.id }}" {% if customer_id == c.id %}selected{% endif %}>{{ c.name }}</option>
+        {% endfor %}
+      </select>
+      <label style="font-size:14px;color:#6B7280;margin-bottom:0">Action:</label>
+      <select name="action" onchange="this.form.submit()" style="width:auto;padding:6px 12px;font-size:14px">
+        <option value="">All</option>
+        {% for a in actions %}
+        <option value="{{ a }}" {% if action == a %}selected{% endif %}>{{ a }}</option>
+        {% endfor %}
+      </select>
+    </form>
+  </div>
+  {% if entries %}
+  <table>
+    <thead>
+      <tr>
+        <th>Time</th>
+        <th>Actor</th>
+        <th>Role</th>
+        <th>Customer</th>
+        <th>Action</th>
+        <th>Target</th>
+        <th>Details</th>
+        <th>IP Address</th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for e in entries %}
+    <tr>
+      <td style="white-space:nowrap;color:#6B7280">{{ e.occurred_at_display }}</td>
+      <td>{{ e.actor_name or e.actor_id or '—' }}</td>
+      <td><span style="font-size:11px;color:#9CA3AF">{{ e.actor_role or '—' }}</span></td>
+      <td>{{ e.customer_id or '—' }}</td>
+      <td style="font-weight:600">{{ e.action or '—' }}</td>
+      <td>{{ e.target or '—' }}</td>
+      <td style="color:#6B7280">{{ e.details or '' }}</td>
+      <td style="color:#9CA3AF">{{ e.ip_address or '—' }}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p style="color:#6B7280;font-size:14px">No audit entries yet{% if customer_id or action %} matching this filter{% endif %}.</p>
+  {% endif %}
+</div>
+{% endblock %}

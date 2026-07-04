@@ -1,0 +1,15 @@
+{
+  "splunk": {
+    "hec_url": "http://splunk-test:8088",
+    "hec_token": "arckon-test-token-001",
+    "index": "main",
+    "sourcetype": "",
+    "verify_ssl": true,
+    "send_on": [
+      "critical",
+      "high",
+      "medium"
+    ],
+    "enabled": true
+  }
+}

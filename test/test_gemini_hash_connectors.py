@@ -216,21 +216,21 @@ class TestHashChatRequest:
     def test_safe_response_returned(self):
         server, host = _start_mock_hash(echo=False)
         try:
-            text, err = hash_request(host, "", "sentinel-test", "Hello")
+            text, err = hash_request(host, "", "arckon-test", "Hello")
         finally:
             server.shutdown()
         assert err == ""
         assert "cannot help" in text.lower()
 
     def test_connection_error_returns_error_string(self):
-        text, err = hash_request("http://127.0.0.1:19998", "", "sentinel-test", "hello")
+        text, err = hash_request("http://127.0.0.1:19998", "", "arckon-test", "hello")
         assert text == ""
         assert err != ""
 
     def test_bearer_token_accepted(self):
         server, host = _start_mock_hash(echo=False)
         try:
-            text, err = hash_request(host, "my-secret-token", "sentinel-test", "Hello")
+            text, err = hash_request(host, "my-secret-token", "arckon-test", "Hello")
         finally:
             server.shutdown()
         assert err == ""

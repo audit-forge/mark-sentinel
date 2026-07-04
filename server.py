@@ -1026,6 +1026,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             'email':       email,
             'role':        self.headers.get('X-Sentinel-User-Role', 'admin').strip(),
             'customer_id': customer_id,
+            'client_org_id': self.headers.get('X-Sentinel-Client-Org-ID', '').strip() or None,
         }
 
     def _session_user(self) -> dict | None:
@@ -1034,6 +1035,44 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             return proxy
         token = _get_session_cookie(self.headers)
         return _get_registry().get_session(token) if token else None
+
+    def _scoped_client_org(self) -> str | None:
+        """Return the effective client_org_id filter for this request.
+
+        A client_viewer's own client_org_id always wins — the ?client_org=
+        query param is ignored for that role so a scoped user can never
+        widen their own view by hand-editing the URL. An MSP admin (no
+        client_org_id on their session) may pass ?client_org=<id> to drill
+        into one client's fleet view from the /clients rollup; omit it (or
+        pass 'all') to see every device across every client, same as before
+        this feature existed."""
+        user = self._session_user()
+        own_org = user.get('client_org_id') if user else None
+        if own_org:
+            return own_org
+        from urllib.parse import parse_qs, urlparse as _up
+        qs = parse_qs(_up(self.path).query)
+        requested = (qs.get('client_org', [''])[0]).strip()
+        return requested if requested and requested != 'all' else None
+
+    # Paths a client_viewer session may reach — everything else 403s.
+    # Each entry here must have matching client_org_id filtering in its
+    # handler (grep for self._scoped_client_org() to verify before adding
+    # a new path). The rollup dashboard (/clients) is deliberately NOT
+    # here — that view spans every client org for the MSP and must stay
+    # admin-only.
+    _CLIENT_VIEWER_ALLOWED_EXACT = frozenset({'/', '/api/status', '/api/devices'})
+    _CLIENT_VIEWER_ALLOWED_PREFIX = ('/api/fleet/report',)
+
+    def _client_viewer_gate(self, path: str) -> bool:
+        """Return True if this request may proceed. Always True for non-
+        client_viewer sessions (MSP admins, agent/proxy auth, etc.)."""
+        user = self._session_user()
+        if not user or user.get('role') != 'client_viewer':
+            return True
+        if path in self._CLIENT_VIEWER_ALLOWED_EXACT:
+            return True
+        return any(path.startswith(p) for p in self._CLIENT_VIEWER_ALLOWED_PREFIX)
 
     def _store(self):
         user = self._session_user()
@@ -1075,7 +1114,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
 
     def _get_dashboard_customer(self) -> dict | None:
         """Return the customer record for the authenticated dashboard user, or None."""
-        user = self._get_dashboard_user()
+        user = self._session_user()
         if not user:
             return None
         cust_id = user.get('customer_id')
@@ -1150,8 +1189,22 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         if not self._require_dashboard_auth():
             return
 
+        # client_viewer is a read-only role scoped to one client org (the
+        # portal login an MSP hands its customer) — deny-by-default rather
+        # than trying to retrofit org-scoping into every one of this file's
+        # data-fetching routes individually. Only a small, explicitly
+        # reviewed allowlist is reachable; everything else 403s. This is
+        # deliberately more restrictive than "everything scoped" for now —
+        # extend the allowlist (with matching org-scoping in the handler)
+        # rather than removing this gate.
+        if not self._client_viewer_gate(path):
+            self._send(403, b'Forbidden: this account is read-only and scoped to one client.', 'text/plain')
+            return
+
         static = {
             '/':               self._serve_fleet,
+            '/clients':        self._serve_clients,
+            '/api/clients':    self._api_clients_list,
             '/dashboard':      self._serve_dashboard,
             '/dashboard.html': self._serve_dashboard,
             '/api/status':     self._api_status,
@@ -1267,6 +1320,13 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         if not self._require_dashboard_auth():
             return
 
+        # client_viewer is read-only by definition — no POST route is ever
+        # appropriate for that role.
+        user = self._session_user()
+        if user and user.get('role') == 'client_viewer':
+            self._send(403, b'Forbidden: this account is read-only.', 'text/plain')
+            return
+
         if path == '/api/scan':
             self._api_scan()
         elif path == '/api/live-scan-config':
@@ -1355,6 +1415,16 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self._api_users_deactivate(path[len('/api/users/deactivate/'):])
         elif path.startswith('/api/users/password/'):
             self._api_users_password(path[len('/api/users/password/'):])
+        elif path == '/api/clients/add':
+            self._api_clients_add()
+        elif path.startswith('/api/clients/rename/'):
+            self._api_clients_rename(path[len('/api/clients/rename/'):])
+        elif path.startswith('/api/clients/deactivate/'):
+            self._api_clients_deactivate(path[len('/api/clients/deactivate/'):])
+        elif path.startswith('/api/clients/report-config/'):
+            self._api_clients_report_config(path[len('/api/clients/report-config/'):])
+        elif path.startswith('/api/clients/send-report/'):
+            self._api_clients_send_report(path[len('/api/clients/send-report/'):])
         elif path == '/api/fleet/risk-register/override':
             self._api_rr_override_set()
         elif path.startswith('/api/fleet/risk-register/override/') and path.endswith('/delete'):
@@ -1600,6 +1670,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             return
         users = _get_registry().list_users(me['customer_id'])
         self._json({'users': [{'id': u['id'], 'email': u['email'], 'role': u['role'],
+                                'client_org_id': u.get('client_org_id'),
                                 'active': u['active'], 'created_at': u['created_at']}
                                for u in users], 'current_user': me['email']})
 
@@ -1618,12 +1689,27 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             email    = str(body.get('email', '')).strip().lower()
             password = str(body.get('password', ''))
             role     = str(body.get('role', 'admin'))
-            if role not in ('admin', 'viewer'):
+            if role not in ('admin', 'viewer', 'client_viewer'):
                 role = 'admin'
             if '@' not in email or len(password) < 8:
                 self._json({'error': 'invalid'}, 400)
                 return
-            user = _get_registry().create_user(me['customer_id'], email, password, role)
+
+            client_org_id = None
+            if role == 'client_viewer':
+                client_org_id = str(body.get('client_org_id', '')).strip()
+                if not client_org_id:
+                    self._json({'error': 'client_org_id is required for the client_viewer role'}, 400)
+                    return
+                # Confirm the org actually belongs to this customer — without
+                # this check a malicious/buggy request could scope a viewer
+                # to another MSP's client org and read their devices.
+                org = _get_registry().get_client_org(client_org_id)
+                if not org or org.get('customer_id') != me['customer_id']:
+                    self._json({'error': 'client_org_id not found for this customer'}, 404)
+                    return
+
+            user = _get_registry().create_user(me['customer_id'], email, password, role, client_org_id)
             self._json({'ok': True, 'user': user})
         except Exception as e:
             self._json({'error': str(e)}, 500)
@@ -1664,6 +1750,131 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self._json({'ok': ok} if ok else {'error': 'user not found'}, 200 if ok else 404)
         except Exception as e:
             self._json({'error': str(e)}, 500)
+
+    # ── client org management (MSP admin only — never reachable by client_viewer,
+    # see _CLIENT_VIEWER_ALLOWED_EXACT/_PREFIX) ───────────────────────────────
+
+    def _api_clients_list(self):
+        me = self._session_user()
+        if not me or me.get('role') not in ('admin', 'customer_admin', 'super_admin'):
+            self._json({'error': 'forbidden'}, 403)
+            return
+        try:
+            reg = _get_registry()
+            orgs = reg.list_client_orgs(me['customer_id'])
+            rollup = self._store().rollup_by_client_org()
+            out = []
+            for o in orgs:
+                stats = rollup.get(o['id'], {
+                    'device_count': 0, 'critical': 0, 'warning': 0, 'ok': 0,
+                    'no_data': 0, 'last_scan_at': 0, 'worst_severity': 'no_data',
+                })
+                out.append({**o, **stats})
+            unassigned = rollup.get(None)
+            if unassigned:
+                out.append({'id': None, 'name': 'Unassigned', 'enroll_token': None, **unassigned})
+            self._json({'client_orgs': out})
+        except Exception as e:
+            self._json({'error': str(e)}, 500)
+
+    def _api_clients_add(self):
+        me = self._session_user()
+        if not me or me.get('role') not in ('admin', 'customer_admin', 'super_admin'):
+            self._json({'error': 'forbidden'}, 403)
+            return
+        cl = int(self.headers.get('Content-Length', 0))
+        raw = self.rfile.read(cl) if cl else b'{}'
+        try:
+            body = json.loads(raw)
+            name = str(body.get('name', '')).strip()
+            if not name:
+                self._json({'error': 'name is required'}, 400)
+                return
+            org = _get_registry().create_client_org(me['customer_id'], name)
+            self._json({'ok': True, 'client_org': org})
+        except Exception as e:
+            self._json({'error': str(e)}, 500)
+
+    def _api_clients_rename(self, org_id_str: str):
+        me = self._session_user()
+        if not me or me.get('role') not in ('admin', 'customer_admin', 'super_admin'):
+            self._json({'error': 'forbidden'}, 403)
+            return
+        org_id = org_id_str.strip('/')
+        cl = int(self.headers.get('Content-Length', 0))
+        raw = self.rfile.read(cl) if cl else b'{}'
+        try:
+            body = json.loads(raw)
+            name = str(body.get('name', '')).strip()
+            if not name:
+                self._json({'error': 'name is required'}, 400)
+                return
+            ok = _get_registry().rename_client_org(org_id, me['customer_id'], name)
+            self._json({'ok': ok} if ok else {'error': 'client org not found'}, 200 if ok else 404)
+        except Exception as e:
+            self._json({'error': str(e)}, 500)
+
+    def _api_clients_deactivate(self, org_id_str: str):
+        me = self._session_user()
+        if not me or me.get('role') not in ('admin', 'customer_admin', 'super_admin'):
+            self._json({'error': 'forbidden'}, 403)
+            return
+        org_id = org_id_str.strip('/')
+        try:
+            ok = _get_registry().deactivate_client_org(org_id, me['customer_id'])
+            self._json({'ok': ok} if ok else {'error': 'client org not found'}, 200 if ok else 404)
+        except Exception as e:
+            self._json({'error': str(e)}, 500)
+
+    def _api_clients_report_config(self, org_id_str: str):
+        """POST /api/clients/report-config/<org_id> — set the monthly
+        white-label PDF delivery email + cadence for one client org."""
+        me = self._session_user()
+        if not me or me.get('role') not in ('admin', 'customer_admin', 'super_admin'):
+            self._json({'error': 'forbidden'}, 403)
+            return
+        org_id = org_id_str.strip('/')
+        cl = int(self.headers.get('Content-Length', 0))
+        raw = self.rfile.read(cl) if cl else b'{}'
+        try:
+            body = json.loads(raw)
+            report_email = str(body.get('report_email', '')).strip()
+            report_cadence = str(body.get('report_cadence', 'off')).strip()
+            if report_cadence == 'monthly' and '@' not in report_email:
+                self._json({'error': 'a valid report_email is required to enable monthly reports'}, 400)
+                return
+            ok = _get_registry().set_client_org_report_config(
+                org_id, me['customer_id'], report_email, report_cadence)
+            self._json({'ok': ok} if ok else {'error': 'client org not found'}, 200 if ok else 404)
+        except Exception as e:
+            self._json({'error': str(e)}, 500)
+
+    def _api_clients_send_report(self, org_id_str: str):
+        """POST /api/clients/send-report/<org_id> — send the report right
+        now, using report_email if set, otherwise a one-off address in the
+        request body. Same send_client_org_report() code path the daily
+        scheduler uses, so a successful manual test is a real guarantee."""
+        me = self._session_user()
+        if not me or me.get('role') not in ('admin', 'customer_admin', 'super_admin'):
+            self._json({'error': 'forbidden'}, 403)
+            return
+        org_id = org_id_str.strip('/')
+        cl = int(self.headers.get('Content-Length', 0))
+        raw = self.rfile.read(cl) if cl else b'{}'
+        try:
+            body = json.loads(raw) if raw.strip() else {}
+        except json.JSONDecodeError:
+            body = {}
+        org = _get_registry().get_client_org(org_id)
+        if not org or org.get('customer_id') != me['customer_id']:
+            self._json({'error': 'client org not found'}, 404)
+            return
+        to_addr = str(body.get('report_email', '')).strip() or org.get('report_email', '')
+        if '@' not in to_addr:
+            self._json({'ok': False, 'error': 'no report_email set for this client — provide one or save it first'}, 400)
+            return
+        ok, msg = send_client_org_report(me['customer_id'], org_id, org['name'], to_addr)
+        self._json({'ok': ok, 'message': msg})
 
     def _api_customers_me(self):
         me = self._session_user()
@@ -2091,6 +2302,22 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         except Exception as _le:
             log.error('license check error: %s', _le)
 
+        # Resolve the optional client-org enrollment token (embedded in the
+        # agent's config for MSP sub-clients) to a client_org_id. Empty
+        # string on any failure/absence — upsert_report() treats that as
+        # "don't touch the existing assignment", never as "clear it".
+        client_org_id = ''
+        client_org_token = body.get('client_org_token', '').strip()
+        if client_org_token:
+            org = _get_registry().get_client_org_by_token(client_org_token)
+            if org and org.get('customer_id') == _cust_id:
+                client_org_id = org['id']
+            else:
+                log.warning(
+                    'agent %s sent client_org_token that did not resolve for customer %s',
+                    device_id, _cust_id,
+                )
+
         try:
             store.upsert_report(
                 device_id=device_id,
@@ -2099,6 +2326,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                 platform=body.get('platform', ''),
                 agent_version=body.get('agent_version', ''),
                 ip_address=self.client_address[0],
+                client_org_id=client_org_id,
             )
         except Exception as e:
             log.error('agent store error: %s', e)
@@ -2107,7 +2335,16 @@ class _Handler(http.server.BaseHTTPRequestHandler):
 
         try:
             from alerts import load_alert_config, fire_alerts
-            alert_cfg = load_alert_config(ROOT / 'data' / 'alerts_config.json')
+            alert_cfg = load_alert_config(ROOT / 'data' / 'alerts_config.json') or {}
+            # Per-client PSA override: if this device belongs to a client org
+            # that has its own PSA config, route its tickets there instead of
+            # the customer-wide default. Only the 'psa' key is swapped —
+            # Slack/email/webhook alert channels stay on the customer-wide
+            # config, since those aren't yet client-org-scoped.
+            if client_org_id:
+                override = _get_registry().get_client_org_psa_override(client_org_id)
+                if override is not None:
+                    alert_cfg = {**alert_cfg, 'psa': override}
             if alert_cfg:
                 threading.Thread(
                     target=fire_alerts,
@@ -2665,10 +2902,14 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         profile  = ','.join(profiles)
         try:
             store = self._store()
+            org_scope = self._scoped_client_org()
             if profiles:
+                # NOTE: list_devices_by_profile() doesn't support client-org
+                # filtering yet — not reachable by the client_viewer role
+                # (see the path allowlist in _do_GET_inner), MSP-admin-only.
                 devices = store.list_devices_by_profile(profiles)
             else:
-                devices = store.list_devices()
+                devices = store.list_devices(client_org_id=org_scope)
                 for d in devices:
                     d['_report'] = store.get_latest_report(d['device_id']) or {}
 
@@ -3203,7 +3444,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
 
     def _api_devices(self):
         try:
-            devices = self._store().list_devices()
+            devices = self._store().list_devices(client_org_id=self._scoped_client_org())
             for d in devices:
                 if d.get('last_seen'):
                     d['last_seen_iso'] = datetime.fromtimestamp(
@@ -3516,10 +3757,36 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         except Exception as e:
             self._json({'ok': False, 'message': str(e)}, 500)
 
+    def _psa_org_scope(self) -> str | None:
+        """?client_org=<id> selects a per-client PSA override instead of
+        the customer-wide default in data/alerts_config.json."""
+        from urllib.parse import parse_qs, urlparse as _up
+        qs = parse_qs(_up(self.path).query)
+        return (qs.get('client_org', [''])[0]).strip() or None
+
+    def _load_psa_cfg(self, org_id: str | None) -> dict:
+        if org_id:
+            override = _get_registry().get_client_org_psa_override(org_id)
+            # No override saved yet for this client -> blank form, not the
+            # customer default. Showing the default here would make it look
+            # like the client already has its own config when it's actually
+            # still inheriting — blank is the honest state to display.
+            return {'psa': override or {}}
+        from alerts import load_alert_config
+        return load_alert_config(ROOT / 'data' / 'alerts_config.json') or {}
+
+    def _save_psa_cfg(self, cfg: dict, org_id: str | None) -> None:
+        if org_id:
+            me = self._session_user()
+            _get_registry().set_client_org_psa_override(org_id, me['customer_id'], cfg.get('psa', {}))
+        else:
+            path = ROOT / 'data' / 'alerts_config.json'
+            path.write_text(json.dumps(cfg, indent=2), encoding='utf-8')
+
     def _api_get_psa_config(self):
         try:
-            from alerts import load_alert_config
-            cfg  = load_alert_config(ROOT / 'data' / 'alerts_config.json') or {}
+            org_id = self._psa_org_scope()
+            cfg = self._load_psa_cfg(org_id)
             psa  = cfg.get('psa', {})
             _M   = '__set__'
             cw   = psa.get('connectwise', {})
@@ -3576,10 +3843,15 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self._send(400, b'Invalid JSON', 'text/plain')
             return
         try:
-            from alerts import load_alert_config
-            path = ROOT / 'data' / 'alerts_config.json'
-            cfg  = load_alert_config(path) or {}
-            _M   = '__set__'
+            org_id = self._psa_org_scope()
+            if org_id:
+                me = self._session_user()
+                org = _get_registry().get_client_org(org_id)
+                if not org or org.get('customer_id') != me['customer_id']:
+                    self._json({'ok': False, 'error': 'client org not found'}, 404)
+                    return
+            cfg = self._load_psa_cfg(org_id)
+            _M  = '__set__'
 
             psa_id = body.get('id', '')
             fields = body.get('fields', {})
@@ -3630,7 +3902,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                     'project_key': str(fields.get('project_key', '')).strip().upper(),
                     'issue_type':  str(fields.get('issue_type', 'Bug')).strip() or 'Bug',
                 }
-            path.write_text(json.dumps(cfg, indent=2), encoding='utf-8')
+            self._save_psa_cfg(cfg, org_id)
             self._json({'ok': True})
         except Exception as e:
             self._json({'ok': False, 'error': str(e)}, 500)
@@ -3823,13 +4095,205 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(content)
 
+    def _serve_clients(self):
+        """GET /clients — Level 1 rollup: one row per client org, worst
+        severity first. MSP-admin only (not in the client_viewer path
+        allowlist, so a scoped session never reaches this method at all)."""
+        me = self._session_user()
+        if not me or me.get('role') not in ('admin', 'customer_admin', 'super_admin'):
+            self._send(403, b'Forbidden', 'text/plain')
+            return
+        try:
+            reg = _get_registry()
+            orgs = reg.list_client_orgs(me['customer_id'])
+            rollup = self._store().rollup_by_client_org()
+        except Exception as e:
+            self._send(500, f'Error loading client orgs: {e}'.encode(), 'text/plain')
+            return
+
+        sev_rank = {'critical': 0, 'warning': 1, 'no_data': 2, 'ok': 3}
+        sev_color = {'critical': '#DC2626', 'warning': '#F97316', 'ok': '#16A34A', 'no_data': '#D1D5DB'}
+        sev_label = {'critical': 'Critical', 'warning': 'Warning', 'ok': 'Clean', 'no_data': 'No data yet'}
+
+        rows_data = []
+        for o in orgs:
+            stats = rollup.pop(o['id'], {
+                'device_count': 0, 'critical': 0, 'warning': 0, 'ok': 0,
+                'no_data': 0, 'last_scan_at': 0, 'worst_severity': 'no_data',
+            })
+            rows_data.append((o['id'], o['name'], stats))
+        unassigned = rollup.pop(None, None)
+        if unassigned and unassigned['device_count']:
+            rows_data.append(('', 'Unassigned devices', unassigned))
+        rows_data.sort(key=lambda r: sev_rank.get(r[2]['worst_severity'], 9))
+
+        now = int(time.time())
+
+        def _age(ts):
+            if not ts:
+                return 'never'
+            secs = now - ts
+            if secs < 3600:
+                return f'{max(1, secs // 60)}m ago'
+            if secs < 86400:
+                return f'{secs // 3600}h ago'
+            return f'{secs // 86400}d ago'
+
+        org_by_id = {o['id']: o for o in orgs}
+
+        row_html = ''
+        for org_id, name, stats in rows_data:
+            sev = stats['worst_severity']
+            link = f"/?client_org={org_id}" if org_id else "/?client_org="
+            if org_id:
+                org = org_by_id.get(org_id, {})
+                report_email = org.get('report_email', '') or ''
+                monthly_checked = 'checked' if org.get('report_cadence') == 'monthly' else ''
+                report_cell = (
+                    '<td onclick="event.stopPropagation()" style="white-space:nowrap">'
+                    f'<input type="email" class="report-email" data-org="{org_id}" value="{report_email}" '
+                    'placeholder="client@example.com" style="width:150px;font-size:12px;background:#0d1117;'
+                    'border:1px solid #30363d;color:#c9d1d9;padding:4px 6px;border-radius:4px">'
+                    f'<label style="font-size:11px;margin-left:6px;color:#8b949e"><input type="checkbox" '
+                    f'class="report-monthly" data-org="{org_id}" {monthly_checked}> Monthly</label>'
+                    f'<button class="scan-btn" style="margin-left:6px;font-size:11px" '
+                    f'onclick="saveReportConfig(\'{org_id}\',this)">Save</button>'
+                    f'<button class="scan-btn" style="margin-left:4px;font-size:11px;color:#58a6ff" '
+                    f'onclick="sendReportNow(\'{org_id}\',this)">Send Now</button>'
+                    f'<span class="report-status" data-org="{org_id}" style="font-size:11px;margin-left:6px;color:#8b949e"></span>'
+                    '</td>'
+                )
+            else:
+                report_cell = '<td style="color:#484f58;font-size:12px">—</td>'
+            row_html += (
+                '<tr class="client-row" onclick="location.href=\'' + link + '\'">'
+                '<td><span class="risk-dot" style="background:' + sev_color[sev] + '"></span></td>'
+                '<td class="client-name">' + name + '</td>'
+                '<td>' + sev_label[sev] + '</td>'
+                '<td>' + str(stats['device_count']) + '</td>'
+                '<td style="color:#DC2626">' + str(stats['critical']) + '</td>'
+                '<td style="color:#F97316">' + str(stats['warning']) + '</td>'
+                '<td style="color:#16A34A">' + str(stats['ok']) + '</td>'
+                '<td>' + _age(stats['last_scan_at']) + '</td>'
+                + report_cell +
+                '</tr>'
+            )
+        if not row_html:
+            row_html = '<tr><td colspan="9" style="text-align:center;padding:32px;color:#8b949e">No client orgs yet — create one below.</td></tr>'
+
+        body = ("""<!DOCTYPE html><html><head><meta charset="utf-8">
+<title>Clients — Arckon</title>
+<style>
+body{font:14px -apple-system,sans-serif;background:#0d1117;color:#c9d1d9;margin:0;padding:32px}
+h1{font-size:20px;font-weight:600;margin:0 0 20px}
+a.back{color:#58a6ff;text-decoration:none;font-size:13px}
+table{width:100%;border-collapse:collapse;margin-top:16px;background:#161b22;border-radius:8px;overflow:hidden}
+th{text-align:left;padding:10px 14px;background:#21262d;color:#8b949e;font-weight:500;font-size:12px;text-transform:uppercase}
+td{padding:10px 14px;border-top:1px solid #21262d}
+.client-row{cursor:pointer}
+.client-row:hover{background:#1c2128}
+.client-name{font-weight:600;color:#e6edf3}
+.risk-dot{display:inline-block;width:10px;height:10px;border-radius:50%}
+.add-form{margin-top:24px;display:flex;gap:8px}
+.add-form input{background:#0d1117;border:1px solid #30363d;color:#c9d1d9;padding:8px 12px;border-radius:6px;font-size:13px;flex:1;max-width:300px}
+.add-form button{background:#238636;color:#fff;border:none;padding:8px 16px;border-radius:6px;cursor:pointer;font-size:13px}
+.add-form button:hover{background:#2ea043}
+#new-token{margin-top:12px;padding:12px;background:#161b22;border:1px solid #30363d;border-radius:6px;font-size:13px;display:none}
+#new-token code{color:#58a6ff;word-break:break-all}
+.scan-btn{background:#21262d;border:1px solid #30363d;color:#c9d1d9;border-radius:4px;padding:3px 8px;cursor:pointer}
+.scan-btn:hover{background:#30363d}
+</style></head><body>
+<a class="back" href="/">&larr; Full fleet (all clients)</a>
+<h1>Clients</h1>
+<table>
+<tr><th></th><th>Client</th><th>Status</th><th>Devices</th><th>Critical</th><th>Warning</th><th>Clean</th><th>Last scan</th><th>Monthly PDF Report</th></tr>
+""" + row_html + """
+</table>
+<div class="add-form">
+  <input id="new-client-name" placeholder="New client name (e.g. Acme Bakery)">
+  <button onclick="addClient()">+ Add Client</button>
+</div>
+<div id="new-token"></div>
+<script>
+async function addClient(){
+  const name = document.getElementById('new-client-name').value.trim();
+  if(!name){ return; }
+  const r = await fetch('/api/clients/add', {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({name})
+  });
+  const data = await r.json();
+  if(data.ok){
+    const box = document.getElementById('new-token');
+    box.style.display = 'block';
+    box.innerHTML = 'Client "' + data.client_org.name + '" created. Enrollment token '
+      + '(paste into that client\\'s agent_config.json as client_org_token):<br><code>'
+      + data.client_org.enroll_token + '</code>';
+    setTimeout(() => location.reload(), 4000);
+  } else {
+    alert(data.error || 'Failed to create client');
+  }
+}
+
+async function saveReportConfig(orgId, btn){
+  const emailEl = document.querySelector('.report-email[data-org="' + orgId + '"]');
+  const monthlyEl = document.querySelector('.report-monthly[data-org="' + orgId + '"]');
+  const statusEl = document.querySelector('.report-status[data-org="' + orgId + '"]');
+  const report_email = emailEl.value.trim();
+  const report_cadence = monthlyEl.checked ? 'monthly' : 'off';
+  btn.disabled = true;
+  try {
+    const r = await fetch('/api/clients/report-config/' + orgId, {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({report_email, report_cadence})
+    });
+    const data = await r.json();
+    statusEl.textContent = data.ok ? 'Saved' : (data.error || 'Failed');
+    statusEl.style.color = data.ok ? '#16A34A' : '#DC2626';
+  } catch(e) {
+    statusEl.textContent = 'Failed: ' + e;
+    statusEl.style.color = '#DC2626';
+  }
+  btn.disabled = false;
+  setTimeout(() => { statusEl.textContent = ''; }, 4000);
+}
+
+async function sendReportNow(orgId, btn){
+  const emailEl = document.querySelector('.report-email[data-org="' + orgId + '"]');
+  const statusEl = document.querySelector('.report-status[data-org="' + orgId + '"]');
+  btn.disabled = true;
+  statusEl.textContent = 'Sending...';
+  statusEl.style.color = '#8b949e';
+  try {
+    const r = await fetch('/api/clients/send-report/' + orgId, {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({report_email: emailEl.value.trim()})
+    });
+    const data = await r.json();
+    statusEl.textContent = data.ok ? 'Sent!' : (data.error || data.message || 'Failed');
+    statusEl.style.color = data.ok ? '#16A34A' : '#DC2626';
+  } catch(e) {
+    statusEl.textContent = 'Failed: ' + e;
+    statusEl.style.color = '#DC2626';
+  }
+  btn.disabled = false;
+}
+</script>
+</body></html>""")
+        self._send(200, body.encode('utf-8'), 'text/html; charset=utf-8')
+
     def _serve_fleet(self):
         print('[SENTINEL] _serve_fleet: start', flush=True)
         try:
             store = self._store()
-            devices = store.list_devices()
-            shadow  = store.list_shadow_devices()
-            mcp     = store.list_mcp_servers()
+            org_scope = self._scoped_client_org()
+            devices = store.list_devices(client_org_id=org_scope)
+            # Shadow-device/MCP discovery isn't tagged per client org yet
+            # (network-wide discovery, not per-device) — suppress rather
+            # than risk showing a client-viewer another client's discovered
+            # assets. MSP admins (org_scope is None) still see everything.
+            shadow  = store.list_shadow_devices() if org_scope is None else []
+            mcp     = store.list_mcp_servers() if org_scope is None else []
             print(f'[SENTINEL] _serve_fleet: got {len(devices)} devices, {len(shadow)} shadow, {len(mcp)} mcp', flush=True)
         except Exception as _e:
             print(f'[SENTINEL] _serve_fleet: store error: {_e}', flush=True)
@@ -4558,6 +5022,54 @@ def _build_mcp_section(servers: list[dict], ts_now: int) -> str:
             f'</span></div>'
             f'<div id="mcp-cards" style="margin-bottom:28px">{cards}</div>'
             f'</div>')
+
+
+def send_client_org_report(customer_id: str, org_id: str, org_name: str, report_email: str) -> tuple[bool, str]:
+    """Build a white-labeled fleet PDF scoped to one client org and email it
+    to report_email. Called both by the daily scheduler tick (main()) and
+    the manual 'Send Now' test endpoint — same code path either way, so a
+    successful manual test is a real guarantee the scheduled version works.
+
+    Returns (ok, message) rather than raising — callers (background thread,
+    HTTP handler) both want a non-throwing result they can log or return
+    as JSON.
+    """
+    try:
+        store = _get_store(customer_id)
+        devices = store.list_devices(client_org_id=org_id)
+        for d in devices:
+            d['_report'] = store.get_latest_report(d['device_id']) or {}
+
+        try:
+            branding_path = ROOT / 'data' / 'branding.json'
+            branding = json.loads(branding_path.read_text()) if branding_path.exists() else {}
+        except Exception:
+            branding = {}
+
+        from output.fleet_report import generate_fleet_pdf
+        pdf_bytes = generate_fleet_pdf(devices, tier='ciso', client_name=org_name, branding=branding)
+
+        from alerts import load_alert_config, send_email_with_attachment
+        alert_cfg = load_alert_config(ROOT / 'data' / 'alerts_config.json') or {}
+        email_cfg = alert_cfg.get('email', {})
+        if not email_cfg.get('smtp_host') or not email_cfg.get('smtp_user'):
+            return False, 'SMTP not configured (Settings -> SIEM & Tool Integrations -> Email)'
+
+        msp_name = (branding.get('msp_name') or 'Arckon').strip()
+        month = datetime.now(timezone.utc).strftime('%B %Y')
+        subject = f'{msp_name} Security Report — {org_name} — {month}'
+        body = (
+            f'Attached is the {month} security report for {org_name}, prepared by {msp_name}.\n\n'
+            f'{len(devices)} monitored device(s).\n\n'
+            f'This report is generated automatically each month — no action needed unless '
+            f'critical findings are listed inside.'
+        )
+        fname = f'{org_name.replace(" ", "_")}_security_report_{datetime.now(timezone.utc).strftime("%Y_%m")}.pdf'
+        ok = send_email_with_attachment(email_cfg, report_email, subject, body, pdf_bytes, fname)
+        return (True, 'sent') if ok else (False, 'SMTP send failed — check server logs')
+    except Exception as e:
+        log.error('send_client_org_report failed for org %s: %s', org_id, e, exc_info=True)
+        return False, str(e)
 
 
 def _build_fleet_html(devices: list[dict], shadow: list[dict] | None = None,
@@ -5314,6 +5826,12 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
 
   <div style="font-size:11px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:#6B7280;margin-bottom:12px">PSA &amp; Ticketing</div>
   <p style="color:#6B7280;font-size:13px;margin-top:-8px;margin-bottom:16px">Auto-create service tickets when new CRITICAL or HIGH findings are detected. Enable one PSA to activate.</p>
+  <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px">
+    <label style="font-size:13px;color:#374151;font-weight:600">Configuring for:</label>
+    <select id="psa-client-org-select" class="form-input" style="max-width:280px" onchange="loadPsaConfig()">
+      <option value="">Default (all clients without their own override)</option>
+    </select>
+  </div>
   <div id="psa-save-banner" style="display:none;background:#D1FAE5;color:#065F46;border:1px solid #6EE7B7;border-radius:6px;padding:10px 16px;margin-bottom:16px;font-size:13px">&#10003; PSA settings saved</div>
   <div id="psa-cards" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(480px,1fr));gap:20px;margin-bottom:32px"></div>
 
@@ -5553,7 +6071,7 @@ function navTo(page) {{
   document.getElementById('main').scrollTop = 0;
   history.replaceState(null, '', '#' + page);
   if (page === 'settings') {{ loadLiveScanConfig(); loadBranding(); }}
-  if (page === 'siem') {{ loadSiemConfig(); loadPsaConfig(); }}
+  if (page === 'siem') {{ loadSiemConfig(); loadPsaClientOrgs(); loadPsaConfig(); }}
   if (page === 'users') {{ loadUsers(); loadCustomerInfo(); }}
   if (page === 'alerts') {{ loadActiveIssues(); loadAlertEvents(); }}
   if (page === 'probe') {{
@@ -7459,9 +7977,31 @@ const PSA_DEFS = [
 
 var _psaCfg = {{}};
 
+function _psaOrgParam() {{
+  const sel = document.getElementById('psa-client-org-select');
+  const val = sel ? sel.value : '';
+  return val ? ('?client_org=' + encodeURIComponent(val)) : '';
+}}
+
+async function loadPsaClientOrgs() {{
+  const sel = document.getElementById('psa-client-org-select');
+  if (!sel) return;
+  try {{
+    const r = await fetch('/api/clients');
+    if (!r.ok) return;
+    const data = await r.json();
+    (data.client_orgs || []).filter(o => o.id).forEach(o => {{
+      const opt = document.createElement('option');
+      opt.value = o.id;
+      opt.textContent = o.name;
+      sel.appendChild(opt);
+    }});
+  }} catch (_) {{}}
+}}
+
 async function loadPsaConfig() {{
   try {{
-    const r = await fetch('/api/psa/config');
+    const r = await fetch('/api/psa/config' + _psaOrgParam());
     if (!r.ok) return;
     _psaCfg = await r.json();
     renderPsaCards();
@@ -7520,7 +8060,7 @@ async function savePsaConfig(psaId) {{
   }});
   const enabled = document.getElementById('psa-enable-' + psaId)?.checked ?? false;
   try {{
-    const r = await fetch('/api/psa/config', {{
+    const r = await fetch('/api/psa/config' + _psaOrgParam(), {{
       method: 'POST',
       headers: {{'Content-Type': 'application/json'}},
       body: JSON.stringify({{id: psaId, enabled, fields}}),
@@ -7567,6 +8107,7 @@ async function testPsaTicket(psaId, btn) {{
   btn.disabled = false;
 }}
 
+loadPsaClientOrgs();
 loadPsaConfig();
 
 // ── SIEM integrations ────────────────────────────────────────────────────────
@@ -8230,6 +8771,28 @@ def main():
     except Exception as _startup_err:
         log.error('License/monitor startup error (non-fatal): %s', _startup_err, exc_info=True)
 
+    _last_report_check_day = [None]  # mutable cell so the closure can update it
+
+    def _check_client_org_reports():
+        """Runs at most once per calendar day (UTC) — cheap enough to just
+        check on every tick, but no reason to hit the registry 1440x/day
+        for something that's only ever due once a month per client."""
+        today = datetime.now(timezone.utc).date()
+        if _last_report_check_day[0] == today:
+            return
+        _last_report_check_day[0] = today
+        try:
+            for org in _get_registry().get_client_orgs_due_for_report():
+                ok, msg = send_client_org_report(
+                    org['customer_id'], org['id'], org['name'], org['report_email'])
+                if ok:
+                    _get_registry().mark_client_org_report_sent(org['id'])
+                    log.info('Scheduled report sent for client org %s (%s)', org['name'], org['id'])
+                else:
+                    log.warning('Scheduled report FAILED for client org %s (%s): %s', org['name'], org['id'], msg)
+        except Exception as _re:
+            log.error('client org report scheduler error: %s', _re)
+
     def _schedule_ticker():
         import time as _t
         while True:
@@ -8255,6 +8818,7 @@ def main():
                         log.error('schedule ticker error for customer %s: %s', cid, _ce)
             except Exception as _se:
                 log.error('schedule ticker error: %s', _se)
+            _check_client_org_reports()
 
     threading.Thread(target=_schedule_ticker, daemon=True, name='schedule-ticker').start()
 

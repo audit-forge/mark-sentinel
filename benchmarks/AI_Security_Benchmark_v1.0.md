@@ -1,17 +1,17 @@
-# M.A.R.K. Sentinel — AI Security Benchmark v1.0
+# Arckon by RiskRaven — AI Security Benchmark v1.0
 ## Community Draft
 
 **Version:** 1.0-draft
 **Published:** 2026-04-28
 **Status:** Community Draft — open for comment
-**Maintained by:** M.A.R.K. Sentinel Project (powered by Hash)
+**Maintained by:** Arckon by RiskRaven Project (powered by Hash)
 **Contact:** keithferg2018@gmail.com
 
 ---
 
 ## Preamble
 
-This document defines the M.A.R.K. Sentinel AI Security Benchmark v1.0: a structured set of security controls for AI system deployments. It is designed to be:
+This document defines the Arckon by RiskRaven AI Security Benchmark v1.0: a structured set of security controls for AI system deployments. It is designed to be:
 
 - **Assessable**: Every control has defined PASS/FAIL criteria that can be tested
 - **Actionable**: Every control includes specific remediation steps
@@ -24,7 +24,7 @@ This benchmark covers the security posture of AI deployments — not the AI itse
 
 As of 2026, there is no self-hostable, framework-mapped security benchmark specifically designed for AI deployments that works for both regulated enterprises and small businesses. This benchmark fills that gap.
 
-Existing tools either require sending your data to a third-party vendor (Lakera, Mindgard), require deep engineering knowledge to operate (Garak), or focus on model-level AI safety rather than deployment security. M.A.R.K. Sentinel is designed to be run by anyone — from a DoD contractor preparing for a CMMC assessment to a restaurant owner wondering if their AI chatbot is safe.
+Existing tools either require sending your data to a third-party vendor (Lakera, Mindgard), require deep engineering knowledge to operate (Garak), or focus on model-level AI safety rather than deployment security. Arckon by RiskRaven is designed to be run by anyone — from a DoD contractor preparing for a CMMC assessment to a restaurant owner wondering if their AI chatbot is safe.
 
 ---
 
@@ -178,7 +178,7 @@ This benchmark covers security controls applicable to:
 
 ### OWASP LLM Top 10 (2025) Coverage
 
-| OWASP ID | Title | M.A.R.K. Controls |
+| OWASP ID | Title | RiskRaven Controls |
 |---|---|---|
 | LLM01 | Prompt Injection | AI-INP-001, AI-INP-002, AI-INP-003, AI-INP-004 |
 | LLM02 | Sensitive Information Disclosure | AI-OUT-001, AI-OUT-002, AI-GOV-002 |
@@ -195,7 +195,7 @@ This benchmark covers security controls applicable to:
 
 ### OWASP Agentic Top 10 (2026) Coverage
 
-| OWASP ID | Title | M.A.R.K. Controls |
+| OWASP ID | Title | RiskRaven Controls |
 |---|---|---|
 | OAGNT-01 | Prompt Injection | AI-INP-001, AI-INP-002, AI-INP-003, AI-AGENT-004, AI-AGENT-006 |
 | OAGNT-02 | Sensitive Information Disclosure from Tool Outputs | AI-OUT-002, AI-OUT-005 |
@@ -212,7 +212,7 @@ This benchmark covers security controls applicable to:
 
 ### NIST AI RMF (AI RMF 1.0) Coverage
 
-| RMF Function | Sub-categories | M.A.R.K. Controls |
+| RMF Function | Sub-categories | RiskRaven Controls |
 |---|---|---|
 | GOVERN | 1.1, 1.2, 1.7, 2.2, 6.1, 6.2 | AI-GOV-001, AI-GOV-004, AI-SUPPLY-001, AI-SUPPLY-004, AI-AGENT-001, AI-AGENT-002 |
 | MAP | 1.1, 1.5 | AI-GOV-005, AI-SUPPLY-001, AI-SUPPLY-002 |
@@ -223,7 +223,7 @@ This benchmark covers security controls applicable to:
 
 ### FedRAMP / NIST 800-53 Rev5 Control Families
 
-| Control Family | Controls Addressed | M.A.R.K. Category |
+| Control Family | Controls Addressed | RiskRaven Category |
 |---|---|---|
 | AC — Access Control | AC-3, AC-4, AC-6, AC-17 | AI-DEPLOY-004, AI-OUT-002, AI-AGENT-001 |
 | AU — Audit & Accountability | AU-2, AU-9, AU-11, AU-12 | AI-DEPLOY-003, AI-AGENT-005, AI-GOV-002 |
@@ -237,7 +237,7 @@ This benchmark covers security controls applicable to:
 
 ### EU AI Act Alignment
 
-| Article | Requirement | M.A.R.K. Controls |
+| Article | Requirement | RiskRaven Controls |
 |---|---|---|
 | Article 5 | Prohibited AI practices | AI-OUT-004 |
 | Article 9 | Risk management system | AI-GOV-001, AI-GOV-003, AI-GOV-004 |
@@ -252,7 +252,7 @@ This benchmark covers security controls applicable to:
 
 ### Score Calculation
 
-M.A.R.K. Sentinel computes two scores:
+Arckon by RiskRaven computes two scores:
 
 **Raw Score:**
 ```
@@ -392,6 +392,6 @@ This benchmark follows a community-review process:
 
 ---
 
-*M.A.R.K. Sentinel AI Security Benchmark v1.0-draft*  
-*© 2026 Keith Ferguson / M.A.R.K. Sentinel Project*  
+*Arckon by RiskRaven AI Security Benchmark v1.0-draft*  
+*© 2026 Keith Ferguson / Arckon by RiskRaven Project*  
 *Licensed under Creative Commons Attribution 4.0 International (CC BY 4.0) — free to use, share, and adapt with attribution.*
