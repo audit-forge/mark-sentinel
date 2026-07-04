@@ -40,16 +40,26 @@ _ARTICLES: list[tuple[str, str, str, list[str]]] = [
 ]
 
 
-def generate_eu_ai_act_report(devices: list[dict], org_name: str = '', branding: dict | None = None) -> str:
-    """
-    Generate an EU AI Act readiness HTML report.
+_STATUS_COLORS = {
+    'GAP':          ('#DC2626', '#FEF2F2'),
+    'AT RISK':      ('#CA8A04', '#FFFBEB'),
+    'COMPLIANT':    ('#16A34A', '#F0FDF4'),
+    'NOT SCANNED':  ('#6B7280', '#F9FAFB'),
+}
 
-    devices:  list of dicts with keys: hostname, _report (the parsed report dict)
-    org_name: optional client/org name for the report header
-    branding: optional dict with msp_name, logo_url, footer_text for white-labelling
+
+def score_eu_ai_act_report(devices: list[dict]) -> dict:
+    """Compute the EU AI Act article-by-article scoring from device reports.
+    Shared by the HTML, PDF, and CSV renderers so all three formats always
+    agree — this is the one place the actual scoring logic lives.
+
+    Returns {
+      'articles': [{'id', 'title', 'desc', 'status', 'findings': [
+          {'check_id', 'title', 'hostname', 'status'}
+      ]}],
+      'compliant_count', 'gap_count', 'atrisk_count', 'score_pct', 'device_count',
+    }
     """
-    branding = branding or {}
-    # Collect all FAIL findings across all devices, keyed by check_id
     fail_checks: dict[str, list[dict]] = {}
     warn_checks: dict[str, list[dict]] = {}
     all_check_ids: set[str] = set()
@@ -68,8 +78,7 @@ def generate_eu_ai_act_report(devices: list[dict], org_name: str = '', branding:
             elif status == 'WARN':
                 warn_checks.setdefault(cid, []).append({**f, 'hostname': hostname})
 
-    # Score each article
-    article_rows = []
+    articles = []
     compliant_count = 0
     gap_count = 0
     atrisk_count = 0
@@ -78,39 +87,64 @@ def generate_eu_ai_act_report(devices: list[dict], org_name: str = '', branding:
         relevant_checks = [c for c in check_ids if c in all_check_ids]
         if not relevant_checks:
             status = 'NOT SCANNED'
-            status_color = '#6B7280'
-            status_bg = '#F9FAFB'
         else:
             failing = [c for c in relevant_checks if c in fail_checks]
             warning = [c for c in relevant_checks if c in warn_checks]
             if failing:
                 status = 'GAP'
-                status_color = '#DC2626'
-                status_bg = '#FEF2F2'
                 gap_count += 1
             elif warning:
                 status = 'AT RISK'
-                status_color = '#CA8A04'
-                status_bg = '#FFFBEB'
                 atrisk_count += 1
             else:
                 status = 'COMPLIANT'
-                status_color = '#16A34A'
-                status_bg = '#F0FDF4'
                 compliant_count += 1
 
-        # Build finding detail rows
-        finding_rows = []
+        findings = []
         for cid in check_ids:
             for f in fail_checks.get(cid, []):
-                finding_rows.append((cid, f.get('title', ''), f.get('hostname', ''), 'FAIL', '#DC2626'))
+                findings.append({'check_id': cid, 'title': f.get('title', ''),
+                                  'hostname': f.get('hostname', ''), 'status': 'FAIL'})
             for f in warn_checks.get(cid, []):
-                finding_rows.append((cid, f.get('title', ''), f.get('hostname', ''), 'WARN', '#CA8A04'))
+                findings.append({'check_id': cid, 'title': f.get('title', ''),
+                                  'hostname': f.get('hostname', ''), 'status': 'WARN'})
 
-        article_rows.append((art_id, art_title, art_desc, status, status_color, status_bg, finding_rows))
+        articles.append({'id': art_id, 'title': art_title, 'desc': art_desc,
+                          'status': status, 'findings': findings})
 
     scored = compliant_count + gap_count + atrisk_count
     score_pct = int(100 * compliant_count / scored) if scored else 0
+
+    return {
+        'articles': articles,
+        'compliant_count': compliant_count,
+        'gap_count': gap_count,
+        'atrisk_count': atrisk_count,
+        'score_pct': score_pct,
+        'device_count': len(devices),
+    }
+
+
+def generate_eu_ai_act_report(devices: list[dict], org_name: str = '', branding: dict | None = None) -> str:
+    """
+    Generate an EU AI Act readiness HTML report.
+
+    devices:  list of dicts with keys: hostname, _report (the parsed report dict)
+    org_name: optional client/org name for the report header
+    branding: optional dict with msp_name, logo_url, footer_text for white-labelling
+    """
+    branding = branding or {}
+    scored = score_eu_ai_act_report(devices)
+    article_rows = [
+        (a['id'], a['title'], a['desc'], a['status'], *_STATUS_COLORS[a['status']],
+         [(f['check_id'], f['title'], f['hostname'], f['status'],
+           '#DC2626' if f['status'] == 'FAIL' else '#CA8A04') for f in a['findings']])
+        for a in scored['articles']
+    ]
+    compliant_count = scored['compliant_count']
+    gap_count = scored['gap_count']
+    atrisk_count = scored['atrisk_count']
+    score_pct = scored['score_pct']
 
     date_str = time.strftime('%B %d, %Y')
     esc = html.escape
@@ -253,3 +287,120 @@ def generate_eu_ai_act_report(devices: list[dict], org_name: str = '', branding:
 </div>
 </body>
 </html>'''
+
+
+def _pdf_safe(s) -> str:
+    """fpdf's built-in fonts are Latin-1 only — replace characters the
+    HTML report can contain (em dash, curly quotes) with ASCII equivalents
+    instead of letting them raise UnicodeEncodeError mid-report."""
+    if s is None:
+        return ''
+    t = str(s).replace('—', '-').replace('–', '-').replace('’', "'").replace('“', '"').replace('”', '"')
+    try:
+        t.encode('latin-1')
+        return t
+    except UnicodeEncodeError:
+        return t.encode('latin-1', errors='replace').decode('latin-1')
+
+
+def generate_eu_ai_act_report_pdf(devices: list[dict], org_name: str = '', branding: dict | None = None) -> bytes:
+    """Real server-side PDF — same scoring as the HTML report (via
+    score_eu_ai_act_report), rendered directly rather than relying on a
+    browser's print-to-PDF (which silently produced blank pages for some
+    users — Safari in particular)."""
+    from fpdf import FPDF
+
+    branding = branding or {}
+    scored = score_eu_ai_act_report(devices)
+    msp_name = branding.get('msp_name', '') or 'Arckon'
+    org_display = org_name or 'Your Organisation'
+    date_str = time.strftime('%B %d, %Y')
+
+    pdf = FPDF()
+    pdf.set_auto_page_break(auto=True, margin=16)
+    pdf.set_margins(14, 14, 14)
+    pdf.add_page()
+
+    pdf.set_font('Helvetica', 'B', 18)
+    pdf.set_text_color(17, 24, 39)
+    pdf.cell(0, 10, 'EU AI Act Readiness Report', ln=True, align='C')
+    pdf.set_font('Helvetica', size=12)
+    pdf.set_text_color(75, 85, 99)
+    pdf.cell(0, 7, _pdf_safe(org_display), ln=True, align='C')
+    pdf.set_font('Helvetica', size=9)
+    pdf.cell(0, 6, f"{date_str} - {scored['device_count']} device(s) scanned - Prepared by {_pdf_safe(msp_name)}",
+              ln=True, align='C')
+    pdf.ln(6)
+
+    score_color = (22, 163, 74) if scored['score_pct'] >= 80 else \
+                  (202, 138, 4) if scored['score_pct'] >= 50 else (220, 38, 38)
+    pdf.set_font('Helvetica', 'B', 14)
+    pdf.set_text_color(*score_color)
+    pdf.cell(0, 8, f"Overall readiness: {scored['score_pct']}%", ln=True)
+    pdf.set_font('Helvetica', size=10)
+    pdf.set_text_color(75, 85, 99)
+    pdf.cell(0, 6,
+              f"{scored['compliant_count']} compliant, {scored['gap_count']} gap(s), "
+              f"{scored['atrisk_count']} at risk",
+              ln=True)
+    pdf.ln(4)
+
+    status_colors = {
+        'GAP': (220, 38, 38), 'AT RISK': (202, 138, 4),
+        'COMPLIANT': (22, 163, 74), 'NOT SCANNED': (107, 114, 128),
+    }
+
+    for art in scored['articles']:
+        pdf.set_font('Helvetica', 'B', 11)
+        pdf.set_text_color(17, 24, 39)
+        pdf.cell(140, 7, _pdf_safe(f"{art['id']} - {art['title']}"), ln=False)
+        pdf.set_text_color(*status_colors[art['status']])
+        pdf.cell(0, 7, art['status'], ln=True, align='R')
+
+        pdf.set_font('Helvetica', size=9)
+        pdf.set_text_color(107, 114, 128)
+        pdf.multi_cell(0, 5, _pdf_safe(art['desc']))
+
+        for f in art['findings']:
+            fc = (220, 38, 38) if f['status'] == 'FAIL' else (202, 138, 4)
+            pdf.set_font('Helvetica', 'B', 8)
+            pdf.set_text_color(*fc)
+            pdf.cell(14, 5, f['status'], ln=False)
+            pdf.set_font('Helvetica', size=8)
+            pdf.set_text_color(55, 65, 81)
+            pdf.cell(0, 5, _pdf_safe(f"{f['check_id']} — {f['title']} (on {f['hostname']})"), ln=True)
+        pdf.ln(3)
+
+    pdf.set_font('Helvetica', size=7)
+    pdf.set_text_color(156, 163, 175)
+    footer = branding.get('footer_text') or f'Generated by {_pdf_safe(msp_name)} - {date_str}'
+    pdf.cell(0, 5, _pdf_safe(footer))
+
+    return bytes(pdf.output())
+
+
+def generate_eu_ai_act_report_csv(devices: list[dict], org_name: str = '') -> bytes:
+    """CSV: one row per article, plus one row per individual finding under
+    it — flat enough to open directly in Excel/Sheets, structured enough
+    to filter by status or article."""
+    import csv
+    import io
+
+    scored = score_eu_ai_act_report(devices)
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(['Organisation', org_name or 'Your Organisation'])
+    writer.writerow(['Generated', time.strftime('%Y-%m-%d %H:%M')])
+    writer.writerow(['Devices Scanned', scored['device_count']])
+    writer.writerow(['Overall Readiness %', scored['score_pct']])
+    writer.writerow([])
+    writer.writerow(['Article', 'Title', 'Article Status', 'Finding Status', 'Check ID', 'Finding Title', 'Device'])
+
+    for art in scored['articles']:
+        if not art['findings']:
+            writer.writerow([art['id'], art['title'], art['status'], '', '', '', ''])
+        for f in art['findings']:
+            writer.writerow([art['id'], art['title'], art['status'],
+                              f['status'], f['check_id'], f['title'], f['hostname']])
+
+    return buf.getvalue().encode('utf-8')

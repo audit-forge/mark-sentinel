@@ -2897,7 +2897,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self._json({'error': str(e)}, 500)
 
     def _api_fleet_report(self):
-        """GET /api/fleet/report?tier=executive|ciso|technical&fmt=pdf|html|json[&profile=fedramp,cmmc][&status=fail|warn|pass][&sev=ch|med|li]"""
+        """GET /api/fleet/report?tier=executive|ciso|technical&fmt=pdf|html|json|csv[&profile=fedramp,cmmc][&status=fail|warn|pass][&sev=ch|med|li]"""
         from urllib.parse import parse_qs, urlparse as _up
         qs = parse_qs(_up(self.path).query)
         tier          = (qs.get('tier',    ['ciso'])[0]).lower()
@@ -2930,13 +2930,38 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                 for d in devices:
                     d['_report'] = store.get_latest_report(d['device_id']) or {}
 
-            if fmt == 'json':
+            if fmt in ('json', 'csv'):
                 payload = [{'device_id': d['device_id'], 'hostname': d['hostname'],
                             'platform': d.get('platform', ''), 'fail_count': d.get('fail_count', 0),
                             'warn_count': d.get('warn_count', 0), 'pass_count': d.get('pass_count', 0),
                             'last_seen': d.get('last_seen'), 'results': d['_report'].get('findings', d['_report'].get('results', []))}
                            for d in devices]
-                self._json({'tier': tier, 'devices': payload})
+                if fmt == 'json':
+                    self._json({'tier': tier, 'devices': payload})
+                    return
+                # CSV — one row per finding, not one row per device, so
+                # severity/status are actually filterable in a spreadsheet.
+                import csv as _csv
+                import io as _io
+                buf = _io.StringIO()
+                writer = _csv.writer(buf)
+                writer.writerow(['Device', 'Platform', 'Last Seen', 'Check ID', 'Title', 'Status', 'Severity'])
+                for d in payload:
+                    findings = d['results'] or [{}]
+                    for f in findings:
+                        writer.writerow([
+                            d['hostname'], d['platform'], d.get('last_seen', ''),
+                            f.get('check_id', ''), f.get('title', ''),
+                            f.get('status', ''), f.get('severity', ''),
+                        ])
+                csv_bytes = buf.getvalue().encode('utf-8')
+                fname = f'sentinel_fleet_{tier}.csv'
+                self.send_response(200)
+                self.send_header('Content-Type', 'text/csv')
+                self.send_header('Content-Disposition', f'attachment; filename="{fname}"')
+                self.send_header('Content-Length', str(len(csv_bytes)))
+                self.end_headers()
+                self.wfile.write(csv_bytes)
                 return
 
             if fmt == 'pdf':
@@ -3975,10 +4000,20 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self._json({'ok': False, 'error': str(e)}, 500)
 
     def _api_eu_ai_act_report(self):
+        """GET /api/fleet/eu-ai-act-report?org=...&fmt=html|pdf|csv
+
+        fmt=html (default) is unchanged — an in-browser page with its own
+        Print/Save-PDF button. fmt=pdf and fmt=csv are real server-side
+        exports, generated and downloaded directly rather than relying on
+        the browser's print-to-PDF (which produced a blank single-page PDF
+        for at least one real user — Safari specifically)."""
         try:
             import urllib.parse as _up
             qs       = _up.parse_qs(_up.urlparse(self.path).query)
             org_name = qs.get('org', [''])[0]
+            fmt      = qs.get('fmt', ['html'])[0].lower()
+            if fmt not in ('html', 'pdf', 'csv'):
+                fmt = 'html'
             store    = self._store()
             devices  = store.list_devices(client_org_id=self._scoped_client_org())
             enriched = []
@@ -3987,9 +4022,30 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                 enriched.append({**d, '_report': rep})
             branding_path = ROOT / 'data' / 'branding.json'
             branding = json.loads(branding_path.read_text()) if branding_path.exists() else {}
-            from eu_ai_act_report import generate_eu_ai_act_report
-            html_out = generate_eu_ai_act_report(enriched, org_name, branding)
-            self._send(200, html_out.encode(), 'text/html; charset=utf-8')
+
+            safe_org = (org_name or 'Report').replace(' ', '_').replace('/', '-')
+            if fmt == 'pdf':
+                from eu_ai_act_report import generate_eu_ai_act_report_pdf
+                pdf_bytes = generate_eu_ai_act_report_pdf(enriched, org_name, branding)
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/pdf')
+                self.send_header('Content-Disposition', f'attachment; filename="EU_AI_Act_Report_{safe_org}.pdf"')
+                self.send_header('Content-Length', str(len(pdf_bytes)))
+                self.end_headers()
+                self.wfile.write(pdf_bytes)
+            elif fmt == 'csv':
+                from eu_ai_act_report import generate_eu_ai_act_report_csv
+                csv_bytes = generate_eu_ai_act_report_csv(enriched, org_name)
+                self.send_response(200)
+                self.send_header('Content-Type', 'text/csv')
+                self.send_header('Content-Disposition', f'attachment; filename="EU_AI_Act_Report_{safe_org}.csv"')
+                self.send_header('Content-Length', str(len(csv_bytes)))
+                self.end_headers()
+                self.wfile.write(csv_bytes)
+            else:
+                from eu_ai_act_report import generate_eu_ai_act_report
+                html_out = generate_eu_ai_act_report(enriched, org_name, branding)
+                self._send(200, html_out.encode(), 'text/html; charset=utf-8')
         except Exception as e:
             self._send(500, f'Report generation failed: {e}'.encode(), 'text/plain')
 
@@ -5914,9 +5970,14 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
 
     <div style="background:#ffffff;border:1px solid #F3F4F6;border-radius:8px;padding:20px">
       <div style="font-size:15px;font-weight:700;color:#111827;margin-bottom:6px">&#127466;&#127482; EU AI Act Readiness</div>
-      <div style="font-size:12px;color:#6B7280;line-height:1.6;margin-bottom:16px">One-page compliance readiness report mapping scan findings to EU AI Act articles (Art. 9–53). Printable PDF for auditors and clients.</div>
+      <div style="font-size:12px;color:#6B7280;line-height:1.6;margin-bottom:12px">Compliance readiness report mapping scan findings to EU AI Act articles (Art. 9–53). Export as PDF or CSV — generated server-side, not a browser print (Safari's print-to-PDF was producing blank pages).</div>
+      <input id="euai-org-name" class="form-input" type="text" placeholder="Organization name for this report"
+             style="font-size:12px;margin-bottom:10px;max-width:280px"
+             onchange="localStorage.setItem('euai_org_name', this.value)">
       <div style="display:flex;gap:8px;flex-wrap:wrap">
-        <button class="scan-btn" onclick="window.open('/api/fleet/eu-ai-act-report','_blank')" style="color:#16A34A;border-color:#238636;font-size:12px">&#128065; Open Report</button>
+        <button class="scan-btn" onclick="openEuaiReport('html')" style="color:#4F46E5;border-color:#C7D2FE;font-size:12px">&#128065; Preview</button>
+        <button class="scan-btn" onclick="openEuaiReport('pdf')" style="color:#16A34A;border-color:#238636;font-size:12px">&#8659; Download PDF</button>
+        <button class="scan-btn" onclick="openEuaiReport('csv')" style="color:#CA8A04;border-color:#FDE68A;font-size:12px">&#8659; Download CSV</button>
       </div>
     </div>
 
@@ -6162,6 +6223,25 @@ async function checkMaintenanceNotice() {{
 }}
 checkMaintenanceNotice();
 setInterval(checkMaintenanceNotice, 120000);
+
+(function() {{
+  const saved = localStorage.getItem('euai_org_name');
+  const input = document.getElementById('euai-org-name');
+  if (saved && input) input.value = saved;
+}})();
+
+function openEuaiReport(fmt) {{
+  const input = document.getElementById('euai-org-name');
+  const org = input ? input.value.trim() : '';
+  const url = '/api/fleet/eu-ai-act-report?org=' + encodeURIComponent(org) + '&fmt=' + fmt;
+  if (fmt === 'html') {{
+    window.open(url, '_blank');
+  }} else {{
+    // PDF/CSV are Content-Disposition: attachment — navigating triggers
+    // a real download instead of opening a new tab.
+    window.location.href = url;
+  }}
+}}
 
 function _age(ts) {{
   if (!ts) return 'never';
