@@ -62,7 +62,7 @@ def _get_shadow_ai_devices(customer_id: str) -> list[dict]:
     """Query the Sentinel app database for detected shadow AI devices."""
     try:
         cmd = [
-            "sudo", "docker", "exec", "sentinel-mfdynamicsllc", "python3", "-c",
+            "sudo", "docker", "exec", f"sentinel-{customer_id}", "python3", "-c",
             f"""
 import sqlite3
 import json
@@ -549,6 +549,156 @@ async def rotate_customer_token(request: Request):
         "expires_at": expires_at,
         "push_queued": push_count,
     })
+
+
+# ── Agent update push ─────────────────────────────────────────────────────────
+#
+# Each customer's own Sentinel server already has a working, tested
+# POST /api/fleet/update/all that queues the (also already-working) agent
+# 'update_self' command for every device it knows about (server.py's
+# _api_fleet_update_all + agent.py's self_update()). What's missing is a
+# super-admin action that triggers that across every customer at once —
+# this endpoint is just the fan-out.
+#
+# NOTE on auth: unlike rotate_customer_token's push above (which calls this
+# same style of endpoint with no auth headers at all — that call is
+# silently swallowed by _require_dashboard_auth() on the receiving end,
+# saved only by the documented in-band-delivery fallback), this sends the
+# customer server's own trusted-proxy headers so the call actually
+# authenticates instead of quietly 401'ing.
+
+async def _push_customer_update_all(customer_id: str, port: int, actor_email: str) -> dict:
+    import httpx
+    url = f"http://127.0.0.1:{port}/api/fleet/update/all"
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            r = await client.post(url, headers={
+                "X-Sentinel-User-Email": actor_email or "super_admin@system",
+                "X-Sentinel-User-Role": "admin",
+                "X-Sentinel-Customer-ID": customer_id,
+            })
+        if r.status_code == 200:
+            data = r.json()
+            return {"customer_id": customer_id, "ok": True, "device_count": data.get("count", 0)}
+        return {"customer_id": customer_id, "ok": False, "error": f"HTTP {r.status_code}"}
+    except Exception as e:
+        return {"customer_id": customer_id, "ok": False, "error": str(e)}
+
+
+@app.post("/api/agents/update-all")
+async def push_agent_updates_all_customers(request: Request):
+    """Super-admin action: queue the update_self command for every device,
+    across every active customer. Fans out to each customer's own already-
+    working /api/fleet/update/all."""
+    try:
+        user = require_super_admin(request)
+    except HTTPException:
+        return JSONResponse({"error": "unauthorized"}, status_code=403)
+
+    with get_conn() as conn:
+        customers = conn.execute(
+            "SELECT id, name, port FROM customers WHERE active=1"
+        ).fetchall()
+
+    results = []
+    for cust in customers:
+        port = cust["port"] or 7001
+        results.append(await _push_customer_update_all(cust["id"], port, user.get("email", "")))
+
+    total_devices = sum(r.get("device_count", 0) for r in results if r["ok"])
+    return JSONResponse({
+        "customers_attempted": len(results),
+        "customers_succeeded": sum(1 for r in results if r["ok"]),
+        "total_devices_queued": total_devices,
+        "results": [{**r, "name": next((c["name"] for c in customers if c["id"] == r["customer_id"]), r["customer_id"])} for r in results],
+    })
+
+
+# ── Maintenance notices ────────────────────────────────────────────────────────
+#
+# Super-admin schedules a maintenance window; every customer dashboard polls
+# /api/maintenance/active (proxied through their own server.py, since
+# customer browsers can't reach this admin service directly — see the
+# _api_maintenance_notice relay added in server.py) and shows a banner if a
+# notice is currently active or upcoming.
+
+@app.post("/api/maintenance/schedule")
+async def schedule_maintenance(request: Request):
+    try:
+        user = require_super_admin(request)
+    except HTTPException:
+        return JSONResponse({"error": "unauthorized"}, status_code=403)
+    try:
+        body = await request.json()
+        message = str(body.get("message", "")).strip()
+        scheduled_at = str(body.get("scheduled_at", "")).strip()  # ISO 8601
+        expires_at = str(body.get("expires_at", "")).strip()      # ISO 8601
+    except Exception:
+        return JSONResponse({"error": "invalid_request"}, status_code=400)
+    if not message or not scheduled_at or not expires_at:
+        return JSONResponse({"error": "message, scheduled_at, and expires_at are required"}, status_code=400)
+    try:
+        datetime.fromisoformat(scheduled_at)
+        datetime.fromisoformat(expires_at)
+    except ValueError:
+        return JSONResponse({"error": "scheduled_at/expires_at must be ISO 8601 timestamps"}, status_code=400)
+
+    notice_id = str(uuid.uuid4())
+    with get_conn() as conn:
+        conn.execute(
+            "INSERT INTO maintenance_notices (id, message, scheduled_at, expires_at, created_by, created_at, active) "
+            "VALUES (?,?,?,?,?,?,1)",
+            (notice_id, message, scheduled_at, expires_at, user.get("email", ""), datetime.now(timezone.utc).isoformat()),
+        )
+    return JSONResponse({"ok": True, "id": notice_id})
+
+
+@app.get("/api/maintenance/list")
+async def list_maintenance_notices(request: Request):
+    try:
+        require_super_admin(request)
+    except HTTPException:
+        return JSONResponse({"error": "unauthorized"}, status_code=403)
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT id, message, scheduled_at, expires_at, created_by, created_at, active "
+            "FROM maintenance_notices ORDER BY scheduled_at DESC"
+        ).fetchall()
+    return JSONResponse({"notices": [dict(r) for r in rows]})
+
+
+@app.post("/api/maintenance/cancel/{notice_id}")
+async def cancel_maintenance_notice(notice_id: str, request: Request):
+    try:
+        require_super_admin(request)
+    except HTTPException:
+        return JSONResponse({"error": "unauthorized"}, status_code=403)
+    with get_conn() as conn:
+        cur = conn.execute("UPDATE maintenance_notices SET active=0 WHERE id=?", (notice_id,))
+    return JSONResponse({"ok": cur.rowcount > 0})
+
+
+@app.get("/api/maintenance/active")
+async def get_active_maintenance_notice():
+    """No auth — every customer server.py instance relays this to its own
+    browser clients. Returns the single most-relevant active notice: an
+    in-progress one if any, otherwise the soonest upcoming one. None if
+    nothing is currently active or upcoming within the next 14 days (so a
+    long-forgotten notice a super-admin never cancelled doesn't linger
+    forever)."""
+    now = datetime.now(timezone.utc).isoformat()
+    horizon = (datetime.now(timezone.utc) + timedelta(days=14)).isoformat()
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT id, message, scheduled_at, expires_at FROM maintenance_notices "
+            "WHERE active=1 AND expires_at > ? AND scheduled_at < ? "
+            "ORDER BY scheduled_at ASC LIMIT 1",
+            (now, horizon),
+        ).fetchone()
+    if not row:
+        return JSONResponse({"notice": None})
+    in_progress = row["scheduled_at"] <= now <= row["expires_at"]
+    return JSONResponse({"notice": {**dict(row), "in_progress": in_progress}})
 
 
 # ── Forgot / Reset password ───────────────────────────────────────────────────

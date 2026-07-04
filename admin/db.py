@@ -43,6 +43,15 @@ def init_db():
                 expires_at TEXT NOT NULL,
                 used INTEGER NOT NULL DEFAULT 0
             );
+            CREATE TABLE IF NOT EXISTS maintenance_notices (
+                id TEXT PRIMARY KEY,
+                message TEXT NOT NULL,
+                scheduled_at TEXT NOT NULL,
+                expires_at TEXT NOT NULL,
+                created_by TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                active INTEGER NOT NULL DEFAULT 1
+            );
         """)
         for col, defn in [
             ('tier',                "TEXT NOT NULL DEFAULT 'standard'"),

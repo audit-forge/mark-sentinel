@@ -1061,7 +1061,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
     # a new path). The rollup dashboard (/clients) is deliberately NOT
     # here — that view spans every client org for the MSP and must stay
     # admin-only.
-    _CLIENT_VIEWER_ALLOWED_EXACT = frozenset({'/', '/api/status', '/api/devices'})
+    _CLIENT_VIEWER_ALLOWED_EXACT = frozenset({'/', '/api/status', '/api/devices', '/api/maintenance-notice'})
     _CLIENT_VIEWER_ALLOWED_PREFIX = ('/api/fleet/report',)
 
     def _client_viewer_gate(self, path: str) -> bool:
@@ -1208,6 +1208,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             '/dashboard':      self._serve_dashboard,
             '/dashboard.html': self._serve_dashboard,
             '/api/status':     self._api_status,
+            '/api/maintenance-notice': self._api_maintenance_notice,
             '/api/events':     self._api_events,
             '/api/devices':    self._api_devices,
             '/api/discover':   self._api_discover,
@@ -1952,6 +1953,22 @@ class _Handler(http.server.BaseHTTPRequestHandler):
     def _api_status(self):
         with _lock:
             self._json({'status': _status, 'lines': len(_log)})
+
+    def _api_maintenance_notice(self):
+        """GET /api/maintenance-notice — relays sentinel-admin's
+        /api/maintenance/active so browsers can poll it without needing
+        direct network access to the internal admin service (which isn't
+        exposed to the public internet). Fails soft: a network blip here
+        should never break the dashboard, just means no banner shows."""
+        try:
+            import urllib.request
+            req = urllib.request.Request('http://sentinel-admin:8000/api/maintenance/active')
+            with urllib.request.urlopen(req, timeout=3) as resp:
+                data = json.loads(resp.read().decode())
+            self._json(data)
+        except Exception as e:
+            log.debug('maintenance notice relay failed: %s', e)
+            self._json({'notice': None})
 
     def _api_health(self):
         """Basic health endpoint for monitoring. Returns 200 + JSON when the dashboard server is reachable.
@@ -5310,6 +5327,7 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
 </head>
 <body>
 <script>if(localStorage.getItem('sentinel_theme')==='dark')document.documentElement.classList.add('dark');</script>
+<div id="maintenance-banner" style="display:none;background:#4a3b0d;border-bottom:1px solid #d29922;color:#d29922;padding:10px 20px;font-size:13px;text-align:center;position:relative;z-index:1000"></div>
 <div id="app">
   <aside id="sidebar">
     <div class="sb-logo">
@@ -6126,6 +6144,24 @@ loadK8sStatus();
 loadRiskRegister();
 loadInventory();
 loadSchedules();
+
+async function checkMaintenanceNotice() {{
+  try {{
+    const r = await fetch('/api/maintenance-notice');
+    const data = await r.json();
+    const banner = document.getElementById('maintenance-banner');
+    if (!banner) return;
+    const notice = data.notice;
+    if (!notice) {{ banner.style.display = 'none'; return; }}
+    const when = new Date(notice.scheduled_at).toLocaleString();
+    const icon = notice.in_progress ? '&#9888;' : '&#128337;';
+    const lead = notice.in_progress ? 'Maintenance in progress: ' : `Scheduled maintenance ${{when}}: `;
+    banner.innerHTML = icon + ' ' + lead + notice.message;
+    banner.style.display = 'block';
+  }} catch (_) {{}}
+}}
+checkMaintenanceNotice();
+setInterval(checkMaintenanceNotice, 120000);
 
 function _age(ts) {{
   if (!ts) return 'never';
