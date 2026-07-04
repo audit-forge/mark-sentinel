@@ -65,6 +65,10 @@ def init_db():
                 conn.execute(f"ALTER TABLE customers ADD COLUMN {col} {defn}")
             except Exception:
                 pass
+        try:
+            conn.execute("ALTER TABLE users ADD COLUMN client_org_id TEXT")
+        except Exception:
+            pass
 
 
 @contextmanager

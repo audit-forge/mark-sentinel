@@ -37,11 +37,13 @@ def verify_password(plain: str, hashed: str) -> bool:
     return pwd_context.verify(plain, hashed)
 
 
-def create_token(user_id: str, role: str, customer_id: str | None, email: str = "") -> str:
+def create_token(user_id: str, role: str, customer_id: str | None, email: str = "",
+                  client_org_id: str | None = None) -> str:
     payload = {
         "sub": user_id,
         "role": role,
         "customer_id": customer_id,
+        "client_org_id": client_org_id,
         "email": email,
         "exp": datetime.now(timezone.utc) + timedelta(hours=TOKEN_EXPIRE_HOURS),
     }

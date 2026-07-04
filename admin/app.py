@@ -2,6 +2,7 @@ import os
 import uuid
 import json
 import secrets
+import sqlite3
 import string
 import subprocess
 import time
@@ -87,6 +88,41 @@ except Exception as e:
         return []
 
 
+def _get_client_orgs(customer_id: str) -> list[dict]:
+    """Read the client_orgs table from a customer's own bind-mounted customers.db.
+
+    Each customer container owns its own isolated customers.db (bind-mounted from
+    /opt/sentinel-data/{customer_id}); the admin container mounts the whole parent
+    dir at /data, so it can read it read-only without going through that customer's API.
+    """
+    db_file = f"/data/{customer_id}/customers.db"
+    if not os.path.isfile(db_file):
+        return []
+    try:
+        conn = sqlite3.connect(db_file)
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            "SELECT id, name FROM client_orgs WHERE active=1 ORDER BY name"
+        ).fetchall()
+        conn.close()
+        return [dict(r) for r in rows]
+    except Exception:
+        return []
+
+
+def _get_all_client_orgs() -> list[dict]:
+    """Flat list of every client org across every customer, for the super_admin Users page."""
+    results = []
+    try:
+        for entry in os.listdir("/data"):
+            for org in _get_client_orgs(entry):
+                org["customer_id"] = entry
+                results.append(org)
+    except Exception:
+        pass
+    return results
+
+
 def _sentinel_url(customer_id: str | None) -> str:
     """Return the Sentinel dashboard URL for a given customer_id."""
     if not customer_id:
@@ -134,7 +170,8 @@ async def login(
         return templates.TemplateResponse("login.html", {
             "request": request, "error": "Invalid credentials", "next": next
         })
-    token = create_token(row["id"], row["role"], row["customer_id"], row["email"])
+    token = create_token(row["id"], row["role"], row["customer_id"], row["email"],
+                          row["client_org_id"] if "client_org_id" in row.keys() else None)
     if not next:
         destination = "/dashboard" if row["role"] == "super_admin" else _sentinel_url(row["customer_id"])
     else:
@@ -177,6 +214,7 @@ async def auth_verify(request: Request):
         "X-Sentinel-User-Email":    email or "",
         "X-Sentinel-User-Role":     user.get("role") or "",
         "X-Sentinel-Customer-ID":   user.get("customer_id") or "",
+        "X-Sentinel-Client-Org-ID": user.get("client_org_id") or "",
     })
 
 
@@ -853,12 +891,33 @@ async def users_page(request: Request):
                 WHERE u.active=1 AND u.customer_id=? AND u.role != 'super_admin'
                 ORDER BY u.email
             """, (user["customer_id"],)).fetchall()
+    if user["role"] == "super_admin":
+        client_orgs = _get_all_client_orgs()
+        cust_names = {c["id"]: c["name"] for c in [dict(r) for r in customers]}
+        for org in client_orgs:
+            org["customer_name"] = cust_names.get(org["customer_id"], org["customer_id"])
+    else:
+        client_orgs = _get_client_orgs(user["customer_id"])
+
+    org_names = {o["id"]: o["name"] for o in client_orgs}
+    users_out = []
+    for r in rows:
+        d = dict(r)
+        d["client_org_name"] = org_names.get(d.get("client_org_id")) if d.get("client_org_id") else None
+        users_out.append(d)
+    all_users_out = []
+    for r in all_users:
+        d = dict(r)
+        d["client_org_name"] = org_names.get(d.get("client_org_id")) if d.get("client_org_id") else None
+        all_users_out.append(d)
+
     return templates.TemplateResponse("users.html", {
         "request": request, "user": user,
         "current_user_id": user["sub"],
-        "users": [dict(r) for r in rows],
-        "all_users": [dict(r) for r in all_users],
+        "users": users_out,
+        "all_users": all_users_out,
         "customers": [dict(r) for r in customers],
+        "client_orgs": client_orgs,
     })
 
 
@@ -869,6 +928,7 @@ async def add_user(
     password: str = Form(...),
     role: str = Form(...),
     customer_id: str = Form(None),
+    client_org_id: str = Form(None),
 ):
     try:
         user = get_current_user(request)
@@ -876,13 +936,29 @@ async def add_user(
         return RedirectResponse("/login")
     if user["role"] == "customer_admin":
         customer_id = user["customer_id"]
-        if role not in ("customer_admin", "user"):
+        if role not in ("customer_admin", "user", "client_viewer"):
             return RedirectResponse("/users?error=forbidden", status_code=303)
+    elif user["role"] != "super_admin":
+        return RedirectResponse("/users?error=forbidden", status_code=303)
+
+    if role == "client_viewer":
+        valid_orgs = {o["id"] for o in _get_client_orgs(customer_id)} if customer_id else set()
+        if not client_org_id or client_org_id not in valid_orgs:
+            return RedirectResponse("/users?error=noclientorg", status_code=303)
+    else:
+        client_org_id = None
+
     with get_conn() as conn:
+        existing = conn.execute(
+            "SELECT id FROM users WHERE email=?", (email.strip().lower(),)
+        ).fetchone()
+        if existing:
+            return RedirectResponse("/users?error=exists", status_code=303)
         conn.execute(
-            "INSERT INTO users (id, email, password_hash, role, customer_id, created_at) VALUES (?,?,?,?,?,?)",
+            "INSERT INTO users (id, email, password_hash, role, customer_id, client_org_id, created_at) "
+            "VALUES (?,?,?,?,?,?,?)",
             (str(uuid.uuid4()), email.strip().lower(), hash_password(password),
-             role, customer_id or None, datetime.now(timezone.utc).isoformat())
+             role, customer_id or None, client_org_id, datetime.now(timezone.utc).isoformat())
         )
     return RedirectResponse("/users", status_code=303)
 
@@ -893,6 +969,7 @@ async def edit_user(
     user_id: str = Form(...),
     role: str = Form(...),
     customer_id: str = Form(None),
+    client_org_id: str = Form(None),
 ):
     try:
         user = get_current_user(request)
@@ -900,12 +977,18 @@ async def edit_user(
         return RedirectResponse("/login")
     if user["role"] != "super_admin":
         return RedirectResponse("/users?error=forbidden", status_code=303)
-    if role not in ("super_admin", "customer_admin", "user"):
+    if role not in ("super_admin", "customer_admin", "user", "client_viewer"):
         role = "user"
+    if role == "client_viewer":
+        valid_orgs = {o["id"] for o in _get_client_orgs(customer_id)} if customer_id else set()
+        if not client_org_id or client_org_id not in valid_orgs:
+            return RedirectResponse("/users?error=noclientorg", status_code=303)
+    else:
+        client_org_id = None
     with get_conn() as conn:
         conn.execute(
-            "UPDATE users SET role=?, customer_id=? WHERE id=?",
-            (role, customer_id or None, user_id)
+            "UPDATE users SET role=?, customer_id=?, client_org_id=? WHERE id=?",
+            (role, customer_id or None, client_org_id, user_id)
         )
     return RedirectResponse("/users?edited=1", status_code=303)
 
