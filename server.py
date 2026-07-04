@@ -3980,7 +3980,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             qs       = _up.parse_qs(_up.urlparse(self.path).query)
             org_name = qs.get('org', [''])[0]
             store    = self._store()
-            devices  = store.get_fleet_device_list()
+            devices  = store.list_devices(client_org_id=self._scoped_client_org())
             enriched = []
             for d in devices:
                 rep = store.get_latest_report(d['device_id'])
