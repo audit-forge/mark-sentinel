@@ -4379,6 +4379,7 @@ async function sendReportNow(orgId, btn){
             body = _build_fleet_html(
                 devices, shadow, mcp,
                 current_user_email=user['email'] if user else '',
+                current_user_role=user.get('role', '') if user else '',
                 store=store,
             ).encode('utf-8')
             print(f'[SENTINEL] _serve_fleet: body built {len(body)} bytes', flush=True)
@@ -5148,6 +5149,7 @@ def send_client_org_report(customer_id: str, org_id: str, org_name: str, report_
 def _build_fleet_html(devices: list[dict], shadow: list[dict] | None = None,
                       mcp: list[dict] | None = None,
                       current_user_email: str = '',
+                      current_user_role: str = '',
                       store=None) -> str:
     shadow = shadow or []
     mcp    = mcp    or []
@@ -5393,6 +5395,7 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
     <nav class="sb-nav">
       <div class="sb-group">Overview</div>
       <button class="sb-item sb-active" id="nav-overview" onclick="navTo('overview')">&#8962; Home</button>
+      {'<button class="sb-item" id="nav-clients" onclick="window.location=\'/clients\'">&#127970; Clients</button>' if current_user_role != 'client_viewer' else ''}
       <div class="sb-group">Fleet</div>
       <button class="sb-item" id="nav-shadow" onclick="navTo('shadow')">&#9888; Shadow AI</button>
       <button class="sb-item" id="nav-alerts" onclick="navTo('alerts')">&#128276; Alerts <span id="alert-badge" style="display:none;background:#DC2626;color:#fff;border-radius:10px;font-size:10px;padding:1px 6px;margin-left:4px;font-weight:700"></span></button>
