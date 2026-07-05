@@ -1027,6 +1027,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             'role':        self.headers.get('X-Sentinel-User-Role', 'admin').strip(),
             'customer_id': customer_id,
             'client_org_id': self.headers.get('X-Sentinel-Client-Org-ID', '').strip() or None,
+            'is_reseller': self.headers.get('X-Sentinel-Is-Reseller', '').strip() == '1',
         }
 
     def _session_user(self) -> dict | None:
@@ -1207,6 +1208,8 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             '/':               self._serve_fleet,
             '/clients':        self._serve_clients,
             '/api/clients':    self._api_clients_list,
+            '/reseller':       self._serve_reseller,
+            '/api/reseller/customers': self._api_reseller_customers,
             '/dashboard':      self._serve_dashboard,
             '/dashboard.html': self._serve_dashboard,
             '/api/status':     self._api_status,
@@ -1755,6 +1758,82 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self._json({'ok': ok} if ok else {'error': 'user not found'}, 200 if ok else 404)
         except Exception as e:
             self._json({'error': str(e)}, 500)
+
+    def _api_reseller_customers(self):
+        """GET /api/reseller/customers — proxies to the admin service so a
+        reseller MSP's own customer_admin sees their resold customers inside
+        their own dashboard, without a separate admin-panel login."""
+        me = self._session_user()
+        if not me or me.get('role') not in ('admin', 'customer_admin', 'super_admin'):
+            self._json({'error': 'forbidden'}, 403)
+            return
+        self._proxy_to_admin('/api/reseller/customers')
+
+    def _serve_reseller(self):
+        """GET /reseller — MSP-admin-only page listing customers resold under
+        this account. Not in the client_viewer allowlist, so a scoped
+        session never reaches this method at all."""
+        me = self._session_user()
+        if not me or me.get('role') not in ('admin', 'customer_admin', 'super_admin'):
+            self._send(403, b'Forbidden', 'text/plain')
+            return
+        body = """<!DOCTYPE html><html><head><meta charset="utf-8">
+<title>Resold Customers — Arckon</title>
+<style>
+body{font:14px -apple-system,sans-serif;background:#0d1117;color:#c9d1d9;margin:0;padding:32px}
+h1{font-size:20px;font-weight:600;margin:0 0 20px}
+a.back{color:#58a6ff;text-decoration:none;font-size:13px}
+table{width:100%;border-collapse:collapse;margin-top:16px;background:#161b22;border-radius:8px;overflow:hidden}
+th{text-align:left;padding:10px 14px;background:#21262d;color:#8b949e;font-weight:500;font-size:12px;text-transform:uppercase}
+td{padding:10px 14px;border-top:1px solid #21262d}
+.badge-green{color:#16A34A}
+.badge-red{color:#DC2626}
+#msg{padding:32px;text-align:center;color:#8b949e}
+</style></head><body>
+<a class="back" href="/">&larr; Back to dashboard</a>
+<h1>Resold Customers</h1>
+<div id="msg">Loading…</div>
+<table id="tbl" style="display:none">
+<tr><th>Name</th><th>Status</th><th>Plan</th><th>Seats used</th><th>License expiry</th><th>Dashboard</th></tr>
+</table>
+<script>
+async function load(){
+  const msg = document.getElementById('msg');
+  const tbl = document.getElementById('tbl');
+  try {
+    const r = await fetch('/api/reseller/customers');
+    const data = await r.json();
+    if (!r.ok) {
+      msg.textContent = data.error === 'this account is not flagged as a reseller MSP'
+        ? 'This account is not set up as a reseller MSP. Contact Arckon to enable reselling on your account.'
+        : (data.error || 'Failed to load resold customers.');
+      return;
+    }
+    const customers = data.customers || [];
+    if (!customers.length) {
+      msg.textContent = 'No resold customers yet.';
+      return;
+    }
+    msg.style.display = 'none';
+    tbl.style.display = '';
+    customers.forEach(c => {
+      const tr = document.createElement('tr');
+      const status = c.active ? '<span class="badge-green">Active</span>' : '<span class="badge-red">Archived</span>';
+      const seats = c.current_agents + ' / ' + c.max_seats;
+      const expiry = c.license_expires_at ? c.license_expires_at.slice(0,10) : '—';
+      const dash = c.dashboard_url ? '<a href="' + c.dashboard_url + '" target="_blank" style="color:#58a6ff">' + c.dashboard_url + '</a>' : '—';
+      tr.innerHTML = '<td>' + c.name + '</td><td>' + status + '</td><td>' + (c.tier || '—') + '</td>' +
+        '<td>' + seats + '</td><td>' + expiry + '</td><td>' + dash + '</td>';
+      tbl.appendChild(tr);
+    });
+  } catch(e) {
+    msg.textContent = 'Network error loading resold customers.';
+  }
+}
+load();
+</script>
+</body></html>"""
+        self._send(200, body.encode('utf-8'), 'text/html; charset=utf-8')
 
     # ── client org management (MSP admin only — never reachable by client_viewer,
     # see _CLIENT_VIEWER_ALLOWED_EXACT/_PREFIX) ───────────────────────────────
@@ -4529,6 +4608,7 @@ async function moveSelectedDevices(){
                 devices, shadow, mcp,
                 current_user_email=user['email'] if user else '',
                 current_user_role=user.get('role', '') if user else '',
+                current_user_is_reseller=bool(user.get('is_reseller')) if user else False,
                 store=store,
             ).encode('utf-8')
             print(f'[SENTINEL] _serve_fleet: body built {len(body)} bytes', flush=True)
@@ -5299,6 +5379,7 @@ def _build_fleet_html(devices: list[dict], shadow: list[dict] | None = None,
                       mcp: list[dict] | None = None,
                       current_user_email: str = '',
                       current_user_role: str = '',
+                      current_user_is_reseller: bool = False,
                       store=None) -> str:
     shadow = shadow or []
     mcp    = mcp    or []
@@ -5545,6 +5626,7 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
       <div class="sb-group">Overview</div>
       <button class="sb-item sb-active" id="nav-overview" onclick="navTo('overview')">&#8962; Home</button>
       {'<button class="sb-item" id="nav-clients" onclick="window.location=\'/clients\'">&#127970; Clients</button>' if current_user_role != 'client_viewer' else ''}
+      {'<button class="sb-item" id="nav-reseller" onclick="window.location=\'/reseller\'">&#127970; Resold Customers</button>' if current_user_is_reseller else ''}
       <div class="sb-group">Fleet</div>
       <button class="sb-item" id="nav-shadow" onclick="navTo('shadow')">&#9888; Shadow AI</button>
       <button class="sb-item" id="nav-alerts" onclick="navTo('alerts')">&#128276; Alerts <span id="alert-badge" style="display:none;background:#DC2626;color:#fff;border-radius:10px;font-size:10px;padding:1px 6px;margin-left:4px;font-weight:700"></span></button>

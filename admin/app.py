@@ -209,12 +209,19 @@ async def auth_verify(request: Request):
             return Response(status_code=403)
     with get_conn() as conn:
         row = conn.execute("SELECT email FROM users WHERE id=?", (user["sub"],)).fetchone()
+        is_reseller = False
+        if user.get("customer_id"):
+            cust = conn.execute(
+                "SELECT is_reseller FROM customers WHERE id=?", (user["customer_id"],)
+            ).fetchone()
+            is_reseller = bool(cust and cust["is_reseller"])
     email = row["email"] if row else ""
     return Response(status_code=200, headers={
         "X-Sentinel-User-Email":    email or "",
         "X-Sentinel-User-Role":     user.get("role") or "",
         "X-Sentinel-Customer-ID":   user.get("customer_id") or "",
         "X-Sentinel-Client-Org-ID": user.get("client_org_id") or "",
+        "X-Sentinel-Is-Reseller":   "1" if is_reseller else "",
     })
 
 
@@ -1258,104 +1265,37 @@ async def receive_telemetry(request: Request):
     return JSONResponse({"status": "ok", "current_agents": current_agents, "max_seats": row["max_seats"]})
 
 
-# ── JSON API — used by Sentinel dashboard in cloud/proxy mode ─────────────────
+# ── Reseller view ─────────────────────────────────────────────────────────────
+# server.py's own dashboard proxies here (via _proxy_to_admin) so a reseller
+# MSP's customer_admin sees their resold customers natively in their own
+# dashboard, without needing separate admin-panel credentials.
 
-@app.get("/api/users")
-async def api_users_list(request: Request):
-    from fastapi.responses import JSONResponse
+@app.get("/api/reseller/customers")
+async def api_reseller_customers(request: Request):
     try:
         user = get_current_user(request)
     except HTTPException:
         return JSONResponse({"error": "unauthorized"}, status_code=401)
-    with get_conn() as conn:
-        if user["role"] == "super_admin":
-            rows = conn.execute(
-                "SELECT id, email, role, created_at FROM users WHERE active=1 ORDER BY role='super_admin' DESC, email"
-            ).fetchall()
-        else:
-            rows = conn.execute(
-                "SELECT id, email, role, created_at FROM users WHERE active=1 AND customer_id=? AND role != 'super_admin' ORDER BY email",
-                (user["customer_id"],),
-            ).fetchall()
-        me_row = conn.execute("SELECT email FROM users WHERE id=?", (user.get("sub"),)).fetchone()
-    current_user_email = me_row["email"] if me_row else ""
-    return JSONResponse({"users": [dict(r) for r in rows], "current_user": current_user_email})
-
-
-@app.post("/api/users/add")
-async def api_add_user(request: Request):
-    from fastapi.responses import JSONResponse
-    try:
-        user = get_current_user(request)
-    except HTTPException:
-        return JSONResponse({"error": "unauthorized"}, status_code=401)
-    if user["role"] not in ("super_admin", "customer_admin"):
-        return JSONResponse({"error": "forbidden"}, status_code=403)
-    body = await request.json()
-    email    = str(body.get("email", "")).strip().lower()
-    password = str(body.get("password", ""))
-    role     = str(body.get("role", "customer_admin"))
-    if user["role"] == "customer_admin" and role not in ("customer_admin", "user"):
-        return JSONResponse({"error": "forbidden"}, status_code=403)
-    if "@" not in email or len(password) < 8:
-        return JSONResponse({"error": "invalid email or password too short"}, status_code=400)
-    customer_id = user["customer_id"] if user["role"] != "super_admin" else body.get("customer_id")
-    try:
-        with get_conn() as conn:
-            conn.execute(
-                "INSERT INTO users (id, email, password_hash, role, customer_id, created_at) VALUES (?,?,?,?,?,?)",
-                (str(uuid.uuid4()), email, hash_password(password), role,
-                 customer_id or None, datetime.now(timezone.utc).isoformat()),
-            )
-    except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=400)
-    return JSONResponse({"ok": True})
-
-
-@app.post("/api/users/password/{user_id}")
-async def api_change_user_password(request: Request, user_id: str):
-    from fastapi.responses import JSONResponse
-    try:
-        user = get_current_user(request)
-    except HTTPException:
-        return JSONResponse({"error": "unauthorized"}, status_code=401)
-    if user["role"] not in ("super_admin", "customer_admin"):
-        return JSONResponse({"error": "forbidden"}, status_code=403)
-    body = await request.json()
-    new_password = str(body.get("new_password", ""))
-    if len(new_password) < 8:
-        return JSONResponse({"error": "password too short"}, status_code=400)
-    with get_conn() as conn:
-        target = conn.execute("SELECT * FROM users WHERE id=? AND active=1", (user_id,)).fetchone()
-        if not target:
-            return JSONResponse({"error": "not found"}, status_code=404)
-        if user["role"] == "customer_admin":
-            if target["customer_id"] != user["customer_id"] or target["role"] == "super_admin":
-                return JSONResponse({"error": "forbidden"}, status_code=403)
-        conn.execute("UPDATE users SET password_hash=? WHERE id=?", (hash_password(new_password), user_id))
-    return JSONResponse({"ok": True})
-
-
-@app.post("/api/users/remove/{user_id}")
-async def api_remove_user(request: Request, user_id: str):
-    from fastapi.responses import JSONResponse
-    try:
-        user = get_current_user(request)
-    except HTTPException:
-        return JSONResponse({"error": "unauthorized"}, status_code=401)
-    if user["role"] not in ("super_admin", "customer_admin"):
+    if user["role"] not in ("customer_admin", "super_admin") or not user.get("customer_id"):
         return JSONResponse({"error": "forbidden"}, status_code=403)
     with get_conn() as conn:
-        target = conn.execute("SELECT * FROM users WHERE id=? AND active=1", (user_id,)).fetchone()
-        if not target:
-            return JSONResponse({"error": "not found"}, status_code=404)
-        if target["id"] == user["sub"]:
-            return JSONResponse({"error": "cannot remove yourself"}, status_code=400)
-        if user["role"] == "customer_admin":
-            if target["customer_id"] != user["customer_id"] or target["role"] == "super_admin":
-                return JSONResponse({"error": "forbidden"}, status_code=403)
-        conn.execute("UPDATE users SET active=0 WHERE id=?", (user_id,))
-    return JSONResponse({"ok": True})
+        me = conn.execute("SELECT is_reseller FROM customers WHERE id=?", (user["customer_id"],)).fetchone()
+        if not me or not me["is_reseller"]:
+            return JSONResponse({"error": "this account is not flagged as a reseller MSP"}, status_code=403)
+        rows = conn.execute(
+            "SELECT * FROM customers WHERE parent_customer_id=? ORDER BY created_at DESC",
+            (user["customer_id"],)
+        ).fetchall()
+    customers_out = []
+    for r in rows:
+        d = dict(r)
+        customers_out.append({
+            "id": d["id"], "name": d["name"], "active": bool(d["active"]),
+            "tier": d["tier"], "max_seats": d["max_seats"], "current_agents": d["current_agents"],
+            "license_expires_at": d["license_expires_at"],
+            "dashboard_url": f"http://{PUBLIC_IP}:{d['port']}" if d.get("port") and d["active"] else None,
+        })
+    return JSONResponse({"customers": customers_out})
 
 
 # ── Audit Log ─────────────────────────────────────────────────────────────────
