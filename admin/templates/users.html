@@ -120,7 +120,7 @@
   {% endif %}
 </div>
 
-{% if user.role == 'super_admin' %}
+{% if user.role in ('super_admin', 'customer_admin') %}
 <div class="card">
   <div class="card-title">Edit User</div>
   <form method="post" action="/users/edit">
@@ -137,7 +137,9 @@
       <div class="form-group" style="max-width:200px">
         <label>Role</label>
         <select name="role" onchange="document.getElementById('edit-client-org-group').style.display = this.value === 'client_viewer' ? '' : 'none'">
+          {% if user.role == 'super_admin' %}
           <option value="super_admin">super_admin</option>
+          {% endif %}
           <option value="customer_admin">customer_admin</option>
           <option value="user">user</option>
           <option value="client_viewer">client viewer</option>

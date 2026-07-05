@@ -975,10 +975,26 @@ async def edit_user(
         user = get_current_user(request)
     except HTTPException:
         return RedirectResponse("/login")
-    if user["role"] != "super_admin":
+
+    with get_conn() as conn:
+        target = conn.execute("SELECT * FROM users WHERE id=? AND active=1", (user_id,)).fetchone()
+    if not target:
+        return RedirectResponse("/users?error=notfound", status_code=303)
+
+    if user["role"] == "customer_admin":
+        # Scoped to their own customer, can't touch a super_admin account,
+        # can't grant super_admin, and can't reassign to a different customer —
+        # same containment rules already applied to /users/remove and /users/password.
+        if target["customer_id"] != user["customer_id"] or target["role"] == "super_admin":
+            return RedirectResponse("/users?error=forbidden", status_code=303)
+        customer_id = user["customer_id"]
+        if role not in ("customer_admin", "user", "client_viewer"):
+            return RedirectResponse("/users?error=forbidden", status_code=303)
+    elif user["role"] != "super_admin":
         return RedirectResponse("/users?error=forbidden", status_code=303)
-    if role not in ("super_admin", "customer_admin", "user", "client_viewer"):
+    elif role not in ("super_admin", "customer_admin", "user", "client_viewer"):
         role = "user"
+
     if role == "client_viewer":
         valid_orgs = {o["id"] for o in _get_client_orgs(customer_id)} if customer_id else set()
         if not client_org_id or client_org_id not in valid_orgs:
