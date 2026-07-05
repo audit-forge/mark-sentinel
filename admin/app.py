@@ -1055,6 +1055,141 @@ async def remove_user(request: Request, user_id: str = Form(...)):
     return RedirectResponse("/users", status_code=303)
 
 
+# ── JSON API for the customer-dashboard-embedded Users tab ────────────────────
+# server.py's own "Users" nav item proxies here (via _proxy_to_admin) when
+# SENTINEL_TRUSTED_PROXY is set, i.e. on every real production deployment.
+# Mirrors the same permission/scoping rules as the HTML routes above.
+
+@app.get("/api/users")
+async def api_users_list(request: Request):
+    try:
+        user = get_current_user(request)
+    except HTTPException:
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    with get_conn() as conn:
+        if user["role"] == "super_admin":
+            rows = conn.execute(
+                "SELECT * FROM users WHERE active=1 ORDER BY created_at DESC"
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM users WHERE active=1 AND customer_id=? AND role != 'super_admin' "
+                "ORDER BY created_at DESC",
+                (user["customer_id"],)
+            ).fetchall()
+    users_out = [
+        {
+            "id": r["id"], "email": r["email"], "role": r["role"],
+            "client_org_id": r["client_org_id"] if "client_org_id" in r.keys() else None,
+            "active": bool(r["active"]), "created_at": r["created_at"],
+        }
+        for r in rows
+    ]
+    return JSONResponse({"users": users_out, "current_user": user.get("email", "")})
+
+
+@app.post("/api/users/add")
+async def api_users_add(request: Request):
+    try:
+        user = get_current_user(request)
+    except HTTPException:
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    email = str(body.get("email", "")).strip().lower()
+    password = str(body.get("password", ""))
+    role = str(body.get("role", "user"))
+    if role == "admin":
+        # The customer-dashboard-embedded Users tab (server.py) predates the
+        # customer_admin/user/client_viewer naming and still sends "admin".
+        role = "customer_admin"
+    client_org_id = body.get("client_org_id") or None
+
+    if not email or "@" not in email or len(password) < 8:
+        return JSONResponse({"error": "invalid email or password"}, status_code=400)
+
+    if user["role"] == "customer_admin":
+        customer_id = user["customer_id"]
+        if role not in ("customer_admin", "user", "client_viewer"):
+            return JSONResponse({"error": "forbidden"}, status_code=403)
+    elif user["role"] != "super_admin":
+        return JSONResponse({"error": "forbidden"}, status_code=403)
+    else:
+        customer_id = body.get("customer_id") or None
+
+    if role == "client_viewer":
+        valid_orgs = {o["id"] for o in _get_client_orgs(customer_id)} if customer_id else set()
+        if not client_org_id or client_org_id not in valid_orgs:
+            return JSONResponse({"error": "select a valid client org for the client viewer role"}, status_code=400)
+    else:
+        client_org_id = None
+
+    with get_conn() as conn:
+        existing = conn.execute("SELECT id FROM users WHERE email=?", (email,)).fetchone()
+        if existing:
+            return JSONResponse({"error": "a user with that email already exists"}, status_code=409)
+        new_id = str(uuid.uuid4())
+        conn.execute(
+            "INSERT INTO users (id, email, password_hash, role, customer_id, client_org_id, created_at) "
+            "VALUES (?,?,?,?,?,?,?)",
+            (new_id, email, hash_password(password), role, customer_id, client_org_id,
+             datetime.now(timezone.utc).isoformat())
+        )
+    return JSONResponse({"ok": True, "user": {"id": new_id, "email": email, "role": role}})
+
+
+@app.post("/api/users/remove/{user_id}")
+async def api_users_remove(request: Request, user_id: str):
+    try:
+        user = get_current_user(request)
+    except HTTPException:
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    if user["role"] not in ("customer_admin", "super_admin"):
+        return JSONResponse({"error": "forbidden"}, status_code=403)
+    with get_conn() as conn:
+        target = conn.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone()
+        if not target:
+            return JSONResponse({"ok": True})
+        if target["id"] == user["sub"]:
+            return JSONResponse({"error": "cannot remove your own account"}, status_code=403)
+        if user["role"] == "customer_admin" and target["customer_id"] != user["customer_id"]:
+            return JSONResponse({"error": "forbidden"}, status_code=403)
+        if user["role"] != "super_admin" and target["role"] == "super_admin":
+            return JSONResponse({"error": "forbidden"}, status_code=403)
+        conn.execute("UPDATE users SET active=0 WHERE id=?", (user_id,))
+    return JSONResponse({"ok": True})
+
+
+@app.post("/api/users/password/{user_id}")
+async def api_users_password(request: Request, user_id: str):
+    try:
+        user = get_current_user(request)
+    except HTTPException:
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    if user["role"] not in ("customer_admin", "super_admin"):
+        return JSONResponse({"error": "forbidden"}, status_code=403)
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    new_password = str(body.get("new_password", ""))
+    if len(new_password) < 8:
+        return JSONResponse({"error": "password must be at least 8 characters"}, status_code=400)
+    with get_conn() as conn:
+        target = conn.execute("SELECT * FROM users WHERE id=? AND active=1", (user_id,)).fetchone()
+        if not target:
+            return JSONResponse({"error": "not found"}, status_code=404)
+        if user["role"] != "super_admin" and target["customer_id"] != user["customer_id"]:
+            return JSONResponse({"error": "forbidden"}, status_code=403)
+        conn.execute(
+            "UPDATE users SET password_hash=? WHERE id=?",
+            (hash_password(new_password), user_id)
+        )
+    return JSONResponse({"ok": True})
+
+
 # ── Telemetry — receives usage heartbeats from running customer containers ─────
 
 @app.post("/api/telemetry")
