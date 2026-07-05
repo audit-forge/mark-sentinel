@@ -1053,6 +1053,8 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         from urllib.parse import parse_qs, urlparse as _up
         qs = parse_qs(_up(self.path).query)
         requested = (qs.get('client_org', [''])[0]).strip()
+        if requested == '__unassigned__':
+            return ''
         return requested if requested and requested != 'all' else None
 
     # Paths a client_viewer session may reach — everything else 403s.
@@ -1416,6 +1418,8 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self._api_users_deactivate(path[len('/api/users/deactivate/'):])
         elif path.startswith('/api/users/password/'):
             self._api_users_password(path[len('/api/users/password/'):])
+        elif path == '/api/clients/assign-devices':
+            self._api_devices_assign_client_org()
         elif path == '/api/clients/add':
             self._api_clients_add()
         elif path.startswith('/api/clients/rename/'):
@@ -1775,6 +1779,38 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             if unassigned:
                 out.append({'id': None, 'name': 'Unassigned', 'enroll_token': None, **unassigned})
             self._json({'client_orgs': out})
+        except Exception as e:
+            self._json({'error': str(e)}, 500)
+
+    def _api_devices_assign_client_org(self):
+        """POST /api/clients/assign-devices — bulk move devices between client
+        orgs (or back to unassigned) without touching agent_config.json on
+        each machine. This is the scale-friendly alternative to per-device
+        re-enrollment for fleets too large to hand-edit one at a time."""
+        me = self._session_user()
+        if not me or me.get('role') not in ('admin', 'customer_admin', 'super_admin'):
+            self._json({'error': 'forbidden'}, 403)
+            return
+        cl = int(self.headers.get('Content-Length', 0))
+        raw = self.rfile.read(cl) if cl else b'{}'
+        try:
+            body = json.loads(raw)
+            device_ids = body.get('device_ids', [])
+            client_org_id = str(body.get('client_org_id', '')).strip()
+            if not isinstance(device_ids, list) or not device_ids:
+                self._json({'error': 'device_ids is required'}, 400)
+                return
+            if client_org_id:
+                org = _get_registry().get_client_org(client_org_id)
+                if not org or org.get('customer_id') != me['customer_id']:
+                    self._json({'error': 'client_org_id not found for this customer'}, 404)
+                    return
+            store = self._store()
+            moved = 0
+            for device_id in device_ids:
+                if store.set_device_client_org(str(device_id), client_org_id or None):
+                    moved += 1
+            self._json({'ok': True, 'moved': moved})
         except Exception as e:
             self._json({'error': str(e)}, 500)
 
@@ -4238,6 +4274,13 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                 )
             else:
                 report_cell = '<td style="color:#484f58;font-size:12px">—</td>'
+            name_js = name.replace('\\', '\\\\').replace("'", "\\'")
+            manage_cell = (
+                '<td onclick="event.stopPropagation()">'
+                f'<button class="scan-btn" style="font-size:11px" '
+                f'onclick="openDeviceModal(\'{org_id}\',\'{name_js}\')">Manage devices</button>'
+                '</td>'
+            )
             row_html += (
                 '<tr class="client-row" onclick="location.href=\'' + link + '\'">'
                 '<td><span class="risk-dot" style="background:' + sev_color[sev] + '"></span></td>'
@@ -4249,10 +4292,15 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                 '<td style="color:#16A34A">' + str(stats['ok']) + '</td>'
                 '<td>' + _age(stats['last_scan_at']) + '</td>'
                 + report_cell +
+                manage_cell +
                 '</tr>'
             )
         if not row_html:
-            row_html = '<tr><td colspan="9" style="text-align:center;padding:32px;color:#8b949e">No client orgs yet — create one below.</td></tr>'
+            row_html = '<tr><td colspan="10" style="text-align:center;padding:32px;color:#8b949e">No client orgs yet — create one below.</td></tr>'
+
+        org_options_html = ''.join(
+            f'<option value="{o["id"]}">{o["name"].replace("<", "&lt;")}</option>' for o in orgs
+        )
 
         body = ("""<!DOCTYPE html><html><head><meta charset="utf-8">
 <title>Clients — Arckon</title>
@@ -4275,11 +4323,17 @@ td{padding:10px 14px;border-top:1px solid #21262d}
 #new-token code{color:#58a6ff;word-break:break-all}
 .scan-btn{background:#21262d;border:1px solid #30363d;color:#c9d1d9;border-radius:4px;padding:3px 8px;cursor:pointer}
 .scan-btn:hover{background:#30363d}
+#device-modal{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:100;align-items:center;justify-content:center}
+#device-modal .box{background:#161b22;border:1px solid #30363d;border-radius:8px;width:640px;max-height:80vh;display:flex;flex-direction:column;padding:20px}
+#device-modal input[type=text]{width:100%;box-sizing:border-box;padding:8px;background:#0d1117;border:1px solid #30363d;color:#c9d1d9;border-radius:6px}
+#dm-list{overflow-y:auto;flex:1;border-top:1px solid #21262d;min-height:120px;max-height:360px}
+.dm-row{display:flex;align-items:center;gap:8px;padding:6px 4px;border-bottom:1px solid #21262d;font-size:13px;cursor:pointer}
+#dm-target-org{flex:1;padding:8px;background:#0d1117;border:1px solid #30363d;color:#c9d1d9;border-radius:6px}
 </style></head><body>
 <a class="back" href="/">&larr; Full fleet (all clients)</a>
 <h1>Clients</h1>
 <table>
-<tr><th></th><th>Client</th><th>Status</th><th>Devices</th><th>Critical</th><th>Warning</th><th>Clean</th><th>Last scan</th><th>Monthly PDF Report</th></tr>
+<tr><th></th><th>Client</th><th>Status</th><th>Devices</th><th>Critical</th><th>Warning</th><th>Clean</th><th>Last scan</th><th>Monthly PDF Report</th><th></th></tr>
 """ + row_html + """
 </table>
 <div class="add-form">
@@ -4287,6 +4341,30 @@ td{padding:10px 14px;border-top:1px solid #21262d}
   <button onclick="addClient()">+ Add Client</button>
 </div>
 <div id="new-token"></div>
+
+<div id="device-modal">
+  <div class="box">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+      <h3 id="dm-title" style="margin:0;font-size:16px"></h3>
+      <button onclick="closeDeviceModal()" style="background:none;border:none;color:#8b949e;font-size:20px;cursor:pointer">&times;</button>
+    </div>
+    <input type="text" id="dm-search" placeholder="Filter by hostname..." oninput="renderDeviceList()" style="margin-bottom:10px">
+    <div style="display:flex;gap:12px;margin-bottom:8px;align-items:center">
+      <label style="font-size:12px"><input type="checkbox" id="dm-select-all" onchange="toggleAllDeviceCheckboxes(this)"> Select all shown (<span id="dm-visible-count">0</span>)</label>
+      <span id="dm-selected-count" style="font-size:12px;color:#8b949e"></span>
+    </div>
+    <div id="dm-list"></div>
+    <div style="display:flex;gap:8px;margin-top:14px;align-items:center">
+      <select id="dm-target-org">
+        <option value="">— Unassigned —</option>
+        """ + org_options_html + """
+      </select>
+      <button onclick="moveSelectedDevices()" class="scan-btn" style="background:#238636;color:#fff;border-color:#238636">Move selected</button>
+    </div>
+    <div id="dm-status" style="font-size:12px;margin-top:8px"></div>
+  </div>
+</div>
+
 <script>
 async function addClient(){
   const name = document.getElementById('new-client-name').value.trim();
@@ -4350,6 +4428,77 @@ async function sendReportNow(orgId, btn){
     statusEl.style.color = '#DC2626';
   }
   btn.disabled = false;
+}
+
+let dmDevices = [];
+
+async function openDeviceModal(orgId, orgName){
+  document.getElementById('dm-title').textContent = 'Devices — ' + orgName;
+  document.getElementById('dm-search').value = '';
+  document.getElementById('dm-select-all').checked = false;
+  document.getElementById('dm-list').innerHTML = '<div style="padding:20px;color:#8b949e">Loading…</div>';
+  document.getElementById('dm-target-org').value = orgId;
+  document.getElementById('dm-status').textContent = '';
+  document.getElementById('device-modal').style.display = 'flex';
+  const qs = orgId === '' ? '__unassigned__' : orgId;
+  try {
+    const r = await fetch('/api/devices?client_org=' + encodeURIComponent(qs));
+    const data = await r.json();
+    dmDevices = data.devices || [];
+  } catch(e) {
+    dmDevices = [];
+  }
+  renderDeviceList();
+}
+
+function closeDeviceModal(){
+  document.getElementById('device-modal').style.display = 'none';
+}
+
+function renderDeviceList(){
+  const filter = (document.getElementById('dm-search').value || '').toLowerCase();
+  const list = document.getElementById('dm-list');
+  const filtered = dmDevices.filter(d => (d.hostname || d.device_id || '').toLowerCase().includes(filter));
+  document.getElementById('dm-visible-count').textContent = filtered.length;
+  list.innerHTML = filtered.map(d =>
+    '<label class="dm-row"><input type="checkbox" class="dm-device-cb" value="' + d.device_id + '" onchange="updateSelectedCount()">' +
+    '<span style="flex:1">' + (d.hostname || d.device_id) + '</span>' +
+    '<span style="color:#8b949e;font-size:11px">' + (d.platform || '') + '</span></label>'
+  ).join('') || '<div style="padding:20px;color:#8b949e">No devices.</div>';
+  updateSelectedCount();
+}
+
+function toggleAllDeviceCheckboxes(cb){
+  document.querySelectorAll('.dm-device-cb').forEach(el => { el.checked = cb.checked; });
+  updateSelectedCount();
+}
+
+function updateSelectedCount(){
+  const n = document.querySelectorAll('.dm-device-cb:checked').length;
+  document.getElementById('dm-selected-count').textContent = n ? (n + ' selected') : '';
+}
+
+async function moveSelectedDevices(){
+  const ids = Array.from(document.querySelectorAll('.dm-device-cb:checked')).map(el => el.value);
+  const statusEl = document.getElementById('dm-status');
+  if (!ids.length){ statusEl.textContent = 'Select at least one device.'; statusEl.style.color = '#DC2626'; return; }
+  const targetOrg = document.getElementById('dm-target-org').value;
+  statusEl.textContent = 'Moving…'; statusEl.style.color = '#8b949e';
+  try {
+    const r = await fetch('/api/clients/assign-devices', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({device_ids: ids, client_org_id: targetOrg})
+    });
+    const data = await r.json();
+    if (data.ok){
+      statusEl.textContent = 'Moved ' + data.moved + ' device(s).'; statusEl.style.color = '#16A34A';
+      setTimeout(() => location.reload(), 1200);
+    } else {
+      statusEl.textContent = data.error || 'Failed'; statusEl.style.color = '#DC2626';
+    }
+  } catch(e) {
+    statusEl.textContent = 'Network error.'; statusEl.style.color = '#DC2626';
+  }
 }
 </script>
 </body></html>""")
@@ -7675,6 +7824,7 @@ async function loadUsers() {{
       customer_admin: '<span style="font-size:10px;font-weight:600;color:#4F46E5;background:#EEF2FF;padding:1px 6px;border-radius:4px">admin</span>',
       admin:          '<span style="font-size:10px;font-weight:600;color:#4F46E5;background:#EEF2FF;padding:1px 6px;border-radius:4px">admin</span>',
       user:           '<span style="font-size:10px;font-weight:600;color:#CA8A04;background:#FEF9C3;padding:1px 6px;border-radius:4px">viewer</span>',
+      client_viewer:  '<span style="font-size:10px;font-weight:600;color:#CA8A04;background:#FEF9C3;padding:1px 6px;border-radius:4px">client viewer</span>',
     }};
     const rows = users.map(u => {{
       const isMe = u.email === myEmail;
