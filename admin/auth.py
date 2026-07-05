@@ -38,15 +38,20 @@ def verify_password(plain: str, hashed: str) -> bool:
 
 
 def create_token(user_id: str, role: str, customer_id: str | None, email: str = "",
-                  client_org_id: str | None = None) -> str:
+                  client_org_id: str | None = None, impersonated_by: str | None = None,
+                  expire_minutes: int | None = None) -> str:
     payload = {
         "sub": user_id,
         "role": role,
         "customer_id": customer_id,
         "client_org_id": client_org_id,
         "email": email,
-        "exp": datetime.now(timezone.utc) + timedelta(hours=TOKEN_EXPIRE_HOURS),
+        "exp": datetime.now(timezone.utc) + (
+            timedelta(minutes=expire_minutes) if expire_minutes else timedelta(hours=TOKEN_EXPIRE_HOURS)
+        ),
     }
+    if impersonated_by:
+        payload["impersonated_by"] = impersonated_by
     return jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
 
 

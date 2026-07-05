@@ -275,6 +275,14 @@ def _get_session_cookie(headers) -> str:
             return v.strip()
     return ''
 
+
+def _get_cookie(headers, name: str) -> str:
+    for part in headers.get('Cookie', '').split(';'):
+        k, _, v = part.strip().partition('=')
+        if k.strip() == name:
+            return v.strip()
+    return ''
+
 # ── per-device report rate limiting ──────────────────────────────────────────
 _report_last_seen: dict[str, float] = {}
 _report_lock = threading.Lock()
@@ -1028,6 +1036,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             'customer_id': customer_id,
             'client_org_id': self.headers.get('X-Sentinel-Client-Org-ID', '').strip() or None,
             'is_reseller': self.headers.get('X-Sentinel-Is-Reseller', '').strip() == '1',
+            'impersonated_by': self.headers.get('X-Sentinel-Impersonated-By', '').strip() or None,
         }
 
     def _session_user(self) -> dict | None:
@@ -1423,6 +1432,10 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self._api_users_password(path[len('/api/users/password/'):])
         elif path == '/api/clients/assign-devices':
             self._api_devices_assign_client_org()
+        elif path == '/api/reseller/impersonate':
+            self._api_reseller_impersonate()
+        elif path == '/api/reseller/impersonate/end':
+            self._api_reseller_impersonate_end()
         elif path == '/api/clients/add':
             self._api_clients_add()
         elif path.startswith('/api/clients/rename/'):
@@ -1769,6 +1782,80 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             return
         self._proxy_to_admin('/api/reseller/customers')
 
+    def _api_reseller_impersonate(self):
+        """POST /api/reseller/impersonate — start a support session in a
+        resold customer's dashboard without re-authenticating.
+
+        The browser's real ingress is nginx on the shared IP, on a different
+        port per customer but the SAME host — cookies aren't port-scoped, so
+        a token cookie set here (via this response) is sent by the browser
+        to any resold customer's port on the same host. We stash the
+        reseller's own token in a second cookie first so "return to my
+        account" can restore it without a fresh login."""
+        me = self._session_user()
+        if not me or me.get('role') not in ('admin', 'customer_admin', 'super_admin'):
+            self._json({'error': 'forbidden'}, 403)
+            return
+        cl = int(self.headers.get('Content-Length', 0))
+        raw = self.rfile.read(cl) if cl else b'{}'
+        import urllib.request, urllib.error
+        url = self._admin_panel_url() + '/api/reseller/impersonate'
+        cookie = self.headers.get('Cookie', '')
+        req = urllib.request.Request(url, data=raw, method='POST',
+                                     headers={'Cookie': cookie, 'Content-Type': 'application/json'})
+        try:
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                data = json.loads(resp.read())
+        except urllib.error.HTTPError as e:
+            self._send(e.code, e.read(), 'application/json')
+            return
+        except Exception as e:
+            self._json({'error': str(e)}, 502)
+            return
+
+        original_token = _get_cookie(self.headers, 'token')
+        body = json.dumps({'ok': True, 'dashboard_url': data.get('dashboard_url', '')}).encode()
+        self.send_response(200)
+        self.send_header('Content-Type', 'application/json')
+        self.send_header('Content-Length', len(body))
+        if original_token:
+            self.send_header('Set-Cookie',
+                f'sentinel_return_token={original_token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=1800')
+            self.send_header('Set-Cookie',
+                f'sentinel_return_url={data.get("return_url", "")}; Path=/; HttpOnly; SameSite=Lax; Max-Age=1800')
+        self.send_header('Set-Cookie',
+            f'token={data.get("token", "")}; Path=/; HttpOnly; SameSite=Lax; Max-Age=1800')
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _api_reseller_impersonate_end(self):
+        """POST /api/reseller/impersonate/end — log the end of the support
+        session (while the impersonation token is still active), then
+        restore the reseller's own token from the stashed cookie."""
+        return_token = _get_cookie(self.headers, 'sentinel_return_token')
+        return_url = _get_cookie(self.headers, 'sentinel_return_url')
+        import urllib.request, urllib.error
+        try:
+            url = self._admin_panel_url() + '/api/reseller/impersonate/end'
+            cookie = self.headers.get('Cookie', '')
+            req = urllib.request.Request(url, data=b'{}', method='POST',
+                                         headers={'Cookie': cookie, 'Content-Type': 'application/json'})
+            with urllib.request.urlopen(req, timeout=5):
+                pass
+        except Exception:
+            pass  # best-effort audit log; don't block the return on it
+
+        body = json.dumps({'ok': bool(return_token), 'redirect_url': return_url}).encode()
+        self.send_response(200)
+        self.send_header('Content-Type', 'application/json')
+        self.send_header('Content-Length', len(body))
+        if return_token:
+            self.send_header('Set-Cookie', f'token={return_token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=28800')
+        self.send_header('Set-Cookie', 'sentinel_return_token=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0')
+        self.send_header('Set-Cookie', 'sentinel_return_url=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0')
+        self.end_headers()
+        self.wfile.write(body)
+
     def _serve_reseller(self):
         """GET /reseller — MSP-admin-only page listing customers resold under
         this account. Not in the client_viewer allowlist, so a scoped
@@ -1794,8 +1881,9 @@ td{padding:10px 14px;border-top:1px solid #21262d}
 <h1>Resold Customers</h1>
 <div id="msg">Loading…</div>
 <table id="tbl" style="display:none">
-<tr><th>Name</th><th>Status</th><th>Plan</th><th>Seats used</th><th>License expiry</th><th>Dashboard</th></tr>
+<tr><th>Name</th><th>Status</th><th>Plan</th><th>Seats used</th><th>License expiry</th><th></th></tr>
 </table>
+<div id="enter-status" style="margin-top:12px;font-size:13px;color:#8b949e"></div>
 <script>
 async function load(){
   const msg = document.getElementById('msg');
@@ -1821,13 +1909,37 @@ async function load(){
       const status = c.active ? '<span class="badge-green">Active</span>' : '<span class="badge-red">Archived</span>';
       const seats = c.current_agents + ' / ' + c.max_seats;
       const expiry = c.license_expires_at ? c.license_expires_at.slice(0,10) : '—';
-      const dash = c.dashboard_url ? '<a href="' + c.dashboard_url + '" target="_blank" style="color:#58a6ff">' + c.dashboard_url + '</a>' : '—';
+      const enterBtn = c.active
+        ? '<button onclick="enterCustomer(\\'' + c.id + '\\', this)" style="background:#238636;color:#fff;border:none;padding:5px 12px;border-radius:4px;cursor:pointer;font-size:12px">Enter dashboard</button>'
+        : '—';
       tr.innerHTML = '<td>' + c.name + '</td><td>' + status + '</td><td>' + (c.tier || '—') + '</td>' +
-        '<td>' + seats + '</td><td>' + expiry + '</td><td>' + dash + '</td>';
+        '<td>' + seats + '</td><td>' + expiry + '</td><td>' + enterBtn + '</td>';
       tbl.appendChild(tr);
     });
   } catch(e) {
     msg.textContent = 'Network error loading resold customers.';
+  }
+}
+
+async function enterCustomer(customerId, btn){
+  const statusEl = document.getElementById('enter-status');
+  btn.disabled = true;
+  statusEl.textContent = 'Starting support session…';
+  try {
+    const r = await fetch('/api/reseller/impersonate', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({customer_id: customerId})
+    });
+    const data = await r.json();
+    if (data.ok && data.dashboard_url) {
+      window.location = data.dashboard_url;
+    } else {
+      statusEl.textContent = data.error || 'Failed to start support session.';
+      btn.disabled = false;
+    }
+  } catch(e) {
+    statusEl.textContent = 'Network error.';
+    btn.disabled = false;
   }
 }
 load();
@@ -4609,6 +4721,7 @@ async function moveSelectedDevices(){
                 current_user_email=user['email'] if user else '',
                 current_user_role=user.get('role', '') if user else '',
                 current_user_is_reseller=bool(user.get('is_reseller')) if user else False,
+                current_user_impersonated_by=(user.get('impersonated_by') or '') if user else '',
                 store=store,
             ).encode('utf-8')
             print(f'[SENTINEL] _serve_fleet: body built {len(body)} bytes', flush=True)
@@ -5380,6 +5493,7 @@ def _build_fleet_html(devices: list[dict], shadow: list[dict] | None = None,
                       current_user_email: str = '',
                       current_user_role: str = '',
                       current_user_is_reseller: bool = False,
+                      current_user_impersonated_by: str = '',
                       store=None) -> str:
     shadow = shadow or []
     mcp    = mcp    or []
@@ -5616,6 +5730,7 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
 <body>
 <script>if(localStorage.getItem('sentinel_theme')==='dark')document.documentElement.classList.add('dark');</script>
 <div id="maintenance-banner" style="display:none;background:#4a3b0d;border-bottom:1px solid #d29922;color:#d29922;padding:10px 20px;font-size:13px;text-align:center;position:relative;z-index:1000"></div>
+{f'<div id="impersonation-banner" style="background:#4a1d0d;border-bottom:1px solid #d97706;color:#fbbf24;padding:10px 20px;font-size:13px;text-align:center;position:relative;z-index:1000">Support session — logged in as <strong>{current_user_impersonated_by}</strong>&nbsp;&nbsp;<button onclick="endImpersonation()" style="background:#d97706;color:#1a1400;border:none;padding:4px 12px;border-radius:4px;cursor:pointer;font-size:12px;font-weight:600">Return to my account</button></div>' if current_user_impersonated_by else ''}
 <div id="app">
   <aside id="sidebar">
     <div class="sb-logo">
@@ -6457,6 +6572,16 @@ async function checkMaintenanceNotice() {{
 }}
 checkMaintenanceNotice();
 setInterval(checkMaintenanceNotice, 120000);
+
+async function endImpersonation() {{
+  try {{
+    const r = await fetch('/api/reseller/impersonate/end', {{method: 'POST'}});
+    const data = await r.json();
+    window.location = data.redirect_url || '/';
+  }} catch (e) {{
+    window.location = '/';
+  }}
+}}
 
 (function() {{
   const saved = localStorage.getItem('euai_org_name');

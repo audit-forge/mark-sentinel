@@ -215,13 +215,16 @@ async def auth_verify(request: Request):
                 "SELECT is_reseller FROM customers WHERE id=?", (user["customer_id"],)
             ).fetchone()
             is_reseller = bool(cust and cust["is_reseller"])
-    email = row["email"] if row else ""
+    # An impersonation token's "sub" is a synthetic marker, not a real users.id row --
+    # fall back to the JWT's own email claim rather than blanking it out.
+    email = row["email"] if row else (user.get("email") or "")
     return Response(status_code=200, headers={
         "X-Sentinel-User-Email":    email or "",
         "X-Sentinel-User-Role":     user.get("role") or "",
         "X-Sentinel-Customer-ID":   user.get("customer_id") or "",
         "X-Sentinel-Client-Org-ID": user.get("client_org_id") or "",
         "X-Sentinel-Is-Reseller":   "1" if is_reseller else "",
+        "X-Sentinel-Impersonated-By": user.get("impersonated_by") or "",
     })
 
 
@@ -1296,6 +1299,79 @@ async def api_reseller_customers(request: Request):
             "dashboard_url": f"http://{PUBLIC_IP}:{d['port']}" if d.get("port") and d["active"] else None,
         })
     return JSONResponse({"customers": customers_out})
+
+
+@app.post("/api/reseller/impersonate")
+async def reseller_impersonate(request: Request):
+    """Mint a short-lived, single-purpose session for a reseller MSP's
+    customer_admin to enter one of their resold customers' dashboards without
+    re-authenticating. Every start/end is written to audit_log."""
+    try:
+        user = get_current_user(request)
+    except HTTPException:
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    if user["role"] != "customer_admin" or not user.get("customer_id"):
+        return JSONResponse({"error": "forbidden"}, status_code=403)
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    target_id = str(body.get("customer_id", "")).strip()
+    if not target_id:
+        return JSONResponse({"error": "customer_id is required"}, status_code=400)
+    client_ip = request.client.host if request.client else ""
+    with get_conn() as conn:
+        me = conn.execute("SELECT is_reseller, port FROM customers WHERE id=?", (user["customer_id"],)).fetchone()
+        if not me or not me["is_reseller"]:
+            return JSONResponse({"error": "this account is not flagged as a reseller MSP"}, status_code=403)
+        target = conn.execute(
+            "SELECT * FROM customers WHERE id=? AND parent_customer_id=? AND active=1",
+            (target_id, user["customer_id"])
+        ).fetchone()
+        if not target or not target["port"]:
+            return JSONResponse({"error": "customer not found or not resold by this account"}, status_code=404)
+        actor_row = conn.execute("SELECT email FROM users WHERE id=?", (user["sub"],)).fetchone()
+        actor_email = actor_row["email"] if actor_row else (user.get("email") or "")
+        conn.execute(
+            "INSERT INTO audit_log (occurred_at, actor_name, actor_role, customer_id, action, target, details, ip_address) "
+            "VALUES (?,?,?,?,?,?,?,?)",
+            (datetime.now(timezone.utc).isoformat(), actor_email, "customer_admin", user["customer_id"],
+             "impersonate_start", target_id, f"Started support session in {target['name']}", client_ip)
+        )
+    impersonation_token = create_token(
+        user_id=f"impersonate:{user['sub']}:{target_id}", role="customer_admin", customer_id=target_id,
+        email=actor_email, impersonated_by=actor_email, expire_minutes=30,
+    )
+    return JSONResponse({
+        "ok": True,
+        "token": impersonation_token,
+        "dashboard_url": f"http://{PUBLIC_IP}:{target['port']}",
+        "return_url": f"http://{PUBLIC_IP}:{me['port']}" if me["port"] else "",
+        "customer_name": target["name"],
+    })
+
+
+@app.post("/api/reseller/impersonate/end")
+async def reseller_impersonate_end(request: Request):
+    """Log the end of a support session. Called with the impersonation
+    token still active, before server.py swaps the browser's cookie back."""
+    try:
+        user = get_current_user(request)
+    except HTTPException:
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    impersonated_by = user.get("impersonated_by")
+    if impersonated_by:
+        client_ip = request.client.host if request.client else ""
+        with get_conn() as conn:
+            target = conn.execute("SELECT name FROM customers WHERE id=?", (user.get("customer_id"),)).fetchone()
+            conn.execute(
+                "INSERT INTO audit_log (occurred_at, actor_name, actor_role, customer_id, action, target, details, ip_address) "
+                "VALUES (?,?,?,?,?,?,?,?)",
+                (datetime.now(timezone.utc).isoformat(), impersonated_by, "customer_admin", user.get("customer_id"),
+                 "impersonate_end", user.get("customer_id"),
+                 f"Ended support session in {target['name'] if target else user.get('customer_id')}", client_ip)
+            )
+    return JSONResponse({"ok": True})
 
 
 # ── Audit Log ─────────────────────────────────────────────────────────────────

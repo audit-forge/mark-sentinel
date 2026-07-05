@@ -52,6 +52,17 @@ def init_db():
                 created_at TEXT NOT NULL,
                 active INTEGER NOT NULL DEFAULT 1
             );
+            CREATE TABLE IF NOT EXISTS audit_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                occurred_at TEXT NOT NULL,
+                actor_name TEXT,
+                actor_role TEXT,
+                customer_id TEXT,
+                action TEXT,
+                target TEXT,
+                details TEXT,
+                ip_address TEXT
+            );
         """)
         for col, defn in [
             ('tier',                "TEXT NOT NULL DEFAULT 'standard'"),
