@@ -345,6 +345,7 @@ async def customers_page(request: Request):
     except HTTPException:
         return RedirectResponse("/login")
     status = request.query_params.get("status", "active")
+    parent_filter = request.query_params.get("parent", "").strip()
     with get_conn() as conn:
         if status == "inactive":
             rows = conn.execute("SELECT * FROM customers WHERE active=0 ORDER BY created_at DESC").fetchall()
@@ -352,6 +353,10 @@ async def customers_page(request: Request):
             rows = conn.execute("SELECT * FROM customers ORDER BY created_at DESC").fetchall()
         else:
             rows = conn.execute("SELECT * FROM customers WHERE active=1 ORDER BY created_at DESC").fetchall()
+        all_names = {r["id"]: r["name"] for r in conn.execute("SELECT id, name FROM customers").fetchall()}
+        resellers = conn.execute(
+            "SELECT id, name FROM customers WHERE is_reseller=1 AND active=1 ORDER BY name"
+        ).fetchall()
     customers = []
     for r in rows:
         c = dict(r)
@@ -359,10 +364,16 @@ async def customers_page(request: Request):
             c["days_remaining"] = (date.fromisoformat(c["license_expires_at"]) - date.today()).days
         except (TypeError, ValueError):
             c["days_remaining"] = None
+        c["parent_name"] = all_names.get(c.get("parent_customer_id")) if c.get("parent_customer_id") else None
         customers.append(c)
+    if parent_filter:
+        customers = [c for c in customers if c.get("parent_customer_id") == parent_filter]
     return templates.TemplateResponse("customers.html", {
         "request": request, "user": user,
         "customers": customers, "ip": PUBLIC_IP, "status": status,
+        "resellers": [dict(r) for r in resellers],
+        "parent_filter": parent_filter,
+        "parent_filter_name": all_names.get(parent_filter, parent_filter) if parent_filter else None,
     })
 
 
@@ -374,6 +385,7 @@ async def add_customer(
     customer_email: str = Form(""),
     tier: str = Form("standard"),
     max_seats: int = Form(5),
+    parent_customer_id: str = Form(""),
 ):
     try:
         require_super_admin(request)
@@ -384,6 +396,7 @@ async def add_customer(
         tier = "standard"
     expires = (date.today() + timedelta(days=365)).isoformat()
     agent_token = secrets.token_urlsafe(32)
+    parent_customer_id = parent_customer_id.strip() or None
     with get_conn() as conn:
         if MAX_CUSTOMERS > 0:
             active_count = conn.execute(
@@ -394,11 +407,21 @@ async def add_customer(
         exists = conn.execute("SELECT id FROM customers WHERE id=?", (cid,)).fetchone()
         if exists:
             return RedirectResponse("/customers?error=exists", status_code=303)
+        if parent_customer_id:
+            # Only an account explicitly flagged as a reseller MSP can be a parent --
+            # keeps the hierarchy intentional rather than letting any customer nest another.
+            parent = conn.execute(
+                "SELECT id FROM customers WHERE id=? AND is_reseller=1", (parent_customer_id,)
+            ).fetchone()
+            if not parent:
+                return RedirectResponse("/customers?error=badparent", status_code=303)
         max_port = conn.execute("SELECT MAX(port) FROM customers").fetchone()[0]
         port = (max_port or 7000) + 1
         conn.execute(
-            "INSERT INTO customers (id, name, created_at, active, tier, license_expires_at, max_seats, port, agent_token) VALUES (?,?,?,1,?,?,?,?,?)",
-            (cid, customer_name.strip(), datetime.now(timezone.utc).isoformat(), tier, expires, max_seats, port, agent_token)
+            "INSERT INTO customers (id, name, created_at, active, tier, license_expires_at, max_seats, port, agent_token, parent_customer_id) "
+            "VALUES (?,?,?,1,?,?,?,?,?,?)",
+            (cid, customer_name.strip(), datetime.now(timezone.utc).isoformat(), tier, expires, max_seats, port,
+             agent_token, parent_customer_id)
         )
         if customer_email.strip():
             email = customer_email.strip().lower()
@@ -418,6 +441,26 @@ async def add_customer(
                 send_welcome_email(email, customer_name.strip(), login_url, temp_password)
     _write_license_file(cid, customer_name.strip(), tier, expires, max_seats)
     _run_script("provision_customer.sh", cid, PUBLIC_IP, tier, expires, str(max_seats), customer_name.strip(), str(port), agent_token)
+    return RedirectResponse("/customers", status_code=303)
+
+
+@app.post("/customers/set-reseller")
+async def set_reseller(request: Request, customer_id: str = Form(...), is_reseller: str = Form("0")):
+    try:
+        require_super_admin(request)
+    except HTTPException:
+        return RedirectResponse("/login")
+    flag = 1 if is_reseller in ("1", "true", "on") else 0
+    with get_conn() as conn:
+        if not flag:
+            # Refuse to unflag a reseller that still has children -- would silently
+            # orphan their parent link rather than something the owner clearly intended.
+            children = conn.execute(
+                "SELECT COUNT(*) FROM customers WHERE parent_customer_id=?", (customer_id,)
+            ).fetchone()[0]
+            if children:
+                return RedirectResponse("/customers?error=hasresold", status_code=303)
+        conn.execute("UPDATE customers SET is_reseller=? WHERE id=?", (flag, customer_id))
     return RedirectResponse("/customers", status_code=303)
 
 

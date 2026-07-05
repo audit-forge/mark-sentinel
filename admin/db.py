@@ -60,6 +60,8 @@ def init_db():
             ('current_agents',      "INTEGER NOT NULL DEFAULT 0"),
             ('port',                "INTEGER"),
             ('agent_token',         "TEXT"),
+            ('parent_customer_id',  "TEXT"),
+            ('is_reseller',         "INTEGER NOT NULL DEFAULT 0"),
         ]:
             try:
                 conn.execute(f"ALTER TABLE customers ADD COLUMN {col} {defn}")

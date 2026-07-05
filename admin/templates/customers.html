@@ -8,6 +8,17 @@
 <div class="error" style="background:#4F46E518;border-color:#4F46E540;color:#4F46E5">&#10003; Plan updated successfully</div>
 {% elif request.query_params.get('error') == 'invalid_seats' %}
 <div class="error">Seat count must be at least 1.</div>
+{% elif request.query_params.get('error') == 'badparent' %}
+<div class="error">Selected parent MSP is not a valid reseller account.</div>
+{% elif request.query_params.get('error') == 'hasresold' %}
+<div class="error">Can't unmark as reseller MSP -- this account still has resold customers linked to it.</div>
+{% endif %}
+
+{% if parent_filter %}
+<div class="error" style="background:#4F46E518;border-color:#4F46E540;color:#4F46E5;display:flex;justify-content:space-between;align-items:center">
+  <span>Showing customers resold by <strong>{{ parent_filter_name }}</strong></span>
+  <a href="/customers" style="color:#4F46E5;font-size:13px">&times; clear filter</a>
+</div>
 {% endif %}
 
 <div class="card">
@@ -37,10 +48,20 @@
         <label>Max Seats</label>
         <input type="number" name="max_seats" value="5" min="1" max="500">
       </div>
+      <div class="form-group" style="max-width:200px">
+        <label>Parent MSP <span style="font-weight:400;color:#6B7280">(optional)</span></label>
+        <select name="parent_customer_id">
+          <option value="">— Direct customer —</option>
+          {% for r in resellers %}
+          <option value="{{ r.id }}">{{ r.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
       <button type="submit" class="btn btn-primary">Provision</button>
     </div>
     <div style="font-size:13px;color:#6B7280;margin-top:10px">
       License expires 1 year from today. Standard = findings only. Pro = findings + remediation steps.
+      Only accounts flagged "Reseller MSP" below appear as parent options -- direct customers don't get to nest others.
     </div>
   </form>
 </div>
@@ -63,6 +84,7 @@
       <tr>
         <th>ID</th>
         <th>Name</th>
+        <th>Reseller / Parent</th>
         <th>Plan</th>
         <th>Seats</th>
         <th>Dashboard URL</th>
@@ -77,6 +99,24 @@
     <tr>
       <td>{{ c.id }}</td>
       <td>{{ c.name }}</td>
+      <td style="white-space:nowrap">
+        {% if c.parent_name %}
+          <span style="color:#6B7280;font-size:12px">Resold by</span><br>
+          <a href="/customers?parent={{ c.parent_customer_id }}" style="font-size:13px">{{ c.parent_name }}</a>
+        {% elif c.is_reseller %}
+          <span class="badge badge-blue">Reseller MSP</span>
+          <a href="/customers?parent={{ c.id }}" style="font-size:11px;display:block;margin-top:4px">View resold customers</a>
+        {% else %}
+          <span style="color:#9CA3AF;font-size:12px">Direct customer</span>
+        {% endif %}
+        <form method="post" action="/customers/set-reseller" style="margin-top:6px">
+          <input type="hidden" name="customer_id" value="{{ c.id }}">
+          <input type="hidden" name="is_reseller" value="{{ 0 if c.is_reseller else 1 }}">
+          <button type="submit" class="btn btn-sm" style="font-size:11px;padding:2px 6px;background:#F9FAFB;border:1px solid #E5E7EB;color:#6B7280">
+            {{ 'Unmark reseller' if c.is_reseller else 'Mark as reseller MSP' }}
+          </button>
+        </form>
+      </td>
       <td>
         <form method="post" action="/customers/upgrade" style="display:flex;align-items:center;gap:6px">
           <input type="hidden" name="customer_id" value="{{ c.id }}">
