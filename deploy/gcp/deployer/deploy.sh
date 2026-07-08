@@ -16,10 +16,11 @@ echo "[deployer] Git pull complete"
 # Python source changes arrive via git pull and must be copied in live.
 for cname in $(docker ps --format '{{.Names}}' | grep '^sentinel-' | grep -vE '^sentinel-(nginx|admin|deployer)$'); do
     echo "[deployer] Patching $cname..."
-    docker cp "$REPO_DIR/server.py"           "$cname:/app/server.py"           2>/dev/null || true
-    docker cp "$REPO_DIR/alerts.py"           "$cname:/app/alerts.py"           2>/dev/null || true
-    docker cp "$REPO_DIR/eu_ai_act_report.py" "$cname:/app/eu_ai_act_report.py" 2>/dev/null || true
-    docker cp "$REPO_DIR/connectors/."        "$cname:/app/connectors/"         2>/dev/null || true
+    docker cp "$REPO_DIR/server.py"            "$cname:/app/server.py"            2>/dev/null || true
+    docker cp "$REPO_DIR/alerts.py"            "$cname:/app/alerts.py"            2>/dev/null || true
+    docker cp "$REPO_DIR/eu_ai_act_report.py"  "$cname:/app/eu_ai_act_report.py"  2>/dev/null || true
+    docker cp "$REPO_DIR/aibom_generator.py"   "$cname:/app/aibom_generator.py"   2>/dev/null || true
+    docker cp "$REPO_DIR/connectors/."         "$cname:/app/connectors/"          2>/dev/null || true
     docker restart "$cname" 2>/dev/null || true
     echo "[deployer] Patched and restarted $cname"
 done

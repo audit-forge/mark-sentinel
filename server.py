@@ -1243,6 +1243,8 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             '/api/fleet/mcp':        self._api_fleet_mcp,
             '/api/fleet/mcp/report': self._api_fleet_mcp_report,
             '/api/fleet/eu-ai-act-report': self._api_eu_ai_act_report,
+            '/api/fleet/aibom':            self._api_fleet_aibom,
+            '/api/fleet/aibom.json':       self._api_fleet_aibom_json,
             '/api/branding':               self._api_get_branding,
             '/api/psa/config':             self._api_get_psa_config,
             '/download/shortcut': self._serve_shortcut,
@@ -4276,6 +4278,53 @@ load();
         except Exception as e:
             self._send(500, f'Report generation failed: {e}'.encode(), 'text/plain')
 
+    def _api_fleet_aibom(self):
+        """GET /api/fleet/aibom?org=... — HTML AI Bill of Materials report."""
+        try:
+            import urllib.parse as _up
+            qs       = _up.parse_qs(_up.urlparse(self.path).query)
+            org_name = qs.get('org', [''])[0]
+            store    = self._store()
+            devices  = store.list_devices(client_org_id=self._scoped_client_org())
+            enriched = []
+            for d in devices:
+                rep = store.get_latest_report(d['device_id'])
+                enriched.append({**d, '_report': rep})
+            shadow   = store.list_shadow_devices()
+            branding_path = ROOT / 'data' / 'branding.json'
+            branding = json.loads(branding_path.read_text()) if branding_path.exists() else {}
+            from aibom_generator import generate_aibom_report
+            html_out = generate_aibom_report(enriched, org_name, branding, shadow)
+            self._send(200, html_out.encode(), 'text/html; charset=utf-8')
+        except Exception as e:
+            self._send(500, f'AI-BOM generation failed: {e}'.encode(), 'text/plain')
+
+    def _api_fleet_aibom_json(self):
+        """GET /api/fleet/aibom.json?org=... — JSON AI-BOM download."""
+        try:
+            import urllib.parse as _up
+            qs       = _up.parse_qs(_up.urlparse(self.path).query)
+            org_name = qs.get('org', [''])[0]
+            store    = self._store()
+            devices  = store.list_devices(client_org_id=self._scoped_client_org())
+            enriched = []
+            for d in devices:
+                rep = store.get_latest_report(d['device_id'])
+                enriched.append({**d, '_report': rep})
+            shadow   = store.list_shadow_devices()
+            from aibom_generator import generate_aibom_json
+            bom = generate_aibom_json(enriched, org_name, shadow)
+            safe_org = (org_name or 'Fleet').replace(' ', '_').replace('/', '-')
+            data = json.dumps(bom, indent=2).encode()
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.send_header('Content-Disposition', f'attachment; filename="AI_BOM_{safe_org}.json"')
+            self.send_header('Content-Length', str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+        except Exception as e:
+            self._send(500, f'AI-BOM JSON failed: {e}'.encode(), 'text/plain')
+
     # ── Alert event log API ───────────────────────────────────────────────────
 
     def _api_get_alert_events(self):
@@ -6330,6 +6379,18 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
       </div>
     </div>
 
+    <div style="background:#ffffff;border:1px solid #F3F4F6;border-radius:8px;padding:20px">
+      <div style="font-size:15px;font-weight:700;color:#111827;margin-bottom:6px">&#129302; AI Bill of Materials</div>
+      <div style="font-size:12px;color:#6B7280;line-height:1.6;margin-bottom:12px">Complete inventory of AI models, packages, developer tools, and SaaS services detected across the fleet. Includes supply chain risk findings. CycloneDX-AI format JSON export.</div>
+      <input id="aibom-org-name" class="form-input" type="text" placeholder="Organization name for this report"
+             style="font-size:12px;margin-bottom:10px;max-width:280px"
+             onchange="localStorage.setItem('aibom_org_name', this.value)">
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="scan-btn" onclick="openAibomReport('html')" style="color:#4F46E5;border-color:#C7D2FE;font-size:12px">&#128065; Preview</button>
+        <button class="scan-btn" onclick="openAibomReport('json')" style="color:#16A34A;border-color:#238636;font-size:12px">&#8659; Download JSON</button>
+      </div>
+    </div>
+
   </div>
 
   <div style="font-size:11px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:#6B7280;margin-bottom:12px">MCP &amp; Agent Governance Reports</div>
@@ -6596,11 +6657,25 @@ function openEuaiReport(fmt) {{
   if (fmt === 'html') {{
     window.open(url, '_blank');
   }} else {{
-    // PDF/CSV are Content-Disposition: attachment — navigating triggers
-    // a real download instead of opening a new tab.
     window.location.href = url;
   }}
 }}
+
+function openAibomReport(fmt) {{
+  const input = document.getElementById('aibom-org-name');
+  const org = input ? input.value.trim() : '';
+  if (fmt === 'json') {{
+    window.location.href = '/api/fleet/aibom.json?org=' + encodeURIComponent(org);
+  }} else {{
+    window.open('/api/fleet/aibom?org=' + encodeURIComponent(org), '_blank');
+  }}
+}}
+
+;(function() {{
+  const saved = localStorage.getItem('aibom_org_name');
+  const input = document.getElementById('aibom-org-name');
+  if (saved && input) input.value = saved;
+}})();
 
 function _age(ts) {{
   if (!ts) return 'never';
