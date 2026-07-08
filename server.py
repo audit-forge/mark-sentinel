@@ -5270,6 +5270,12 @@ def _build_shadow_section(shadow: list[dict], ts_now: int) -> str:
             model_html = _model_tags(models) if models else (
                 '<span style="font-size:11px;color:#484f58">No model details available</span>'
             )
+            svc_js = svc.replace("'", "\\'")
+            approve_btn = (
+                f'<button class="scan-btn" onclick="shadowApproveGlobally(\'{svc_js}\',this)" '
+                f'style="font-size:11px;color:#a371f7;border-color:#6e40c9;margin-bottom:4px;display:block;width:100%">'
+                f'&#9733; Approve globally</button>'
+            ) if src == 'saas_ai' else ''
             card_parts.append(
                 f'<div class="shadow-card" style="border-left-color:{color}">'
                 f'<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px">'
@@ -5284,10 +5290,15 @@ def _build_shadow_section(shadow: list[dict], ts_now: int) -> str:
                 f'<div style="margin-bottom:8px">{sub_html}</div>'
                 f'<div style="display:flex;flex-wrap:wrap;gap:5px;align-items:center">{model_html}</div>'
                 f'</div>'
-                f'<div style="text-align:right;flex-shrink:0">'
+                f'<div style="text-align:right;flex-shrink:0;min-width:130px">'
                 f'<div style="font-size:11px;color:#484f58;margin-bottom:8px">Detected {age}</div>'
+                f'{approve_btn}'
+                f'<button class="scan-btn" onclick="navTo(\'inventory\')" '
+                f'style="font-size:11px;color:#4F46E5;border-color:#4F46E5;margin-bottom:4px;display:block;width:100%">'
+                f'&#128196; View in Inventory</button>'
                 f'<button class="scan-btn" onclick="dismissShadow({sid})" '
-                f'style="font-size:11px;color:#6e7681;border-color:#30363d">Dismiss</button>'
+                f'style="font-size:11px;color:#6e7681;border-color:#30363d;display:block;width:100%">'
+                f'Dismiss (temp)</button>'
                 f'</div></div></div>'
             )
 
@@ -8004,6 +8015,27 @@ async function invClearFP(id, btn) {{
     const d = await r.json();
     if (d.ok) {{ await loadInventory(); }} else {{ btn.disabled=false; btn.textContent=orig; }}
   }} catch(e) {{ btn.disabled=false; btn.textContent=orig; }}
+}}
+
+async function shadowApproveGlobally(service, btn) {{
+  if (!confirm(`Approve "${{service}}" globally?\n\nThis will:\n• Mark all current detections as Approved on every device\n• Auto-approve any future detections on any device\n• Suppress alerts for this service\n\nYou can undo this from the Asset Inventory page.`)) return;
+  const orig = btn.textContent;
+  btn.disabled = true; btn.textContent = '…';
+  try {{
+    const r = await fetch('/api/fleet/inventory/approve-service', {{
+      method: 'POST',
+      headers: {{'Content-Type': 'application/json'}},
+      body: JSON.stringify({{service, action: 'approve'}}),
+    }});
+    const d = await r.json();
+    if (d.ok) {{
+      btn.closest('.shadow-card').style.opacity = '0.4';
+      btn.textContent = '✓ Approved';
+    }} else {{
+      btn.disabled = false; btn.textContent = orig;
+      alert('Failed: ' + (d.error || 'unknown'));
+    }}
+  }} catch(e) {{ btn.disabled = false; btn.textContent = orig; }}
 }}
 
 async function invApproveGlobally(service, btn) {{
