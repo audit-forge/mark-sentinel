@@ -7329,11 +7329,18 @@ async function dismissAllShadow() {{
   if (resp.ok) {{ refreshShadow(); }}
 }}
 
+async function dismissShadowGroup(idsStr) {{
+  const ids = idsStr.split(',').map(s => s.trim()).filter(Boolean);
+  await Promise.all(ids.map(id => fetch('/api/fleet/shadow/dismiss/' + id, {{method:'POST'}})));
+  refreshShadow();
+}}
+
 const _SHADOW_SRC = {{
   network:   {{icon:'&#127760;', color:'#a371f7', label:'Network'}},
   cloud_api: {{icon:'&#9729;',   color:'#4F46E5', label:'Cloud API'}},
   process:   {{icon:'&#9881;',   color:'#f0883e', label:'Process'}},
   docker:    {{icon:'&#128051;', color:'#16A34A', label:'Container'}},
+  saas_ai:   {{icon:'&#128101;', color:'#f78166', label:'SaaS AI'}},
 }};
 
 async function loadK8sStatus() {{
@@ -7402,18 +7409,30 @@ async function refreshShadow() {{
     const dockerItems = devs.filter(d => d.source === 'docker');
     const otherItems  = devs.filter(d => d.source !== 'docker');
 
-    const otherHtml = otherItems.map(d => {{
+    // Group non-docker items by service name to avoid showing 20+ cards for the same service
+    const _svcGroups = {{}};
+    for (const d of otherItems) {{
+      const key = (d.source || 'network') + '||' + (d.service || d.host);
+      if (!_svcGroups[key]) _svcGroups[key] = [];
+      _svcGroups[key].push(d);
+    }}
+    const otherHtml = Object.values(_svcGroups).map(grp => {{
+      const d = grp[0];
       const src = _SHADOW_SRC[d.source] || _SHADOW_SRC.network;
       const age = _age(d.last_seen);
-      const locationHtml = d.source === 'network'
-        ? `<span style="font-weight:700;color:#111827;font-size:14px">${{esc(d.host)}}:${{d.port}}</span>`
-        : `<span style="font-weight:700;color:#111827;font-size:14px">${{esc(d.service)}}</span>`;
+      const cnt = grp.length;
+      const endpointNote = cnt > 1
+        ? `<span style="font-size:11px;color:#9CA3AF;margin-left:6px">(${{cnt}} endpoints)</span>`
+        : '';
+      const locationHtml = `<span style="font-weight:700;color:#111827;font-size:14px">${{esc(d.service)}}</span>${{endpointNote}}`;
       const subHtml = d.source === 'network'
-        ? `<div style="font-size:12px;color:${{src.color}};margin-bottom:8px">${{esc(d.service)}}</div>`
+        ? `<div style="font-size:12px;color:${{src.color}};margin-bottom:8px">${{cnt > 1 ? cnt+' network endpoints' : esc(d.host)+(d.port?':'+d.port:'')}}</div>`
         : d.detail ? `<div style="font-size:12px;color:#6B7280;margin-bottom:8px">${{esc(d.detail)}}</div>` : '';
-      const modelSection = (d.models||[]).length
-        ? `<div style="display:flex;flex-wrap:wrap;gap:5px;align-items:center">${{_modelTags(d.models)}}</div>`
+      const allModels = [...new Set(grp.flatMap(x => x.models||[]))];
+      const modelSection = allModels.length
+        ? `<div style="display:flex;flex-wrap:wrap;gap:5px;align-items:center">${{_modelTags(allModels)}}</div>`
         : `<div style="font-size:11px;color:#9CA3AF">No model details available</div>`;
+      const allIds = grp.map(x => x.id).join(',');
       return `<div class="shadow-card" style="border-left-color:${{src.color}}">
         <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px">
           <div style="flex:1;min-width:0">
@@ -7429,7 +7448,7 @@ async function refreshShadow() {{
             <div style="font-size:11px;color:#9CA3AF;margin-bottom:8px">Detected ${{age}}</div>
             ${{d.source === 'saas_ai' ? `<button class="scan-btn" onclick="shadowApproveGlobally('${{esc(d.service)}}',this)" style="font-size:11px;color:#a371f7;border-color:#6e40c9;margin-bottom:4px;display:block;width:100%">&#9733; Approve globally</button>` : ''}}
             <button class="scan-btn" onclick="navTo('inventory')" style="font-size:11px;color:#4F46E5;border-color:#4F46E5;margin-bottom:4px;display:block;width:100%">&#128196; View in Inventory</button>
-            <button class="scan-btn" onclick="dismissShadow(${{d.id}})" style="font-size:11px;color:#6e7681;border-color:#30363d;display:block;width:100%">Dismiss (temp)</button>
+            <button class="scan-btn" onclick="dismissShadowGroup('${{allIds}}')" style="font-size:11px;color:#6e7681;border-color:#30363d;display:block;width:100%">Dismiss (temp)</button>
           </div>
         </div>
       </div>`;
@@ -7873,6 +7892,19 @@ function renderInventory() {{
   else if (_invStatus === 'all') rows = activeItems;
   else                         rows = activeItems.filter(i => i.approval_status === _invStatus);
 
+  // Deduplicate by (service, reporter_hostname) — collapse multiple IPs for same service into one row
+  const _invGroups = {{}};
+  for (const item of rows) {{
+    const key = (item.service||'') + '||' + (item.reporter_hostname||'');
+    if (!_invGroups[key]) _invGroups[key] = [];
+    _invGroups[key].push(item);
+  }}
+  const _statusPriority = {{unapproved:0, under_review:1, approved:2}};
+  rows = Object.values(_invGroups).map(items => {{
+    items.sort((a,b) => (_statusPriority[a.approval_status]||0) - (_statusPriority[b.approval_status]||0));
+    return Object.assign({{}}, items[0], {{_endpointCount: items.length}});
+  }});
+
   const el = document.getElementById('inv-body');
   if (!rows.length) {{
     const fallback = isFPView ? 'No false positives recorded.'
@@ -7889,7 +7921,10 @@ function renderInventory() {{
     // For local discoveries (process/DNS) host is the agent's own device ID — show hostname.
     // For network discoveries host is the remote IP — show IP with agent as secondary label.
     const isNetwork = !isLocalHost && item.host && item.host !== item.reporter_hostname;
-    const hostDisplay = isLocalHost ? (item.reporter_hostname || 'local') : item.host;
+    const cnt = item._endpointCount || 1;
+    const hostDisplay = isLocalHost
+      ? (item.reporter_hostname || 'local')
+      : (cnt > 1 ? cnt + ' endpoints' : item.host);
     const agentLabel = isNetwork
       ? `<div style="font-size:10px;color:#9CA3AF;margin-top:1px">via ${{esc(item.reporter_hostname||'')}} agent</div>`
       : '';
