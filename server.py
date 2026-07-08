@@ -7425,10 +7425,11 @@ async function refreshShadow() {{
             ${{subHtml}}
             ${{modelSection}}
           </div>
-          <div style="text-align:right;flex-shrink:0">
-            <div style="font-size:11px;color:#9CA3AF;margin-bottom:3px">Detected ${{age}}</div>
-            <div style="font-size:11px;color:#6B7280;margin-bottom:8px">via ${{esc(d.reporter_hostname)}}</div>
-            <button class="scan-btn" onclick="dismissShadow(${{d.id}})" style="font-size:11px;color:#6B7280;border-color:#E5E7EB">Dismiss</button>
+          <div style="text-align:right;flex-shrink:0;min-width:130px">
+            <div style="font-size:11px;color:#9CA3AF;margin-bottom:8px">Detected ${{age}}</div>
+            ${{d.source === 'saas_ai' ? `<button class="scan-btn" onclick="shadowApproveGlobally('${{esc(d.service)}}',this)" style="font-size:11px;color:#a371f7;border-color:#6e40c9;margin-bottom:4px;display:block;width:100%">&#9733; Approve globally</button>` : ''}}
+            <button class="scan-btn" onclick="navTo('inventory')" style="font-size:11px;color:#4F46E5;border-color:#4F46E5;margin-bottom:4px;display:block;width:100%">&#128196; View in Inventory</button>
+            <button class="scan-btn" onclick="dismissShadow(${{d.id}})" style="font-size:11px;color:#6e7681;border-color:#30363d;display:block;width:100%">Dismiss (temp)</button>
           </div>
         </div>
       </div>`;

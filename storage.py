@@ -780,7 +780,7 @@ class AgentStore:
                   json.dumps(models), source, detail, now, now, auto_status))
         return is_new
 
-    def list_shadow_devices(self, max_age_days: int = 7) -> list[dict]:
+    def list_shadow_devices(self, max_age_days: int = 90) -> list[dict]:
         cutoff = int(time.time()) - (max_age_days * 86400)
         with self._lock, self._conn() as conn:
             rows = conn.execute("""
