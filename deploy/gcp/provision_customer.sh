@@ -93,6 +93,8 @@ server {
         auth_request_set \$sentinel_user_email    \$upstream_http_x_sentinel_user_email;
         auth_request_set \$sentinel_user_role     \$upstream_http_x_sentinel_user_role;
         auth_request_set \$sentinel_customer_id   \$upstream_http_x_sentinel_customer_id;
+        auth_request_set \$sentinel_is_reseller   \$upstream_http_x_sentinel_is_reseller;
+        auth_request_set \$sentinel_is_msp        \$upstream_http_x_sentinel_is_msp;
 
         proxy_pass http://${CONTAINER_NAME}:7331;
         proxy_set_header Host \$host;
@@ -101,6 +103,8 @@ server {
         proxy_set_header X-Sentinel-User-Email   \$sentinel_user_email;
         proxy_set_header X-Sentinel-User-Role    \$sentinel_user_role;
         proxy_set_header X-Sentinel-Customer-ID  \$sentinel_customer_id;
+        proxy_set_header X-Sentinel-Is-Reseller  \$sentinel_is_reseller;
+        proxy_set_header X-Sentinel-Is-MSP       \$sentinel_is_msp;
         proxy_read_timeout 300;
         proxy_buffering off;
     }

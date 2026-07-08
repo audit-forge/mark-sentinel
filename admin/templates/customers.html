@@ -6,6 +6,8 @@
 <div class="error" style="background:#4F46E518;border-color:#4F46E540;color:#4F46E5">&#10003; Seat count updated successfully</div>
 {% elif request.query_params.get('plan_updated') %}
 <div class="error" style="background:#4F46E518;border-color:#4F46E540;color:#4F46E5">&#10003; Plan updated successfully</div>
+{% elif request.query_params.get('msp_updated') %}
+<div class="error" style="background:#4F46E518;border-color:#4F46E540;color:#4F46E5">&#10003; MSP flag updated</div>
 {% elif request.query_params.get('error') == 'invalid_seats' %}
 <div class="error">Seat count must be at least 1.</div>
 {% elif request.query_params.get('error') == 'badparent' %}
@@ -84,6 +86,7 @@
       <tr>
         <th>ID</th>
         <th>Name</th>
+        <th>Account Type</th>
         <th>Reseller / Parent</th>
         <th>Plan</th>
         <th>Seats</th>
@@ -99,6 +102,20 @@
     <tr>
       <td>{{ c.id }}</td>
       <td>{{ c.name }}</td>
+      <td style="white-space:nowrap;text-align:center">
+        {% if c.is_msp %}
+          <span class="badge badge-blue" style="font-size:11px">MSP</span>
+        {% else %}
+          <span style="color:#9CA3AF;font-size:12px">Standard</span>
+        {% endif %}
+        <form method="post" action="/customers/set-msp" style="margin-top:6px">
+          <input type="hidden" name="customer_id" value="{{ c.id }}">
+          <input type="hidden" name="is_msp" value="{{ 0 if c.is_msp else 1 }}">
+          <button type="submit" class="btn btn-sm" style="font-size:11px;padding:2px 8px;{% if c.is_msp %}background:#EFF6FF;border:1px solid #BFDBFE;color:#1D4ED8{% else %}background:#F0FDF4;border:1px solid #BBF7D0;color:#15803D{% endif %}">
+            {{ 'Remove MSP' if c.is_msp else 'Mark as MSP' }}
+          </button>
+        </form>
+      </td>
       <td style="white-space:nowrap">
         {% if c.parent_name %}
           <span style="color:#6B7280;font-size:12px">Resold by</span><br>

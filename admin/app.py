@@ -210,11 +210,13 @@ async def auth_verify(request: Request):
     with get_conn() as conn:
         row = conn.execute("SELECT email FROM users WHERE id=?", (user["sub"],)).fetchone()
         is_reseller = False
+        is_msp      = False
         if user.get("customer_id"):
             cust = conn.execute(
-                "SELECT is_reseller FROM customers WHERE id=?", (user["customer_id"],)
+                "SELECT is_reseller, is_msp FROM customers WHERE id=?", (user["customer_id"],)
             ).fetchone()
             is_reseller = bool(cust and cust["is_reseller"])
+            is_msp      = bool(cust and cust["is_msp"])
     # An impersonation token's "sub" is a synthetic marker, not a real users.id row --
     # fall back to the JWT's own email claim rather than blanking it out.
     email = row["email"] if row else (user.get("email") or "")
@@ -224,6 +226,7 @@ async def auth_verify(request: Request):
         "X-Sentinel-Customer-ID":   user.get("customer_id") or "",
         "X-Sentinel-Client-Org-ID": user.get("client_org_id") or "",
         "X-Sentinel-Is-Reseller":   "1" if is_reseller else "",
+        "X-Sentinel-Is-MSP":        "1" if is_msp else "",
         "X-Sentinel-Impersonated-By": user.get("impersonated_by") or "",
     })
 
@@ -472,6 +475,18 @@ async def set_reseller(request: Request, customer_id: str = Form(...), is_resell
                 return RedirectResponse("/customers?error=hasresold", status_code=303)
         conn.execute("UPDATE customers SET is_reseller=? WHERE id=?", (flag, customer_id))
     return RedirectResponse("/customers", status_code=303)
+
+
+@app.post("/customers/set-msp")
+async def set_msp(request: Request, customer_id: str = Form(...), is_msp: str = Form("0")):
+    try:
+        require_super_admin(request)
+    except HTTPException:
+        return RedirectResponse("/login")
+    flag = 1 if is_msp in ("1", "true", "on") else 0
+    with get_conn() as conn:
+        conn.execute("UPDATE customers SET is_msp=? WHERE id=?", (flag, customer_id))
+    return RedirectResponse("/customers?msp_updated=1", status_code=303)
 
 
 @app.post("/customers/renew")

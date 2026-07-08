@@ -1036,6 +1036,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             'customer_id': customer_id,
             'client_org_id': self.headers.get('X-Sentinel-Client-Org-ID', '').strip() or None,
             'is_reseller': self.headers.get('X-Sentinel-Is-Reseller', '').strip() == '1',
+            'is_msp':      self.headers.get('X-Sentinel-Is-MSP', '').strip() == '1',
             'impersonated_by': self.headers.get('X-Sentinel-Impersonated-By', '').strip() or None,
         }
 
@@ -4770,6 +4771,7 @@ async function moveSelectedDevices(){
                 current_user_email=user['email'] if user else '',
                 current_user_role=user.get('role', '') if user else '',
                 current_user_is_reseller=bool(user.get('is_reseller')) if user else False,
+                current_user_is_msp=bool(user.get('is_msp')) if user else False,
                 current_user_impersonated_by=(user.get('impersonated_by') or '') if user else '',
                 store=store,
             ).encode('utf-8')
@@ -5542,6 +5544,7 @@ def _build_fleet_html(devices: list[dict], shadow: list[dict] | None = None,
                       current_user_email: str = '',
                       current_user_role: str = '',
                       current_user_is_reseller: bool = False,
+                      current_user_is_msp: bool = False,
                       current_user_impersonated_by: str = '',
                       store=None) -> str:
     shadow = shadow or []
@@ -5789,7 +5792,7 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
     <nav class="sb-nav">
       <div class="sb-group">Overview</div>
       <button class="sb-item sb-active" id="nav-overview" onclick="navTo('overview')">&#8962; Home</button>
-      {'<button class="sb-item" id="nav-clients" onclick="window.location=\'/clients\'">&#127970; Clients</button>' if current_user_role != 'client_viewer' else ''}
+      {'<button class="sb-item" id="nav-clients" onclick="window.location=\'/clients\'">&#127970; Clients</button>' if current_user_is_msp else ''}
       {'<button class="sb-item" id="nav-reseller" onclick="window.location=\'/reseller\'">&#127970; Resold Customers</button>' if current_user_is_reseller else ''}
       <div class="sb-group">Fleet</div>
       <button class="sb-item" id="nav-shadow" onclick="navTo('shadow')">&#9888; Shadow AI</button>
