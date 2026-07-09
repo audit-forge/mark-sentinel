@@ -1666,7 +1666,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self._json({'email': None, 'role': None, 'customer_id': None}, 401)
 
     def _admin_panel_url(self) -> str:
-        return os.environ.get('SENTINEL_ADMIN_URL', 'http://user-manager:8000')
+        return os.environ.get('SENTINEL_ADMIN_URL', 'http://sentinel-admin:8000')
 
     def _proxy_to_admin(self, path: str, method: str = 'GET', body: bytes = b'') -> None:
         import urllib.request
@@ -1868,7 +1868,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self._send(403, b'Forbidden', 'text/plain')
             return
         body = """<!DOCTYPE html><html><head><meta charset="utf-8">
-<title>Resold Customers — Arckon</title>
+<title>MSP View — Arckon</title>
 <style>
 body{font:14px -apple-system,sans-serif;background:#0d1117;color:#c9d1d9;margin:0;padding:32px}
 h1{font-size:20px;font-weight:600;margin:0 0 20px}
@@ -1880,8 +1880,9 @@ td{padding:10px 14px;border-top:1px solid #21262d}
 .badge-red{color:#DC2626}
 #msg{padding:32px;text-align:center;color:#8b949e}
 </style></head><body>
-<a class="back" href="/">&larr; Back to dashboard</a>
-<h1>Resold Customers</h1>
+<a class="back" id="backlink" href="/">&larr; Back to dashboard</a>
+<script>if (window.self !== window.top) { var _bl = document.getElementById('backlink'); if (_bl) _bl.style.display = 'none'; }</script>
+<h1>MSP View</h1>
 <div id="msg">Loading…</div>
 <table id="tbl" style="display:none">
 <tr><th>Name</th><th>Status</th><th>Plan</th><th>Seats used</th><th>License expiry</th><th></th></tr>
@@ -5804,7 +5805,7 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
       <div class="sb-group">Overview</div>
       <button class="sb-item sb-active" id="nav-overview" onclick="navTo('overview')">&#8962; Home</button>
       {'<button class="sb-item" id="nav-clients" onclick="window.location=\'/clients\'">&#127970; Clients</button>' if current_user_is_msp else ''}
-      {'<button class="sb-item" id="nav-reseller" onclick="window.location=\'/reseller\'">&#127970; Resold Customers</button>' if current_user_is_reseller else ''}
+      {'<button class="sb-item" id="nav-reseller" onclick="navTo(\'reseller\')">&#127970; MSP View</button>' if current_user_is_reseller else ''}
       <div class="sb-group">Fleet</div>
       <button class="sb-item" id="nav-shadow" onclick="navTo('shadow')">&#9888; Shadow AI</button>
       <button class="sb-item" id="nav-alerts" onclick="navTo('alerts')">&#128276; Alerts <span id="alert-badge" style="display:none;background:#DC2626;color:#fff;border-radius:10px;font-size:10px;padding:1px 6px;margin-left:4px;font-weight:700"></span></button>
@@ -6450,6 +6451,8 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
 
   {'<div class="page" id="page-probe" style="position:fixed;top:0;left:240px;right:0;bottom:0;z-index:50"><iframe id="probe-iframe" data-loaded="0" style="width:100%;height:100%;border:none;display:block"></iframe></div>' if _has_live_scan() else ''}
 
+  {'<div class="page" id="page-reseller" style="position:fixed;top:0;left:240px;right:0;bottom:0;z-index:50"><iframe id="reseller-iframe" data-loaded="0" style="width:100%;height:100%;border:none;display:block"></iframe></div>' if current_user_is_reseller else ''}
+
   <div class="page" id="page-users" style="position:fixed;top:0;left:240px;right:0;bottom:0;z-index:50;background:#F9FAFB;overflow-y:auto;padding:28px 36px">
   <div class="sec-hdr" style="margin-top:0;padding-top:0">Users</div>
   <div class="content-panel" style="background:#ffffff;border:1px solid #F3F4F6;border-radius:8px;padding:20px;margin-bottom:16px">
@@ -6584,11 +6587,18 @@ function navTo(page) {{
       fr.setAttribute('data-loaded', '1');
     }}
   }}
+  if (page === 'reseller') {{
+    const fr = document.getElementById('reseller-iframe');
+    if (fr && fr.getAttribute('data-loaded') === '0') {{
+      fr.src = '/reseller';
+      fr.setAttribute('data-loaded', '1');
+    }}
+  }}
 }}
 (function() {{
   const hash = window.location.hash.replace('#', '');
   const valid = ['overview','shadow','alerts','mcp','riskregister','inventory','schedules',
-                 'discovery','findings','reports','siem','settings','users','probe'];
+                 'discovery','findings','reports','siem','settings','users','probe','reseller'];
   if (hash && valid.includes(hash)) {{ navTo(hash); }}
 }})();
 
