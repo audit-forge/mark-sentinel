@@ -715,7 +715,7 @@ def _build_fleet_report_html(devices: list, tier: str, profile: str = '', profil
     now = datetime.now(tz=timezone.utc).strftime('%Y-%m-%d %H:%M UTC')
     active_profiles = profiles or ([profile] if profile else [])
 
-    _rpt_profiles = [('default', 'Base Scan'), ('fedramp', 'FedRAMP'), ('cmmc', 'CMMC 2.0'),
+    _rpt_profiles = [('default', 'Base Scan'), ('fedramp', 'FedRAMP'), ('fedramp_20x', 'FedRAMP 20x'), ('cmmc', 'CMMC 2.0'),
                      ('financial', 'Financial'), ('biotech', 'Biotech'), ('healthcare', 'Healthcare'),
                      ('professional_services', 'Professional Services'),
                      ('owasp_agentic', 'OWASP Agentic'), ('eu_ai_act', 'EU AI Act'),
@@ -2673,7 +2673,7 @@ load();
             pass
 
         profiles = [p.strip() for p in (body.get('profiles') or []) if p.strip()]
-        _VALID = {'default', 'fedramp', 'cmmc', 'financial', 'professional_services',
+        _VALID = {'default', 'fedramp', 'fedramp_20x', 'cmmc', 'financial', 'professional_services',
                   'healthcare', 'biotech', 'lifesciences', 'owasp_agentic', 'eu_ai_act',
                   'iso42001', 'atlas', 'kubernetes', 'docker'}
         profiles = [p for p in profiles if p in _VALID]
@@ -2700,7 +2700,7 @@ load();
         except Exception:
             pass
 
-        _VALID = {'default', 'fedramp', 'cmmc', 'financial', 'professional_services',
+        _VALID = {'default', 'fedramp', 'fedramp_20x', 'cmmc', 'financial', 'professional_services',
                   'healthcare', 'biotech', 'lifesciences', 'owasp_agentic', 'eu_ai_act',
                   'iso42001', 'atlas', 'kubernetes', 'docker'}
         profiles = [p for p in (body.get('profiles') or []) if p in _VALID]
@@ -3145,7 +3145,7 @@ load();
             status_filter = ''
         if sev_filter not in ('ch', 'med', 'li', ''):
             sev_filter = ''
-        _VALID_PROFILES = {'default', 'fedramp', 'cmmc', 'financial', 'biotech', 'healthcare', 'lifesciences', 'owasp_agentic', 'eu_ai_act', 'professional_services', 'iso42001', 'atlas', 'kubernetes', 'docker'}
+        _VALID_PROFILES = {'default', 'fedramp', 'fedramp_20x', 'cmmc', 'financial', 'biotech', 'healthcare', 'lifesciences', 'owasp_agentic', 'eu_ai_act', 'professional_services', 'iso42001', 'atlas', 'kubernetes', 'docker'}
         profiles = [p for p in profile_raw.split(',') if p in _VALID_PROFILES]
         profile  = ','.join(profiles)
         try:
@@ -3239,7 +3239,7 @@ load();
         from datetime import datetime as _dt
         qs = parse_qs(_up(self.path).query)
         profile_raw = (qs.get('profile', [''])[0]).lower().strip()
-        _VALID = {'default', 'fedramp', 'cmmc', 'financial', 'biotech', 'healthcare',
+        _VALID = {'default', 'fedramp', 'fedramp_20x', 'cmmc', 'financial', 'biotech', 'healthcare',
                   'lifesciences', 'owasp_agentic', 'eu_ai_act', 'professional_services',
                   'iso42001', 'atlas', 'kubernetes', 'docker'}
         profiles = [p for p in profile_raw.split(',') if p in _VALID]
@@ -5876,6 +5876,7 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
           <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:#111827;padding:3px 0;cursor:pointer"><input type="checkbox" class="scan-profile-cb" value="professional_services" onchange="updateScanProfileBtn()"> Professional Services</label>
           <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:#111827;padding:3px 0;cursor:pointer"><input type="checkbox" class="scan-profile-cb" value="financial" onchange="updateScanProfileBtn()"> Financial Services</label>
           <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:#111827;padding:3px 0;cursor:pointer"><input type="checkbox" class="scan-profile-cb" value="fedramp" onchange="updateScanProfileBtn()"> FedRAMP / NIST 800-53</label>
+          <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:#111827;padding:3px 0;cursor:pointer"><input type="checkbox" class="scan-profile-cb" value="fedramp_20x" onchange="updateScanProfileBtn()"> FedRAMP 20x (KSI)</label>
           <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:#111827;padding:3px 0;cursor:pointer"><input type="checkbox" class="scan-profile-cb" value="cmmc" onchange="updateScanProfileBtn()"> CMMC 2.0</label>
           <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:#111827;padding:3px 0;cursor:pointer"><input type="checkbox" class="scan-profile-cb" value="healthcare" onchange="updateScanProfileBtn()"> Healthcare</label>
           <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:#111827;padding:3px 0;cursor:pointer"><input type="checkbox" class="scan-profile-cb" value="biotech" onchange="updateScanProfileBtn()"> Biotech</label>
@@ -6048,6 +6049,7 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
         <select id="sched-profile" style="background:#F9FAFB;border:1px solid #E5E7EB;border-radius:4px;color:#111827;font-size:12px;padding:4px 8px">
           <option value="default">Base Scan</option>
           <option value="fedramp">FedRAMP</option>
+          <option value="fedramp_20x">FedRAMP 20x</option>
           <option value="cmmc">CMMC 2.0</option>
           <option value="financial">Financial</option>
           <option value="healthcare">Healthcare</option>
@@ -6157,6 +6159,7 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
         <label style="font-size:13px;color:#111827;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="cfg-profile-cb" value="atlas"> MITRE ATLAS (Adversarial ML)</label>
         <label style="font-size:13px;color:#111827;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="cfg-profile-cb" value="financial"> Financial Services</label>
         <label style="font-size:13px;color:#111827;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="cfg-profile-cb" value="fedramp"> FedRAMP / NIST 800-53</label>
+        <label style="font-size:13px;color:#111827;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="cfg-profile-cb" value="fedramp_20x"> FedRAMP 20x (KSI-Aligned)</label>
         <label style="font-size:13px;color:#111827;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="cfg-profile-cb" value="cmmc"> CMMC 2.0</label>
         <label style="font-size:13px;color:#111827;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="cfg-profile-cb" value="biotech"> Biotech (FDA 21 CFR Part 11 / HIPAA / GxP)</label>
         <label style="font-size:13px;color:#111827;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="cfg-profile-cb" value="healthcare"> Healthcare (HIPAA / HITECH / FDA SaMD)</label>
@@ -6335,6 +6338,7 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
     <div style="display:flex;flex-wrap:wrap;gap:8px 20px;margin-bottom:4px">
       <label style="font-size:13px;color:#374151;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="rpt-profile" value="default"> Base Scan</label>
       <label style="font-size:13px;color:#374151;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="rpt-profile" value="fedramp"> FedRAMP / NIST 800-53</label>
+      <label style="font-size:13px;color:#374151;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="rpt-profile" value="fedramp_20x"> FedRAMP 20x</label>
       <label style="font-size:13px;color:#374151;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="rpt-profile" value="cmmc"> CMMC 2.0</label>
       <label style="font-size:13px;color:#374151;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="rpt-profile" value="financial"> Financial Services</label>
       <label style="font-size:13px;color:#374151;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="rpt-profile" value="biotech"> Biotech</label>
@@ -7130,6 +7134,7 @@ const _SCAN_PROFILES = [
   {{id:'iso42001',      label:'ISO 42001',           desc:'ISO/IEC 42001:2023 — the international AI Management System standard. Covers governance, lifecycle, supply chain, risk assessment, and monitoring across all industries.'}},
   {{id:'atlas',         label:'MITRE ATLAS',         desc:'MITRE ATLAS adversarial ML threat framework — prompt injection, jailbreak, supply chain compromise, inference API abuse, model exfiltration, and cost harvesting attacks.'}},
   {{id:'fedramp',       label:'FedRAMP',             desc:'FedRAMP Moderate — NIST 800-53 control mappings. Required for federal cloud systems and agency deployments.'}},
+  {{id:'fedramp_20x',   label:'FedRAMP 20x',         desc:'FedRAMP 20x Key Security Indicators (KSI) — the next-generation, continuously-validated cloud authorization model from GSA. Currently in pilot; use for readiness, not authorization.'}},
   {{id:'cmmc',          label:'CMMC 2.0',            desc:'Cybersecurity Maturity Model Certification — required for DoD contractors handling CUI.'}},
   {{id:'financial',     label:'Financial Services',  desc:'Financial sector AI controls — SOC 2, FFIEC, SR 11-7 model risk guidance.'}},
   {{id:'biotech',       label:'Biotech',             desc:'FDA 21 CFR Part 11, HIPAA, ICH E6(R2), GxP — for pharma and biotech AI systems.'}},
@@ -8296,7 +8301,7 @@ async function savePassword(uid) {{
 
 const CADENCE_LABELS = {{daily:'Daily',weekly:'Weekly',monthly:'Monthly'}};
 const WEEKDAY_LABELS = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
-const PROFILE_LABELS = {{default:'Base Scan',fedramp:'FedRAMP',cmmc:'CMMC 2.0',financial:'Financial',
+const PROFILE_LABELS = {{default:'Base Scan',fedramp:'FedRAMP',fedramp_20x:'FedRAMP 20x',cmmc:'CMMC 2.0',financial:'Financial',
   healthcare:'Healthcare',biotech:'Biotech',owasp_agentic:'OWASP Agentic',eu_ai_act:'EU AI Act',
   professional_services:'Professional Services',kubernetes:'Kubernetes',docker:'Docker'}};
 
