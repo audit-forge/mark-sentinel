@@ -23,6 +23,12 @@ _PLACEHOLDER_RE = re.compile(
     r'(?i)(^$|xxx|placeholder|changeme|replace|your[_-]|example|'
     r'^test$|demo|fake|dummy|^none$|^empty$|^\*+$|^<.+>$)'
 )
+# Env vars whose names match secret patterns but whose values are public,
+# non-confidential data baked into official base images — e.g. python/php
+# images ship the release-signing GPG key *fingerprint*, which is public
+# information used to verify downloads, not a credential.
+_PUBLIC_ENV_KEYS = frozenset({'GPG_KEY', 'GPG_KEYS'})
+
 _DANGEROUS_CAPS = frozenset({
     'SYS_ADMIN', 'NET_ADMIN', 'ALL', 'SYS_PTRACE', 'SYS_MODULE',
     'DAC_OVERRIDE', 'SETUID', 'SETGID', 'SYS_RAWIO', 'SYS_CHROOT',
@@ -338,6 +344,8 @@ def check_docker_006(ctx: DockerContext) -> CheckResult:
             if '=' not in env_str:
                 continue
             key, _, val = env_str.partition('=')
+            if key.strip().upper() in _PUBLIC_ENV_KEYS or 'PUBLIC' in key.upper():
+                continue
             if _SECRET_KEY_RE.match(env_str) and _is_real_secret(val):
                 masked = f"{key}={val[:4]}***" if len(val) > 4 else f"{key}=***"
                 secret_hits.append(f"{name}: {masked}")
