@@ -35,9 +35,24 @@ def _check_rate_limit(ip: str) -> bool:
 def _record_failed_login(ip: str) -> None:
     _login_attempts[ip].append(time.time())
 
+def _load_admin_password() -> str:
+    """ADMIN_PASSWORD env, or ADMIN_PASSWORD_FILE (mounted secret — keeps the
+    credential out of container env vars, same pattern as SECRET_KEY_FILE)."""
+    pw = os.environ.get("ADMIN_PASSWORD", "")
+    if not pw:
+        path = os.environ.get("ADMIN_PASSWORD_FILE", "")
+        if path:
+            try:
+                import pathlib
+                p = pathlib.Path(path)
+                pw = p.read_text().strip() if p.is_file() else ""
+            except Exception:
+                pw = ""
+    return pw or "changeme"
+
 ADMIN_EMAIL    = os.environ.get("ADMIN_EMAIL", "admin@sentinel.local")
 MAX_CUSTOMERS  = int(os.environ.get("MAX_CUSTOMERS", "0"))  # 0 = unlimited
-ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "changeme")
+ADMIN_PASSWORD = _load_admin_password()
 PUBLIC_IP = os.environ.get("PUBLIC_IP", "35.255.19.236")
 
 

@@ -40,7 +40,7 @@ docker run -d \
   --restart always \
   --label "sentinel.customer=${CUSTOMER_ID}" \
   --label "sentinel.tier=${TIER}" \
-  -e "SENTINEL_AGENT_TOKEN=${AGENT_TOKEN}" \
+  -e "SENTINEL_AGENT_TOKEN_FILE=/app/data/agent_token.txt" \
   -e "SENTINEL_TRUSTED_PROXY=1" \
   ${LICENSE_MOUNT} \
   -v "${DATA_DIR}:/app/data" \

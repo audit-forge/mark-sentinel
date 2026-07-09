@@ -20,7 +20,7 @@ services:
     environment:
       - SECRET_KEY_FILE=/run/secrets/secret_key
       - ADMIN_EMAIL=${ADMIN_EMAIL}
-      - ADMIN_PASSWORD=${ADMIN_PASSWORD}
+      - ADMIN_PASSWORD_FILE=/run/secrets/admin_password
       - PUBLIC_IP=${PUBLIC_IP}
       - DB_PATH=/data/sentinel.db
       - MAX_CUSTOMERS=${MAX_CUSTOMERS:-0}
@@ -35,6 +35,7 @@ services:
     volumes:
       - /opt/sentinel-data:/data
       - /opt/sentinel-secrets/admin-secret-key:/run/secrets/secret_key:ro
+      - /opt/sentinel-secrets/admin-password:/run/secrets/admin_password:ro
       - /opt/licenses:/licenses
       - /var/run/docker.sock:/var/run/docker.sock
       - ./provision_customer.sh:/app/provision_customer.sh:ro

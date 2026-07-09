@@ -229,12 +229,22 @@ def _content_length(headers) -> int:
 
 
 def _agent_token() -> str:
-    """Return legacy single-token value. Empty string means no auth configured."""
+    """Return legacy single-token value. Empty string means no auth configured.
+    Prefer SENTINEL_AGENT_TOKEN_FILE over a plain env var — env values are
+    visible via docker inspect and /proc (Arckon's own AI-DOCKER-006 check)."""
     if os.environ.get('SENTINEL_AGENT_TOKEN'):
         return os.environ['SENTINEL_AGENT_TOKEN']
-    tok_file = ROOT / 'agent_token.txt'
-    if tok_file.exists():
-        return tok_file.read_text().strip()
+    tok_path = os.environ.get('SENTINEL_AGENT_TOKEN_FILE', '')
+    if tok_path:
+        try:
+            p = Path(tok_path)
+            if p.is_file():
+                return p.read_text().strip()
+        except OSError:
+            pass
+    for tok_file in (ROOT / 'agent_token.txt', ROOT / 'data' / 'agent_token.txt'):
+        if tok_file.exists():
+            return tok_file.read_text().strip()
     return ''
 
 

@@ -36,7 +36,7 @@ docker run -d \
   --network sentinel-net \
   --restart always \
   --label "sentinel.customer=${CUSTOMER_ID}" \
-  -e "SENTINEL_AGENT_TOKEN=${AGENT_TOKEN}" \
+  -e "SENTINEL_AGENT_TOKEN_FILE=/app/data/agent_token.txt" \
   -e "SENTINEL_TRUSTED_PROXY=1" \
   ${LICENSE_MOUNT} \
   -v "${DATA_DIR}:/app/data" \
