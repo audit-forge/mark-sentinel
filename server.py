@@ -5952,7 +5952,7 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
       <div style="font-size:12px;color:#9CA3AF;margin-top:2px">Active critical/high issues across your fleet, plus event history for new discoveries.</div>
     </div>
     <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-      <button class="scan-btn" onclick="loadActiveIssues();loadAlertEvents();" style="font-size:12px;color:#4F46E5;border-color:#E5E7EB">&#8635; Refresh</button>
+      <button id="alerts-refresh-btn" class="scan-btn" onclick="refreshAlertsPage(this)" style="font-size:12px;color:#4F46E5;border-color:#E5E7EB">&#8635; Refresh</button>
     </div>
   </div>
 
@@ -9173,9 +9173,22 @@ async function testAlert(channel) {{
 loadAlertConfig();
 
 // ── Active issues (current CRITICAL/HIGH FAILs from latest reports) ──────────
+async function refreshAlertsPage(btn) {{
+  if (btn) {{ btn.disabled = true; btn.innerHTML = '&#8635; Refreshing…'; }}
+  try {{
+    await Promise.all([loadActiveIssues(), loadAlertEvents()]);
+  }} finally {{
+    if (btn) {{
+      btn.innerHTML = '&#10003; Updated';
+      setTimeout(() => {{ btn.disabled = false; btn.innerHTML = '&#8635; Refresh'; }}, 1200);
+    }}
+  }}
+}}
+
 async function loadActiveIssues() {{
   const feed = document.getElementById('active-issues-feed');
   if (!feed) return;
+  feed.innerHTML = '<div style="color:#9CA3AF;font-size:13px;padding:12px 0">Loading…</div>';
   try {{
     const r = await fetch('/api/alerts/active-issues');
     if (!r.ok) throw new Error(r.status);
