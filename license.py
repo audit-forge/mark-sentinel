@@ -1,5 +1,5 @@
 """
-M.A.R.K. Sentinel — License enforcement, telemetry, and device monitoring
+RiskRaven Arckon — License enforcement, telemetry, and device monitoring
 
 License file (license.json) sits next to server.py.
 Fields:
@@ -9,9 +9,9 @@ Fields:
   grace_pct            — overage % tolerance before hard-alert (default 10)
   expires_at           — ISO date "YYYY-MM-DD"
   issued_at            — ISO date
-  issued_by            — "M.A.R.K. AI Systems"
+  issued_by            — "RiskRaven"
   webhook_url          — (optional) overage + stale-device alerts → customer channel
-  telemetry_url        — (set by M.A.R.K.) rolling usage reports → M.A.R.K. endpoint
+  telemetry_url        — (set by RiskRaven) rolling usage reports → Arckon endpoint
   telemetry_interval_h — hours between usage reports (default 24)
   stale_alert_hours    — hours of silence before a device is flagged unreachable (default 26)
 
@@ -72,7 +72,7 @@ class License:
         self.grace_pct            = float(data.get('grace_pct', _DEFAULT_GRACE))
         self.expires_at           = data.get('expires_at', '')
         self.issued_at            = data.get('issued_at', '')
-        self.issued_by            = data.get('issued_by', 'M.A.R.K. AI Systems')
+        self.issued_by            = data.get('issued_by', 'RiskRaven')
         self.webhook_url          = data.get('webhook_url', '')
         self.telemetry_url        = data.get('telemetry_url', '')
         self.telemetry_interval_h = float(data.get('telemetry_interval_h', 24))

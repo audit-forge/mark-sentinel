@@ -3,13 +3,13 @@
 <h1>CUSTOMERS</h1>
 
 {% if request.query_params.get('seats_updated') %}
-<div class="error" style="background:#4F46E518;border-color:#4F46E540;color:#4F46E5">&#10003; Seat count updated successfully</div>
+<div class="error" style="background:#4F46E518;border-color:#4F46E540;color:#4F46E5">&#10003; License count updated successfully</div>
 {% elif request.query_params.get('plan_updated') %}
 <div class="error" style="background:#4F46E518;border-color:#4F46E540;color:#4F46E5">&#10003; Plan updated successfully</div>
 {% elif request.query_params.get('msp_updated') %}
 <div class="error" style="background:#4F46E518;border-color:#4F46E540;color:#4F46E5">&#10003; MSP flag updated</div>
 {% elif request.query_params.get('error') == 'invalid_seats' %}
-<div class="error">Seat count must be at least 1.</div>
+<div class="error">License count must be at least 1.</div>
 {% elif request.query_params.get('error') == 'badparent' %}
 <div class="error">Selected parent MSP is not a valid reseller account.</div>
 {% elif request.query_params.get('error') == 'hasresold' %}
@@ -47,7 +47,7 @@
         </select>
       </div>
       <div class="form-group" style="max-width:120px">
-        <label>Max Seats</label>
+        <label>Max Licenses</label>
         <input type="number" name="max_seats" value="5" min="1" max="500">
       </div>
       <div class="form-group" style="max-width:200px">
@@ -81,6 +81,7 @@
     </div>
   </div>
   {% if customers %}
+  <div style="overflow-x:auto">
   <table>
     <thead>
       <tr>
@@ -89,7 +90,7 @@
         <th>Account Type</th>
         <th>Reseller / Parent</th>
         <th>Plan</th>
-        <th>Seats</th>
+        <th>Licenses</th>
         <th>Dashboard URL</th>
         <th>License Expiry</th>
         <th>Status</th>
@@ -214,6 +215,7 @@
     {% endfor %}
     </tbody>
   </table>
+  </div>
   {% else %}
   <div class="empty">No customers found.</div>
   {% endif %}

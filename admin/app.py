@@ -335,11 +335,11 @@ async def test_email(request: Request):
         return RedirectResponse("/login")
     from mailer import send_alert
     ok = send_alert(
-        subject="[Sentinel] Test alert — email is working",
-        body_text="This is a test alert from M.A.R.K. Sentinel admin panel.\n\nIf you received this, email alerts are configured correctly.",
+        subject="[Arckon] Test alert — email is working",
+        body_text="This is a test alert from the RiskRaven Arckon admin panel.\n\nIf you received this, email alerts are configured correctly.",
         body_html="""
 <div style="font-family:monospace;background:#0a0a0a;color:#e0e0e0;padding:24px;max-width:520px">
-  <div style="color:#00ff88;font-weight:bold;letter-spacing:3px;margin-bottom:16px">M.A.R.K. SENTINEL</div>
+  <div style="color:#00ff88;font-weight:bold;letter-spacing:3px;margin-bottom:16px">RISKRAVEN ARCKON</div>
   <div style="font-size:15px;color:#fff;margin-bottom:12px">Test Alert</div>
   <div style="font-size:13px;color:#aaa">Email alerts are configured correctly.</div>
 </div>

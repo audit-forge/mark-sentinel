@@ -105,7 +105,7 @@ def _handle_overage(customer: dict, agent_count: int):
     )
     body_html = f"""
 <div style="font-family:monospace;background:#0a0a0a;color:#e0e0e0;padding:24px;max-width:520px">
-  <div style="color:#00ff88;font-weight:bold;letter-spacing:3px;margin-bottom:16px">M.A.R.K. SENTINEL</div>
+  <div style="color:#00ff88;font-weight:bold;letter-spacing:3px;margin-bottom:16px">RISKRAVEN ARCKON</div>
   <div style="font-size:16px;color:#fff;margin-bottom:20px">Seat Overage Alert</div>
   <table style="border-collapse:collapse;width:100%;font-size:13px">
     <tr><td style="color:#666;padding:6px 0;width:160px">Customer</td><td style="color:#fff">{customer['name']}</td></tr>
@@ -118,7 +118,7 @@ def _handle_overage(customer: dict, agent_count: int):
 </div>
 """
     send_alert(
-        subject=f"[Sentinel] Seat overage — {customer['name']} ({agent_count}/{customer['max_seats']})",
+        subject=f"[Arckon] Seat overage — {customer['name']} ({agent_count}/{customer['max_seats']})",
         body_text=body_text,
         body_html=body_html,
     )

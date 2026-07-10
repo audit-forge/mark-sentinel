@@ -42,8 +42,8 @@ def send_alert(subject: str, body_text: str, body_html: str | None = None) -> bo
 
 
 def send_password_reset_email(to: str, reset_url: str) -> bool:
-    subject = "[M.A.R.K. Sentinel] Password reset request"
-    body_text = f"""Someone requested a password reset for your M.A.R.K. Sentinel account.
+    subject = "[RiskRaven Arckon] Password reset request"
+    body_text = f"""Someone requested a password reset for your RiskRaven Arckon account.
 
 Click the link below to set a new password. This link expires in 1 hour.
 
@@ -51,14 +51,14 @@ Click the link below to set a new password. This link expires in 1 hour.
 
 If you did not request this, you can safely ignore this email.
 
-— M.A.R.K. AI Systems
+— RiskRaven
 """
     body_html = f"""
 <div style="font-family:'Segoe UI',system-ui,sans-serif;background:#f0f4ff;padding:40px 0;min-height:100vh">
   <div style="max-width:520px;margin:0 auto;background:#ffffff;border-radius:12px;overflow:hidden;border:1px solid #ccd3e8;box-shadow:0 4px 24px rgba(26,47,90,0.12)">
     <div style="background:#0f1e3d;padding:28px 32px">
       <div style="font-size:22px;font-weight:800;color:#ffffff;letter-spacing:4px">
-        M.A.R.K. <span style="color:#f5a623">SENTINEL</span>
+        RiskRaven <span style="color:#f5a623">Arckon</span>
       </div>
       <div style="font-size:12px;color:#8a9abf;letter-spacing:2px;margin-top:6px;text-transform:uppercase">
         Security Intelligence Platform
@@ -81,7 +81,7 @@ If you did not request this, you can safely ignore this email.
       </div>
     </div>
     <div style="padding:20px 32px;border-top:1px solid #ccd3e8;font-size:12px;color:#5a6a8a">
-      This message was sent by M.A.R.K. AI Systems. Do not reply to this email.
+      This message was sent by RiskRaven. Do not reply to this email.
     </div>
   </div>
 </div>
@@ -90,8 +90,8 @@ If you did not request this, you can safely ignore this email.
 
 
 def send_welcome_email(to: str, customer_name: str, login_url: str, temp_password: str) -> bool:
-    subject = "[M.A.R.K. Sentinel] Your account is ready"
-    body_text = f"""Welcome to M.A.R.K. Sentinel, {customer_name}!
+    subject = "[RiskRaven Arckon] Your account is ready"
+    body_text = f"""Welcome to RiskRaven Arckon, {customer_name}!
 
 Your account has been provisioned. Use the credentials below to sign in.
 
@@ -103,14 +103,14 @@ Please change your password immediately after your first login.
 
 If you have any questions, contact your account administrator.
 
-— M.A.R.K. AI Systems
+— RiskRaven
 """
     body_html = f"""
 <div style="font-family:'Segoe UI',system-ui,sans-serif;background:#f0f4ff;padding:40px 0;min-height:100vh">
   <div style="max-width:520px;margin:0 auto;background:#ffffff;border-radius:12px;overflow:hidden;border:1px solid #ccd3e8;box-shadow:0 4px 24px rgba(26,47,90,0.12)">
     <div style="background:#0f1e3d;padding:28px 32px">
       <div style="font-size:22px;font-weight:800;color:#ffffff;letter-spacing:4px">
-        M.A.R.K. <span style="color:#f5a623">SENTINEL</span>
+        RiskRaven <span style="color:#f5a623">Arckon</span>
       </div>
       <div style="font-size:12px;color:#8a9abf;letter-spacing:2px;margin-top:6px;text-transform:uppercase">
         Security Intelligence Platform
@@ -138,7 +138,7 @@ If you have any questions, contact your account administrator.
       </div>
     </div>
     <div style="padding:20px 32px;border-top:1px solid #ccd3e8;font-size:12px;color:#5a6a8a">
-      This message was sent by M.A.R.K. AI Systems. Do not reply to this email.
+      This message was sent by RiskRaven. Do not reply to this email.
     </div>
   </div>
 </div>
