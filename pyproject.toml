@@ -29,3 +29,17 @@ mark-sentinel = "server:main"
 [tool.hatch.build.targets.wheel]
 include = ["**/*"]
 
+[tool.ruff]
+target-version = "py311"
+exclude = [
+    "server.py",
+    "admin/",
+    "test/",
+    "tests/",
+    ".git",
+    "__pycache__",
+]
+
+[tool.ruff.lint]
+select = ["E", "F", "W"]
+ignore = ["E501", "E402", "E701", "E702", "E741", "F401"]

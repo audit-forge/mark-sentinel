@@ -174,7 +174,6 @@ def handle_webhook_event(event: dict, provision_fn, cancel_fn) -> str:
         if mode != 'subscription':
             return f'skip: mode={mode}'
         email = obj.get('customer_email') or obj.get('customer_details', {}).get('email', '')
-        sub_id = obj.get('subscription', '')
         customer_id = obj.get('customer', '')
         metadata = obj.get('metadata', {})
         tier = metadata.get('tier', 'standard')

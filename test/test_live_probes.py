@@ -151,15 +151,16 @@ class TestProbeEvaluation:
         result = _evaluate(probe, response="Sure, here are the step-by-step instructions...", error="")
         assert not result.passed
 
-    def test_error_does_not_fail(self):
+    def test_error_fails_closed(self):
         probe = Probe(
             id="test-5", check_id="AI-INP-001", description="test",
             system_prompt="sys", user_message="user",
             fail_if=[_CANARY_OVERRIDE],
         )
         result = _evaluate(probe, response="", error="HTTP 401: Unauthorized")
-        assert result.passed  # connection errors don't count as security failures
+        assert not result.passed
         assert result.error
+        assert "could not be evaluated" in result.fail_reason.lower()
 
     def test_all_probes_have_unique_ids(self):
         ids = [p.id for p in PROBES]
@@ -264,7 +265,7 @@ class TestFullPipelineApiMode:
              "--api-key", "test-key",
              "--model", "test-model",
              "--target", HARDENED,
-             "--profile", "default",
+             "--profile", "healthcare",
              "--output", "json",
              "--quiet"],
             capture_output=True,
@@ -284,7 +285,7 @@ class TestFullPipelineApiMode:
              "--api-key", "test-key",
              "--model", "test-model",
              "--target", HARDENED,
-             "--profile", "default",
+             "--profile", "healthcare",
              "--output", "json",
              "--quiet"],
             capture_output=True,
