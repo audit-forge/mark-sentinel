@@ -71,6 +71,47 @@ def init_db():
                 conn.execute(f"ALTER TABLE customers ADD COLUMN {col} {defn}")
             except Exception:
                 pass
+        # NULL = full access to the customer's whole fleet; non-NULL scopes a
+        # client_viewer to that one client org.
+        try:
+            conn.execute("ALTER TABLE users ADD COLUMN client_org_id TEXT")
+        except Exception:
+            pass
+
+
+class StaleSessionError(Exception):
+    """A session's user row no longer backs the session's claims."""
+
+
+def revalidate_user(user_id) -> dict:
+    """Re-read a session's authoritative identity from the users table.
+
+    Sessions are self-contained JWTs, so every access decision copied into
+    their claims at login (role, customer_id, client_org_id) is a snapshot
+    that would otherwise stay valid for the token's full 8 hours. Callers
+    re-read this row on every request, so a role change, a move to another
+    client org, or a deactivation takes effect on the *next* request instead
+    of whenever the token happens to expire.
+
+    Raises StaleSessionError if the user is gone or deactivated — the caller
+    must fail closed rather than fall back on the claims it was handed."""
+    if not user_id:
+        raise StaleSessionError("session carries no user id")
+    with get_conn() as conn:
+        row = conn.execute("SELECT * FROM users WHERE id=?", (str(user_id),)).fetchone()
+    if row is None:
+        raise StaleSessionError(f"user {user_id!r} no longer exists")
+    if not row["active"]:
+        raise StaleSessionError(f"user {user_id!r} is deactivated")
+    cols = row.keys()
+    return {
+        "sub":           row["id"],
+        "email":         row["email"],
+        "role":          row["role"],
+        "customer_id":   row["customer_id"],
+        # Older databases predate the column; init_db() adds it on startup.
+        "client_org_id": row["client_org_id"] if "client_org_id" in cols else None,
+    }
 
 
 def log_audit(actor_id, actor_name, actor_role, customer_id, action,

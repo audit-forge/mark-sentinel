@@ -205,6 +205,12 @@ class AgentStore:
                 conn.execute("ALTER TABLE devices ADD COLUMN ip_address TEXT NOT NULL DEFAULT ''")
             if 'display_name' not in cols:
                 conn.execute("ALTER TABLE devices ADD COLUMN display_name TEXT NOT NULL DEFAULT ''")
+            if 'client_org_id' not in cols:
+                # Nullable — NULL means "unassigned" (pre-existing devices, or an MSP
+                # that hasn't set up client orgs yet). Never enforced NOT NULL so this
+                # migration can't fail against existing data.
+                conn.execute("ALTER TABLE devices ADD COLUMN client_org_id TEXT DEFAULT NULL")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_devices_client_org ON devices(client_org_id)")
             sh_cols = {r[1] for r in conn.execute("PRAGMA table_info(shadow_devices)")}
             if 'approval_status' not in sh_cols:
                 conn.execute(
@@ -229,22 +235,28 @@ class AgentStore:
 
     def upsert_report(self, device_id: str, hostname: str, report: dict,
                       platform: str = '', agent_version: str = '',
-                      ip_address: str = '') -> None:
-        """Store a new report for a device, upserting device metadata."""
+                      ip_address: str = '', client_org_id: str = '') -> None:
+        """Store a new report for a device, upserting device metadata.
+
+        client_org_id: pass '' (default) when the agent didn't send a
+        client-org token — an existing assignment is preserved rather than
+        cleared. Pass an actual org id to (re)assign the device."""
         now = int(time.time())
         summary = report.get('summary', {})
         with self._lock, self._conn() as conn:
             conn.execute("""
                 INSERT INTO devices
-                    (device_id, hostname, platform, agent_version, ip_address, first_seen, last_seen)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                    (device_id, hostname, platform, agent_version, ip_address, client_org_id, first_seen, last_seen)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(device_id) DO UPDATE SET
                     hostname      = excluded.hostname,
                     platform      = excluded.platform,
                     agent_version = excluded.agent_version,
                     ip_address    = CASE WHEN excluded.ip_address != '' THEN excluded.ip_address ELSE ip_address END,
+                    client_org_id = CASE WHEN excluded.client_org_id IS NOT NULL THEN excluded.client_org_id ELSE client_org_id END,
                     last_seen     = excluded.last_seen
-            """, (device_id, hostname, platform, agent_version, ip_address, now, now))
+            """, (device_id, hostname, platform, agent_version, ip_address,
+                  client_org_id or None, now, now))
 
             conn.execute("""
                 INSERT INTO reports
@@ -263,13 +275,19 @@ class AgentStore:
                 json.dumps(report),
             ))
 
-    def list_devices(self) -> list[dict]:
-        """Return all devices with their latest scan summary."""
+    def list_devices(self, client_org_id: Union[str, None] = None) -> list[dict]:
+        """Return all devices with their latest scan summary.
+
+        client_org_id: pass a specific org id to filter to just that org's
+        devices (used by the client-viewer role and the fleet view's org
+        filter); pass '' (empty string, not None) to filter to unassigned
+        devices only; leave as None (default) for no filtering (MSP admin
+        view)."""
         with self._lock, self._conn() as conn:
-            rows = conn.execute("""
+            query = """
                 SELECT
                     d.device_id, d.hostname, d.display_name, d.platform, d.agent_version,
-                    d.first_seen, d.last_seen,
+                    d.first_seen, d.last_seen, d.client_org_id,
                     r.scan_date, r.profile, r.mode, r.target,
                     r.fail_count, r.warn_count, r.pass_count,
                     r.received_at AS report_time
@@ -280,9 +298,26 @@ class AgentStore:
                         SELECT MAX(received_at) FROM reports
                         WHERE device_id = d.device_id
                     )
-                ORDER BY d.last_seen DESC
-            """).fetchall()
+            """
+            params: tuple = ()
+            if client_org_id == '':
+                query += " WHERE d.client_org_id IS NULL"
+            elif client_org_id is not None:
+                query += " WHERE d.client_org_id = ?"
+                params = (client_org_id,)
+            query += " ORDER BY d.last_seen DESC"
+            rows = conn.execute(query, params).fetchall()
         return [dict(r) for r in rows]
+
+    def set_device_client_org(self, device_id: str, client_org_id: Union[str, None]) -> bool:
+        """Manually (re)assign a device to a client org — used by the onboarding
+        UI to move devices between orgs, independent of the agent's own token."""
+        with self._lock, self._conn() as conn:
+            cur = conn.execute(
+                "UPDATE devices SET client_org_id=? WHERE device_id=?",
+                (client_org_id, device_id),
+            )
+            return cur.rowcount > 0
 
     def rename_device(self, device_id: str, display_name: str) -> bool:
         """Set a custom display name for a device. Returns True if device was found."""
@@ -301,12 +336,20 @@ class AgentStore:
             ).fetchall()
         return {r[0] for r in rows}
 
-    def list_devices_by_profile(self, profiles: list[str]) -> list[dict]:
+    def list_devices_by_profile(self, profiles: list[str],
+                                client_org_id: Union[str, None] = None) -> list[dict]:
         """Return devices with their latest scan matching any of the given profile slugs.
 
         Each device row includes '_report' (full parsed report JSON) keyed to
         the most recent scan that matched the requested profiles — not the
         overall latest scan, which may be a different profile.
+
+        client_org_id: same semantics as list_devices(client_org_id=...) —
+        pass a specific org id to filter to just that org's devices, pass ''
+        (empty string, not None) to filter to unassigned devices only, leave
+        as None (default) for no filtering (MSP admin view). Callers serving
+        a client_viewer must pass a resolved org id here; None means "every
+        org", which is exactly the cross-tenant read this scoping prevents.
         """
         _SLUG_TO_DISPLAY = {
             'default':   'default (full suite)',
@@ -322,11 +365,21 @@ class AgentStore:
                 terms.add(_SLUG_TO_DISPLAY[p])
         term_list = list(terms)
         ph = ','.join('?' * len(term_list))
+        # Org filter is bound as a parameter; the '?' placeholders built
+        # above are the only thing interpolated into the SQL text.
+        org_clause = ''
+        org_params: list = []
+        if client_org_id == '':
+            org_clause = ' AND d.client_org_id IS NULL'
+        elif client_org_id is not None:
+            org_clause = ' AND d.client_org_id = ?'
+            org_params = [client_org_id]
+
         with self._lock, self._conn() as conn:
             rows = conn.execute(f"""
                 SELECT
                     d.device_id, d.hostname, d.platform, d.agent_version,
-                    d.first_seen, d.last_seen,
+                    d.first_seen, d.last_seen, d.client_org_id,
                     r.scan_date, r.profile, r.mode, r.target,
                     r.fail_count, r.warn_count, r.pass_count,
                     r.received_at AS report_time,
@@ -339,9 +392,9 @@ class AgentStore:
                         WHERE r2.device_id = d.device_id
                         AND LOWER(r2.profile) IN ({ph})
                     )
-                WHERE LOWER(r.profile) IN ({ph})
+                WHERE LOWER(r.profile) IN ({ph}){org_clause}
                 ORDER BY d.last_seen DESC
-            """, term_list + term_list).fetchall()
+            """, term_list + term_list + org_params).fetchall()
         result = []
         for row in rows:
             d = dict(row)
@@ -1026,6 +1079,18 @@ class CustomerRegistry:
 
                 CREATE INDEX IF NOT EXISTS idx_ds_expires
                     ON dashboard_sessions(expires_at);
+
+                CREATE TABLE IF NOT EXISTS client_orgs (
+                    id           TEXT PRIMARY KEY,
+                    customer_id  TEXT NOT NULL REFERENCES customers(id),
+                    name         TEXT NOT NULL,
+                    enroll_token TEXT UNIQUE NOT NULL,
+                    created_at   INTEGER NOT NULL,
+                    active       INTEGER NOT NULL DEFAULT 1
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_client_orgs_customer
+                    ON client_orgs(customer_id, active);
             """)
 
             # Live migrations for existing deployments
@@ -1036,6 +1101,15 @@ class CustomerRegistry:
                 conn.execute("ALTER TABLE customers ADD COLUMN max_agents INTEGER NOT NULL DEFAULT 0")
             if 'expires_at' not in cols:
                 conn.execute("ALTER TABLE customers ADD COLUMN expires_at TEXT NOT NULL DEFAULT ''")
+            du_cols = {r[1] for r in conn.execute('PRAGMA table_info(dashboard_users)').fetchall()}
+            if 'client_org_id' not in du_cols:
+                # NULL = full MSP-admin access (sees every client org for this
+                # customer); non-NULL = client-viewer scoped to that one org.
+                # Sessions don't need their own copy of this — get_session()
+                # joins to dashboard_users and reads it from there, so it's
+                # always current even if an admin changes a user's scope
+                # after they've already logged in.
+                conn.execute('ALTER TABLE dashboard_users ADD COLUMN client_org_id TEXT DEFAULT NULL')
 
     # ── password helpers ──────────────────────────────────────────────────────
 
@@ -1176,38 +1250,109 @@ class CustomerRegistry:
             'seconds_remaining': max(0, row['token_prev_expires'] - now) if active else 0,
         }
 
+    # ── client org management (MSP's own downstream clients) ─────────────────
+
+    def create_client_org(self, customer_id: str, name: str) -> dict:
+        """Create a new client org under an MSP customer and issue its
+        enrollment token — the token an agent installer embeds so check-ins
+        get tagged with this org automatically."""
+        import uuid, secrets
+        oid = str(uuid.uuid4())
+        token = secrets.token_urlsafe(24)
+        now = int(time.time())
+        with self._lock, self._conn() as conn:
+            conn.execute(
+                'INSERT INTO client_orgs (id, customer_id, name, enroll_token, created_at, active) '
+                'VALUES (?,?,?,?,?,1)',
+                (oid, customer_id, name.strip(), token, now),
+            )
+        return {'id': oid, 'customer_id': customer_id, 'name': name.strip(),
+                'enroll_token': token, 'created_at': now}
+
+    def list_client_orgs(self, customer_id: str) -> list[dict]:
+        with self._lock, self._conn() as conn:
+            rows = conn.execute(
+                'SELECT id, customer_id, name, enroll_token, created_at, active '
+                'FROM client_orgs WHERE customer_id=? ORDER BY created_at ASC',
+                (customer_id,),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def get_client_org(self, org_id: str) -> Union[dict, None]:
+        with self._lock, self._conn() as conn:
+            row = conn.execute(
+                'SELECT id, customer_id, name, enroll_token, created_at, active '
+                'FROM client_orgs WHERE id=?',
+                (org_id,),
+            ).fetchone()
+        return dict(row) if row else None
+
+    def get_client_org_by_token(self, token: str) -> Union[dict, None]:
+        """Resolve an agent's client-org enrollment token at check-in time."""
+        if not token:
+            return None
+        with self._lock, self._conn() as conn:
+            row = conn.execute(
+                'SELECT id, customer_id, name FROM client_orgs WHERE enroll_token=? AND active=1',
+                (token,),
+            ).fetchone()
+        return dict(row) if row else None
+
+    def rename_client_org(self, org_id: str, customer_id: str, name: str) -> bool:
+        with self._lock, self._conn() as conn:
+            cur = conn.execute(
+                'UPDATE client_orgs SET name=? WHERE id=? AND customer_id=?',
+                (name.strip(), org_id, customer_id),
+            )
+            return cur.rowcount > 0
+
+    def deactivate_client_org(self, org_id: str, customer_id: str) -> bool:
+        """Soft-delete — devices keep their client_org_id (historical data
+        stays intact) but the org drops out of the active onboarding lists
+        and its client-viewer logins stop working."""
+        with self._lock, self._conn() as conn:
+            cur = conn.execute(
+                'UPDATE client_orgs SET active=0 WHERE id=? AND customer_id=?',
+                (org_id, customer_id),
+            )
+            return cur.rowcount > 0
+
     # ── dashboard user management ─────────────────────────────────────────────
 
-    def create_user(self, customer_id: str, email: str, password: str, role: str = 'admin') -> dict:
+    def create_user(self, customer_id: str, email: str, password: str, role: str = 'admin',
+                    client_org_id: Union[str, None] = None) -> dict:
         import uuid
         uid = str(uuid.uuid4())
         now = int(time.time())
         with self._lock, self._conn() as conn:
             conn.execute(
                 'INSERT INTO dashboard_users '
-                '(id, customer_id, email, password_hash, role, created_at, active) '
-                'VALUES (?,?,?,?,?,?,1)',
-                (uid, customer_id, email.lower().strip(), self._hash_pw(password), role, now),
+                '(id, customer_id, email, password_hash, role, client_org_id, created_at, active) '
+                'VALUES (?,?,?,?,?,?,?,1)',
+                (uid, customer_id, email.lower().strip(), self._hash_pw(password), role,
+                 client_org_id, now),
             )
         return {'id': uid, 'customer_id': customer_id,
-                'email': email.lower().strip(), 'role': role}
+                'email': email.lower().strip(), 'role': role,
+                'client_org_id': client_org_id}
 
     def authenticate_user(self, email: str, password: str) -> Union[dict, None]:
         with self._lock, self._conn() as conn:
             row = conn.execute(
-                'SELECT id, customer_id, email, password_hash, role FROM dashboard_users '
-                'WHERE email=? AND active=1',
+                'SELECT id, customer_id, email, password_hash, role, client_org_id '
+                'FROM dashboard_users WHERE email=? AND active=1',
                 (email.lower().strip(),),
             ).fetchone()
         if row is None or not self._verify_pw(password, row['password_hash']):
             return None
         return {'id': row['id'], 'customer_id': row['customer_id'],
-                'email': row['email'], 'role': row['role']}
+                'email': row['email'], 'role': row['role'],
+                'client_org_id': row['client_org_id']}
 
     def list_users(self, customer_id: str) -> list[dict]:
         with self._lock, self._conn() as conn:
             rows = conn.execute(
-                'SELECT id, email, role, created_at, active FROM dashboard_users '
+                'SELECT id, email, role, client_org_id, created_at, active FROM dashboard_users '
                 'WHERE customer_id=? ORDER BY created_at ASC',
                 (customer_id,),
             ).fetchall()
@@ -1252,7 +1397,7 @@ class CustomerRegistry:
         now = int(time.time())
         with self._lock, self._conn() as conn:
             row = conn.execute(
-                'SELECT s.user_id, s.customer_id, s.email, u.role '
+                'SELECT s.user_id, s.customer_id, s.email, u.role, u.client_org_id '
                 'FROM dashboard_sessions s '
                 'JOIN dashboard_users u ON u.id = s.user_id '
                 'WHERE s.token=? AND s.expires_at>? AND u.active=1',

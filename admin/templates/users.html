@@ -12,6 +12,8 @@
 <div class="error">User not found.</div>
 {% elif request.query_params.get('error') == 'exists' %}
 <div class="error">A user with that email already exists.</div>
+{% elif request.query_params.get('error') == 'noclientorg' %}
+<div class="error">A client viewer must be assigned to a client org belonging to that customer.</div>
 {% endif %}
 
 <div class="card">
@@ -28,12 +30,13 @@
       </div>
       <div class="form-group" style="max-width:180px">
         <label>Role</label>
-        <select name="role">
+        <select name="role" onchange="document.getElementById('add-client-org-group').style.display = this.value === 'client_viewer' ? '' : 'none'">
           {% if user.role == 'super_admin' %}
           <option value="super_admin">super_admin</option>
           <option value="customer_admin">customer_admin</option>
           {% endif %}
           <option value="user">user</option>
+          <option value="client_viewer">client viewer</option>
         </select>
       </div>
       {% if user.role == 'super_admin' %}
@@ -47,6 +50,18 @@
         </select>
       </div>
       {% endif %}
+      <div class="form-group" id="add-client-org-group" style="max-width:220px;display:none">
+        <label>Client Org</label>
+        <select name="client_org_id">
+          <option value="">— select client org —</option>
+          {% for o in client_orgs %}
+          <option value="{{ o.id }}">{{ o.name }}{% if o.customer_name %} ({{ o.customer_name }}){% endif %}</option>
+          {% endfor %}
+        </select>
+        {% if not client_orgs %}
+        <div style="font-size:12px;color:#6B7280;margin-top:4px">No client orgs yet — create one from that customer's dashboard first.</div>
+        {% endif %}
+      </div>
       <button type="submit" class="btn btn-primary">Add User</button>
     </div>
   </form>
@@ -61,6 +76,7 @@
         <th>Email</th>
         <th>Role</th>
         <th>Customer</th>
+        <th>Client Org</th>
         <th>Created</th>
         <th></th>
       </tr>
@@ -74,11 +90,14 @@
           <span class="badge badge-green">internal</span>
         {% elif u.role == 'customer_admin' %}
           <span class="badge badge-blue">admin</span>
+        {% elif u.role == 'client_viewer' %}
+          <span class="badge badge-yellow">client viewer</span>
         {% else %}
           <span class="badge badge-yellow">user</span>
         {% endif %}
       </td>
       <td style="color:#666">{{ u.customer_name or '—' }}</td>
+      <td style="color:#666">{{ u.client_org_name or '—' }}</td>
       <td style="color:#555">{{ u.created_at[:10] }}</td>
       <td style="white-space:nowrap">
         <button type="button" class="btn btn-sm" style="background:#F9FAFB;border:1px solid #D1D5DB;color:#374151;margin-right:4px"
@@ -117,10 +136,11 @@
       </div>
       <div class="form-group" style="max-width:200px">
         <label>Role</label>
-        <select name="role">
+        <select name="role" onchange="document.getElementById('edit-client-org-group').style.display = this.value === 'client_viewer' ? '' : 'none'">
           <option value="super_admin">super_admin</option>
           <option value="customer_admin">customer_admin</option>
           <option value="user">user</option>
+          <option value="client_viewer">client viewer</option>
         </select>
       </div>
       {% if user.role == 'super_admin' %}
@@ -134,6 +154,15 @@
         </select>
       </div>
       {% endif %}
+      <div class="form-group" id="edit-client-org-group" style="max-width:220px;display:none">
+        <label>Client Org</label>
+        <select name="client_org_id">
+          <option value="">— select client org —</option>
+          {% for o in client_orgs %}
+          <option value="{{ o.id }}">{{ o.name }}{% if o.customer_name %} ({{ o.customer_name }}){% endif %}</option>
+          {% endfor %}
+        </select>
+      </div>
       <button type="submit" class="btn btn-primary">Save Changes</button>
     </div>
   </form>

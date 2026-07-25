@@ -15,11 +15,12 @@ Usage:
 
 Config file (agent_config.json):
   {
-    "server":   "http://10.0.1.50:7331",
-    "token":    "your-secret-token",
-    "target":   "~",
-    "profile":  "default",
-    "interval": 7200
+    "server":           "http://10.0.1.50:7331",
+    "token":            "your-secret-token",
+    "target":           "~",
+    "profile":          "default",
+    "interval":         7200,
+    "client_org_token": "optional — MSP client-org enrollment token"
   }
 
 Environment overrides:
@@ -349,13 +350,16 @@ def report_to_server(report: dict, config: dict,
         return True
 
     token = config.get('token', '')
-    payload = json.dumps({
+    payload_dict = {
         'device_id':     device_id,
         'hostname':      hostname,
         'platform':      platform.system(),
         'agent_version': VERSION,
         'report':        report,
-    }).encode()
+    }
+    if config.get('client_org_token'):
+        payload_dict['client_org_token'] = config['client_org_token']
+    payload = json.dumps(payload_dict).encode()
 
     headers: dict[str, str] = {
         'Content-Type':   'application/json',
