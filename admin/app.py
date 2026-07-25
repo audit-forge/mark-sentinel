@@ -41,6 +41,8 @@ ADMIN_EMAIL    = os.environ.get("ADMIN_EMAIL", "admin@arckon.local")
 MAX_CUSTOMERS  = int(os.environ.get("MAX_CUSTOMERS", "0"))  # 0 = unlimited
 ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "changeme")
 PUBLIC_IP = os.environ.get("PUBLIC_IP", "35.255.19.236")
+# Parent dir holding one bind-mounted data dir per customer container.
+CUSTOMER_DATA_ROOT = os.environ.get("CUSTOMER_DATA_ROOT", "/data")
 
 
 @app.on_event("startup")
@@ -66,6 +68,44 @@ def _check_customer_active(customer_id: str) -> bool:
     with get_conn() as conn:
         row = conn.execute("SELECT active FROM customers WHERE id=?", (customer_id,)).fetchone()
     return bool(row and row["active"])
+
+
+def _get_client_orgs(customer_id: Union[str, None]) -> list[dict]:
+    """Read the client_orgs table from a customer's own bind-mounted customers.db.
+
+    Each customer container owns its own isolated customers.db (bind-mounted from
+    /opt/sentinel-data/{customer_id}); the admin container mounts the whole parent
+    dir at /data, so it can read it read-only without going through that customer's
+    API. Returns [] off-cloud or before the customer has created any client orgs."""
+    if not customer_id:
+        return []
+    db_file = os.path.join(CUSTOMER_DATA_ROOT, customer_id, "customers.db")
+    if not os.path.isfile(db_file):
+        return []
+    try:
+        import sqlite3
+        conn = sqlite3.connect(db_file)
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            "SELECT id, name FROM client_orgs WHERE active=1 ORDER BY name"
+        ).fetchall()
+        conn.close()
+        return [dict(r) for r in rows]
+    except Exception:
+        return []
+
+
+def _get_all_client_orgs() -> list[dict]:
+    """Flat list of every client org across every customer, for the super_admin Users page."""
+    results = []
+    try:
+        for entry in os.listdir(CUSTOMER_DATA_ROOT):
+            for org in _get_client_orgs(entry):
+                org["customer_id"] = entry
+                results.append(org)
+    except Exception:
+        pass
+    return results
 
 
 def _arckon_url(customer_id: Union[str, None]) -> str:
@@ -120,7 +160,8 @@ async def login(
         return templates.TemplateResponse("login.html", {
             "request": request, "error": "Invalid credentials", "next": next
         })
-    token = create_token(row["id"], row["role"], row["customer_id"], row["email"])
+    token = create_token(row["id"], row["role"], row["customer_id"], row["email"],
+                         row["client_org_id"] if "client_org_id" in row.keys() else None)
     log_audit(
         actor_id=row["id"], actor_name=row["email"], actor_role=row["role"],
         customer_id=row["customer_id"] or "", action="login.success", target=email,
@@ -174,13 +215,19 @@ async def auth_verify(request: Request):
     if customer_id and user["role"] != "super_admin":
         if user.get("customer_id") != customer_id:
             return Response(status_code=403)
-    with get_conn() as conn:
-        row = conn.execute("SELECT email FROM users WHERE id=?", (user["sub"],)).fetchone()
-    email = row["email"] if row else ""
+    # get_current_user() has already re-read this user from the users table, so
+    # every value below is current as of this subrequest: a deactivated user
+    # 401s (nginx then bounces them to /login) and a role change or client-org
+    # move reaches the customer container on their very next page load.
     return Response(status_code=200, headers={
-        "X-Arckon-User-Email":    email or "",
+        "X-Arckon-User-Email":    user.get("email") or "",
         "X-Arckon-User-Role":     user.get("role") or "",
         "X-Arckon-Customer-ID":   user.get("customer_id") or "",
+        # The client-org pin that scopes a client_viewer to one tenant. The
+        # vhost must both capture (auth_request_set) and re-set this header,
+        # and blank it on any location that bypasses /auth/verify — otherwise
+        # a browser-supplied value reaches a container that trusts the proxy.
+        "X-Arckon-Client-Org-ID": user.get("client_org_id") or "",
     })
 
 
@@ -1012,12 +1059,28 @@ async def users_page(request: Request):
                 WHERE u.active=1 AND u.customer_id=? AND u.role != 'super_admin'
                 ORDER BY u.email
             """, (user["customer_id"],)).fetchall()
+    if user["role"] == "super_admin":
+        client_orgs = _get_all_client_orgs()
+        cust_names = {c["id"]: c["name"] for c in [dict(r) for r in customers]}
+        for org in client_orgs:
+            org["customer_name"] = cust_names.get(org["customer_id"], org["customer_id"])
+    else:
+        client_orgs = _get_client_orgs(user["customer_id"])
+
+    org_names = {o["id"]: o["name"] for o in client_orgs}
+
+    def _with_org_name(row):
+        d = dict(row)
+        d["client_org_name"] = org_names.get(d.get("client_org_id")) if d.get("client_org_id") else None
+        return d
+
     return templates.TemplateResponse("users.html", {
         "request": request, "user": user,
         "current_user_id": user["sub"],
-        "users": [dict(r) for r in rows],
-        "all_users": [dict(r) for r in all_users],
+        "users": [_with_org_name(r) for r in rows],
+        "all_users": [_with_org_name(r) for r in all_users],
         "customers": [dict(r) for r in customers],
+        "client_orgs": client_orgs,
     })
 
 
@@ -1028,6 +1091,7 @@ async def add_user(
     password: str = Form(...),
     role: str = Form(...),
     customer_id: str = Form(None),
+    client_org_id: str = Form(None),
 ):
     try:
         user = get_current_user(request)
@@ -1036,14 +1100,23 @@ async def add_user(
     client_ip = request.client.host if request.client else "unknown"
     if user["role"] == "customer_admin":
         customer_id = user["customer_id"]
-        if role not in ("customer_admin", "user"):
+        if role not in ("customer_admin", "user", "client_viewer"):
             return RedirectResponse("/users?error=forbidden", status_code=303)
+    # A client_viewer without a valid org pin would be a portal login with no
+    # tenant scope at all — reject rather than create one that fails closed later.
+    if role == "client_viewer":
+        valid_orgs = {o["id"] for o in _get_client_orgs(customer_id)}
+        if not client_org_id or client_org_id not in valid_orgs:
+            return RedirectResponse("/users?error=noclientorg", status_code=303)
+    else:
+        client_org_id = None
     addr = email.strip().lower()
     with get_conn() as conn:
         conn.execute(
-            "INSERT INTO users (id, email, password_hash, role, customer_id, created_at) VALUES (?,?,?,?,?,?)",
+            "INSERT INTO users (id, email, password_hash, role, customer_id, client_org_id, created_at) "
+            "VALUES (?,?,?,?,?,?,?)",
             (str(uuid.uuid4()), addr, hash_password(password),
-             role, customer_id or None, datetime.now(timezone.utc).isoformat())
+             role, customer_id or None, client_org_id, datetime.now(timezone.utc).isoformat())
         )
     log_audit(
         actor_id=user["sub"], actor_name=user["email"], actor_role=user["role"],
@@ -1059,6 +1132,7 @@ async def edit_user(
     user_id: str = Form(...),
     role: str = Form(...),
     customer_id: str = Form(None),
+    client_org_id: str = Form(None),
 ):
     try:
         user = get_current_user(request)
@@ -1067,13 +1141,21 @@ async def edit_user(
     client_ip = request.client.host if request.client else "unknown"
     if user["role"] != "super_admin":
         return RedirectResponse("/users?error=forbidden", status_code=303)
-    if role not in ("super_admin", "customer_admin", "user"):
+    if role not in ("super_admin", "customer_admin", "user", "client_viewer"):
         role = "user"
+    if role == "client_viewer":
+        valid_orgs = {o["id"] for o in _get_client_orgs(customer_id)}
+        if not client_org_id or client_org_id not in valid_orgs:
+            return RedirectResponse("/users?error=noclientorg", status_code=303)
+    else:
+        # Demoting/promoting out of client_viewer must clear the pin, or a
+        # stale org id keeps scoping a now-unscoped account.
+        client_org_id = None
     with get_conn() as conn:
         target = conn.execute("SELECT email FROM users WHERE id=?", (user_id,)).fetchone()
         conn.execute(
-            "UPDATE users SET role=?, customer_id=? WHERE id=?",
-            (role, customer_id or None, user_id)
+            "UPDATE users SET role=?, customer_id=?, client_org_id=? WHERE id=?",
+            (role, customer_id or None, client_org_id, user_id)
         )
     log_audit(
         actor_id=user["sub"], actor_name=user["email"], actor_role=user["role"],
@@ -1178,11 +1260,13 @@ async def api_users_list(request: Request):
     with get_conn() as conn:
         if user["role"] == "super_admin":
             rows = conn.execute(
-                "SELECT id, email, role, created_at FROM users WHERE active=1 ORDER BY role='super_admin' DESC, email"
+                "SELECT id, email, role, client_org_id, created_at FROM users WHERE active=1 "
+                "ORDER BY role='super_admin' DESC, email"
             ).fetchall()
         else:
             rows = conn.execute(
-                "SELECT id, email, role, created_at FROM users WHERE active=1 AND customer_id=? AND role != 'super_admin' ORDER BY email",
+                "SELECT id, email, role, client_org_id, created_at FROM users "
+                "WHERE active=1 AND customer_id=? AND role != 'super_admin' ORDER BY email",
                 (user["customer_id"],),
             ).fetchall()
         me_row = conn.execute("SELECT email FROM users WHERE id=?", (user.get("sub"),)).fetchone()
@@ -1203,18 +1287,28 @@ async def api_add_user(request: Request):
     email    = str(body.get("email", "")).strip().lower()
     password = str(body.get("password", ""))
     role     = str(body.get("role", "customer_admin"))
-    if user["role"] == "customer_admin" and role not in ("customer_admin", "user"):
+    if user["role"] == "customer_admin" and role not in ("customer_admin", "user", "client_viewer"):
         return JSONResponse({"error": "forbidden"}, status_code=403)
     if "@" not in email or len(password) < 8:
         return JSONResponse({"error": "invalid email or password too short"}, status_code=400)
     customer_id = user["customer_id"] if user["role"] != "super_admin" else body.get("customer_id")
+    client_org_id = None
+    if role == "client_viewer":
+        client_org_id = str(body.get("client_org_id", "")).strip()
+        # The org must belong to the customer this user is being created
+        # under — otherwise a viewer could be pinned to another MSP's tenant.
+        if not client_org_id or client_org_id not in {o["id"] for o in _get_client_orgs(customer_id)}:
+            return JSONResponse(
+                {"error": "a client_org_id belonging to this customer is required for the client_viewer role"},
+                status_code=400)
     client_ip = request.client.host if request.client else "unknown"
     try:
         with get_conn() as conn:
             conn.execute(
-                "INSERT INTO users (id, email, password_hash, role, customer_id, created_at) VALUES (?,?,?,?,?,?)",
+                "INSERT INTO users (id, email, password_hash, role, customer_id, client_org_id, created_at) "
+                "VALUES (?,?,?,?,?,?,?)",
                 (str(uuid.uuid4()), email, hash_password(password), role,
-                 customer_id or None, datetime.now(timezone.utc).isoformat()),
+                 customer_id or None, client_org_id, datetime.now(timezone.utc).isoformat()),
             )
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=400)

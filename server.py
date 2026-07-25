@@ -993,6 +993,15 @@ def _run_scan(mode: str, target: str, profile: str, providers: list[str], live_c
             _status = 'error'
 
 
+class _TenantScopeError(Exception):
+    """A session's client-org scope could not be resolved safely.
+
+    Raised instead of returning None (which means "no filter — show the whole
+    MSP fleet") so that a client_viewer with a missing, unknown, deactivated
+    or cross-customer client_org_id fails closed rather than being handed
+    every tenant's devices."""
+
+
 class _Handler(http.server.BaseHTTPRequestHandler):
     def log_message(self, *_): pass
 
@@ -1009,10 +1018,17 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         if not email:
             return None
         customer_id = (self.headers.get('X-Sentinel-Customer-ID') or self.headers.get('X-Arckon-Customer-ID', '')).strip() or 'default'
+        org = (self.headers.get('X-Sentinel-Client-Org-ID')
+               or self.headers.get('X-Arckon-Client-Org-ID', '')).strip()
         return {
             'email':       email,
-            'role':        (self.headers.get('X-Sentinel-User-Role') or self.headers.get('X-Arckon-User-Role', 'admin')).strip(),
+            # No role header means the proxy didn't vouch for one. Default to
+            # the least-privileged role, never 'admin' — a misconfigured or
+            # partially-updated vhost must not hand out MSP-wide access.
+            'role':        (self.headers.get('X-Sentinel-User-Role')
+                            or self.headers.get('X-Arckon-User-Role', '')).strip() or 'client_viewer',
             'customer_id': customer_id,
+            'client_org_id': org or None,
         }
 
     def _session_user(self) -> Union[dict, None]:
@@ -1021,6 +1037,90 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             return proxy
         token = _get_session_cookie(self.headers)
         return _get_registry().get_session(token) if token else None
+
+    def _resolve_session_org(self, user: Union[dict, None]) -> Union[str, None]:
+        """Validate this session's client-org pin and return it.
+
+        Returns None only for sessions that legitimately span the whole
+        customer — MSP admins, agent and setup requests — which is what lets
+        those roles keep their existing fleet-wide view. Anything else raises
+        _TenantScopeError:
+
+          * a client_viewer carrying no client_org_id at all (an unscoped
+            portal login is a cross-tenant read waiting to happen),
+          * any session whose client_org_id doesn't resolve to an active
+            client org belonging to that session's own customer (covers a
+            deleted/deactivated org, a typo, and a spoofed header that got
+            past the proxy).
+        """
+        if not user:
+            return None
+        raw = (user.get('client_org_id') or '').strip()
+        if not raw:
+            if user.get('role') == 'client_viewer':
+                raise _TenantScopeError(
+                    f"client_viewer {user.get('email', '?')!r} has no client_org_id"
+                )
+            return None
+        try:
+            org = _get_registry().get_client_org(raw)
+        except Exception as e:
+            # A registry that can't answer is not a licence to show everything.
+            raise _TenantScopeError(f'could not resolve client_org_id {raw!r}: {e}')
+        if not org or not org.get('active'):
+            raise _TenantScopeError(f'client_org_id {raw!r} is not an active client org')
+        if org.get('customer_id') != user.get('customer_id'):
+            raise _TenantScopeError(
+                f"client_org_id {raw!r} belongs to customer "
+                f"{org.get('customer_id')!r}, not {user.get('customer_id')!r}"
+            )
+        return raw
+
+    def _scoped_client_org(self) -> Union[str, None]:
+        """Return the effective client_org_id filter for this request.
+
+        A client_viewer's own client_org_id always wins — the ?client_org=
+        query param is ignored for that role so a scoped user can never
+        widen their own view by hand-editing the URL. An MSP admin (no
+        client_org_id on their session) may pass ?client_org=<id> to drill
+        into one client's fleet view; omit it (or pass 'all') to see every
+        device across every client, same as before this feature existed.
+
+        '' (empty string) is a meaningful return value here, not a falsy
+        "no filter" — it means "unassigned devices only". Callers must
+        compare against None, never test truthiness.
+        """
+        from urllib.parse import parse_qs, urlparse as _up
+        pinned = self._resolve_session_org(self._session_user())
+        if pinned is not None:
+            return pinned
+        qs = parse_qs(_up(self.path).query)
+        requested = (qs.get('client_org', [''])[0]).strip()
+        if requested == '__unassigned__':
+            return ''
+        return requested if requested and requested != 'all' else None
+
+    # Paths a client_viewer session may reach — everything else 403s.
+    # Each entry here must have matching client_org_id filtering in its
+    # handler (grep for self._scoped_client_org() to verify before adding
+    # a new path).
+    _CLIENT_VIEWER_ALLOWED_EXACT = frozenset({'/', '/api/status', '/api/devices'})
+    _CLIENT_VIEWER_ALLOWED_PREFIX = ('/api/fleet/report',)
+
+    def _client_viewer_gate(self, path: str) -> bool:
+        """Return True if this request may proceed. Always True for non-
+        client_viewer sessions (MSP admins, agent/proxy auth, etc.).
+
+        Raises _TenantScopeError if the session claims a client org that
+        doesn't validate — checked for every role, not just client_viewer,
+        so a bad org pin can never fall through to an unscoped query."""
+        user = self._session_user()
+        self._resolve_session_org(user)
+        if not user or user.get('role') != 'client_viewer':
+            return True
+        if path in self._CLIENT_VIEWER_ALLOWED_EXACT:
+            return True
+        return any(path.startswith(p) for p in self._CLIENT_VIEWER_ALLOWED_PREFIX)
 
     def _store(self):
         user = self._session_user()
@@ -1140,6 +1240,23 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         if not self._require_dashboard_auth():
             return
 
+        # client_viewer is a read-only role scoped to one client org (the
+        # portal login an MSP hands its customer) — deny-by-default rather
+        # than trying to retrofit org-scoping into every one of this file's
+        # data-fetching routes individually. Only a small, explicitly
+        # reviewed allowlist is reachable; everything else 403s. This is
+        # deliberately more restrictive than "everything scoped" for now —
+        # extend the allowlist (with matching org-scoping in the handler)
+        # rather than removing this gate.
+        try:
+            if not self._client_viewer_gate(path):
+                self._send(403, b'Forbidden: this account is read-only and scoped to one client.', 'text/plain')
+                return
+        except _TenantScopeError as e:
+            log.warning('denying GET %s — unresolvable client-org scope: %s', path, e)
+            self._send(403, b'Forbidden: this account is not scoped to a valid client.', 'text/plain')
+            return
+
         if path == '/dns-inventory':
             self._serve_dns_inventory()
             return
@@ -1151,6 +1268,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             '/api/status':     self._api_status,
             '/api/events':     self._api_events,
             '/api/devices':    self._api_devices,
+            '/api/clients':    self._api_clients_list,
             '/api/discover':   self._api_discover,
             '/fleet':          lambda: self._redirect('/'),
             '/academy':        self._serve_academy,
@@ -1253,6 +1371,21 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         if not self._require_dashboard_auth():
             return
 
+        # client_viewer is read-only by definition — no POST route is ever
+        # appropriate for that role.
+        user = self._session_user()
+        if user and user.get('role') == 'client_viewer':
+            self._send(403, b'Forbidden: this account is read-only.', 'text/plain')
+            return
+        # An admin session pinned to a client org that no longer validates is
+        # denied here too — same fail-closed rule as GET.
+        try:
+            self._resolve_session_org(user)
+        except _TenantScopeError as e:
+            log.warning('denying POST %s — unresolvable client-org scope: %s', path, e)
+            self._send(403, b'Forbidden: this account is not scoped to a valid client.', 'text/plain')
+            return
+
         if path == '/api/scan':
             self._api_scan()
         elif path == '/api/live-scan-config':
@@ -1331,6 +1464,14 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self._api_users_deactivate(path[len('/api/users/deactivate/'):])
         elif path.startswith('/api/users/password/'):
             self._api_users_password(path[len('/api/users/password/'):])
+        elif path == '/api/clients/add':
+            self._api_clients_add()
+        elif path == '/api/clients/assign-devices':
+            self._api_devices_assign_client_org()
+        elif path.startswith('/api/clients/rename/'):
+            self._api_clients_rename(path[len('/api/clients/rename/'):])
+        elif path.startswith('/api/clients/deactivate/'):
+            self._api_clients_deactivate(path[len('/api/clients/deactivate/'):])
         else:
             self._not_found()
 
@@ -1576,6 +1717,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             return
         users = _get_registry().list_users(me['customer_id'])
         self._json({'users': [{'id': u['id'], 'email': u['email'], 'role': u['role'],
+                                'client_org_id': u.get('client_org_id'),
                                 'active': u['active'], 'created_at': u['created_at']}
                                for u in users], 'current_user': me['email']})
 
@@ -1594,12 +1736,28 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             email    = str(body.get('email', '')).strip().lower()
             password = str(body.get('password', ''))
             role     = str(body.get('role', 'admin'))
-            if role not in ('admin', 'viewer'):
+            if role not in ('admin', 'viewer', 'client_viewer'):
                 role = 'admin'
             if '@' not in email or len(password) < 8:
                 self._json({'error': 'invalid'}, 400)
                 return
-            user = _get_registry().create_user(me['customer_id'], email, password, role)
+
+            client_org_id = None
+            if role == 'client_viewer':
+                client_org_id = str(body.get('client_org_id', '')).strip()
+                if not client_org_id:
+                    self._json({'error': 'client_org_id is required for the client_viewer role'}, 400)
+                    return
+                # Confirm the org actually belongs to this customer — without
+                # this check a malicious/buggy request could scope a viewer
+                # to another MSP's client org and read their devices.
+                org = _get_registry().get_client_org(client_org_id)
+                if not org or org.get('customer_id') != me['customer_id']:
+                    self._json({'error': 'client_org_id not found for this customer'}, 404)
+                    return
+
+            user = _get_registry().create_user(me['customer_id'], email, password, role,
+                                               client_org_id)
             self._store().log_action(
                 actor_id=me.get('user_id', me.get('id', '')), actor_name=me['email'], actor_role=me.get('role', ''),
                 action='user.add', target=email,
@@ -1655,6 +1813,100 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                     details=f'Reset password for user {user_id}', ip_address=self.client_address[0]
                 )
             self._json({'ok': ok} if ok else {'error': 'user not found'}, 200 if ok else 404)
+        except Exception as e:
+            self._json({'error': str(e)}, 500)
+
+    # ── client org management (MSP admin only — never reachable by client_viewer,
+    # see _CLIENT_VIEWER_ALLOWED_EXACT/_PREFIX) ───────────────────────────────
+
+    def _api_clients_list(self):
+        me = self._session_user()
+        if not me or me.get('role') not in ('admin', 'customer_admin', 'super_admin'):
+            self._json({'error': 'forbidden'}, 403)
+            return
+        try:
+            self._json({'client_orgs': _get_registry().list_client_orgs(me['customer_id'])})
+        except Exception as e:
+            self._json({'error': str(e)}, 500)
+
+    def _api_clients_add(self):
+        me = self._session_user()
+        if not me or me.get('role') not in ('admin', 'customer_admin', 'super_admin'):
+            self._json({'error': 'forbidden'}, 403)
+            return
+        cl = int(self.headers.get('Content-Length', 0))
+        raw = self.rfile.read(cl) if cl else b'{}'
+        try:
+            body = json.loads(raw)
+            name = str(body.get('name', '')).strip()
+            if not name:
+                self._json({'error': 'name is required'}, 400)
+                return
+            org = _get_registry().create_client_org(me['customer_id'], name)
+            self._json({'ok': True, 'client_org': org})
+        except Exception as e:
+            self._json({'error': str(e)}, 500)
+
+    def _api_clients_rename(self, org_id_str: str):
+        me = self._session_user()
+        if not me or me.get('role') not in ('admin', 'customer_admin', 'super_admin'):
+            self._json({'error': 'forbidden'}, 403)
+            return
+        org_id = org_id_str.strip('/')
+        cl = int(self.headers.get('Content-Length', 0))
+        raw = self.rfile.read(cl) if cl else b'{}'
+        try:
+            body = json.loads(raw)
+            name = str(body.get('name', '')).strip()
+            if not name:
+                self._json({'error': 'name is required'}, 400)
+                return
+            ok = _get_registry().rename_client_org(org_id, me['customer_id'], name)
+            self._json({'ok': ok} if ok else {'error': 'client org not found'}, 200 if ok else 404)
+        except Exception as e:
+            self._json({'error': str(e)}, 500)
+
+    def _api_clients_deactivate(self, org_id_str: str):
+        me = self._session_user()
+        if not me or me.get('role') not in ('admin', 'customer_admin', 'super_admin'):
+            self._json({'error': 'forbidden'}, 403)
+            return
+        org_id = org_id_str.strip('/')
+        try:
+            ok = _get_registry().deactivate_client_org(org_id, me['customer_id'])
+            self._json({'ok': ok} if ok else {'error': 'client org not found'}, 200 if ok else 404)
+        except Exception as e:
+            self._json({'error': str(e)}, 500)
+
+    def _api_devices_assign_client_org(self):
+        """POST /api/clients/assign-devices — bulk move devices between client
+        orgs (or back to unassigned) without touching agent_config.json on
+        each machine. This is the scale-friendly alternative to per-device
+        re-enrollment for fleets too large to hand-edit one at a time."""
+        me = self._session_user()
+        if not me or me.get('role') not in ('admin', 'customer_admin', 'super_admin'):
+            self._json({'error': 'forbidden'}, 403)
+            return
+        cl = int(self.headers.get('Content-Length', 0))
+        raw = self.rfile.read(cl) if cl else b'{}'
+        try:
+            body = json.loads(raw)
+            device_ids = body.get('device_ids', [])
+            client_org_id = str(body.get('client_org_id', '')).strip()
+            if not isinstance(device_ids, list) or not device_ids:
+                self._json({'error': 'device_ids is required'}, 400)
+                return
+            if client_org_id:
+                org = _get_registry().get_client_org(client_org_id)
+                if not org or org.get('customer_id') != me['customer_id']:
+                    self._json({'error': 'client_org_id not found for this customer'}, 404)
+                    return
+            store = self._store()
+            moved = 0
+            for device_id in device_ids:
+                if store.set_device_client_org(str(device_id), client_org_id or None):
+                    moved += 1
+            self._json({'ok': True, 'moved': moved})
         except Exception as e:
             self._json({'error': str(e)}, 500)
 
@@ -2056,6 +2308,23 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         except Exception as _le:
             log.error('license check error: %s', _le)
 
+        # Resolve the optional client-org enrollment token (embedded in the
+        # agent's config for MSP sub-clients) to a client_org_id. Empty
+        # string on any failure/absence — upsert_report() treats that as
+        # "don't touch the existing assignment", never as "clear it".
+        _cust_id = _cust['id'] if _cust else 'default'
+        client_org_id = ''
+        client_org_token = str(body.get('client_org_token', '')).strip()
+        if client_org_token:
+            org = _get_registry().get_client_org_by_token(client_org_token)
+            if org and org.get('customer_id') == _cust_id:
+                client_org_id = org['id']
+            else:
+                log.warning(
+                    'agent %s sent client_org_token that did not resolve for customer %s',
+                    device_id, _cust_id,
+                )
+
         try:
             store.upsert_report(
                 device_id=device_id,
@@ -2064,6 +2333,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                 platform=body.get('platform', ''),
                 agent_version=body.get('agent_version', ''),
                 ip_address=self.client_address[0],
+                client_org_id=client_org_id,
             )
         except Exception as e:
             log.error('agent store error: %s', e)
@@ -2920,10 +3190,15 @@ function copyToken(token) {{
         profile  = ','.join(profiles)
         try:
             store = self._store()
+            org_scope = self._scoped_client_org()
             if profiles:
-                devices = store.list_devices_by_profile(profiles)
+                # /api/fleet/report *is* on the client_viewer allowlist, so
+                # this branch has to carry the same org scope as the one
+                # below — an unscoped call here returns every client's
+                # devices to whoever asked for ?profile=.
+                devices = store.list_devices_by_profile(profiles, client_org_id=org_scope)
             else:
-                devices = store.list_devices()
+                devices = store.list_devices(client_org_id=org_scope)
                 for d in devices:
                     d['_report'] = store.get_latest_report(d['device_id']) or {}
 
@@ -3319,7 +3594,7 @@ function copyToken(token) {{
 
     def _api_devices(self):
         try:
-            devices = self._store().list_devices()
+            devices = self._store().list_devices(client_org_id=self._scoped_client_org())
             for d in devices:
                 if d.get('last_seen'):
                     d['last_seen_iso'] = datetime.fromtimestamp(
@@ -3799,9 +4074,14 @@ function copyToken(token) {{
         _set_request_license(self._get_dashboard_customer())
         try:
             store = self._store()
-            devices = store.list_devices()
-            shadow  = store.list_shadow_devices()
-            mcp     = store.list_mcp_servers()
+            org_scope = self._scoped_client_org()
+            devices = store.list_devices(client_org_id=org_scope)
+            # Shadow-device/MCP discovery isn't tagged per client org yet
+            # (network-wide discovery, not per-device) — suppress rather
+            # than risk showing a client-viewer another client's discovered
+            # assets. MSP admins (org_scope is None) still see everything.
+            shadow  = store.list_shadow_devices() if org_scope is None else []
+            mcp     = store.list_mcp_servers() if org_scope is None else []
             print(f'[ARCKON] _serve_fleet: got {len(devices)} devices, {len(shadow)} shadow, {len(mcp)} mcp', flush=True)
         except Exception as _e:
             print(f'[ARCKON] _serve_fleet: store error: {_e}', flush=True)
