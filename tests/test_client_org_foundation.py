@@ -707,7 +707,7 @@ def _auth_verify_emitted_headers():
     without wiring it through the vhost fails these tests."""
     src = (ADMIN / "app.py").read_text()
     body = src.split("async def auth_verify(", 1)[1].split("\n@app.", 1)[0]
-    headers = re.findall(r'"(X-Arckon-[\w-]+)":', body)
+    headers = re.findall(r'"(X-(?:Arckon|Sentinel)-[\w-]+)":', body)
     assert len(headers) >= 4, "could not read auth_verify's headers: " + repr(headers)
     return headers
 
@@ -812,19 +812,18 @@ def test_the_authenticated_location_forwards_every_verified_identity_header(
     captured = _captured_headers(block)
     headers = _proxy_headers(block)
 
-    for emitted in _auth_verify_emitted_headers():
-        for name in (emitted, emitted.replace("X-Arckon-", "X-Sentinel-")):
-            assert name in headers, name + " never reaches the container"
-            value = headers[name]
-            assert value not in ('""', ""), name + " is forwarded as an empty value"
-            if value.startswith("$"):
-                assert captured.get(value) == emitted.lower(), \
-                    name + " is set from " + value + ", which is not captured " \
-                    "from " + emitted
-            else:
-                # The only literal allowed: the vhost's own customer (below).
-                assert name.endswith("-Customer-ID"), \
-                    name + " is set to the literal " + value
+    for name in _auth_verify_emitted_headers():
+        assert name in headers, name + " never reaches the container"
+        value = headers[name]
+        assert value not in ('""', ""), name + " is forwarded as an empty value"
+        if value.startswith("$"):
+            assert captured.get(value) == name.lower(), \
+                name + " is set from " + value + ", which is not captured " \
+                "from " + name
+        else:
+            # The only literal allowed: the vhost's own customer (below).
+            assert name.endswith("-Customer-ID"), \
+                name + " is set to the literal " + value
 
 
 def test_the_authenticated_location_pins_the_customer_id_to_its_own_vhost(

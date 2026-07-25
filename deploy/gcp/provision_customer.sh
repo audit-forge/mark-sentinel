@@ -73,6 +73,11 @@ server {
         proxy_set_header X-Sentinel-Client-Org-ID "";
     }
 
+    # Agent/bundle/install routes bypass auth_request, so nothing here has
+    # been vetted by /auth/verify. The upstream runs with
+    # SENTINEL_TRUSTED_PROXY=1 and believes any X-Sentinel-* header it is
+    # handed, so every one of them must be blanked out on these paths or a
+    # caller could mint their own admin (or cross-tenant) identity.
     location /api/agent/ {
         proxy_pass http://${CONTAINER_NAME}:7331;
         proxy_set_header Host \$host;
@@ -82,10 +87,15 @@ server {
         proxy_set_header X-Arckon-User-Role "";
         proxy_set_header X-Arckon-Customer-ID "";
         proxy_set_header X-Arckon-Client-Org-ID "";
+        proxy_set_header X-Arckon-Is-Reseller "";
+        proxy_set_header X-Arckon-Is-MSP "";
         proxy_set_header X-Sentinel-User-Email "";
         proxy_set_header X-Sentinel-User-Role "";
         proxy_set_header X-Sentinel-Customer-ID "";
         proxy_set_header X-Sentinel-Client-Org-ID "";
+        proxy_set_header X-Sentinel-Is-Reseller     "";
+        proxy_set_header X-Sentinel-Is-MSP          "";
+        proxy_set_header X-Sentinel-Impersonated-By "";
         proxy_read_timeout 300;
         proxy_buffering off;
     }
@@ -99,10 +109,15 @@ server {
         proxy_set_header X-Arckon-User-Role "";
         proxy_set_header X-Arckon-Customer-ID "";
         proxy_set_header X-Arckon-Client-Org-ID "";
+        proxy_set_header X-Arckon-Is-Reseller "";
+        proxy_set_header X-Arckon-Is-MSP "";
         proxy_set_header X-Sentinel-User-Email "";
         proxy_set_header X-Sentinel-User-Role "";
         proxy_set_header X-Sentinel-Customer-ID "";
         proxy_set_header X-Sentinel-Client-Org-ID "";
+        proxy_set_header X-Sentinel-Is-Reseller     "";
+        proxy_set_header X-Sentinel-Is-MSP          "";
+        proxy_set_header X-Sentinel-Impersonated-By "";
         proxy_read_timeout 300;
     }
 
@@ -114,37 +129,54 @@ server {
         proxy_set_header X-Arckon-User-Role "";
         proxy_set_header X-Arckon-Customer-ID "";
         proxy_set_header X-Arckon-Client-Org-ID "";
+        proxy_set_header X-Arckon-Is-Reseller "";
+        proxy_set_header X-Arckon-Is-MSP "";
         proxy_set_header X-Sentinel-User-Email "";
         proxy_set_header X-Sentinel-User-Role "";
         proxy_set_header X-Sentinel-Customer-ID "";
         proxy_set_header X-Sentinel-Client-Org-ID "";
+        proxy_set_header X-Sentinel-Is-Reseller     "";
+        proxy_set_header X-Sentinel-Is-MSP          "";
+        proxy_set_header X-Sentinel-Impersonated-By "";
     }
 
     location / {
         auth_request /_auth;
         error_page 401 403 = @login_redirect;
-        auth_request_set \$sentinel_user_email    \$upstream_http_x_arckon_user_email;
-        auth_request_set \$sentinel_user_role     \$upstream_http_x_arckon_user_role;
-        auth_request_set \$sentinel_client_org_id \$upstream_http_x_arckon_client_org_id;
-        auth_request_set \$sentinel_is_reseller   \$upstream_http_x_arckon_is_reseller;
-        auth_request_set \$sentinel_is_msp        \$upstream_http_x_arckon_is_msp;
+        # Every identity header /auth/verify emits is captured and re-set below.
+        # A header that is captured but not proxy_set_header'd
+        # is silently replaced by whatever the browser sent; a client_viewer
+        # whose Client-Org-ID never arrives is what let one tenant read the
+        # whole MSP fleet.
+        auth_request_set \$sentinel_user_email      \$upstream_http_x_arckon_user_email;
+        auth_request_set \$sentinel_user_role       \$upstream_http_x_arckon_user_role;
+        auth_request_set \$sentinel_client_org_id   \$upstream_http_x_arckon_client_org_id;
+        auth_request_set \$sentinel_is_reseller     \$upstream_http_x_arckon_is_reseller;
+        auth_request_set \$sentinel_is_msp          \$upstream_http_x_arckon_is_msp;
+        auth_request_set \$sentinel_verified_user_email      \$upstream_http_x_sentinel_user_email;
+        auth_request_set \$sentinel_verified_user_role       \$upstream_http_x_sentinel_user_role;
+        auth_request_set \$sentinel_verified_client_org_id   \$upstream_http_x_sentinel_client_org_id;
+        auth_request_set \$sentinel_verified_is_reseller     \$upstream_http_x_sentinel_is_reseller;
+        auth_request_set \$sentinel_verified_is_msp          \$upstream_http_x_sentinel_is_msp;
+        auth_request_set \$sentinel_impersonated_by \$upstream_http_x_sentinel_impersonated_by;
 
         proxy_pass http://${CONTAINER_NAME}:7331;
         proxy_set_header Host \$host;
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Arckon-User-Email     \$sentinel_user_email;
-        proxy_set_header X-Arckon-User-Role      \$sentinel_user_role;
-        proxy_set_header X-Arckon-Customer-ID    ${CUSTOMER_ID};
-        proxy_set_header X-Arckon-Client-Org-ID  \$sentinel_client_org_id;
-        proxy_set_header X-Sentinel-User-Email   \$sentinel_user_email;
-        proxy_set_header X-Sentinel-User-Role    \$sentinel_user_role;
-        proxy_set_header X-Sentinel-Customer-ID  ${CUSTOMER_ID};
-        proxy_set_header X-Sentinel-Client-Org-ID \$sentinel_client_org_id;
+        proxy_set_header X-Arckon-User-Email      \$sentinel_user_email;
+        proxy_set_header X-Arckon-User-Role       \$sentinel_user_role;
+        proxy_set_header X-Arckon-Customer-ID     ${CUSTOMER_ID};
+        proxy_set_header X-Arckon-Client-Org-ID   \$sentinel_client_org_id;
         proxy_set_header X-Arckon-Is-Reseller     \$sentinel_is_reseller;
         proxy_set_header X-Arckon-Is-MSP          \$sentinel_is_msp;
-        proxy_set_header X-Sentinel-Is-Reseller  \$sentinel_is_reseller;
-        proxy_set_header X-Sentinel-Is-MSP       \$sentinel_is_msp;
+        proxy_set_header X-Sentinel-User-Email      \$sentinel_verified_user_email;
+        proxy_set_header X-Sentinel-User-Role       \$sentinel_verified_user_role;
+        proxy_set_header X-Sentinel-Customer-ID     ${CUSTOMER_ID};
+        proxy_set_header X-Sentinel-Client-Org-ID   \$sentinel_verified_client_org_id;
+        proxy_set_header X-Sentinel-Is-Reseller     \$sentinel_verified_is_reseller;
+        proxy_set_header X-Sentinel-Is-MSP          \$sentinel_verified_is_msp;
+        proxy_set_header X-Sentinel-Impersonated-By \$sentinel_impersonated_by;
         proxy_read_timeout 300;
         proxy_buffering off;
     }

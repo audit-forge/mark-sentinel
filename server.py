@@ -1025,7 +1025,12 @@ def _run_scan(mode: str, target: str, profile: str, providers: list[str], live_c
 
 
 class _TenantScopeError(Exception):
-    """A client-org scope could not be resolved safely."""
+    """A session's client-org scope could not be resolved safely.
+
+    Raised instead of returning None (which means "no filter — show the whole
+    MSP fleet") so that a client_viewer with a missing, unknown, deactivated
+    or cross-customer client_org_id fails closed rather than being handed
+    every tenant's devices."""
 
 
 class _Handler(http.server.BaseHTTPRequestHandler):
@@ -1052,6 +1057,11 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             'email':       email,
             'role':        (self.headers.get('X-Sentinel-User-Role')
                             or self.headers.get('X-Arckon-User-Role', '')).strip() or 'client_viewer',
+            # No role header means the proxy didn't vouch for one. Default to
+            # the least-privileged role, never 'admin' — a misconfigured or
+            # partially-updated vhost must not hand out MSP-wide access.
+            'role':        (self.headers.get('X-Sentinel-User-Role')
+                            or self.headers.get('X-Arckon-User-Role', '')).strip() or 'client_viewer',
             'customer_id': customer_id,
             'client_org_id': org or None,
             'is_reseller': self.headers.get('X-Sentinel-Is-Reseller', '').strip() == '1',
@@ -1067,21 +1077,42 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         return _get_registry().get_session(token) if token else None
 
     def _resolve_session_org(self, user: dict | None) -> str | None:
-        """Validate an optional organization pin; never widen an invalid pin."""
+        """Validate the client org this session is pinned to.
+
+        Returns None only for sessions that legitimately span the whole
+        customer — MSP/reseller admins, super-admin impersonation, agent and
+        setup requests — which is what lets those roles keep their existing
+        fleet-wide view. Anything else raises _TenantScopeError:
+
+          * a client_viewer carrying no client_org_id at all (an unscoped
+            portal login is a cross-tenant read waiting to happen),
+          * any session whose client_org_id doesn't resolve to an active
+            client org belonging to that session's own customer (covers a
+            deleted/deactivated org, a typo, and a spoofed header that got
+            past the proxy).
+        """
         if not user:
             return None
-        org_id = (user.get('client_org_id') or '').strip()
-        if not org_id:
+        raw = (user.get('client_org_id') or '').strip()
+        if not raw:
             if user.get('role') == 'client_viewer':
-                raise _TenantScopeError('client_viewer has no client_org_id')
+                raise _TenantScopeError(
+                    f"client_viewer {user.get('email', '?')!r} has no client_org_id"
+                )
             return None
         try:
-            org = _get_registry().get_client_org(org_id)
-        except Exception as exc:
-            raise _TenantScopeError(f'could not resolve client_org_id: {exc}')
-        if not org or not org.get('active') or org.get('customer_id') != user.get('customer_id'):
-            raise _TenantScopeError('client_org_id is inactive, unknown, or belongs to another customer')
-        return org_id
+            org = _get_registry().get_client_org(raw)
+        except Exception as e:
+            # A registry that can't answer is not a licence to show everything.
+            raise _TenantScopeError(f'client org lookup failed for {raw!r}: {e}') from e
+        if not org or not org.get('active'):
+            raise _TenantScopeError(f'client_org_id {raw!r} is not an active client org')
+        if org.get('customer_id') != user.get('customer_id'):
+            raise _TenantScopeError(
+                f"client_org_id {raw!r} belongs to customer "
+                f"{org.get('customer_id')!r}, not {user.get('customer_id')!r}"
+            )
+        return raw
 
     def _scoped_client_org(self) -> str | None:
         """Return the effective client_org_id filter for this request.
@@ -1092,7 +1123,10 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         client_org_id on their session) may pass ?client_org=<id> to drill
         into one client's fleet view from the /clients rollup; omit it (or
         pass 'all') to see every device across every client, same as before
-        this feature existed."""
+        this feature existed.
+
+        Raises _TenantScopeError for a scoped session whose org doesn't
+        validate — callers must not translate that into an unfiltered query."""
         user = self._session_user()
         own_org = self._resolve_session_org(user)
         if own_org is not None:
@@ -1115,7 +1149,11 @@ class _Handler(http.server.BaseHTTPRequestHandler):
 
     def _client_viewer_gate(self, path: str) -> bool:
         """Return True if this request may proceed. Always True for non-
-        client_viewer sessions (MSP admins, agent/proxy auth, etc.)."""
+        client_viewer sessions (MSP admins, agent/proxy auth, etc.).
+
+        Raises _TenantScopeError if the session claims a client org that
+        doesn't validate — checked for every role, not just client_viewer,
+        so a bad org pin can never fall through to an unscoped query."""
         user = self._session_user()
         self._resolve_session_org(user)
         if not user or user.get('role') != 'client_viewer':
@@ -1251,8 +1289,8 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             if not self._client_viewer_gate(path):
                 self._send(403, b'Forbidden: this account is read-only and scoped to one client.', 'text/plain')
                 return
-        except _TenantScopeError as exc:
-            log.warning('denying GET %s due to invalid client-org scope: %s', path, exc)
+        except _TenantScopeError as e:
+            log.warning('denying GET %s — unresolvable client-org scope: %s', path, e)
             self._send(403, b'Forbidden: this account is not scoped to a valid client.', 'text/plain')
             return
 
@@ -1392,6 +1430,14 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         user = self._session_user()
         if user and user.get('role') == 'client_viewer':
             self._send(403, b'Forbidden: this account is read-only.', 'text/plain')
+            return
+        # An admin session pinned to a client org that no longer validates is
+        # denied here too — same fail-closed rule as GET.
+        try:
+            self._resolve_session_org(user)
+        except _TenantScopeError as e:
+            log.warning('denying POST %s — unresolvable client-org scope: %s', path, e)
+            self._send(403, b'Forbidden: this account is not scoped to a valid client.', 'text/plain')
             return
 
         if path == '/api/scan':
@@ -3201,11 +3247,11 @@ load();
             store = self._store()
             org_scope = self._scoped_client_org()
             if profiles:
-                # NOTE: list_devices_by_profile() doesn't support client-org
-                # filtering yet — not reachable by the client_viewer role
-                # (see the path allowlist in _do_GET_inner), MSP-admin-only.
-                devices = store.list_devices_by_profile(
-                    profiles, client_org_id=self._scoped_client_org())
+                # /api/fleet/report *is* on the client_viewer allowlist, so
+                # this branch has to carry the same org scope as the one
+                # below — an unscoped call here returns every client's
+                # devices to whoever asked for ?profile=.
+                devices = store.list_devices_by_profile(profiles, client_org_id=org_scope)
             else:
                 devices = store.list_devices(client_org_id=org_scope)
                 for d in devices:

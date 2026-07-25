@@ -372,7 +372,13 @@ class AgentStore:
         Each device row includes '_report' (full parsed report JSON) keyed to
         the most recent scan that matched the requested profiles — not the
         overall latest scan, which may be a different profile.
-        """
+
+        client_org_id: same semantics as list_devices(client_org_id=...) —
+        pass a specific org id to filter to just that org's devices, pass ''
+        (empty string, not None) to filter to unassigned devices only, leave
+        as None (default) for no filtering (MSP admin view). Callers serving
+        a client_viewer must pass a resolved org id here; None means "every
+        org", which is exactly the cross-tenant read this scoping prevents."""
         _SLUG_TO_DISPLAY = {
             'default':   'default (full suite)',
             'fedramp':   'fedramp moderate',
@@ -387,6 +393,17 @@ class AgentStore:
                 terms.add(_SLUG_TO_DISPLAY[p])
         term_list = list(terms)
         ph = ','.join('?' * len(term_list))
+
+        # Org filter is bound, never interpolated — the profile placeholders
+        # above are the only thing built into the SQL text.
+        org_clause = ''
+        org_params: list = []
+        if client_org_id == '':
+            org_clause = ' AND d.client_org_id IS NULL'
+        elif client_org_id is not None:
+            org_clause = ' AND d.client_org_id = ?'
+            org_params = [client_org_id]
+
         with self._lock, self._conn() as conn:
             rows = conn.execute(f"""
                 SELECT
@@ -404,10 +421,9 @@ class AgentStore:
                         WHERE r2.device_id = d.device_id
                         AND LOWER(r2.profile) IN ({ph})
                     )
-                WHERE LOWER(r.profile) IN ({ph})
-                {"AND d.client_org_id IS NULL" if client_org_id == '' else "AND d.client_org_id = ?" if client_org_id is not None else ""}
+                WHERE LOWER(r.profile) IN ({ph}){org_clause}
                 ORDER BY d.last_seen DESC
-            """, term_list + term_list + ([client_org_id] if client_org_id not in (None, '') else [])).fetchall()
+            """, term_list + term_list + org_params).fetchall()
         result = []
         for row in rows:
             d = dict(row)
