@@ -1155,7 +1155,7 @@
   <h1>Demo Script</h1>
   <p class="lead">A complete walkthrough for a live demo. Adjust based on the prospect — SMB gets the plain English flow, enterprise gets the compliance profile and PDF.</p>
 
-  <div class="warn-box">Before the demo: Run a scan against the <code>demo_target/bank_ai_pilot/</code> directory. It has intentional failures — exposed key, no auth, no logging, no rate limiting. Perfect for showing CRITICAL findings live.</div>
+  <div class="warn-box">Before the demo: select an authorized customer target and set <code>ARCKON_TARGET</code> to its path. Arckon does not include synthetic findings or demo deployments in the release build.</div>
 
   <h2>Opening (2 min)</h2>
   <div class="script-block">
@@ -1168,7 +1168,7 @@
   <div class="script-block">
     <div class="script-label">Say</div>
     <div class="script-say">"Let me show you what this looks like in practice. I'm going to point Sentinel at a realistic AI deployment — it's a banking AI pilot app with some intentional security problems baked in."</div>
-    <div class="script-do">python audit.py --target demo_target/bank_ai_pilot --profile default --output plain</div>
+    <div class="script-do">python audit.py --target "$ARCKON_TARGET" --profile default --output plain</div>
     <div class="script-label" style="margin-top:8px">What they'll see</div>
     <div class="script-say">The scan runs in seconds. Critical findings appear first in red — exposed API key, no authentication, no logging. Plain English explanation for each one.</div>
   </div>
@@ -1193,7 +1193,7 @@
   <div class="script-block">
     <div class="script-label">Say</div>
     <div class="script-say">"Now let me show you what the output looks like for leadership or an auditor."</div>
-    <div class="script-do">python audit.py --target demo_target/bank_ai_pilot --profile default --output pdf</div>
+    <div class="script-do">python audit.py --target "$ARCKON_TARGET" --profile default --output pdf</div>
     <div class="script-say">This is the deliverable. Executive summary, risk table by severity, full findings with remediation steps. Your CISO or auditor can take this PDF and know exactly where you stand.</div>
   </div>
 
@@ -1201,7 +1201,7 @@
   <div class="script-block">
     <div class="script-label">For a healthcare prospect — say</div>
     <div class="script-say">"Since you're in healthcare, let me run the HIPAA-aligned profile. Same scan, but now every finding maps to specific HIPAA Security Rule requirements — 45 CFR sections. So when your compliance officer asks 'what's the finding tied to?' you have the exact control reference."</div>
-    <div class="script-do">python audit.py --target demo_target/bank_ai_pilot --profile healthcare --output plain,pdf</div>
+    <div class="script-do">python audit.py --target "$ARCKON_TARGET" --profile healthcare --output plain,pdf</div>
   </div>
 
   <h2>Step 5 — Show the Dashboard (2 min)</h2>
@@ -1390,7 +1390,7 @@ python audit.py --target ./my-app --profile default --output plain</div>
 python audit.py --target ./my-app --profile default --output plain,pdf</div>
 
   <div class="cmd"><span class="comment"># Demo target — intentional failures</span>
-python audit.py --target demo_target/bank_ai_pilot --profile default --output plain</div>
+ python audit.py --target "$ARCKON_TARGET" --profile default --output plain</div>
 
   <div class="cmd"><span class="comment"># Live probe against OpenAI</span>
 python audit.py --mode openai --api-key $OPENAI_API_KEY --model gpt-4o --output plain</div>

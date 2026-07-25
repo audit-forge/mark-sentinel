@@ -301,20 +301,8 @@ _REPORT_MIN_INTERVAL = 60  # seconds between accepted reports per device
 
 
 def _latest_out_dir() -> Path | None:
-    """Return the newest demo_* dir (by directory name) that has a non-empty dashboard.html."""
-    candidates = []
-    for d in (ROOT / 'output').glob('demo_*'):
-        p = d / 'dashboard.html'
-        if p.exists():
-            try:
-                if p.stat().st_size > 1024:
-                    candidates.append(d.name)
-            except Exception:
-                pass
-    if not candidates:
-        return None
-    candidates.sort(reverse=True)
-    return ROOT / 'output' / candidates[0]
+    """Legacy compatibility hook; generated demo reports are never served."""
+    return None
 
 
 def _rebuild_dashboard(out_dir: Path) -> bool:
@@ -2239,42 +2227,7 @@ load();
     # ── endpoints ─────────────────────────────────────────────────────────────
 
     def _serve_dashboard(self):
-        out_dir = _latest_out_dir()
-        dash = (out_dir / 'dashboard.html') if out_dir else None
-        if dash and dash.exists():
-            try:
-                html = dash.read_text(encoding='utf-8')
-                idx = html.lower().find('<body')
-                if idx != -1:
-                    idx2 = html.find('>', idx)
-                    if idx2 != -1:
-                        link = (
-                            '\n<div style="position:fixed;left:50%;top:14px;'
-                            'transform:translateX(-50%);z-index:999;'>
-                            '<a href="/" style="background:#161b22;color:#58a6ff;'
-                            'padding:6px 10px;border-radius:6px;border:1px solid #21262d;'
-                            'text-decoration:none;font-size:13px">Command Center</a> '
-                            '<a href="/academy" target="_blank" style="background:#161b22;color:#58a6ff;'
-                            'padding:6px 10px;border-radius:6px;border:1px solid #21262d;'
-                            'text-decoration:none;font-size:13px;margin-left:8px">Academy</a></div>\n'
-                        )
-                        html = html[:idx2+1] + link + html[idx2+1:]
-                self._send(200, html.encode('utf-8'), 'text/html; charset=utf-8')
-                return
-            except Exception:
-                self._send(200, dash.read_bytes(), 'text/html; charset=utf-8')
-        else:
-            page = (
-                b'<html><head><style>'
-                b'body{font:14px sans-serif;background:#0d1117;color:#c9d1d9;padding:48px}'
-                b'code{background:#161b22;padding:4px 10px;border-radius:4px;color:#58a6ff}'
-                b'</style></head><body>'
-                b'<h2>No scan results found.</h2>'
-                b'<p>Run a scan first, then reload:</p>'
-                b'<p><code>python3 scripts/demo.py .</code></p>'
-                b'</body></html>'
-            )
-            self._send(200, page, 'text/html; charset=utf-8')
+        self._serve_fleet()
 
     def _api_status(self):
         with _lock:
@@ -2544,14 +2497,14 @@ load();
         safe_target = os.path.realpath(raw_target)
         if not safe_target.startswith(os.path.realpath(str(ROOT))):
             safe_target = str(ROOT)
-        mode = body.get('mode', 'demo')
-        if mode not in ('demo', 'config', 'api', 'local', 'gemini', 'vertex', 'anthropic', 'hash'):
-            mode = 'demo'
+        mode = body.get('mode', 'config')
+        if mode not in ('config', 'api', 'local', 'gemini', 'vertex', 'anthropic', 'hash'):
+            mode = 'config'
         profile = body.get('profile', 'default')
         if not profile.replace('-', '').replace('_', '').isalnum():
             profile = 'default'
         live_cfg = None
-        if mode not in ('demo', 'config'):
+        if mode != 'config':
             if not _has_live_scan():
                 self._json({'error': 'Live scan requires a Plus license'}, 403)
                 return
