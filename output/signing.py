@@ -7,7 +7,6 @@ and has not been altered since it was generated.
 """
 import hashlib
 import hmac
-import os
 import secrets
 import uuid
 from pathlib import Path

@@ -1,0 +1,11 @@
+{
+  "name": "FedRAMP 20x (KSI-Aligned)",
+  "description": "FedRAMP 20x readiness — all checks with Key Security Indicator (KSI) mappings emphasized, per FedRAMP's 2026 Consolidated Rules (46 KSIs across 10 clusters). 20x is in Phase 2 pilot as of 2026; this profile shows directional alignment, not authorization.",
+  "checks": "all",
+  "default_output": "plain",
+  "include_remediation": true,
+  "include_frameworks": true,
+  "severity_threshold": "LOW",
+  "smb_language": false,
+  "framework_emphasis": "fedramp_20x"
+}

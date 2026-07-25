@@ -1,18 +1,19 @@
 """
 kubectl_connector.py
 
-A minimal, fixture-friendly kubectl connector. It provides helpers to parse
-Kubernetes manifest files and to produce a simple scan result suitable for
-unit tests and for the compliance formatter.
+Kubernetes connector for Sentinel. Provides both:
+- Static manifest parsing (original capability, unchanged)
+- Live cluster querying via kubectl CLI (new)
 
-Functions:
-- parse_k8s_manifest(path) -> list of resource dicts
-- scan_manifest_for_ai_components(path) -> dict with findings
-
-No external kubernetes client is required; this works from YAML manifests.
+No Python kubernetes client required — uses kubectl subprocess calls.
 """
+from __future__ import annotations
+import json
+import subprocess
 from typing import Any
 
+
+# ── Static manifest helpers (original, unchanged) ─────────────────────────────
 
 def _load_yaml_multi(path: str) -> list[dict[str, Any]]:
     try:
@@ -23,7 +24,6 @@ def _load_yaml_multi(path: str) -> list[dict[str, Any]]:
     if yaml:
         docs = list(yaml.safe_load_all(text))
         return [d for d in docs if d]
-    # very small fallback: split on "---" and look for "kind:" and "metadata:"
     docs = []
     parts = text.split('\n---\n')
     for part in parts:
@@ -35,9 +35,6 @@ def _load_yaml_multi(path: str) -> list[dict[str, Any]]:
                 continue
             if line.startswith("kind:"):
                 doc["kind"] = line.split(":", 1)[1].strip()
-            elif line.startswith("metadata:"):
-                # attempt to capture name next line
-                pass
             elif line.startswith("name:"):
                 doc.setdefault("metadata", {})["name"] = line.split(":", 1)[1].strip()
         if doc:
@@ -51,17 +48,13 @@ def parse_k8s_manifest(manifest_path: str) -> list[dict[str, Any]]:
 
 
 def scan_manifest_for_ai_components(manifest_path: str) -> dict[str, Any]:
-    """Look for common AI service patterns (Deployments, Pods with images that look like 'ai' or 'model')
-
-    Returns a dict: {resources: [...], findings: [...]}
-    """
+    """Look for AI service patterns in a manifest file."""
     resources = parse_k8s_manifest(manifest_path)
     findings = []
     for r in resources:
         kind = r.get("kind", "")
         name = (r.get("metadata") or {}).get("name") or r.get("metadata_name") or "unknown"
         if kind.lower() in ("deployment", "pod", "statefulset"):
-            # naive heuristic: name or image contains 'ai' or 'model' or 'inference'
             name_l = name.lower()
             if any(tok in name_l for tok in ("ai", "model", "inference")):
                 findings.append({
@@ -70,21 +63,111 @@ def scan_manifest_for_ai_components(manifest_path: str) -> dict[str, Any]:
                     "result": "WARN",
                     "severity": "medium",
                     "description": f"Kubernetes resource {kind}/{name} may expose an AI endpoint.",
-                    "remediation": "Review service exposure (ClusterIP vs LoadBalancer) and restrict to private networks; add authentication."
+                    "remediation": "Review service exposure and restrict to private networks; add authentication."
                 })
     return {"resources": resources, "findings": findings}
 
 
+# ── Live cluster helpers ───────────────────────────────────────────────────────
+
+def _kubectl_json(args: list[str], timeout: int = 15) -> dict | None:
+    """Run kubectl with -o json, return parsed dict or None on any error."""
+    try:
+        r = subprocess.run(
+            ['kubectl'] + args + ['-o', 'json'],
+            capture_output=True, text=True, timeout=timeout,
+        )
+        if r.returncode != 0:
+            return None
+        return json.loads(r.stdout)
+    except Exception:
+        return None
+
+
+def cluster_reachable(timeout: int = 5) -> bool:
+    """Return True if kubectl can reach the currently configured cluster."""
+    try:
+        r = subprocess.run(
+            ['kubectl', 'cluster-info'],
+            capture_output=True, timeout=timeout,
+        )
+        return r.returncode == 0
+    except Exception:
+        return False
+
+
+def current_context() -> str:
+    """Return the active kubectl context name, or empty string."""
+    try:
+        r = subprocess.run(
+            ['kubectl', 'config', 'current-context'],
+            capture_output=True, text=True, timeout=5,
+        )
+        return r.stdout.strip() if r.returncode == 0 else ''
+    except Exception:
+        return ''
+
+
+def cluster_server_url() -> str:
+    """Return the API server URL for the current cluster."""
+    try:
+        r = subprocess.run(
+            ['kubectl', 'config', 'view', '--minify',
+             '-o', 'jsonpath={.clusters[0].cluster.server}'],
+            capture_output=True, text=True, timeout=5,
+        )
+        return r.stdout.strip() if r.returncode == 0 else ''
+    except Exception:
+        return ''
+
+
+def build_k8s_context():
+    """
+    Query the live cluster and return a K8sContext populated with resource data.
+    Returns None if the cluster is unreachable.
+    """
+    from checks.kubernetes import K8sContext
+
+    if not cluster_reachable():
+        return None
+
+    ctx = K8sContext()
+    ctx.context_name = current_context()
+    ctx.server_url   = cluster_server_url()
+
+    pods = _kubectl_json(['get', 'pods', '--all-namespaces'])
+    if pods:
+        ctx.pods = pods.get('items', [])
+
+    svcs = _kubectl_json(['get', 'services', '--all-namespaces'])
+    if svcs:
+        ctx.services = svcs.get('items', [])
+
+    ns = _kubectl_json(['get', 'namespaces'])
+    if ns:
+        ctx.namespaces = [n['metadata']['name'] for n in ns.get('items', [])]
+
+    crbs = _kubectl_json(['get', 'clusterrolebindings'])
+    if crbs:
+        ctx.cluster_role_bindings = crbs.get('items', [])
+
+    nps = _kubectl_json(['get', 'networkpolicies', '--all-namespaces'])
+    if nps:
+        ctx.network_policies = nps.get('items', [])
+
+    return ctx
+
+
 if __name__ == "__main__":
     import argparse
-    import json
     parser = argparse.ArgumentParser()
-    parser.add_argument("manifest")
-    parser.add_argument("--out")
+    parser.add_argument("manifest", nargs='?')
+    parser.add_argument("--live", action="store_true")
     args = parser.parse_args()
-    res = scan_manifest_for_ai_components(args.manifest)
-    if args.out:
-        with open(args.out, "w", encoding="utf-8") as fh:
-            json.dump(res, fh, indent=2)
-    else:
-        print(res)
+    if args.live:
+        ctx = build_k8s_context()
+        print(json.dumps({'pods': len(ctx.pods if ctx else []),
+                          'services': len(ctx.services if ctx else []),
+                          'context': ctx.context_name if ctx else 'unreachable'}, indent=2))
+    elif args.manifest:
+        print(json.dumps(scan_manifest_for_ai_components(args.manifest), indent=2))

@@ -22,6 +22,7 @@ if hasattr(sys.stderr, 'reconfigure'):
     sys.stderr.reconfigure(encoding='utf-8', errors='replace')
 import argparse
 import json
+import logging
 import os
 import socket
 from pathlib import Path
@@ -41,6 +42,7 @@ from output.plain_english import format_report
 from output.json_report import format_json
 from output.sarif import format_sarif
 
+log = logging.getLogger(__name__)
 
 BANNER = """
 ╔══════════════════════════════════════════════════╗
@@ -53,9 +55,25 @@ _SEV_ORDER = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW', 'INFO']
 
 
 def load_profile(name: str) -> dict:
-    profile_path = Path(__file__).parent / 'profiles' / f'{name}.json'
+    # Find profiles directory in multiple places (important for compiled binary mode)
+    profiles_dir = None
+    for candidate in [
+        Path(__file__).parent / 'profiles',
+        Path(sys.argv[0]).resolve().parent / 'profiles',
+        Path.cwd() / 'profiles',
+        Path('/app/profiles'),
+    ]:
+        if candidate.is_dir():
+            profiles_dir = candidate
+            break
+
+    if not profiles_dir:
+        print("[ERROR] profiles directory not found.", file=sys.stderr)
+        sys.exit(1)
+
+    profile_path = profiles_dir / f'{name}.json'
     if not profile_path.exists():
-        available = sorted(p.stem for p in (Path(__file__).parent / 'profiles').glob('*.json')
+        available = sorted(p.stem for p in profiles_dir.glob('*.json')
                            if not p.stem.endswith('_controls'))
         print(f"[ERROR] Profile '{name}' not found. Available: {', '.join(available)}", file=sys.stderr)
         sys.exit(1)
@@ -63,7 +81,7 @@ def load_profile(name: str) -> dict:
         profile = json.load(f)
     emphasis = profile.get('framework_emphasis')
     if emphasis:
-        controls_path = Path(__file__).parent / 'profiles' / f'{emphasis}_controls.json'
+        controls_path = profiles_dir / f'{emphasis}_controls.json'
         if controls_path.exists():
             with open(controls_path) as f:
                 profile['_controls'] = json.load(f)
@@ -80,6 +98,24 @@ def filter_results(results: list, profile: dict) -> list:
         results = [r for r in results
                    if r.severity not in _SEV_ORDER or _SEV_ORDER.index(r.severity) <= cutoff]
     return results
+
+
+def inventory_results(results: list) -> list:
+    """Return positive inventory signals regardless of the selected profile."""
+    inventory = []
+    for result in results:
+        if result.status == 'SKIP':
+            continue
+        if result.check_id in {
+            'AI-TOOL-001', 'AI-TOOL-002', 'AI-TOOL-003',
+            'AI-TOOL-004', 'AI-TOOL-005', 'AI-TOOL-006',
+        }:
+            inventory.append(result)
+        elif result.check_id in {'AI-SUPPLY-003', 'AI-SUPPLY-005'}:
+            inventory.append(result)
+        elif result.check_id == 'AI-SUPPLY-006' and result.evidence:
+            inventory.append(result)
+    return inventory
 
 
 def build_scan_context(args):
@@ -103,6 +139,14 @@ def build_scan_context(args):
             api_key=api_key,
             model=args.model,
             target_dir=str(target),
+            rag_probe=(
+                {
+                    'query': args.rag_query,
+                    'retrieval_marker': args.rag_retrieval_marker,
+                    'injection_marker': args.rag_injection_marker,
+                }
+                if args.rag_query else None
+            ),
         )
 
     if mode == "local":
@@ -176,7 +220,7 @@ examples:
     )
     parser.add_argument(
         '--mode',
-        choices=['config', 'api', 'local', 'gemini', 'vertex', 'anthropic', 'hash', 'docker', 'kubectl'],
+        choices=['config', 'api', 'local', 'gemini', 'vertex', 'anthropic', 'hash', 'docker', 'kubectl', 'k8s'],
         default='config',
         help='Scan mode (default: config)',
     )
@@ -189,7 +233,7 @@ examples:
     parser.add_argument(
         '--profile',
         default='default',
-        help='Audit profile: default, fedramp, cmmc, financial, healthcare, biotech, owasp_agentic, eu_ai_act (default: default)',
+        help='Audit profile: default, fedramp, cmmc, financial, healthcare, biotech, lifesciences, professional_services, owasp_agentic, eu_ai_act, iso42001, atlas, kubernetes, docker (default: default)',
     )
     parser.add_argument(
         '--output',
@@ -231,6 +275,24 @@ examples:
         '--model',
         default='gemini-1.5-flash',
         help='Model name to probe (default: gemini-1.5-flash)',
+    )
+    parser.add_argument(
+        '--rag-query',
+        default=None,
+        metavar='QUERY',
+        help='Query that retrieves a controlled RAG test document (for --mode api)',
+    )
+    parser.add_argument(
+        '--rag-retrieval-marker',
+        default='ARCKON_RAG_RETRIEVED_C7E1',
+        metavar='MARKER',
+        help='Marker in the seeded RAG document that proves retrieval (for --rag-query)',
+    )
+    parser.add_argument(
+        '--rag-injection-marker',
+        default='ARCKON_RAG_INJECTION_A9D4',
+        metavar='MARKER',
+        help='Marker the seeded RAG document tries to make the model output (for --rag-query)',
     )
     # Local/Ollama args
     parser.add_argument(
@@ -368,9 +430,99 @@ examples:
     if not args.quiet:
         print(BANNER, file=sys.stderr)
 
-    if args.mode in ('docker', 'kubectl'):
-        print(f"\n[INFO] '{args.mode}' mode will be available in Phase 3. Running config mode scan.\n")
-        args.mode = 'config'
+    if args.mode == 'docker':
+        from checks.docker import build_docker_context, run_all as docker_checks
+        if not args.quiet:
+            print('\nConnecting to Docker daemon...', end='', flush=True, file=sys.stderr)
+        docker_bin = next(
+            (p for p in ['/usr/local/bin/docker', '/usr/bin/docker', '/opt/homebrew/bin/docker']
+             if __import__('pathlib').Path(p).exists()),
+            'docker',
+        )
+        dctx = build_docker_context(docker_bin=docker_bin)
+        if dctx is None:
+            if not args.quiet:
+                print(' unreachable.\n', file=sys.stderr)
+            print(json.dumps({'error': 'Docker daemon unreachable',
+                              'results': [], 'findings': [],
+                              'summary': {'fail': 0, 'warn': 0, 'pass': 0, 'skip': 0}}))
+            sys.exit(1)
+        if not args.quiet:
+            print(f' connected (daemon {dctx.daemon_version}, {len(dctx.containers)} container(s)).\n',
+                  file=sys.stderr)
+        profile   = load_profile(args.profile if args.profile not in ('default', 'config') else 'docker')
+        d_results = docker_checks(dctx)
+        summary   = {'fail': 0, 'warn': 0, 'pass': 0, 'skip': 0}
+        out_list  = []
+        for r in d_results:
+            summary[r.status.lower() if r.status.lower() in summary else 'skip'] += 1
+            d = {
+                'check_id':    r.check_id,
+                'title':       r.title,
+                'status':      r.status,
+                'severity':    r.severity,
+                'category':    r.category,
+                'details':     r.details,
+                'evidence':    r.evidence,
+                'remediation': r.remediation,
+                'frameworks':  r.frameworks,
+            }
+            controls = profile.get('_controls', {}).get(r.check_id)
+            if controls:
+                d['emphasis_controls'] = controls
+            out_list.append(d)
+        report = {
+            'scan_mode':       'docker',
+            'daemon_version':  dctx.daemon_version,
+            'containers_checked': len(dctx.containers),
+            'profile':         profile.get('name', 'Docker Container Security'),
+            'findings':        out_list,
+            'results':         out_list,
+            'summary':         summary,
+        }
+        print(json.dumps(report, indent=2))
+        sys.exit(0 if summary['fail'] == 0 else 1)
+
+    if args.mode in ('kubectl', 'k8s'):
+        from connectors.kubectl_connector import build_k8s_context
+        from checks.kubernetes import run_all as k8s_checks
+        if not args.quiet:
+            print('\nConnecting to Kubernetes cluster...', end='', flush=True, file=sys.stderr)
+        k8s_ctx = build_k8s_context()
+        if k8s_ctx is None:
+            print(' unreachable.\n', file=sys.stderr)
+            print(json.dumps({'error': 'Cluster unreachable — kubectl could not connect',
+                              'results': [], 'summary': {'fail': 0, 'warn': 0, 'pass': 0, 'skip': 0}}))
+            sys.exit(1)
+        if not args.quiet:
+            print(f' connected ({k8s_ctx.context_name}, {len(k8s_ctx.pods)} pods).\n', file=sys.stderr)
+        profile  = load_profile(args.profile if args.profile != 'default' else 'kubernetes')
+        k8s_results = k8s_checks(k8s_ctx)
+        summary  = {'fail': 0, 'warn': 0, 'pass': 0, 'skip': 0}
+        out_list = []
+        for r in k8s_results:
+            summary[r.status.lower() if r.status.lower() in summary else 'skip'] += 1
+            out_list.append({
+                'check_id':    r.check_id,
+                'title':       r.title,
+                'status':      r.status,
+                'severity':    r.severity,
+                'category':    r.category,
+                'details':     r.details,
+                'evidence':    r.evidence,
+                'remediation': r.remediation,
+                'frameworks':  r.frameworks,
+            })
+        report = {
+            'scan_mode':    'k8s',
+            'cluster':      k8s_ctx.context_name,
+            'server_url':   k8s_ctx.server_url,
+            'profile':      profile.get('name', 'Kubernetes'),
+            'results':      out_list,
+            'summary':      summary,
+        }
+        print(json.dumps(report, indent=2))
+        sys.exit(0 if summary['fail'] == 0 else 1)
 
     profile = load_profile(args.profile)
     profile['_slug'] = args.profile
@@ -426,7 +578,21 @@ examples:
     results.extend(ls_checks(ctx))
 
     # Augment every result with MITRE ATLAS and ISO 42001 mappings
-    _profiles_dir = Path(__file__).parent / 'profiles'
+    # Find profiles directory in multiple places (important for compiled binary mode)
+    _profiles_dir = None
+    for _candidate in [
+        Path(__file__).parent / 'profiles',
+        Path(sys.argv[0]).resolve().parent / 'profiles',
+        Path.cwd() / 'profiles',
+        Path('/app/profiles'),
+    ]:
+        if _candidate.is_dir():
+            _profiles_dir = _candidate
+            break
+    if _profiles_dir is None:
+        log.warning('profiles directory not found; ATLAS/ISO mappings skipped')
+        _profiles_dir = Path('/nonexistent')  # prevent errors later
+
     _atlas_map: dict = {}
     _iso_map: dict = {}
     try:
@@ -445,6 +611,9 @@ examples:
         if _iso_map.get(_r.check_id):
             _r.frameworks['ISO/IEC 42001'] = _iso_map[_r.check_id]
 
+    # Preserve inventory detections before applying profile/severity filters.
+    inventory = inventory_results(results)
+
     # Apply profile filter
     results = filter_results(results, profile)
 
@@ -458,7 +627,10 @@ examples:
         print(output_text)
 
     if 'json' in output_formats:
-        json_text = format_json(results, profile, str(target), args.mode)
+        json_text = format_json(
+            results, profile, str(target), args.mode,
+            inventory_results=inventory,
+        )
         if 'plain' not in output_formats:
             print(json_text)
         if args.out_file:

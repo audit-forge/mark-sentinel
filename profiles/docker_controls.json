@@ -1,0 +1,12 @@
+{
+  "AI-DOCKER-001": "CIS Docker 5.4 — Do not use privileged containers; NIST SP 800-190 4.3.3",
+  "AI-DOCKER-002": "CIS Docker 5.1 — Do not run containers as root; NIST SP 800-190 4.3.2",
+  "AI-DOCKER-003": "CIS Docker 5.31 — Do not mount the Docker socket inside containers; NIST SP 800-190 4.3.3",
+  "AI-DOCKER-004": "CIS Docker 5.14 — Do not use host network mode; NIST SP 800-190 4.3.1",
+  "AI-DOCKER-005": "CIS Docker 6.2 — Use trusted base images; NIST SP 800-190 4.2.2; MITRE ATLAS AML.T0017",
+  "AI-DOCKER-006": "CIS Docker 5.25 — Do not expose sensitive information in environment variables; OWASP LLM07",
+  "AI-DOCKER-007": "CIS Docker 5.12 — Mount container root filesystem as read-only; NIST SP 800-190 4.3.2",
+  "AI-DOCKER-008": "CIS Docker 5.7 — Do not map privileged ports within containers; NIST SP 800-190 4.3.1",
+  "AI-DOCKER-009": "CIS Docker 5.3 — Restrict Linux kernel capabilities; NIST SP 800-190 4.3.3",
+  "AI-DOCKER-010": "CIS Docker 5.10 — Set resource limits; NIST SP 800-190 4.3.4; MITRE ATLAS AML.T0034"
+}

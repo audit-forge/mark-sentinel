@@ -1,4 +1,4 @@
-# Sentinel — Session Handoff
+# Arckon — Session Handoff
 **Overwrite this file at the end of every session. Do not append.**
 
 ---
@@ -19,9 +19,9 @@ Phase 4 (SMB polish + packaging) in progress. Core scan engine is complete.
 - One-command installer script scaffolded
 
 ## Known gaps
-- AI-INP-003 (indirect injection via RAG) — not implemented, returns SKIP
+- AI-INP-003 (indirect injection via RAG) — API-driven end-to-end test; requires a controlled document seeded in the target knowledge base and a retrieval query. Native retrieval-stack inspection is not implemented.
 - AI-AGENT-003 (memory/context poisoning) — not implemented, returns SKIP
-- These two gaps mean Sentinel cannot test for the Google Gemini-class indirect injection attacks
+- These two gaps mean Arckon cannot test for the Google Gemini-class indirect injection attacks
 - No runtime interception — point-in-time scanner only
 
 ## What's next
@@ -30,7 +30,7 @@ These require: a test harness that feeds malicious documents/content to an agent
 and verifies whether the injected instructions execute.
 
 ## Active gotchas
-- Sentinel is a SCANNER not a runtime blocker — do not confuse with CNAPP's EDR
+- Arckon is a SCANNER not a runtime blocker — do not confuse with CNAPP's EDR
 - Check results: PASS/FAIL/WARN/SKIP/NA — SKIP means "not implemented or not applicable"
 - Config mode skips all live probe checks (INP-001, INP-002, INP-004, OUT-001 through OUT-004)
 - Each check returns a CheckResult object with check_id, status, severity, evidence, remediation

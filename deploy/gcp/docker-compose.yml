@@ -1,29 +1,28 @@
 services:
   nginx:
     image: nginx:alpine
-    container_name: arckon-nginx
+    container_name: sentinel-nginx
     ports:
       - "80:80"
       - "7001-7100:7001-7100"
     volumes:
       - ./nginx:/etc/nginx/conf.d:ro
     networks:
-      - arckon-net
+      - sentinel-net
     restart: always
     depends_on:
       - user-manager
 
   user-manager:
     build:
-      context: ../..
-      dockerfile: admin/Dockerfile
-    container_name: arckon-admin
+      context: ../../admin
+    container_name: sentinel-admin
     environment:
       - SECRET_KEY_FILE=/run/secrets/secret_key
       - ADMIN_EMAIL=${ADMIN_EMAIL}
-      - ADMIN_PASSWORD=${ADMIN_PASSWORD}
+      - ADMIN_PASSWORD_FILE=/run/secrets/admin_password
       - PUBLIC_IP=${PUBLIC_IP}
-      - DB_PATH=/data/arckon.db
+      - DB_PATH=/data/sentinel.db
       - MAX_CUSTOMERS=${MAX_CUSTOMERS:-0}
       - LICENSES_DIR=/licenses
       - SMTP_HOST=${SMTP_HOST:-}
@@ -34,8 +33,9 @@ services:
       - ALERT_TO=${ALERT_TO:-}
       - MONITOR_INTERVAL_H=${MONITOR_INTERVAL_H:-24}
     volumes:
-      - /opt/arckon-data:/data
-      - /opt/arckon-secrets/admin-secret-key:/run/secrets/secret_key:ro
+      - /opt/sentinel-data:/data
+      - /opt/sentinel-secrets/admin-secret-key:/run/secrets/secret_key:ro
+      - /opt/sentinel-secrets/admin-password:/run/secrets/admin_password:ro
       - /opt/licenses:/licenses
       - /var/run/docker.sock:/var/run/docker.sock
       - ./provision_customer.sh:/app/provision_customer.sh:ro
@@ -43,23 +43,23 @@ services:
       - ./restart_customer.sh:/app/restart_customer.sh:ro
       - ./nginx:/app/nginx
     networks:
-      - arckon-net
+      - sentinel-net
     restart: always
 
   deployer:
     build:
       context: ./deployer
-    container_name: arckon-deployer
+    container_name: sentinel-deployer
     environment:
-      - REPO_DIR=${REPO_DIR:-/opt/arckon}
+      - REPO_DIR=${REPO_DIR:-/opt/sentinel}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-      - ${REPO_DIR:-/opt/arckon}:${REPO_DIR:-/opt/arckon}
+      - ${REPO_DIR:-/opt/sentinel}:${REPO_DIR:-/opt/sentinel}
     networks:
-      - arckon-net
+      - sentinel-net
     restart: always
 
 networks:
-  arckon-net:
-    name: arckon-net
+  sentinel-net:
+    name: sentinel-net
     driver: bridge

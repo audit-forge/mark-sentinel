@@ -1,0 +1,51 @@
+{
+  "splunk": {
+    "enabled": false,
+    "hec_url": "https://splunk.example.com:8088",
+    "hec_token": "",
+    "index": "arckon",
+    "sourcetype": "arckon:finding",
+    "verify_ssl": true,
+    "send_on": ["critical", "high"]
+  },
+  "sentinel": {
+    "enabled": false,
+    "workspace_id": "",
+    "shared_key": "",
+    "log_type": "ArckonFindings",
+    "send_on": ["critical", "high"]
+  },
+  "qradar": {
+    "enabled": false,
+    "syslog_host": "",
+    "syslog_port": 514,
+    "protocol": "tcp",
+    "send_on": ["critical", "high"]
+  },
+  "elastic": {
+    "enabled": false,
+    "endpoint": "https://elasticsearch.example.com:9200",
+    "api_key": "",
+    "index": "arckon-findings",
+    "verify_ssl": true,
+    "send_on": ["critical", "high"]
+  },
+  "exabeam": {
+    "enabled": false,
+    "syslog_host": "",
+    "syslog_port": 514,
+    "protocol": "udp",
+    "send_on": ["critical", "high"]
+  },
+  "kaseya": {
+    "enabled": false,
+    "vsa_url": "",
+    "vsa_api_key": "",
+    "bms_url": "",
+    "bms_api_key": "",
+    "itglue_api_key": "",
+    "itglue_org_id": "",
+    "ticket_queue": "Security",
+    "send_on": ["critical", "high"]
+  }
+}

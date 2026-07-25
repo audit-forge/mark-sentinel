@@ -1,0 +1,22 @@
+FROM --platform=linux/amd64 python:3.12.4-slim AS compiler
+WORKDIR /src
+
+RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-recommends \
+    gcc g++ patchelf ccache make libffi-dev && \
+    rm -rf /var/lib/apt/lists/*
+
+COPY requirements.txt ./
+RUN pip install --no-cache-dir --upgrade pip setuptools wheel && \
+    pip install --no-cache-dir -r requirements.txt && \
+    pip install --no-cache-dir "nuitka[onefile]" ordered-set zstandard
+
+COPY audit.py ./
+COPY checks/ ./checks/
+COPY profiles/ ./profiles/
+COPY output/ ./output/
+COPY connectors/ ./connectors/
+RUN python -m nuitka --onefile --assume-yes-for-downloads \
+    --output-dir=/out --output-filename=audit audit.py
+
+FROM scratch
+COPY --from=compiler /out/audit /audit

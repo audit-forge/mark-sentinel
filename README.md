@@ -1,7 +1,8 @@
-# M.A.R.K. Sentinel — AI Security Audit Tool
+# Arckon v1.0.0 — AI Security Platform
 
 Short summary
 - M.A.R.K. Sentinel (ai-stig-audit) is a self-hosted AI security and compliance scanner that produces plain-English summaries for SMBs and framework-mapped compliance artifacts (SARIF/MD/JSON) for enterprise use (FedRAMP, CMMC, NIST AI RMF).
+- Arckon Edge DNS Sensor is an opt-in, customer-managed add-on scaffold for authorized DNS-log telemetry. See `docs/EDGE_DNS_SENSOR.md`.
 
 Quick links
 - Phase 4 (SMB polish & packaging branch): phase4/smb-packaging — https://github.com/audit-forge/mark-sentinel/pull/2

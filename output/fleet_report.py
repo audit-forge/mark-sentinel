@@ -57,24 +57,31 @@ def _bar_ascii(score: int, width: int = 20) -> str:
 
 class _PDF(FPDF):
     def header(self):
+        msp_name = getattr(self, '_msp_name', None) or 'M.A.R.K. Sentinel'
         self.set_font('Helvetica', 'B', 9)
         if getattr(self, '_demo', False):
             self.set_text_color(240, 165, 0)
             self.cell(0, 6, 'DEMO REPORT - FOR EVALUATION ONLY - NOT FOR DISTRIBUTION', align='C')
         else:
             self.set_text_color(110, 118, 129)
-            self.cell(0, 6, 'M.A.R.K. Sentinel - Fleet Security Report  |  CONFIDENTIAL', align='R')
+            self.cell(0, 6, f'{msp_name} - Fleet Security Report  |  CONFIDENTIAL', align='R')
         self.ln(4)
 
     def footer(self):
         self.set_y(-13)
         self.set_font('Helvetica', size=8)
+        msp_name = getattr(self, '_msp_name', None) or 'M.A.R.K. Sentinel'
+        custom_footer = getattr(self, '_footer_text', None)
         if getattr(self, '_demo', False):
             self.set_text_color(240, 165, 0)
             self.cell(0, 5, 'DEMO - M.A.R.K. Sentinel Evaluation Copy - Not for distribution  |  Contact sales@markai.io', align='L')
+        elif custom_footer:
+            self.set_text_color(110, 118, 129)
+            sig_text = f'  |  Report ID: {self._report_id}' if getattr(self, '_report_id', None) else ''
+            self.cell(0, 5, f'{_safe(custom_footer)}{sig_text}', align='L')
         else:
             self.set_text_color(110, 118, 129)
-            sig_text = f'  |  Report ID: {self._report_id}  |  Signed by M.A.R.K. Sentinel' if getattr(self, '_report_id', None) else ''
+            sig_text = f'  |  Report ID: {self._report_id}  |  Signed by {msp_name}' if getattr(self, '_report_id', None) else ''
             self.cell(0, 5, f'Generated {datetime.now(tz=timezone.utc).strftime("%Y-%m-%d %H:%M UTC")}  |  © 2026 M.A.R.K. AI Systems. Patent Pending.{sig_text}', align='L')
         self.cell(0, 5, f'Page {self.page_no()}', align='R')
 
@@ -89,6 +96,7 @@ def _section_header(pdf: _PDF, title: str):
 
 
 def _device_row(pdf: _PDF, hostname: str, platform: str, fail: int, warn: int, passed: int, score: int, last_seen):
+    fail + warn + passed
     pdf.set_font('Helvetica', 'B', 10)
     pdf.set_text_color(201, 209, 217)
     pdf.cell(70, 6, _safe(hostname), ln=False)
@@ -113,16 +121,25 @@ def _device_row(pdf: _PDF, hostname: str, platform: str, fail: int, warn: int, p
     pdf.cell(0, 6, _safe(_ts(last_seen)), ln=True)
 
 
-def generate_fleet_pdf(devices: list, tier: str = 'ciso', report_id: str = '', demo: bool = False) -> bytes:
+def generate_fleet_pdf(devices: list, tier: str = 'ciso', report_id: str = '', demo: bool = False,
+                        client_name: str = '', branding: dict | None = None) -> bytes:
     """
     devices: list of dicts from storage.list_devices() merged with get_latest_report()
     tier: 'executive' | 'ciso' | 'technical'
     report_id: optional signing report ID to embed in footer
     demo: True adds watermark headers/footers and a cover banner
+    client_name: when set (MSP white-label delivery to one client org), shown
+        as a subtitle on the cover page — "Prepared for <client_name>"
+    branding: optional {'msp_name', 'footer_text'} from data/branding.json —
+        replaces the default "M.A.R.K. Sentinel" header/footer text with the
+        MSP's own identity. None/{} preserves the exact previous output.
     """
+    branding = branding or {}
     pdf = _PDF()
     pdf._report_id = report_id or ''
     pdf._demo = demo
+    pdf._msp_name = (branding.get('msp_name') or '').strip() or None
+    pdf._footer_text = (branding.get('footer_text') or '').strip() or None
     pdf.set_auto_page_break(auto=True, margin=16)
     pdf.set_margins(14, 14, 14)
     pdf.add_page()
@@ -135,10 +152,14 @@ def generate_fleet_pdf(devices: list, tier: str = 'ciso', report_id: str = '', d
     pdf.set_text_color(201, 209, 217)
 
     tier_label = {'executive': 'Executive Summary', 'ciso': 'CISO Report', 'technical': 'Technical Findings'}.get(tier, 'Fleet Report')
-    pdf.cell(0, 10, 'M.A.R.K. Sentinel', ln=True, align='C')
+    pdf.cell(0, 10, _safe(pdf._msp_name or 'M.A.R.K. Sentinel'), ln=True, align='C')
     pdf.set_font('Helvetica', size=12)
     pdf.set_text_color(88, 166, 255)
     pdf.cell(0, 7, f'Fleet {tier_label}', ln=True, align='C')
+    if client_name:
+        pdf.set_font('Helvetica', 'B', 11)
+        pdf.set_text_color(201, 209, 217)
+        pdf.cell(0, 7, _safe(f'Prepared for: {client_name}'), ln=True, align='C')
     pdf.set_font('Helvetica', size=9)
     pdf.set_text_color(110, 118, 129)
     pdf.cell(0, 6, datetime.now(tz=timezone.utc).strftime('%B %d, %Y'), ln=True, align='C')

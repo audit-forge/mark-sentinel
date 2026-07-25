@@ -95,7 +95,9 @@ def check_gov_001(ctx: ScanContext) -> CheckResult:
                 "2. Have legal/compliance review for industry-specific requirements (HIPAA, PCI, GDPR).\n"
                 "3. Communicate to all employees and collect acknowledgment.\n"
                 "4. Publish in your internal wiki and set a 12-month review reminder.\n"
-                "5. M.A.R.K. Sentinel provides a policy template in docs/SMB_GUIDE.md."
+                "5. Arckon ships a fill-in-the-blanks template at `compliance_starter_kit/ai_usage_policy.md`.\n"
+                "WHERE TO SAVE IT: put your completed file in a `compliance/` folder in the directory Arckon scans "
+                "(your home directory by default), e.g. `~/compliance/ai_usage_policy.md`, then re-run the scan."
             ),
             frameworks={"OWASP LLM": "LLM10", "FedRAMP": "PL-1", "NIST AI RMF": "GOVERN 1.1", "EU AI Act": "Article 9"},
         )
@@ -162,7 +164,9 @@ def check_gov_002(ctx: ScanContext) -> CheckResult:
                 "2. Add AI data categories to your retention policy with defined retention periods.\n"
                 "3. Configure technical enforcement: log rotation, vector store TTLs.\n"
                 "4. Check your AI provider's data retention settings — configure minimum retention.\n"
-                "5. Document the deletion process for AI data in your data subject rights procedure."
+                "5. Document the deletion process for AI data in your data subject rights procedure.\n"
+                "Starter template: `compliance_starter_kit/data_retention_policy.md`. WHERE TO SAVE IT: put your completed file at "
+                "`compliance/data_retention_policy.md` in the directory Arckon scans (your home directory by default), then re-run the scan."
             ),
             frameworks={"OWASP LLM": "LLM02", "FedRAMP": "SI-12, AU-11", "NIST AI RMF": "GOVERN 1.1", "GDPR": "Article 5(1)(e)"},
         )
@@ -223,7 +227,9 @@ def check_gov_003(ctx: ScanContext) -> CheckResult:
                 "2. Who do I call first? (internal team + AI vendor security contact)\n"
                 "3. How do I disable AI quickly? (document the kill switch)\n"
                 "4. How do I preserve evidence? (export logs before clearing)\n"
-                "5. Who needs to be notified? (legal, affected users, regulators if required)"
+                "5. Who needs to be notified? (legal, affected users, regulators if required)\n"
+                "Starter template: `compliance_starter_kit/ai_incident_response_plan.md`. WHERE TO SAVE IT: put your completed file at "
+                "`compliance/ai_incident_response_plan.md` in the directory Arckon scans (your home directory by default), then re-run the scan."
             ),
             frameworks={"OWASP LLM": "LLM10", "FedRAMP": "IR-1, IR-4", "NIST AI RMF": "MANAGE 4.1"},
         )
@@ -308,7 +314,9 @@ def check_gov_004(ctx: ScanContext) -> CheckResult:
                 "1. Identify which AI use cases constitute high-stakes decisions (hiring, credit, medical, legal).\n"
                 "2. For each high-stakes use case: define who reviews, what information they see, how they override.\n"
                 "3. Document the oversight mechanism for auditors.\n"
-                "4. Track AI-human divergence rate: how often do humans override the AI? A 0% rate suggests rubber-stamping."
+                "4. Track AI-human divergence rate: how often do humans override the AI? A 0% rate suggests rubber-stamping.\n"
+                "Document the oversight mechanism in a file saved to the `compliance/` folder Arckon scans "
+                "(your home directory by default), then re-run the scan."
             ),
             frameworks={"OWASP LLM": "LLM06", "FedRAMP": "PL-1", "NIST AI RMF": "GOVERN 6.1", "EU AI Act": "Article 14"},
         )
@@ -361,7 +369,9 @@ def check_gov_005(ctx: ScanContext) -> CheckResult:
                 "1. Start with a simple spreadsheet or Markdown table: System, Provider, Model, Version, Owner, Data Processed.\n"
                 "2. Include ALL AI: externally-hosted APIs, local models, and AI features in approved software (Copilot, Gemini).\n"
                 "3. Build inventory maintenance into change management: no new AI deployment without an inventory entry.\n"
-                "4. Review quarterly — remove decommissioned systems, add newly discovered shadow AI."
+                "4. Review quarterly — remove decommissioned systems, add newly discovered shadow AI.\n"
+                "Starter template: `compliance_starter_kit/ai_asset_inventory.md`. WHERE TO SAVE IT: put your completed file at "
+                "`compliance/ai_asset_inventory.md` in the directory Arckon scans (your home directory by default), then re-run the scan."
             ),
             frameworks={"OWASP LLM": "LLM10", "FedRAMP": "CM-8", "NIST AI RMF": "GOVERN 2.2", "EU AI Act": "Article 60"},
         )

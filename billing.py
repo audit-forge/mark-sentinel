@@ -1,5 +1,5 @@
 """
-M.A.R.K. Sentinel — Billing scaffold (Stripe)
+Arckon by RiskRaven — Billing scaffold (Stripe)
 
 Wires Stripe Checkout into the self-serve signup flow.
 Set env vars to activate; absent vars = billing disabled (admin-provisioned path).
@@ -33,7 +33,7 @@ import urllib.error
 import urllib.request
 from typing import Optional
 
-log = logging.getLogger('sentinel.billing')
+log = logging.getLogger('arckon.billing')
 
 _STRIPE_API = 'https://api.stripe.com/v1'
 

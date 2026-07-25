@@ -1,0 +1,268 @@
+---
+- name: Arckon by RiskRaven Agent — Deploy and configure
+  hosts: all
+  become: true
+  gather_facts: true
+
+  vars:
+    arckon_server:      "http://localhost:7331"
+    arckon_token:       "replace-with-your-secret-token"
+    arckon_profile:     "default"
+    arckon_target:      "."
+    arckon_interval:    7200
+    arckon_install_dir: "/opt/arckon"
+    arckon_venv_dir:    "/opt/arckon/venv"
+    arckon_config_dir:  "/etc/arckon"
+    arckon_config_file: "/etc/arckon/agent_config.json"
+    arckon_service_name: "arckon-agent"
+    arckon_user:        "arckon"
+
+  tasks:
+
+    # ── Python 3.11+ ──────────────────────────────────────────────────────────
+
+    - name: Install Python 3.11+ on Debian/Ubuntu
+      apt:
+        name:
+          - python3.11
+          - python3.11-venv
+          - python3-pip
+        state: present
+        update_cache: true
+      when: ansible_facts['os_family'] == "Debian"
+
+    - name: Enable EPEL and install Python 3.11+ on RHEL/CentOS 8+
+      block:
+        - name: Install EPEL release
+          dnf:
+            name: epel-release
+            state: present
+        - name: Install Python 3.11
+          dnf:
+            name:
+              - python3.11
+              - python3-pip
+            state: present
+      when: ansible_facts['os_family'] == "RedHat" and ansible_facts['distribution_major_version'] | int >= 8
+
+    - name: Install Python 3.11+ on RHEL/CentOS 7
+      yum:
+        name:
+          - python3
+          - python3-pip
+        state: present
+      when: ansible_facts['os_family'] == "RedHat" and ansible_facts['distribution_major_version'] | int < 8
+
+    - name: Install Python 3.11+ on macOS (via Homebrew)
+      become: false
+      community.general.homebrew:
+        name: python@3.11
+        state: present
+      when: ansible_facts['os_family'] == "Darwin"
+
+    - name: Resolve python3.11+ executable path
+      command: >
+        bash -c "for p in python3.13 python3.12 python3.11 python3; do
+          command -v $p &>/dev/null || continue;
+          ver=$($p -c 'import sys; print(\"%d%d\" % sys.version_info[:2])') &&
+          [ \"$ver\" -ge 311 ] && echo $p && break;
+        done"
+      register: python_bin_result
+      changed_when: false
+      failed_when: python_bin_result.stdout | trim == ""
+
+    - name: Set python executable fact
+      set_fact:
+        arckon_python: "{{ python_bin_result.stdout | trim }}"
+
+    # ── System user ───────────────────────────────────────────────────────────
+
+    - name: Create arckon system user (Linux)
+      user:
+        name: "{{ arckon_user }}"
+        system: true
+        shell: /sbin/nologin
+        create_home: false
+        comment: "Arckon by RiskRaven Agent"
+      when: ansible_facts['os_family'] != "Darwin"
+
+    # ── Install files ─────────────────────────────────────────────────────────
+
+    - name: Create install directory
+      file:
+        path: "{{ arckon_install_dir }}"
+        state: directory
+        owner: "{{ arckon_user if ansible_facts['os_family'] != 'Darwin' else 'root' }}"
+        group: "{{ arckon_user if ansible_facts['os_family'] != 'Darwin' else 'wheel' }}"
+        mode: "0755"
+
+    - name: Copy agent entry point (executable)
+      copy:
+        src: "{{ playbook_dir }}/../../agent.py"
+        dest: "{{ arckon_install_dir }}/agent.py"
+        mode: "0755"
+
+    - name: Copy remaining source files
+      copy:
+        src: "{{ item }}"
+        dest: "{{ arckon_install_dir }}/{{ item | basename }}"
+        mode: "0644"
+      loop:
+        - "{{ playbook_dir }}/../../audit.py"
+        - "{{ playbook_dir }}/../../storage.py"
+        - "{{ playbook_dir }}/../../server.py"
+        - "{{ playbook_dir }}/../../requirements.txt"
+
+    - name: Copy checks, connectors, and profiles directories
+      copy:
+        src: "{{ playbook_dir }}/../../{{ item }}/"
+        dest: "{{ arckon_install_dir }}/{{ item }}/"
+        mode: preserve
+      loop:
+        - checks
+        - connectors
+        - profiles
+
+    # ── Virtualenv + pip deps ─────────────────────────────────────────────────
+
+    - name: Create virtualenv
+      command: "{{ arckon_python }} -m venv {{ arckon_venv_dir }}"
+      args:
+        creates: "{{ arckon_venv_dir }}/bin/python"
+
+    - name: Upgrade pip inside venv
+      command: "{{ arckon_venv_dir }}/bin/python -m pip install --quiet --upgrade pip"
+      changed_when: false
+
+    - name: Install requirements into venv
+      command: >
+        {{ arckon_venv_dir }}/bin/python -m pip install
+        --quiet -r {{ arckon_install_dir }}/requirements.txt
+      register: pip_result
+      changed_when: "'Successfully installed' in pip_result.stdout"
+
+    # ── Configuration ─────────────────────────────────────────────────────────
+
+    - name: Create config directory
+      file:
+        path: "{{ arckon_config_dir }}"
+        state: directory
+        owner: root
+        group: "{{ arckon_user if ansible_facts['os_family'] != 'Darwin' else 'wheel' }}"
+        mode: "0750"
+
+    - name: Write agent config
+      copy:
+        dest: "{{ arckon_config_file }}"
+        owner: root
+        group: "{{ arckon_user if ansible_facts['os_family'] != 'Darwin' else 'wheel' }}"
+        mode: "0640"
+        force: false
+        content: |
+          {
+            "server":   "{{ arckon_server }}",
+            "token":    "{{ arckon_token }}",
+            "target":   "{{ arckon_target }}",
+            "profile":  "{{ arckon_profile }}",
+            "interval": {{ arckon_interval }}
+          }
+      notify: Restart arckon service
+
+    # ── systemd service (Linux) ───────────────────────────────────────────────
+
+    - name: Write systemd unit file with resolved python path
+      copy:
+        dest: /etc/systemd/system/arckon-agent.service
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          [Unit]
+          Description=Arckon by RiskRaven Agent
+          After=network-online.target
+          Wants=network-online.target
+
+          [Service]
+          Type=simple
+          User={{ arckon_user }}
+          Group={{ arckon_user }}
+          ExecStart={{ arckon_venv_dir }}/bin/python {{ arckon_install_dir }}/agent.py --config {{ arckon_config_file }} --daemon
+          Restart=on-failure
+          RestartSec=30
+          TimeoutStopSec=30
+          Environment=PYTHONUNBUFFERED=1
+          EnvironmentFile=-/etc/arckon/arckon.env
+          StandardOutput=journal
+          StandardError=journal
+          SyslogIdentifier=arckon-agent
+          NoNewPrivileges=yes
+          ProtectSystem=strict
+          ProtectHome=yes
+          PrivateTmp=yes
+          ReadWritePaths={{ arckon_install_dir }} /var/log
+
+          [Install]
+          WantedBy=multi-user.target
+      when: ansible_facts['os_family'] != "Darwin" and ansible_facts['service_mgr'] == "systemd"
+      notify:
+        - Reload systemd
+        - Restart arckon service
+
+    - name: Enable and start arckon-agent (systemd)
+      systemd:
+        name: arckon-agent
+        enabled: true
+        state: started
+        daemon_reload: true
+      when: ansible_facts['os_family'] != "Darwin" and ansible_facts['service_mgr'] == "systemd"
+
+    # ── launchd daemon (macOS) ────────────────────────────────────────────────
+
+    - name: Install launchd plist (macOS)
+      copy:
+        src: "{{ playbook_dir }}/../io.riskraven.arckon-agent.plist"
+        dest: /Library/LaunchDaemons/io.riskraven.arckon-agent.plist
+        owner: root
+        group: wheel
+        mode: "0644"
+      when: ansible_facts['os_family'] == "Darwin"
+      notify: Reload launchd daemon
+
+    - name: Load launchd daemon (macOS)
+      command: launchctl load -w /Library/LaunchDaemons/io.riskraven.arckon-agent.plist
+      when: ansible_facts['os_family'] == "Darwin"
+      register: launchctl_load
+      changed_when: launchctl_load.rc == 0
+      failed_when: false
+
+    # ── Verify agent is running ───────────────────────────────────────────────
+
+    - name: Verify arckon-agent service is active (Linux)
+      command: systemctl is-active arckon-agent
+      register: svc_status
+      changed_when: false
+      failed_when: false
+      when: ansible_facts['os_family'] != "Darwin" and ansible_facts['service_mgr'] == "systemd"
+
+    - name: Report service status
+      debug:
+        msg: "arckon-agent status: {{ svc_status.stdout | default('n/a') }}"
+      when: ansible_facts['os_family'] != "Darwin"
+
+  handlers:
+
+    - name: Reload systemd
+      systemd:
+        daemon_reload: true
+
+    - name: Restart arckon service
+      systemd:
+        name: arckon-agent
+        state: restarted
+      when: ansible_facts['os_family'] != "Darwin" and ansible_facts['service_mgr'] == "systemd"
+
+    - name: Reload launchd daemon
+      command: >
+        bash -c "launchctl unload /Library/LaunchDaemons/io.riskraven.arckon-agent.plist 2>/dev/null;
+                 launchctl load -w /Library/LaunchDaemons/io.riskraven.arckon-agent.plist"
+      when: ansible_facts['os_family'] == "Darwin"

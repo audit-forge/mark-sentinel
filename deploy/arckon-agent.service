@@ -1,0 +1,27 @@
+[Unit]
+Description=Arckon by RiskRaven Agent
+Documentation=https://github.com/hash-ai/arckon
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=arckon
+Group=arckon
+ExecStart=/usr/bin/python3 /opt/arckon/agent.py --config /etc/arckon/agent_config.json --daemon
+Restart=on-failure
+RestartSec=30
+TimeoutStopSec=30
+Environment=PYTHONUNBUFFERED=1
+EnvironmentFile=-/etc/arckon/arckon.env
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=arckon-agent
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ReadWritePaths=/opt/arckon /var/log
+
+[Install]
+WantedBy=multi-user.target

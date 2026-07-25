@@ -1,6 +1,6 @@
 # V1 Release Boundary
 
-This document defines the acceptance criteria for M.A.R.K. Sentinel v1.0
+This document defines the acceptance criteria for Arckon by RiskRaven v1.0
 (pilot-ready). All items must be complete and evidence provided before a pilot
 release is approved.
 

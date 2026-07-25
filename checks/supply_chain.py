@@ -55,6 +55,11 @@ _AI_PACKAGES = {
     'vllm', 'ollama', 'litellm', 'guidance', 'instructor', 'dspy-ai',
 }
 
+
+def _is_pip_directive(line: str) -> bool:
+    """Pip options/includes are not installable package requirements."""
+    return line.lstrip().startswith('-')
+
 # Shadow AI indicators
 _SHADOW_AI_ENV_RE = re.compile(
     r'(?i)(?:OPENAI|ANTHROPIC|GROQ|COHERE|MISTRAL|TOGETHER|REPLICATE|HUGGINGFACE)[_-]?API[_-]?KEY\s*=\s*[^\s$]{10,}'
@@ -264,6 +269,11 @@ def check_supply_003(ctx: ScanContext) -> CheckResult:
     unpinned_ai = []
 
     for line in lines:
+        # Ignore editable installs, included requirement files, index settings,
+        # and other pip CLI options. Treating "-e" as a package causes false
+        # dependency findings and corrupts the AI-BOM inventory.
+        if _is_pip_directive(line):
+            continue
         pkg_name = re.split(r'[=<>!; \[\]]', line)[0].strip().lower()
         if not pkg_name:
             continue

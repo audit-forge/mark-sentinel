@@ -13,7 +13,10 @@ Usage:
     --out /path/to/customer/license.json
 """
 import argparse
+import hashlib
+import hmac
 import json
+import os
 import sys
 from datetime import date, timedelta
 from pathlib import Path
@@ -39,6 +42,8 @@ def main():
                     help='Hours between usage heartbeats (default: 24)')
     ap.add_argument('--stale-hours',       type=float, default=26.0,
                     help='Hours of silence before a device is flagged unreachable (default: 26)')
+    ap.add_argument('--plan',              default='plus', choices=['demo', 'standard', 'plus'],
+                    help='License plan: demo, standard, or plus (default: plus)')
     ap.add_argument('--out',               default='license.json',
                     help='Output file path (default: ./license.json)')
     args = ap.parse_args()
@@ -62,11 +67,20 @@ def main():
         'expires_at':           expires,
         'issued_at':            date.today().isoformat(),
         'issued_by':            'M.A.R.K. AI Systems',
+        'plan':                 args.plan,
         'webhook_url':          args.webhook,
         'telemetry_url':        args.telemetry_url,
         'telemetry_interval_h': args.telemetry_interval,
         'stale_alert_hours':    args.stale_hours,
     }
+
+    signing_key = os.environ.get('LICENSE_SIGNING_KEY', '').encode()
+    if signing_key:
+        canon = json.dumps({k: v for k, v in sorted(license_data.items())},
+                           sort_keys=True, separators=(',', ':'))
+        license_data['sig'] = hmac.new(signing_key, canon.encode(), hashlib.sha256).hexdigest()
+    else:
+        print('WARNING: LICENSE_SIGNING_KEY not set — license will not be signed.', file=sys.stderr)
 
     out_path = Path(args.out)
     out_path.write_text(json.dumps(license_data, indent=2) + '\n', encoding='utf-8')

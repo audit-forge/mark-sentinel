@@ -28,17 +28,19 @@ _API_KEY_RE = re.compile(
 
 def _home_dirs() -> list:
     homes = {Path.home()}
-    home_root = Path('/home')
-    try:
-        if home_root.exists():
-            for p in home_root.iterdir():
-                try:
-                    if p.is_dir():
-                        homes.add(p)
-                except OSError:
-                    pass
-    except OSError:
-        pass
+    # Agents normally run as root, so Path.home() alone misses interactive
+    # users. Linux uses /home; macOS uses /Users.
+    for home_root in (Path('/home'), Path('/Users')):
+        try:
+            if home_root.exists():
+                for p in home_root.iterdir():
+                    try:
+                        if p.is_dir() and p.name != 'Shared':
+                            homes.add(p)
+                    except OSError:
+                        pass
+        except OSError:
+            pass
     return list(homes)
 
 

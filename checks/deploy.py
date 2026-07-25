@@ -10,8 +10,8 @@ CATEGORY = "AI-DEPLOY"
 
 # API key patterns — only match values that look like real keys (long, opaque)
 _API_KEY_RE = [
-    (re.compile(r'sk-[a-zA-Z0-9_-]{20,}'), 'OpenAI API key'),
-    (re.compile(r'sk-ant-api\d+-[a-zA-Z0-9_-]{20,}'), 'Anthropic API key'),
+    (re.compile(r'(?<![a-zA-Z])sk-[a-zA-Z0-9_-]{20,}'), 'OpenAI API key'),
+    (re.compile(r'(?<![a-zA-Z])sk-ant-api\d+-[a-zA-Z0-9_-]{20,}'), 'Anthropic API key'),
     (re.compile(r'AIza[a-zA-Z0-9_-]{35}'), 'Google/Gemini API key'),
     (re.compile(r'hf_[a-zA-Z0-9]{30,}'), 'HuggingFace token'),
     (re.compile(r'gsk_[a-zA-Z0-9]{40,}'), 'Groq API key'),
@@ -31,33 +31,11 @@ _PLACEHOLDER_FRAGMENTS = (
 _CRED_RE = [
     (re.compile(r'(?im)^(?:export\s+)?(?:DB|DATABASE|MYSQL|POSTGRES|MONGODB)_PASSWORD\s*=\s*(?!\$\{)(?!\$\()(?!\s*$)(.+)$'), 'Database password'),
     (re.compile(r'(?im)^(?:export\s+)?REDIS_PASSWORD\s*=\s*(?!\$)(?!\s*$)(.+)$'), 'Redis password'),
-    (re.compile(r'(?i)postgres(?:ql)?://[^:\s]+:([^@\s]{4,})@'), 'PostgreSQL URL with password'),
-    (re.compile(r'(?i)mysql://[^:\s]+:([^@\s]{4,})@'), 'MySQL URL with password'),
-    (re.compile(r'(?i)mongodb://[^:\s]+:([^@\s]{4,})@'), 'MongoDB URL with password'),
+    (re.compile(r'(?i)postgres(?:ql)?://[^:\s]+:(?!\$\{)(?!\$\()([^@\s]{4,})@'), 'PostgreSQL URL with password'),
+    (re.compile(r'(?i)mysql://[^:\s]+:(?!\$\{)(?!\$\()([^@\s]{4,})@'), 'MySQL URL with password'),
+    (re.compile(r'(?i)mongodb://[^:\s]+:(?!\$\{)(?!\$\()([^@\s]{4,})@'), 'MongoDB URL with password'),
     (re.compile(r'(?i)"password"\s*:\s*"(?!\$\{)([^"$]{4,})"'), 'Password in JSON'),
 ]
-
-# ── CI test credential classification (AI-DEPLOY-002) ──────────────────────
-# A PostgreSQL URL is treated as a CI test fixture only when every condition
-# holds: it lives in a GitHub Actions workflow, it points at a loopback host,
-# the same workflow declares a postgres service container, and that workflow
-# sets a test-named POSTGRES_DB. Anything else stays a hardcoded credential.
-
-_WORKFLOW_PATH_RE = re.compile(r'(?:^|/)\.github/workflows/[^/]+\.ya?ml$', re.IGNORECASE)
-
-# Captures the host only — the password is matched but never captured.
-_PG_LOOPBACK_HOST_RE = re.compile(
-    r'(?i)postgres(?:ql)?://[^:\s]+:[^@\s]{4,}@(localhost|127\.0\.0\.1)(?=[:/?\s"\'#]|$)'
-)
-
-_WF_SERVICES_RE = re.compile(r'(?im)^\s*services\s*:\s*(?:#.*)?$')
-_WF_PG_IMAGE_RE = re.compile(
-    r'(?im)^\s*image\s*:\s*["\']?(?:docker\.io/)?(?:library/)?postgres(?::[\w.\-]+)?["\']?\s*$'
-)
-_WF_PG_SERVICE_KEY_RE = re.compile(r'(?im)^\s*postgres\w*\s*:\s*(?:#.*)?$')
-_WF_TEST_DB_RE = re.compile(
-    r'(?im)^\s*POSTGRES_DB\s*[:=]\s*["\']?[A-Za-z0-9_.\-]*test[A-Za-z0-9_.\-]*["\']?\s*(?:#.*)?$'
-)
 
 _AUTH_POSITIVE_RE = [
     re.compile(r'(?i)auth(?:entication)?[_-]?(?:required|enabled)\s*[=:]\s*(?:true|yes|1)'),
@@ -126,6 +104,48 @@ _INPUT_LIMIT_RE = [
 ]
 
 
+# ── AI-DEPLOY-002: CI test-fixture classifier ──────────────────────────────
+# A PostgreSQL connection string inside a GitHub Actions workflow that points at
+# that same workflow's `postgres` service container, with a test-named database,
+# is a CI fixture — it grants no access outside the ephemeral runner. It stays
+# visible, but as WARN/LOW under its own title instead of FAIL/HIGH.
+CI_TEST_CREDENTIAL_TITLE = "CI Test Credential Hygiene"
+
+_WORKFLOW_PATH_RE = re.compile(r'(?:^|/)\.github/workflows/[^/]+\.ya?ml$', re.IGNORECASE)
+_PG_URL_HOST_RE = re.compile(r'(?i)postgres(?:ql)?://[^:\s/@]+:[^@\s]{4,}@([A-Za-z0-9._-]+)')
+_CI_LOCAL_HOSTS = frozenset({'localhost', '127.0.0.1'})
+_SERVICES_KEY_RE = re.compile(r'(?m)^\s*services:\s*(?:#.*)?$')
+_PG_SERVICE_IMAGE_RE = re.compile(
+    r'(?im)^\s*image:\s*["\']?(?:docker\.io/)?(?:library/)?postgres(?:[:@\s"\']|$)'
+)
+_POSTGRES_DB_RE = re.compile(r'(?im)^\s*POSTGRES_DB\s*[:=]\s*["\']?([A-Za-z0-9._-]+)')
+
+
+def _pg_url_host(line: str) -> str:
+    """Host portion of a PostgreSQL URL. Never returns the credential value."""
+    m = _PG_URL_HOST_RE.search(line)
+    return m.group(1).lower() if m else ''
+
+
+def _declares_postgres_service(workflow: str) -> bool:
+    return bool(_SERVICES_KEY_RE.search(workflow) and _PG_SERVICE_IMAGE_RE.search(workflow))
+
+
+def _has_test_postgres_db(workflow: str) -> bool:
+    return any('test' in m.group(1).lower() for m in _POSTGRES_DB_RE.finditer(workflow))
+
+
+def _is_ci_test_credential(path: str, desc: str, line: str, workflow: str) -> bool:
+    """True only when every CI-fixture condition holds — anything else is a real hit."""
+    if desc != 'PostgreSQL URL with password':
+        return False
+    if not _WORKFLOW_PATH_RE.search(path.replace('\\', '/')):
+        return False
+    if _pg_url_host(line) not in _CI_LOCAL_HOSTS:
+        return False
+    return _declares_postgres_service(workflow) and _has_test_postgres_db(workflow)
+
+
 def _is_env_path(path: str) -> bool:
     name = path.split('/')[-1]
     return name == '.env' or name.startswith('.env.') or name.endswith('.env')
@@ -134,28 +154,6 @@ def _is_env_path(path: str) -> bool:
 def _is_placeholder(val: str) -> bool:
     v = val.lower()
     return any(f in v for f in _PLACEHOLDER_FRAGMENTS) or len(val.strip()) < 8
-
-
-def _is_ci_workflow_fixture_context(path: str, content: str) -> bool:
-    """True when this file is a GitHub Actions workflow that stands up a postgres
-    service container for a test database — the only place a loopback PostgreSQL
-    URL counts as a CI fixture rather than a hardcoded credential."""
-    if not _WORKFLOW_PATH_RE.search(path):
-        return False
-    has_service = bool(_WF_SERVICES_RE.search(content)) and bool(
-        _WF_PG_IMAGE_RE.search(content) or _WF_PG_SERVICE_KEY_RE.search(content)
-    )
-    return has_service and bool(_WF_TEST_DB_RE.search(content))
-
-
-def _ci_fixture_host(line: str) -> str | None:
-    """Return the loopback host of a PostgreSQL URL on this line, or None.
-
-    Only the host is captured; the password is never bound to a name, so a
-    qualifying CI fixture password is never extracted, displayed, or stored.
-    """
-    m = _PG_LOOPBACK_HOST_RE.search(line)
-    return m.group(1) if m else None
 
 
 def _scan(ctx: ScanContext, patterns: list, skip_env: bool = True) -> list:
@@ -212,7 +210,7 @@ def check_deploy_001(ctx: ScanContext) -> CheckResult:
         ev += gi_issues
         return CheckResult(
             check_id="AI-DEPLOY-001",
-            title="API Keys Not Exposed",
+            title="API Keys Exposed in Source Files",
             status=FAIL,
             severity="CRITICAL",
             category=CATEGORY,
@@ -232,7 +230,7 @@ def check_deploy_001(ctx: ScanContext) -> CheckResult:
     elif gi_issues:
         return CheckResult(
             check_id="AI-DEPLOY-001",
-            title="API Keys Not Exposed",
+            title="API Key Exposure Risk — .gitignore Gap",
             status=WARN,
             severity="CRITICAL",
             category=CATEGORY,
@@ -260,41 +258,53 @@ def check_deploy_001(ctx: ScanContext) -> CheckResult:
 
 
 def check_deploy_002(ctx: ScanContext) -> CheckResult:
-    hits = []      # real hardcoded credentials
-    ci_hits = []   # qualifying CI test fixtures (file/line/type/host only)
+    findings = []  # (path, lineno, desc, is_ci_fixture, host)
+    for regex, desc in _CRED_RE:
+        for path, lineno, line in _scan(ctx, [regex], skip_env=True):
+            if path.endswith('.py') or path.endswith('.md'):
+                continue  # skip source/doc files — credential patterns match regex strings
+            m = regex.search(line)
+            if not m:
+                continue
+            # Classify first: a qualifying CI fixture never has its password bound
+            # to a local, not even transiently. Only non-CI hits reach _is_placeholder.
+            if _is_ci_test_credential(path, desc, line, ctx.files.get(path, '')):
+                findings.append((path, lineno, desc, True, _pg_url_host(line)))
+                continue
+            captured = m.group(1) if m.lastindex else m.group(0)
+            if not _is_placeholder(captured):
+                findings.append((path, lineno, desc, False, ''))
 
-    for path, content in ctx.files.items():
-        if _is_env_path(path):
-            continue
-        if path.endswith('.py') or path.endswith('.md'):
-            continue  # skip source/doc files — credential patterns match regex strings
-        is_ci_workflow = _is_ci_workflow_fixture_context(path, content)
-        for lineno, line in enumerate(content.splitlines(), 1):
-            line = line.strip()[:120]
-            # CI classification runs first: a qualifying fixture line never
-            # reaches capture-group or placeholder handling.
-            if is_ci_workflow:
-                host = _ci_fixture_host(line)
-                if host:
-                    ci_hits.append(
-                        f"{path}:{lineno} — PostgreSQL URL with password (host {host})"
-                    )
-                    continue
-            for regex, desc in _CRED_RE:
-                m = regex.search(line)
-                if not m:
-                    continue
-                captured = m.group(1) if m.lastindex else m.group(0)
-                if not _is_placeholder(captured):
-                    hits.append(f"{path}:{lineno} — {desc}")
+    hits = [f"{p}:{n} — {d}" for p, n, d, _, _ in findings]
+    ci_findings = [f for f in findings if f[3]]
+
+    if hits and len(ci_findings) == len(findings):
+        # Every hit is a local CI service fixture — report it, but not as an exposure.
+        return CheckResult(
+            check_id="AI-DEPLOY-002",
+            title=CI_TEST_CREDENTIAL_TITLE,
+            status=WARN,
+            severity="LOW",
+            category=CATEGORY,
+            details=(
+                f"{len(ci_findings)} PostgreSQL connection string(s) in GitHub Actions workflow(s) "
+                "point at the workflow's own postgres service container using a test-named database. "
+                "These are CI fixtures scoped to the ephemeral runner, not production credentials — "
+                "no external system is reachable with them. No hardcoded production credentials were found."
+            ),
+            evidence=[
+                _mask(f"{p}:{n} — {d} (local CI postgres service fixture, host {host})")
+                for p, n, d, _, host in ci_findings[:5]
+            ],
+            remediation=(
+                "1. Keep CI fixture connection strings pointed at localhost/127.0.0.1 and a test-only database.\n"
+                "2. Prefer job-level env vars or ${{ secrets.* }} even for CI fixtures, so workflows match production practice.\n"
+                "3. Never reuse a CI fixture password for any non-CI service."
+            ),
+            frameworks={"OWASP LLM": "LLM07", "FedRAMP": "IA-5, CM-6", "NIST AI RMF": "MANAGE 2.2"},
+        )
 
     if hits:
-        ev = [_mask(h) for h in hits[:5]]
-        if ci_hits:
-            ev.append(
-                f"{len(ci_hits)} CI test fixture credential(s) also present in "
-                ".github/workflows (loopback host, test database) — reported separately"
-            )
         return CheckResult(
             check_id="AI-DEPLOY-002",
             title="No Hardcoded Credentials in Model Config",
@@ -302,34 +312,12 @@ def check_deploy_002(ctx: ScanContext) -> CheckResult:
             severity="HIGH",
             category=CATEGORY,
             details=f"{len(hits)} hardcoded credential(s) found in config files. These give attackers access to your databases and services.",
-            evidence=ev,
+            evidence=[_mask(h) for h in hits[:5]],
             remediation=(
                 "1. Replace hardcoded values with environment variable references: ${DB_PASSWORD}.\n"
                 "2. Rotate all exposed credentials.\n"
                 "3. For docker-compose: use env_file: .env or secrets: instead of environment: with values.\n"
                 "4. For Kubernetes: use Secret objects, not ConfigMaps."
-            ),
-            frameworks={"OWASP LLM": "LLM07", "FedRAMP": "IA-5, CM-6", "NIST AI RMF": "MANAGE 2.2"},
-        )
-    elif ci_hits:
-        return CheckResult(
-            check_id="AI-DEPLOY-002",
-            title="CI Test Credential Hygiene",
-            status=WARN,
-            severity="LOW",
-            category=CATEGORY,
-            details=(
-                f"{len(ci_hits)} PostgreSQL credential(s) found in GitHub Actions workflows point at a "
-                "loopback service container backed by a test database. These are throwaway CI test "
-                "fixtures, not production credentials — no real system is reachable with them. "
-                "No production credential was found in config files."
-            ),
-            evidence=ci_hits[:5],
-            remediation=(
-                "1. No rotation needed — these credentials only reach a CI service container on localhost.\n"
-                "2. Keep them confined to .github/workflows; never reuse the same value in application config.\n"
-                "3. Optional: move the value to a workflow-level env var so the intent is explicit.\n"
-                "4. Re-check if the workflow ever points the URL at a non-loopback host."
             ),
             frameworks={"OWASP LLM": "LLM07", "FedRAMP": "IA-5, CM-6", "NIST AI RMF": "MANAGE 2.2"},
         )

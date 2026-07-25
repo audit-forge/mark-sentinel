@@ -1,6 +1,6 @@
 # PILOT TESTER HANDOFF
 
-This document explains how a pilot tester can run M.A.R.K. Sentinel (ai-stig-audit)
+This document explains how a pilot tester can run Arckon by RiskRaven (ai-stig-audit)
 locally to validate the v1.0 feature set. It assumes the project is checked out
 and Python 3.11+ is available.
 
@@ -31,5 +31,5 @@ Notes for pilot testers
   Use Ollama or OpenAI-compatible endpoints for equivalent testing during the pilot.
 
 Contact
-- Project owner: M.A.R.K. Sentinel maintainers (open an issue in the repo)
+- Project owner: Arckon by RiskRaven maintainers (open an issue in the repo)
 - Technical owner for handoff: Hash (local agent)

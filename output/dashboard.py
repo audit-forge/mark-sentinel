@@ -781,6 +781,11 @@ function openReport(type){
   w.document.close();
 }
 
+// Titles whose findings are narrower than the generic per-check business-risk
+// copy below — show the finding's own details instead.
+// Keep in sync with CI_TEST_CREDENTIAL_TITLE in checks/deploy.py.
+const DETAIL_OVER_BIZ_TITLES={'CI Test Credential Hygiene':1};
+
 const BIZ_RISK={
   'AI-DEPLOY-001':'Your AI credentials are exposed in code — anyone who finds them can use your AI services at your expense and access your data.',
   'AI-DEPLOY-002':'Database passwords are stored in plain text — an attacker who reads your config files can take over your database.',
@@ -797,14 +802,6 @@ const BIZ_RISK={
   'AI-GOV-005':'Your AI system is not in any asset inventory — it cannot be managed, monitored, or secured if it is not tracked.',
   'AI-SUPPLY-005':'Your AI model version is not pinned — the model could change behavior overnight without your knowledge.',
 };
-
-// A check that reclassifies a finding carries a different title; its own
-// details describe that narrower case, so the generic risk text does not apply.
-const SPECIAL_TITLES={'AI-DEPLOY-002':'CI Test Credential Hygiene'};
-function bizRisk(f){
-  if(SPECIAL_TITLES[f.check_id]===f.title)return f.details||'';
-  return BIZ_RISK[f.check_id]||f.details;
-}
 
 function rptCSS(){return `<style>
 *{box-sizing:border-box;margin:0;padding:0}
@@ -875,7 +872,7 @@ function buildExecReport(p){
   const highs=p.findings.filter(f=>f.status==='FAIL'&&f.severity==='HIGH');
   const fails=p.findings.filter(f=>f.status==='FAIL');
   const rows=fails.slice(0,7).map(f=>{
-    const biz=bizRisk(f);
+    const biz=(DETAIL_OVER_BIZ_TITLES[f.title]?f.details:BIZ_RISK[f.check_id])||f.details;
     const step=(f.remediation||'').split('\n').filter(Boolean)[0]||'See detailed report';
     return`<tr><td><strong>${esc(f.title)}</strong><br><span style="color:#6b7280;font-size:12px">${esc(biz)}</span></td><td style="text-align:center"><span class="badge ${f.severity.toLowerCase()}">${esc(f.severity)}</span></td><td style="font-size:12px">${esc(step)}</td></tr>`;
   }).join('');
@@ -1098,10 +1095,19 @@ function renderScan(){
         <span class="form-label" style="padding-top:3px">Profiles</span>
         <div style="display:flex;flex-direction:column;gap:6px">
           ${[
-            ['default',   'Base Scan',                      'Essential checks — plain language, highest-impact controls'],
-            ['fedramp',   'FedRAMP / NIST 800-53',        'FedRAMP Moderate controls'],
-            ['cmmc',      'CMMC 2.0',                     'Cybersecurity Maturity Model'],
-            ['financial', 'Financial Services',           'NIST AI RMF / SR 26-2'],
+            ['default',      'Base Scan',              'Essential checks — plain language, highest-impact controls'],
+            ['iso42001',     'ISO 42001',              'ISO/IEC 42001:2023 AI Management System — international standard'],
+            ['atlas',        'MITRE ATLAS',            'Adversarial ML threats — prompt injection, model exfiltration, supply chain'],
+            ['fedramp',      'FedRAMP / NIST 800-53',  'FedRAMP Moderate controls'],
+            ['cmmc',         'CMMC 2.0',               'Cybersecurity Maturity Model'],
+            ['financial',    'Financial Services',     'NIST AI RMF / SR 26-2'],
+            ['healthcare',   'Healthcare',             'HIPAA / HITECH / FDA SaMD'],
+            ['biotech',      'Biotech',                'FDA 21 CFR Part 11 / GxP'],
+            ['lifesciences', 'Life Sciences',          'BioMedical / clinical AI'],
+            ['owasp_agentic','OWASP Agentic',          'OWASP Top 10 for Agentic AI (2026)'],
+            ['eu_ai_act',    'EU AI Act',              'Articles 9-15 — mandatory for high-risk AI in Europe'],
+            ['kubernetes',   'Kubernetes',             'CIS K8s Benchmark / NSA-CISA hardening'],
+            ['docker',       'Docker Security',        'CIS Docker Benchmark — container isolation and runtime'],
           ].map(([v,l,d])=>`
             <label style="display:flex;align-items:flex-start;gap:8px;cursor:pointer">
               <input type="checkbox" class="profile-cb" value="${v}" ${v==='default'?'checked':''}

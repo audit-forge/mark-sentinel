@@ -112,6 +112,127 @@
 </div>
 
 <div class="card">
+  <div class="card-title">Maintenance Notice</div>
+  <p style="color:#6B7280;font-size:13px;margin-top:-8px;margin-bottom:16px">
+    Schedule a maintenance window — every customer dashboard shows a banner in advance, then while it's in progress.
+  </p>
+  <form id="maint-form" onsubmit="return submitMaintenance(event)" style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;margin-bottom:12px">
+    <div>
+      <label style="font-size:11px;color:#6B7280;display:block;margin-bottom:4px">Starts</label>
+      <input type="datetime-local" id="maint-start" required style="padding:6px 10px;border:1px solid #E5E7EB;border-radius:6px;font-size:13px">
+    </div>
+    <div>
+      <label style="font-size:11px;color:#6B7280;display:block;margin-bottom:4px">Ends</label>
+      <input type="datetime-local" id="maint-end" required style="padding:6px 10px;border:1px solid #E5E7EB;border-radius:6px;font-size:13px">
+    </div>
+    <div style="flex:1;min-width:220px">
+      <label style="font-size:11px;color:#6B7280;display:block;margin-bottom:4px">Message</label>
+      <input type="text" id="maint-message" required placeholder="e.g. Upgrading dashboard features, brief downtime possible"
+             style="width:100%;padding:6px 10px;border:1px solid #E5E7EB;border-radius:6px;font-size:13px">
+    </div>
+    <button type="submit" class="btn btn-sm" style="background:#4F46E5;color:#fff;border:none">Schedule</button>
+  </form>
+  <div id="maint-status" style="font-size:12px;margin-bottom:12px"></div>
+  <table id="maint-list-table">
+    <tr><td style="color:#6B7280" colspan="4">Loading notices...</td></tr>
+  </table>
+</div>
+
+<div class="card">
+  <div class="card-title">Agent Updates</div>
+  <p style="color:#6B7280;font-size:13px;margin-top:-8px;margin-bottom:12px">
+    Push the latest agent to every device across every active customer. Queues each agent's existing self-update
+    check-in (bundle download + restart) — no manual per-machine action needed.
+  </p>
+  <button class="btn btn-sm" style="background:#4F46E5;color:#fff;border:none" onclick="pushAllAgentUpdates(this)">
+    &#8593; Push Updates to All Customers
+  </button>
+  <span id="update-all-status" style="font-size:12px;margin-left:12px"></span>
+</div>
+
+<script>
+async function loadMaintenanceList() {
+  const table = document.getElementById('maint-list-table');
+  try {
+    const r = await fetch('/api/maintenance/list');
+    const data = await r.json();
+    const notices = (data.notices || []).filter(n => n.active);
+    if (!notices.length) {
+      table.innerHTML = '<tr><td style="color:#6B7280">No scheduled notices.</td></tr>';
+      return;
+    }
+    table.innerHTML = '<tr><td style="color:#6B7280;width:180px">Starts</td><td style="color:#6B7280;width:180px">Ends</td>' +
+      '<td style="color:#6B7280">Message</td><td></td></tr>' +
+      notices.map(n => `<tr>
+        <td>${new Date(n.scheduled_at).toLocaleString()}</td>
+        <td>${new Date(n.expires_at).toLocaleString()}</td>
+        <td>${n.message}</td>
+        <td><button class="btn btn-sm" style="background:#F9FAFB;color:#DC2626;border:1px solid #DC262630" onclick="cancelMaintenance('${n.id}')">Cancel</button></td>
+      </tr>`).join('');
+  } catch (e) {
+    table.innerHTML = '<tr><td style="color:#DC2626">Failed to load notices</td></tr>';
+  }
+}
+
+async function submitMaintenance(ev) {
+  ev.preventDefault();
+  const status = document.getElementById('maint-status');
+  const start = document.getElementById('maint-start').value;
+  const end = document.getElementById('maint-end').value;
+  const message = document.getElementById('maint-message').value.trim();
+  if (!start || !end || !message) return false;
+  try {
+    const r = await fetch('/api/maintenance/schedule', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        message,
+        scheduled_at: new Date(start).toISOString(),
+        expires_at: new Date(end).toISOString(),
+      }),
+    });
+    const data = await r.json();
+    if (data.ok) {
+      status.textContent = 'Scheduled.';
+      status.style.color = '#16A34A';
+      document.getElementById('maint-form').reset();
+      loadMaintenanceList();
+    } else {
+      status.textContent = data.error || 'Failed to schedule';
+      status.style.color = '#DC2626';
+    }
+  } catch (e) {
+    status.textContent = 'Failed: ' + e;
+    status.style.color = '#DC2626';
+  }
+  return false;
+}
+
+async function cancelMaintenance(id) {
+  await fetch('/api/maintenance/cancel/' + id, {method: 'POST'});
+  loadMaintenanceList();
+}
+
+async function pushAllAgentUpdates(btn) {
+  const status = document.getElementById('update-all-status');
+  btn.disabled = true;
+  status.textContent = 'Pushing...';
+  status.style.color = '#6B7280';
+  try {
+    const r = await fetch('/api/agents/update-all', {method: 'POST'});
+    const data = await r.json();
+    status.textContent = `Queued for ${data.total_devices_queued} device(s) across ${data.customers_succeeded}/${data.customers_attempted} customer(s).`;
+    status.style.color = data.customers_succeeded === data.customers_attempted ? '#16A34A' : '#CA8A04';
+  } catch (e) {
+    status.textContent = 'Failed: ' + e;
+    status.style.color = '#DC2626';
+  }
+  btn.disabled = false;
+}
+
+loadMaintenanceList();
+</script>
+
+<div class="card">
   <div class="card-title">Quick Access</div>
   <table>
     <tr>
@@ -120,7 +241,7 @@
     </tr>
     <tr>
       <td style="color:#6B7280">Customer URL pattern</td>
-      <td><span class="url">http://{{ ip }}:[port]  (see Customers page for each customer's port)</span></td>
+      <td><span class="url">http://{{ ip }}:[port]  — find each customer's live link in the "Dashboard URL" column on the <a href="/customers">Customers page</a></span></td>
     </tr>
   </table>
   <div style="margin-top:16px;padding-top:16px;border-top:1px solid #E5E7EB;display:flex;align-items:center;gap:16px;flex-wrap:wrap">

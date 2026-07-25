@@ -11,7 +11,7 @@ Usage:
 import sys
 if sys.version_info < (3, 11):
     sys.exit(
-        "Arckon by RiskRaven requires Python 3.11 or later.\n"
+        "Arckon requires Python 3.11 or later.\n"
         f"Running: Python {sys.version.split()[0]}\n"
         "Install: https://python.org/downloads/"
     )
@@ -24,24 +24,27 @@ if hasattr(sys.stderr, 'reconfigure'):
 # functionality. Runs with the same Python binary that launched the server so
 # app-bundle and venv environments get the right site-packages.
 def _ensure_packages():
-    import importlib, subprocess as _sp, os as _os, time as _time
+    import importlib
+    import subprocess as _sp
+    import os as _os
+    import time as _time
     _needed = [('fpdf', 'fpdf2'), ('yaml', 'pyyaml')]
     installed_any = False
     for module, package in _needed:
         try:
             importlib.import_module(module)
         except ImportError:
-            print(f'[arckon] installing {package}…', flush=True)
+            print(f'[sentinel] installing {package}…', flush=True)
             r = _sp.run([sys.executable, '-m', 'pip', 'install', package, '-q'],
                         capture_output=True)
             if r.returncode == 0:
                 installed_any = True
             else:
-                print(f'[arckon] pip failed: {r.stderr.decode(errors="replace").strip()}', flush=True)
+                print(f'[sentinel] pip failed: {r.stderr.decode(errors="replace").strip()}', flush=True)
     if installed_any:
         # Newly installed packages aren't visible to the running interpreter —
         # restart immediately so the next launch finds them in site-packages.
-        print('[arckon] packages installed — restarting…', flush=True)
+        print('[sentinel] packages installed — restarting…', flush=True)
         _time.sleep(0.5)
         if sys.platform == 'win32':
             _sp.Popen([sys.executable] + sys.argv,
@@ -66,9 +69,8 @@ from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlparse
-from typing import Union
 
-PORT = 7331
+PORT = 7001
 
 
 def _compiled_cmd(script: Path) -> list:
@@ -79,11 +81,8 @@ def _compiled_cmd(script: Path) -> list:
     return [sys.executable, str(script)]
 ROOT = Path(__file__).parent
 _serve_port = PORT   # updated at startup so handlers can reference it
-# Set ARCKON_SECURE_COOKIES=true when serving over HTTPS
-_SECURE_COOKIE = os.environ.get("ARCKON_SECURE_COOKIES", "").lower() == "true"
-_COOKIE_FLAGS = "; HttpOnly; SameSite=Strict" + ("; Secure" if _SECURE_COOKIE else "")
 
-log = logging.getLogger('arckon.server')
+log = logging.getLogger('sentinel.server')
 
 # ── login rate limiting ───────────────────────────────────────────────────────
 _login_attempts: dict[str, list[float]] = defaultdict(list)
@@ -132,68 +131,78 @@ def _get_store(customer_id: str = 'default'):
     return _store_cache[customer_id]
 
 
+_device_store_map: dict[str, str] = {}  # device_id → customer_id
+_device_store_map_lock = threading.Lock()
+
+def _get_store_for_device(device_id: str):
+    """Return the AgentStore that owns device_id, searching all customer dirs if needed."""
+    with _device_store_map_lock:
+        if device_id in _device_store_map:
+            return _get_store(_device_store_map[device_id])
+
+    # Check default first (fast path for single-tenant setups)
+    default_store = _get_store('default')
+    if default_store.is_known_device(device_id):
+        with _device_store_map_lock:
+            _device_store_map[device_id] = 'default'
+        return default_store
+
+    # Scan all customer directories for the device
+    customers_dir = ROOT / 'data' / 'customers'
+    if customers_dir.exists():
+        for cust_dir in customers_dir.iterdir():
+            if not cust_dir.is_dir() or cust_dir.name == 'default':
+                continue
+            db = cust_dir / 'agents.db'
+            if not db.exists():
+                continue
+            store = _get_store(cust_dir.name)
+            if store.is_known_device(device_id):
+                with _device_store_map_lock:
+                    _device_store_map[device_id] = cust_dir.name
+                return store
+
+    # Fall back to default (will create device there on touch)
+    return default_store
+
+
 # ── license (loaded once at startup) ─────────────────────────────────────────
 def _load_license() -> None:
     from license import load_license
     load_license(ROOT / 'license.json')
 
-# Thread-local storage for per-request customer license
-_request_lic = threading.local()
-
-
-def _set_request_license(customer: Union[dict, None]) -> None:
-    """Called at the start of each authenticated request to set the per-customer license."""
-    if customer:
-        from license import get_customer_license
-        _request_lic.license = get_customer_license(customer)
-    else:
-        _request_lic.license = None
-
-
-def _current_license():
-    """Return per-request customer license if set, else fall back to global license.json."""
-    lic = getattr(_request_lic, 'license', None)
-    if lic is not None:
-        return lic
-    from license import get_license
-    return get_license()
-
-
 def _has_technical_reports() -> bool:
+    """Return True if this license includes Technical reports and remediation. Defaults True."""
     try:
-        return _current_license().has_technical_reports
+        from license import get_license
+        return get_license().has_technical_reports
     except Exception:
         return True
 
 def _is_demo() -> bool:
+    """Return True when running in demo mode."""
     try:
-        return _current_license().is_demo
+        from license import get_license
+        return get_license().is_demo
     except Exception:
         return False
 
 def _has_evidence_package() -> bool:
+    """Return True when the license allows Evidence Package export. Defaults True."""
     try:
-        return _current_license().has_evidence_package
+        from license import get_license
+        return get_license().has_evidence_package
     except Exception:
         return True
+
 
 def _has_live_scan() -> bool:
+    """Return True when the license allows live adversarial probe scans (Plus only)."""
     try:
-        return _current_license().has_live_scan
+        from license import get_license
+        return get_license().has_live_scan
     except Exception:
         return True
-
-
-# ── per-customer alert config path ────────────────────────────────────────────
-def _alert_config_path(customer_id: str) -> Path:
-    """Return the per-customer alert config path, falling back to legacy global path."""
-    per_cust = ROOT / 'data' / 'customers' / customer_id / 'alerts_config.json'
-    if per_cust.exists():
-        return per_cust
-    legacy = ROOT / 'alerts_config.json'
-    if legacy.exists():
-        return legacy
-    return per_cust  # new customers write here on first save
 
 
 _LIVE_SCAN_CFG_PATH = ROOT / 'data' / 'live_scan_config.json'
@@ -220,12 +229,22 @@ def _content_length(headers) -> int:
 
 
 def _agent_token() -> str:
-    """Return legacy single-token value. Empty string means no auth configured."""
-    if os.environ.get('ARCKON_AGENT_TOKEN'):
-        return os.environ['ARCKON_AGENT_TOKEN']
-    tok_file = ROOT / 'agent_token.txt'
-    if tok_file.exists():
-        return tok_file.read_text().strip()
+    """Return legacy single-token value. Empty string means no auth configured.
+    Prefer SENTINEL_AGENT_TOKEN_FILE over a plain env var — env values are
+    visible via docker inspect and /proc (Arckon's own AI-DOCKER-006 check)."""
+    if os.environ.get('SENTINEL_AGENT_TOKEN'):
+        return os.environ['SENTINEL_AGENT_TOKEN']
+    tok_path = os.environ.get('SENTINEL_AGENT_TOKEN_FILE', '')
+    if tok_path:
+        try:
+            p = Path(tok_path)
+            if p.is_file():
+                return p.read_text().strip()
+        except OSError:
+            pass
+    for tok_file in (ROOT / 'agent_token.txt', ROOT / 'data' / 'agent_token.txt'):
+        if tok_file.exists():
+            return tok_file.read_text().strip()
     return ''
 
 
@@ -239,7 +258,7 @@ def _check_agent_token(submitted: str) -> bool:
     if single and _hmac.compare_digest(submitted, single):
         return True
     # Check multi-token store (tokens.py)
-    store_path_env = os.environ.get('ARCKON_TOKEN_STORE', '')
+    store_path_env = os.environ.get('SENTINEL_TOKEN_STORE', '')
     store_path = Path(store_path_env) if store_path_env else ROOT / 'output' / 'agent_tokens.json'
     if store_path.exists():
         try:
@@ -262,7 +281,15 @@ def _check_agent_token(submitted: str) -> bool:
 def _get_session_cookie(headers) -> str:
     for part in headers.get('Cookie', '').split(';'):
         k, _, v = part.strip().partition('=')
-        if k.strip() == 'arckon_session':
+        if k.strip() == 'sentinel_session':
+            return v.strip()
+    return ''
+
+
+def _get_cookie(headers, name: str) -> str:
+    for part in headers.get('Cookie', '').split(';'):
+        k, _, v = part.strip().partition('=')
+        if k.strip() == name:
             return v.strip()
     return ''
 
@@ -273,7 +300,7 @@ _REPORT_MIN_INTERVAL = 60  # seconds between accepted reports per device
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-def _latest_out_dir() -> Union[Path, None]:
+def _latest_out_dir() -> Path | None:
     """Return the newest demo_* dir (by directory name) that has a non-empty dashboard.html."""
     candidates = []
     for d in (ROOT / 'output').glob('demo_*'):
@@ -347,7 +374,7 @@ _LIGHT_MODE_CSS = (
     'html.light .auth-ok{color:#1a7f37}'
 )
 _THEME_EARLY_SCRIPT = (
-    "<script>if(localStorage.getItem('arckon_theme')==='light')"
+    "<script>if(localStorage.getItem('sentinel_theme')==='light')"
     "document.documentElement.classList.add('light');</script>"
 )
 _THEME_TOGGLE_JS = (
@@ -372,13 +399,13 @@ _THEME_TOGGLE_JS = (
     "n.style.color=l?'#57606a':null;});}}"
     "function toggleTheme(){"
     "var l=!document.documentElement.classList.contains('light');"
-    "localStorage.setItem('arckon_theme',l?'light':'dark');"
+    "localStorage.setItem('sentinel_theme',l?'light':'dark');"
     "_applyTheme(l);}"
     "document.addEventListener('DOMContentLoaded',function(){"
-    "_applyTheme(localStorage.getItem('arckon_theme')==='light');});"
+    "_applyTheme(localStorage.getItem('sentinel_theme')==='light');});"
     "window.addEventListener('storage',function(e){"
-    "if(e.key==='arckon_theme')_applyTheme(e.newValue==='light');});"
-    "_applyTheme(localStorage.getItem('arckon_theme')==='light');"
+    "if(e.key==='sentinel_theme')_applyTheme(e.newValue==='light');});"
+    "_applyTheme(localStorage.getItem('sentinel_theme')==='light');"
 )
 _THEME_BTN = (
     '<button id="theme-toggle" onclick="toggleTheme()" '
@@ -441,8 +468,8 @@ def _build_mcp_report_html(servers: list, tier: str) -> str:
     no_auth      = [s for s in servers if s.get('auth_status') == 'none']
     unknown_auth = [s for s in servers if s.get('auth_status') == 'unknown']
     auth_ok      = [s for s in servers if s.get('auth_status') == 'required']
-    net_servers  = [s for s in servers if s.get('source') == 'network']
-    proc_servers = [s for s in servers if s.get('source') == 'process']
+    [s for s in servers if s.get('source') == 'network']
+    [s for s in servers if s.get('source') == 'process']
     all_tools    = sorted({t for s in servers for t in (s.get('tools') or [])})
 
     risk_level  = 'CRITICAL' if no_auth else 'MEDIUM' if unknown_auth else 'LOW'
@@ -453,7 +480,7 @@ def _build_mcp_report_html(servers: list, tier: str) -> str:
     active_btn = 'color:#58a6ff;border-color:#1f6feb'
 
     parts = [f'''<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
-<title>Arckon by RiskRaven — MCP & Agent Governance {esc(tier_label)}</title>
+<title>Arckon — MCP & Agent Governance {esc(tier_label)}</title>
 <style>
 *{{box-sizing:border-box;margin:0;padding:0}}
 body{{background:#0d1117;color:#c9d1d9;font-family:system-ui,sans-serif;padding:32px;max-width:1100px;margin:0 auto}}
@@ -486,14 +513,14 @@ function switchTier(t){{location.href='/api/fleet/mcp/report?tier='+t;}}
 {_THEME_EARLY_SCRIPT}
 </head><body>
 <div class="toolbar">
-  <span style="font-size:13px;font-weight:600;color:#c9d1d9;margin-right:6px">Arckon by RiskRaven</span>
+  <span style="font-size:13px;font-weight:600;color:#c9d1d9;margin-right:6px">Arckon</span>
   <button onclick="switchTier('executive')" style="{btn_style}{';' + active_btn if tier=='executive' else ''}">Executive</button>
   <button onclick="switchTier('ciso')"      style="{btn_style}{';' + active_btn if tier=='ciso'      else ''}">CISO</button>
   <button onclick="switchTier('technical')" style="{btn_style}{';' + active_btn if tier=='technical' else ''}">Technical</button>
   <button onclick="window.print()" style="{btn_style}">&#128438; Print</button>
   {_THEME_BTN}
 </div>
-<h1>Arckon by RiskRaven &mdash; MCP &amp; Agent Governance &mdash; {esc(tier_label)}</h1>
+<h1>Arckon &mdash; MCP &amp; Agent Governance &mdash; {esc(tier_label)}</h1>
 <div class="meta">Generated {esc(now)} &nbsp;&bull;&nbsp; {len(servers)} MCP server(s) discovered &nbsp;&bull;&nbsp; Confidential</div>''']
 
     # Risk banner
@@ -505,8 +532,8 @@ function switchTier(t){{location.href='/api/fleet/mcp/report?tier='+t;}}
         parts.append(f'<div class="risk-banner" style="background:#2a1f0a;border:1px solid #d29922;color:#d29922">'
                      f'&#9888;&nbsp; REVIEW REQUIRED — {len(unknown_auth)} MCP server{"s" if len(unknown_auth)>1 else ""} with unverified authentication.</div>')
     else:
-        parts.append(f'<div class="risk-banner" style="background:#0f2a1a;border:1px solid #3fb950;color:#3fb950">'
-                     f'&#10003;&nbsp; All MCP servers require authentication.</div>')
+        parts.append('<div class="risk-banner" style="background:#0f2a1a;border:1px solid #3fb950;color:#3fb950">'
+                     '&#10003;&nbsp; All MCP servers require authentication.</div>')
 
     # Summary cards
     parts.append(f'''<div class="cards">
@@ -521,7 +548,7 @@ function switchTier(t){{location.href='/api/fleet/mcp/report?tier='+t;}}
     # ── EXECUTIVE ──────────────────────────────────────────────────────────────
     if tier == 'executive':
         if not servers:
-            parts.append('<div class="block"><p>No MCP servers have been discovered on the network. Run a scan from the Arckon dashboard to populate this report.</p></div>')
+            parts.append('<div class="block"><p>No MCP servers have been discovered on the network. Run a scan from the Sentinel dashboard to populate this report.</p></div>')
         else:
             business_risk = (
                 'Your organization has AI agent infrastructure running with <strong>no access controls</strong>. '
@@ -627,9 +654,9 @@ function switchTier(t){{location.href='/api/fleet/mcp/report?tier='+t;}}
                 fix = hint
                 break
 
-        parts.append(f'<div class="block">')
+        parts.append('<div class="block">')
         parts.append(f'<h3>&#128279; {esc(loc)} &mdash; {esc(server_name)}</h3>')
-        parts.append(f'<table style="margin-bottom:12px"><tbody>')
+        parts.append('<table style="margin-bottom:12px"><tbody>')
         parts.append(f'<tr><td style="color:#6e7681;width:160px">Auth Status</td><td><strong style="color:{auth_color}">{esc(auth_label)}</strong></td></tr>')
         parts.append(f'<tr><td style="color:#6e7681">Source</td><td>{"Network probe" if s.get("source")=="network" else "Process scan"}</td></tr>')
         parts.append(f'<tr><td style="color:#6e7681">Reporter</td><td>{esc(s.get("reporter_hostname",""))}</td></tr>')
@@ -644,8 +671,8 @@ function switchTier(t){{location.href='/api/fleet/mcp/report?tier='+t;}}
             parts.append('<div style="margin-bottom:12px">' + ''.join(f'<span class="tag">{esc(t)}</span>' for t in tools) + '</div>')
             high_risk_tools = [t for t in tools if any(kw in t.lower() for kw in ('exec', 'code', 'shell', 'run', 'write', 'delete', 'email', 'send', 'database', 'db', 'sql'))]
             if high_risk_tools and auth == 'none':
-                parts.append(f'<div style="background:#2d0f0f;border:1px solid #f85149;border-radius:4px;padding:8px 12px;font-size:12px;margin-bottom:10px;color:#f85149">'
-                             f'&#9888; High-risk tools accessible with no auth: '
+                parts.append('<div style="background:#2d0f0f;border:1px solid #f85149;border-radius:4px;padding:8px 12px;font-size:12px;margin-bottom:10px;color:#f85149">'
+                             '&#9888; High-risk tools accessible with no auth: '
                              + ''.join(f'<code style="background:#0d1117;padding:1px 6px;border-radius:3px;margin:0 3px">{esc(t)}</code>' for t in high_risk_tools)
                              + '</div>')
         else:
@@ -669,7 +696,7 @@ function switchTier(t){{location.href='/api/fleet/mcp/report?tier='+t;}}
     return ''.join(parts)
 
 
-def _build_fleet_report_html(devices: list, tier: str, profile: str = '', profiles: Union[list, None] = None, status_filter: str = '', sev_filter: str = '', demo: bool = False) -> str:
+def _build_fleet_report_html(devices: list, tier: str, profile: str = '', profiles: list | None = None, status_filter: str = '', sev_filter: str = '', demo: bool = False) -> str:
     from datetime import datetime, timezone
     import html as _html
 
@@ -698,8 +725,12 @@ def _build_fleet_report_html(devices: list, tier: str, profile: str = '', profil
     now = datetime.now(tz=timezone.utc).strftime('%Y-%m-%d %H:%M UTC')
     active_profiles = profiles or ([profile] if profile else [])
 
-    _rpt_profiles = [('default', 'Base Scan'), ('fedramp', 'FedRAMP'), ('cmmc', 'CMMC 2.0'),
-                     ('financial', 'Financial'), ('biotech', 'Biotech'), ('healthcare', 'Healthcare')]
+    _rpt_profiles = [('default', 'Base Scan'), ('fedramp', 'FedRAMP'), ('fedramp_20x', 'FedRAMP 20x'), ('cmmc', 'CMMC 2.0'),
+                     ('financial', 'Financial'), ('biotech', 'Biotech'), ('healthcare', 'Healthcare'),
+                     ('professional_services', 'Professional Services'),
+                     ('owasp_agentic', 'OWASP Agentic'), ('eu_ai_act', 'EU AI Act'),
+                     ('iso42001', 'ISO 42001'), ('atlas', 'MITRE ATLAS'),
+                     ('kubernetes', 'Kubernetes'), ('docker', 'Docker')]
     _toolbar_cbs = ' '.join(
         f'<label style="font-size:12px;color:#c9d1d9;white-space:nowrap;cursor:pointer">'
         f'<input type="checkbox" class="rpt-cb" value="{v}"{" checked" if v in active_profiles else ""}> {lbl}</label>'
@@ -723,7 +754,7 @@ def _build_fleet_report_html(devices: list, tier: str, profile: str = '', profil
     _cnt_li  = sum(1 for f in _all_pre if f.get('severity') in ('LOW', 'INFO'))
 
     parts = [f'''<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
-<title>Arckon by RiskRaven — Fleet {esc(tier_label)}</title>
+<title>Arckon — Fleet {esc(tier_label)}</title>
 <style>
 *{{box-sizing:border-box;margin:0;padding:0}}
 body{{background:#0d1117;color:#c9d1d9;font-family:system-ui,sans-serif;padding:32px;max-width:1100px;margin:0 auto}}
@@ -771,21 +802,21 @@ function switchTier(t){{
 {_THEME_EARLY_SCRIPT}
 </head><body>
 <div class="toolbar">
-  <span style="font-size:13px;font-weight:600;color:#c9d1d9;margin-right:6px">Arckon by RiskRaven</span>
+  <span style="font-size:13px;font-weight:600;color:#c9d1d9;margin-right:6px">Arckon</span>
   <button onclick="switchTier('executive')" style="{btn_style}{';color:#58a6ff;border-color:#1f6feb' if tier=='executive' else ''}">Executive</button>
   <button onclick="switchTier('ciso')"      style="{btn_style}{';color:#58a6ff;border-color:#1f6feb' if tier=='ciso' else ''}">CISO</button>
   <button onclick="switchTier('technical')" style="{btn_style}{';color:#58a6ff;border-color:#1f6feb' if tier=='technical' else ''}">Technical</button>
   <span style="font-size:11px;color:#8b949e;white-space:nowrap;margin-left:6px">Profiles:</span>
   {_toolbar_cbs}
   <button onclick="applyProfiles()" style="{btn_style};color:#58a6ff;border-color:#1f6feb">Apply</button>
-  <a href="/api/fleet/report?tier={tier}&fmt=pdf{_pdf_profile_param}{'&status=' + status_filter if status_filter else ''}" download="arckon_fleet_{tier}{_pdf_fname_suffix}.pdf" style="{btn_style};color:#3fb950;border-color:#238636">&#8659; Download PDF</a>
+  <a href="/api/fleet/report?tier={tier}&fmt=pdf{_pdf_profile_param}{'&status=' + status_filter if status_filter else ''}" download="sentinel_fleet_{tier}{_pdf_fname_suffix}.pdf" style="{btn_style};color:#3fb950;border-color:#238636">&#8659; Download PDF</a>
   <button onclick="window.print()" style="{btn_style}">&#128438; Print</button>
   {'<a href="/api/fleet/report?tier=' + tier + '&fmt=html' + _pdf_profile_param + '" style="' + btn_style + ';color:#f85149;border-color:#30363d">&#10005; Clear filter</a>' if status_filter else ''}
   {_THEME_BTN}
 </div>
 {'<div style="background:#1c2128;border:1px solid #30363d;border-radius:6px;padding:10px 18px;margin-bottom:20px;display:flex;align-items:center;justify-content:space-between"><span style="font-size:13px;font-weight:600;color:' + ('#f85149' if status_filter=='fail' else '#d29922' if status_filter=='warn' else '#58a6ff') + '">Showing: ' + esc(_status_label) + ' only — across all devices</span></div>' if status_filter else ''}
 {'<div style="background:#3d2000;border:1px solid #bb6800;border-radius:6px;padding:10px 18px;margin-bottom:18px;display:flex;align-items:center;gap:12px"><span style="font-size:15px">⚠️</span><div><span style="font-size:13px;font-weight:700;color:#f0a500">DEMO REPORT — For evaluation purposes only. Not for distribution.</span><span style="font-size:12px;color:#8b949e;margin-left:12px">Contact <a href="mailto:sales@markai.io" style="color:#58a6ff">sales@markai.io</a> to purchase a license.</span></div></div>' if demo else ''}
-<h1>Arckon by RiskRaven &mdash; Fleet {esc(tier_label)}</h1>
+<h1>Arckon &mdash; Fleet {esc(tier_label)}</h1>
 <div class="meta">Generated {esc(now)} &nbsp;&bull;&nbsp; {len(devices)} device(s){(' &nbsp;&bull;&nbsp; Profiles: <strong>' + esc(_profile_label) + '</strong>') if _profile_label else ''} &nbsp;&bull;&nbsp; {'DEMO — Not for distribution' if demo else 'Confidential'}</div>
 <div class="cards">
   <div class="card"><div class="card-n score">{fleet_score}%</div><div class="card-l">Fleet Score</div></div>
@@ -926,7 +957,7 @@ function switchTier(t){{
     return ''.join(parts)
 
 
-def _run_scan(mode: str, target: str, profile: str, providers: list[str], live_cfg: Union[dict, None] = None):
+def _run_scan(mode: str, target: str, profile: str, providers: list[str], live_cfg: dict | None = None):
     global _status, _log
     with _lock:
         _status = 'running'
@@ -994,12 +1025,7 @@ def _run_scan(mode: str, target: str, profile: str, providers: list[str], live_c
 
 
 class _TenantScopeError(Exception):
-    """A session's client-org scope could not be resolved safely.
-
-    Raised instead of returning None (which means "no filter — show the whole
-    MSP fleet") so that a client_viewer with a missing, unknown, deactivated
-    or cross-customer client_org_id fails closed rather than being handed
-    every tenant's devices."""
+    """A client-org scope could not be resolved safely."""
 
 
 class _Handler(http.server.BaseHTTPRequestHandler):
@@ -1011,89 +1037,67 @@ class _Handler(http.server.BaseHTTPRequestHandler):
 
     # ── auth helpers ──────────────────────────────────────────────────────────
 
-    def _proxy_session_user(self) -> Union[dict, None]:
-        if not (os.environ.get('ARCKON_TRUSTED_PROXY') or os.environ.get('SENTINEL_TRUSTED_PROXY')):
+    def _proxy_session_user(self) -> dict | None:
+        if not os.environ.get('SENTINEL_TRUSTED_PROXY'):
             return None
-        email = (self.headers.get('X-Sentinel-User-Email') or self.headers.get('X-Arckon-User-Email', '')).strip()
+        email = (self.headers.get('X-Sentinel-User-Email')
+                 or self.headers.get('X-Arckon-User-Email', '')).strip()
         if not email:
             return None
-        customer_id = (self.headers.get('X-Sentinel-Customer-ID') or self.headers.get('X-Arckon-Customer-ID', '')).strip() or 'default'
+        customer_id = (self.headers.get('X-Sentinel-Customer-ID')
+                       or self.headers.get('X-Arckon-Customer-ID', '')).strip() or 'default'
         org = (self.headers.get('X-Sentinel-Client-Org-ID')
                or self.headers.get('X-Arckon-Client-Org-ID', '')).strip()
         return {
             'email':       email,
-            # No role header means the proxy didn't vouch for one. Default to
-            # the least-privileged role, never 'admin' — a misconfigured or
-            # partially-updated vhost must not hand out MSP-wide access.
             'role':        (self.headers.get('X-Sentinel-User-Role')
                             or self.headers.get('X-Arckon-User-Role', '')).strip() or 'client_viewer',
             'customer_id': customer_id,
             'client_org_id': org or None,
+            'is_reseller': self.headers.get('X-Sentinel-Is-Reseller', '').strip() == '1',
+            'is_msp':      self.headers.get('X-Sentinel-Is-MSP', '').strip() == '1',
+            'impersonated_by': self.headers.get('X-Sentinel-Impersonated-By', '').strip() or None,
         }
 
-    def _session_user(self) -> Union[dict, None]:
+    def _session_user(self) -> dict | None:
         proxy = self._proxy_session_user()
         if proxy:
             return proxy
         token = _get_session_cookie(self.headers)
         return _get_registry().get_session(token) if token else None
 
-    def _resolve_session_org(self, user: Union[dict, None]) -> Union[str, None]:
-        """Validate this session's client-org pin and return it.
-
-        Returns None only for sessions that legitimately span the whole
-        customer — MSP admins, agent and setup requests — which is what lets
-        those roles keep their existing fleet-wide view. Anything else raises
-        _TenantScopeError:
-
-          * a client_viewer carrying no client_org_id at all (an unscoped
-            portal login is a cross-tenant read waiting to happen),
-          * any session whose client_org_id doesn't resolve to an active
-            client org belonging to that session's own customer (covers a
-            deleted/deactivated org, a typo, and a spoofed header that got
-            past the proxy).
-        """
+    def _resolve_session_org(self, user: dict | None) -> str | None:
+        """Validate an optional organization pin; never widen an invalid pin."""
         if not user:
             return None
-        raw = (user.get('client_org_id') or '').strip()
-        if not raw:
+        org_id = (user.get('client_org_id') or '').strip()
+        if not org_id:
             if user.get('role') == 'client_viewer':
-                raise _TenantScopeError(
-                    f"client_viewer {user.get('email', '?')!r} has no client_org_id"
-                )
+                raise _TenantScopeError('client_viewer has no client_org_id')
             return None
         try:
-            org = _get_registry().get_client_org(raw)
-        except Exception as e:
-            # A registry that can't answer is not a licence to show everything.
-            raise _TenantScopeError(f'could not resolve client_org_id {raw!r}: {e}')
-        if not org or not org.get('active'):
-            raise _TenantScopeError(f'client_org_id {raw!r} is not an active client org')
-        if org.get('customer_id') != user.get('customer_id'):
-            raise _TenantScopeError(
-                f"client_org_id {raw!r} belongs to customer "
-                f"{org.get('customer_id')!r}, not {user.get('customer_id')!r}"
-            )
-        return raw
+            org = _get_registry().get_client_org(org_id)
+        except Exception as exc:
+            raise _TenantScopeError(f'could not resolve client_org_id: {exc}')
+        if not org or not org.get('active') or org.get('customer_id') != user.get('customer_id'):
+            raise _TenantScopeError('client_org_id is inactive, unknown, or belongs to another customer')
+        return org_id
 
-    def _scoped_client_org(self) -> Union[str, None]:
+    def _scoped_client_org(self) -> str | None:
         """Return the effective client_org_id filter for this request.
 
         A client_viewer's own client_org_id always wins — the ?client_org=
         query param is ignored for that role so a scoped user can never
         widen their own view by hand-editing the URL. An MSP admin (no
         client_org_id on their session) may pass ?client_org=<id> to drill
-        into one client's fleet view; omit it (or pass 'all') to see every
-        device across every client, same as before this feature existed.
-
-        '' (empty string) is a meaningful return value here, not a falsy
-        "no filter" — it means "unassigned devices only". Callers must
-        compare against None, never test truthiness.
-        """
+        into one client's fleet view from the /clients rollup; omit it (or
+        pass 'all') to see every device across every client, same as before
+        this feature existed."""
+        user = self._session_user()
+        own_org = self._resolve_session_org(user)
+        if own_org is not None:
+            return own_org
         from urllib.parse import parse_qs, urlparse as _up
-        pinned = self._resolve_session_org(self._session_user())
-        if pinned is not None:
-            return pinned
         qs = parse_qs(_up(self.path).query)
         requested = (qs.get('client_org', [''])[0]).strip()
         if requested == '__unassigned__':
@@ -1103,17 +1107,15 @@ class _Handler(http.server.BaseHTTPRequestHandler):
     # Paths a client_viewer session may reach — everything else 403s.
     # Each entry here must have matching client_org_id filtering in its
     # handler (grep for self._scoped_client_org() to verify before adding
-    # a new path).
-    _CLIENT_VIEWER_ALLOWED_EXACT = frozenset({'/', '/api/status', '/api/devices'})
+    # a new path). The rollup dashboard (/clients) is deliberately NOT
+    # here — that view spans every client org for the MSP and must stay
+    # admin-only.
+    _CLIENT_VIEWER_ALLOWED_EXACT = frozenset({'/', '/api/status', '/api/devices', '/api/maintenance-notice'})
     _CLIENT_VIEWER_ALLOWED_PREFIX = ('/api/fleet/report',)
 
     def _client_viewer_gate(self, path: str) -> bool:
         """Return True if this request may proceed. Always True for non-
-        client_viewer sessions (MSP admins, agent/proxy auth, etc.).
-
-        Raises _TenantScopeError if the session claims a client org that
-        doesn't validate — checked for every role, not just client_viewer,
-        so a bad org pin can never fall through to an unscoped query."""
+        client_viewer sessions (MSP admins, agent/proxy auth, etc.)."""
         user = self._session_user()
         self._resolve_session_org(user)
         if not user or user.get('role') != 'client_viewer':
@@ -1147,7 +1149,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                 self.end_headers()
         return False
 
-    def _get_agent_customer(self) -> Union[dict, None]:
+    def _get_agent_customer(self) -> dict | None:
         submitted = self.headers.get('Authorization', '')
         if submitted.startswith('Bearer '):
             submitted = submitted[len('Bearer '):]
@@ -1160,7 +1162,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             return {'id': 'default', 'name': 'Default'}
         return None
 
-    def _get_dashboard_customer(self) -> Union[dict, None]:
+    def _get_dashboard_customer(self) -> dict | None:
         """Return the customer record for the authenticated dashboard user, or None."""
         user = self._session_user()
         if not user:
@@ -1179,13 +1181,13 @@ class _Handler(http.server.BaseHTTPRequestHandler):
     # ── routing ───────────────────────────────────────────────────────────────
 
     def do_GET(self):
-        print(f'[ARCKON] GET {self.path}', flush=True)
+        print(f'[SENTINEL] GET {self.path}', flush=True)
         try:
             self._do_GET_inner()
-            print(f'[ARCKON] GET {self.path} done', flush=True)
+            print(f'[SENTINEL] GET {self.path} done', flush=True)
         except BaseException as _e:
             import traceback as _tb
-            print(f'[ARCKON] GET {self.path} EXCEPTION: {_e}\n{_tb.format_exc()}', flush=True)
+            print(f'[SENTINEL] GET {self.path} EXCEPTION: {_e}\n{_tb.format_exc()}', flush=True)
             log.error('Unhandled GET error for %s: %s', self.path, _e, exc_info=True)
             try:
                 body = ('Internal server error:\n' + _tb.format_exc()).encode('utf-8', errors='replace')
@@ -1212,9 +1214,6 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             return
         if path == '/setup':
             self._serve_setup()
-            return
-        if path == '/admin':
-            self._serve_admin_panel()
             return
         if path == '/api/auth/me':
             self._api_auth_me()
@@ -1252,23 +1251,23 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             if not self._client_viewer_gate(path):
                 self._send(403, b'Forbidden: this account is read-only and scoped to one client.', 'text/plain')
                 return
-        except _TenantScopeError as e:
-            log.warning('denying GET %s — unresolvable client-org scope: %s', path, e)
+        except _TenantScopeError as exc:
+            log.warning('denying GET %s due to invalid client-org scope: %s', path, exc)
             self._send(403, b'Forbidden: this account is not scoped to a valid client.', 'text/plain')
-            return
-
-        if path == '/dns-inventory':
-            self._serve_dns_inventory()
             return
 
         static = {
             '/':               self._serve_fleet,
+            '/clients':        self._serve_clients,
+            '/api/clients':    self._api_clients_list,
+            '/reseller':       self._serve_reseller,
+            '/api/reseller/customers': self._api_reseller_customers,
             '/dashboard':      self._serve_dashboard,
             '/dashboard.html': self._serve_dashboard,
             '/api/status':     self._api_status,
+            '/api/maintenance-notice': self._api_maintenance_notice,
             '/api/events':     self._api_events,
             '/api/devices':    self._api_devices,
-            '/api/clients':    self._api_clients_list,
             '/api/discover':   self._api_discover,
             '/fleet':          lambda: self._redirect('/'),
             '/academy':        self._serve_academy,
@@ -1276,13 +1275,21 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             '/command':        lambda: self._redirect('/'),
             '/api/config':           self._api_get_config,
             '/api/alerts/config':    self._api_get_alert_config,
-            '/api/alerts/log':       self._api_get_alert_log,
-            '/api/audit/log':        self._api_get_audit_log,
+            '/api/alerts/events':    self._api_get_alert_events,
+            '/api/alerts/active-issues': self._api_get_active_issues,
+            '/api/alerts/unreviewed-count': self._api_unreviewed_alert_count,
+            '/api/siem/config':      self._api_get_siem_config,
             '/api/live-scan-config': self._api_get_live_scan_config,
             '/api/fleet/live-stats': self._api_fleet_live_stats,
+            '/api/fleet/k8s-status': self._api_fleet_k8s_status,
             '/api/fleet/shadow':  self._api_fleet_shadow,
             '/api/fleet/mcp':        self._api_fleet_mcp,
             '/api/fleet/mcp/report': self._api_fleet_mcp_report,
+            '/api/fleet/eu-ai-act-report': self._api_eu_ai_act_report,
+            '/api/fleet/aibom':            self._api_fleet_aibom,
+            '/api/fleet/aibom.json':       self._api_fleet_aibom_json,
+            '/api/branding':               self._api_get_branding,
+            '/api/psa/config':             self._api_get_psa_config,
             '/download/shortcut': self._serve_shortcut,
         }
         if path in static:
@@ -1306,8 +1313,10 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self._api_risk_register()
         elif path == '/api/fleet/risk-register/csv':
             self._api_risk_register_csv()
-        elif path == '/api/audit/log/csv':
-            self._api_audit_log_csv()
+        elif path == '/api/fleet/risk-register/overrides':
+            self._api_rr_overrides_list()
+        elif path == '/api/fleet/shadow/csv':
+            self._api_shadow_csv()
         elif path == '/api/fleet/inventory':
             self._api_inventory()
         elif path.startswith('/api/fleet/inventory/history/'):
@@ -1371,19 +1380,18 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         if not self._require_dashboard_auth():
             return
 
+        try:
+            self._resolve_session_org(self._session_user())
+        except _TenantScopeError as exc:
+            log.warning('denying POST %s due to invalid client-org scope: %s', path, exc)
+            self._send(403, b'Forbidden: this account is not scoped to a valid client.', 'text/plain')
+            return
+
         # client_viewer is read-only by definition — no POST route is ever
         # appropriate for that role.
         user = self._session_user()
         if user and user.get('role') == 'client_viewer':
             self._send(403, b'Forbidden: this account is read-only.', 'text/plain')
-            return
-        # An admin session pinned to a client org that no longer validates is
-        # denied here too — same fail-closed rule as GET.
-        try:
-            self._resolve_session_org(user)
-        except _TenantScopeError as e:
-            log.warning('denying POST %s — unresolvable client-org scope: %s', path, e)
-            self._send(403, b'Forbidden: this account is not scoped to a valid client.', 'text/plain')
             return
 
         if path == '/api/scan':
@@ -1396,8 +1404,25 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self._api_set_alert_config()
         elif path == '/api/alerts/test':
             self._api_test_alert()
-        elif path == '/api/alerts/ack':
-            self._api_ack_alert()
+        elif path == '/api/branding':
+            self._api_set_branding()
+        elif path == '/api/alerts/psa/test':
+            self._api_test_psa()
+        elif path == '/api/psa/config':
+            self._api_set_psa_config()
+        elif path.startswith('/api/psa/test-ticket/'):
+            self._api_test_psa_ticket(path[len('/api/psa/test-ticket/'):].strip('/'))
+        elif path.startswith('/api/psa/test/'):
+            self._api_test_psa_provider(path[len('/api/psa/test/'):].strip('/'))
+        elif path == '/api/alerts/events/review-all':
+            self._api_review_all_alerts()
+        elif path.startswith('/api/alerts/events/') and path.endswith('/review'):
+            _eid = path[len('/api/alerts/events/'):-len('/review')]
+            self._api_review_alert(_eid)
+        elif path == '/api/siem/config':
+            self._api_set_siem_config()
+        elif path.startswith('/api/siem/test/'):
+            self._api_test_siem(path[len('/api/siem/test/'):].strip('/'))
         elif path == '/api/system/update':
             self._api_system_update()
         elif path == '/api/system/restart-agent':
@@ -1416,22 +1441,11 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self._api_fleet_update(path[len('/api/fleet/update/'):])
         elif path.startswith('/api/fleet/remove/'):
             self._api_fleet_remove(path[len('/api/fleet/remove/'):])
-        elif path == '/api/fleet/set-profile':
-            self._api_fleet_set_profile()
-        elif path.startswith('/api/fleet/rename/'):
-            self._api_fleet_rename(path[len('/api/fleet/rename/'):])
         elif path == '/api/admin/license':
             self._api_admin_license()
-        elif path == '/api/admin/customers':
-            self._api_admin_create_customer()
-        elif path.startswith('/api/admin/customers/'):
-            self._api_admin_update_customer(path[len('/api/admin/customers/'):])
-        elif path == '/api/dns-inventory/analyze':
-            self._api_dns_inventory_analyze()
         elif path == '/api/probe-scan':
             self._api_probe_scan()
         elif path == '/probe':
-            _set_request_license(self._get_dashboard_customer())
             if not _has_live_scan():
                 self._send(403, b'Live scanning requires a Pro license. Contact sales@markai.io to upgrade.', 'text/plain')
                 return
@@ -1448,6 +1462,10 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self._api_inventory_set_status(path[len('/api/fleet/inventory/review/'):], 'under_review')
         elif path.startswith('/api/fleet/inventory/unapprove/'):
             self._api_inventory_set_status(path[len('/api/fleet/inventory/unapprove/'):], 'unapproved')
+        elif path.startswith('/api/fleet/inventory/false-positive/'):
+            self._api_inventory_false_positive(path[len('/api/fleet/inventory/false-positive/'):])
+        elif path == '/api/fleet/inventory/approve-service':
+            self._api_approve_service_globally()
         elif path == '/api/schedules':
             self._api_schedules_create()
         elif path.startswith('/api/schedules/') and path.endswith('/toggle'):
@@ -1464,14 +1482,27 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self._api_users_deactivate(path[len('/api/users/deactivate/'):])
         elif path.startswith('/api/users/password/'):
             self._api_users_password(path[len('/api/users/password/'):])
-        elif path == '/api/clients/add':
-            self._api_clients_add()
         elif path == '/api/clients/assign-devices':
             self._api_devices_assign_client_org()
+        elif path == '/api/reseller/impersonate':
+            self._api_reseller_impersonate()
+        elif path == '/api/reseller/impersonate/end':
+            self._api_reseller_impersonate_end()
+        elif path == '/api/clients/add':
+            self._api_clients_add()
         elif path.startswith('/api/clients/rename/'):
             self._api_clients_rename(path[len('/api/clients/rename/'):])
         elif path.startswith('/api/clients/deactivate/'):
             self._api_clients_deactivate(path[len('/api/clients/deactivate/'):])
+        elif path.startswith('/api/clients/report-config/'):
+            self._api_clients_report_config(path[len('/api/clients/report-config/'):])
+        elif path.startswith('/api/clients/send-report/'):
+            self._api_clients_send_report(path[len('/api/clients/send-report/'):])
+        elif path == '/api/fleet/risk-register/override':
+            self._api_rr_override_set()
+        elif path.startswith('/api/fleet/risk-register/override/') and path.endswith('/delete'):
+            check_id = path[len('/api/fleet/risk-register/override/'):-len('/delete')]
+            self._api_rr_override_delete(check_id)
         else:
             self._not_found()
 
@@ -1504,6 +1535,13 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self.send_header('Location', '/setup')
             self.end_headers()
             return
+        # In trusted-proxy mode the user is already authenticated by nginx —
+        # skip the login form and go straight to the dashboard.
+        if self._proxy_session_user():
+            self.send_response(302)
+            self.send_header('Location', '/')
+            self.end_headers()
+            return
         qs = parse_qs(urlparse(self.path).query)
         next_url = qs.get('next', ['/'])[0]
         if not next_url.startswith('/') or '//' in next_url:
@@ -1512,7 +1550,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         err_html = '<p class="err">Incorrect email or password.</p>' if qs.get('error') else ''
         body = (
             f'<!doctype html><html><head><meta charset="utf-8">'
-            f'<title>Arckon by RiskRaven — Sign in</title>'
+            f'<title>Arckon — Sign in</title>'
             f'<style>{self._LOGIN_CSS}</style>'
             f'</head><body><div class="box">'
             f'<h2>Arckon by RiskRaven</h2>'
@@ -1526,7 +1564,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             f'<input type="password" name="password" placeholder="••••••••" autocomplete="current-password">'
             f'<button type="submit">Sign in</button>'
             f'</form>'
-            f'<div class="brand">Powered by Hash</div>'
+            f'<div class="brand">Powered by RiskRaven</div>'
             f'</div></body></html>'
         ).encode()
         self.send_response(200)
@@ -1544,7 +1582,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         client_ip = self.client_address[0]
         if not _login_allowed(client_ip):
             self.send_response(302)
-            self.send_header('Location', f'/login?error=ratelimit')
+            self.send_header('Location', '/login?error=ratelimit')
             self.end_headers()
             return
         params = parse_qs(self.rfile.read(length).decode(errors='ignore'))
@@ -1557,14 +1595,9 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         user = reg.authenticate_user(email, password)
         if user:
             token = reg.create_session(user['id'], user['customer_id'], user['email'])
-            _get_store(user['customer_id']).log_action(
-                actor_id=user['id'], actor_name=user['email'], actor_role=user.get('role', ''),
-                action='login.success', target=user['email'],
-                details='User logged in successfully', ip_address=client_ip
-            )
             self.send_response(302)
             self.send_header('Set-Cookie',
-                f'arckon_session={token}; Path=/' + _COOKIE_FLAGS)
+                f'sentinel_session={token}; Path=/; HttpOnly; SameSite=Strict')
             self.send_header('Location', next_url)
             self.end_headers()
         else:
@@ -1576,18 +1609,11 @@ class _Handler(http.server.BaseHTTPRequestHandler):
     def _handle_logout(self):
         token = _get_session_cookie(self.headers)
         if token:
-            me = _get_registry().get_session(token)
-            if me:
-                _get_store(me['customer_id']).log_action(
-                    actor_id=me['user_id'], actor_name=me['email'], actor_role=me.get('role', ''),
-                    action='logout', target=me['email'],
-                    details='User logged out', ip_address=self.client_address[0]
-                )
             _get_registry().delete_session(token)
         self.send_response(302)
         self.send_header('Set-Cookie',
-            'arckon_session=; Path=/' + _COOKIE_FLAGS + '; Max-Age=0')
-        if os.environ.get('ARCKON_TRUSTED_PROXY'):
+            'sentinel_session=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0')
+        if os.environ.get('SENTINEL_TRUSTED_PROXY'):
             # Cloud mode: clear admin-panel JWT via its logout endpoint,
             # which then redirects to the clean /login page.
             host = self.headers.get('Host', '').split(':')[0]
@@ -1597,7 +1623,6 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         self.end_headers()
 
     def _serve_setup(self):
-        import html as _html
         from urllib.parse import parse_qs
         if _get_registry().has_customers():
             self.send_response(302)
@@ -1616,7 +1641,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         err_html = f'<p class="err">{err_map.get(err_key, "")}</p>' if err_key else ''
         body = (
             f'<!doctype html><html><head><meta charset="utf-8">'
-            f'<title>Arckon by RiskRaven — Setup</title>'
+            f'<title>Arckon — Setup</title>'
             f'<style>{self._LOGIN_CSS}</style>'
             f'</head><body><div class="box">'
             f'<h2>Arckon by RiskRaven</h2>'
@@ -1633,7 +1658,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             f'<input type="password" name="confirm" placeholder="Re-enter password" autocomplete="new-password">'
             f'<button type="submit">Create &amp; sign in</button>'
             f'</form>'
-            f'<div class="brand">Powered by Hash</div>'
+            f'<div class="brand">Powered by RiskRaven</div>'
             f'</div></body></html>'
         ).encode()
         self.send_response(200)
@@ -1673,7 +1698,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             token = reg.create_session(user['id'], customer['id'], user['email'])
             self.send_response(302)
             self.send_header('Set-Cookie',
-                f'arckon_session={token}; Path=/' + _COOKIE_FLAGS)
+                f'sentinel_session={token}; Path=/; HttpOnly; SameSite=Strict')
             self.send_header('Location', '/')
             self.end_headers()
         except Exception:
@@ -1690,10 +1715,11 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self._json({'email': None, 'role': None, 'customer_id': None}, 401)
 
     def _admin_panel_url(self) -> str:
-        return os.environ.get('ARCKON_ADMIN_URL', 'http://user-manager:8000')
+        return os.environ.get('SENTINEL_ADMIN_URL', 'http://sentinel-admin:8000')
 
     def _proxy_to_admin(self, path: str, method: str = 'GET', body: bytes = b'') -> None:
-        import urllib.request, urllib.error
+        import urllib.request
+        import urllib.error
         url = self._admin_panel_url() + path
         cookie = self.headers.get('Cookie', '')
         req = urllib.request.Request(url, data=body or None, method=method,
@@ -1712,7 +1738,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         if not me:
             self._json({'error': 'unauthorized'}, 401)
             return
-        if os.environ.get('ARCKON_TRUSTED_PROXY'):
+        if os.environ.get('SENTINEL_TRUSTED_PROXY'):
             self._proxy_to_admin('/api/users')
             return
         users = _get_registry().list_users(me['customer_id'])
@@ -1728,7 +1754,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             return
         cl = int(self.headers.get('Content-Length', 0))
         raw = self.rfile.read(cl) if cl else b'{}'
-        if os.environ.get('ARCKON_TRUSTED_PROXY'):
+        if os.environ.get('SENTINEL_TRUSTED_PROXY'):
             self._proxy_to_admin('/api/users/add', 'POST', raw)
             return
         try:
@@ -1756,13 +1782,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                     self._json({'error': 'client_org_id not found for this customer'}, 404)
                     return
 
-            user = _get_registry().create_user(me['customer_id'], email, password, role,
-                                               client_org_id)
-            self._store().log_action(
-                actor_id=me.get('user_id', me.get('id', '')), actor_name=me['email'], actor_role=me.get('role', ''),
-                action='user.add', target=email,
-                details=f'Added user {email} with role {role}', ip_address=self.client_address[0]
-            )
+            user = _get_registry().create_user(me['customer_id'], email, password, role, client_org_id)
             self._json({'ok': True, 'user': user})
         except Exception as e:
             self._json({'error': str(e)}, 500)
@@ -1773,17 +1793,11 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self._json({'error': 'forbidden'}, 403)
             return
         user_id = user_id_str.strip('/')
-        if os.environ.get('ARCKON_TRUSTED_PROXY'):
+        if os.environ.get('SENTINEL_TRUSTED_PROXY'):
             self._proxy_to_admin(f'/api/users/remove/{user_id}', 'POST')
             return
         try:
             ok = _get_registry().deactivate_user(user_id, me['customer_id'])
-            if ok:
-                self._store().log_action(
-                    actor_id=me.get('user_id', me.get('id', '')), actor_name=me['email'], actor_role=me.get('role', ''),
-                    action='user.remove', target=user_id,
-                    details=f'Removed user {user_id}', ip_address=self.client_address[0]
-                )
             self._json({'ok': ok})
         except Exception as e:
             self._json({'error': str(e)}, 500)
@@ -1796,7 +1810,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         user_id = user_id_str.strip('/')
         cl = int(self.headers.get('Content-Length', 0))
         raw = self.rfile.read(cl) if cl else b'{}'
-        if os.environ.get('ARCKON_TRUSTED_PROXY'):
+        if os.environ.get('SENTINEL_TRUSTED_PROXY'):
             self._proxy_to_admin(f'/api/users/password/{user_id}', 'POST', raw)
             return
         try:
@@ -1806,15 +1820,185 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                 self._json({'error': 'password too short'}, 400)
                 return
             ok = _get_registry().change_user_password(user_id, me['customer_id'], new_password)
-            if ok:
-                self._store().log_action(
-                    actor_id=me.get('user_id', me.get('id', '')), actor_name=me['email'], actor_role=me.get('role', ''),
-                    action='user.password.reset', target=user_id,
-                    details=f'Reset password for user {user_id}', ip_address=self.client_address[0]
-                )
             self._json({'ok': ok} if ok else {'error': 'user not found'}, 200 if ok else 404)
         except Exception as e:
             self._json({'error': str(e)}, 500)
+
+    def _api_reseller_customers(self):
+        """GET /api/reseller/customers — proxies to the admin service so a
+        reseller MSP's own customer_admin sees their resold customers inside
+        their own dashboard, without a separate admin-panel login."""
+        me = self._session_user()
+        if not me or me.get('role') not in ('admin', 'customer_admin', 'super_admin'):
+            self._json({'error': 'forbidden'}, 403)
+            return
+        self._proxy_to_admin('/api/reseller/customers')
+
+    def _api_reseller_impersonate(self):
+        """POST /api/reseller/impersonate — start a support session in a
+        resold customer's dashboard without re-authenticating.
+
+        The browser's real ingress is nginx on the shared IP, on a different
+        port per customer but the SAME host — cookies aren't port-scoped, so
+        a token cookie set here (via this response) is sent by the browser
+        to any resold customer's port on the same host. We stash the
+        reseller's own token in a second cookie first so "return to my
+        account" can restore it without a fresh login."""
+        me = self._session_user()
+        if not me or me.get('role') not in ('admin', 'customer_admin', 'super_admin'):
+            self._json({'error': 'forbidden'}, 403)
+            return
+        cl = int(self.headers.get('Content-Length', 0))
+        raw = self.rfile.read(cl) if cl else b'{}'
+        import urllib.request, urllib.error
+        url = self._admin_panel_url() + '/api/reseller/impersonate'
+        cookie = self.headers.get('Cookie', '')
+        req = urllib.request.Request(url, data=raw, method='POST',
+                                     headers={'Cookie': cookie, 'Content-Type': 'application/json'})
+        try:
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                data = json.loads(resp.read())
+        except urllib.error.HTTPError as e:
+            self._send(e.code, e.read(), 'application/json')
+            return
+        except Exception as e:
+            self._json({'error': str(e)}, 502)
+            return
+
+        original_token = _get_cookie(self.headers, 'token')
+        body = json.dumps({'ok': True, 'dashboard_url': data.get('dashboard_url', '')}).encode()
+        self.send_response(200)
+        self.send_header('Content-Type', 'application/json')
+        self.send_header('Content-Length', len(body))
+        if original_token:
+            self.send_header('Set-Cookie',
+                f'sentinel_return_token={original_token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=1800')
+            self.send_header('Set-Cookie',
+                f'sentinel_return_url={data.get("return_url", "")}; Path=/; HttpOnly; SameSite=Lax; Max-Age=1800')
+        self.send_header('Set-Cookie',
+            f'token={data.get("token", "")}; Path=/; HttpOnly; SameSite=Lax; Max-Age=1800')
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _api_reseller_impersonate_end(self):
+        """POST /api/reseller/impersonate/end — log the end of the support
+        session (while the impersonation token is still active), then
+        restore the reseller's own token from the stashed cookie."""
+        return_token = _get_cookie(self.headers, 'sentinel_return_token')
+        return_url = _get_cookie(self.headers, 'sentinel_return_url')
+        import urllib.request, urllib.error
+        try:
+            url = self._admin_panel_url() + '/api/reseller/impersonate/end'
+            cookie = self.headers.get('Cookie', '')
+            req = urllib.request.Request(url, data=b'{}', method='POST',
+                                         headers={'Cookie': cookie, 'Content-Type': 'application/json'})
+            with urllib.request.urlopen(req, timeout=5):
+                pass
+        except Exception:
+            pass  # best-effort audit log; don't block the return on it
+
+        body = json.dumps({'ok': bool(return_token), 'redirect_url': return_url}).encode()
+        self.send_response(200)
+        self.send_header('Content-Type', 'application/json')
+        self.send_header('Content-Length', len(body))
+        if return_token:
+            self.send_header('Set-Cookie', f'token={return_token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=28800')
+        self.send_header('Set-Cookie', 'sentinel_return_token=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0')
+        self.send_header('Set-Cookie', 'sentinel_return_url=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0')
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _serve_reseller(self):
+        """GET /reseller — MSP-admin-only page listing customers resold under
+        this account. Not in the client_viewer allowlist, so a scoped
+        session never reaches this method at all."""
+        me = self._session_user()
+        if not me or me.get('role') not in ('admin', 'customer_admin', 'super_admin'):
+            self._send(403, b'Forbidden', 'text/plain')
+            return
+        body = """<!DOCTYPE html><html><head><meta charset="utf-8">
+<title>MSP View — Arckon</title>
+<style>
+body{font:14px -apple-system,sans-serif;background:#0d1117;color:#c9d1d9;margin:0;padding:32px}
+h1{font-size:20px;font-weight:600;margin:0 0 20px}
+a.back{color:#58a6ff;text-decoration:none;font-size:13px}
+table{width:100%;border-collapse:collapse;margin-top:16px;background:#161b22;border-radius:8px;overflow:hidden}
+th{text-align:left;padding:10px 14px;background:#21262d;color:#8b949e;font-weight:500;font-size:12px;text-transform:uppercase}
+td{padding:10px 14px;border-top:1px solid #21262d}
+.badge-green{color:#16A34A}
+.badge-red{color:#DC2626}
+#msg{padding:32px;text-align:center;color:#8b949e}
+</style></head><body>
+<a class="back" id="backlink" href="/">&larr; Back to dashboard</a>
+<script>if (window.self !== window.top) { var _bl = document.getElementById('backlink'); if (_bl) _bl.style.display = 'none'; }</script>
+<h1>MSP View</h1>
+<div id="msg">Loading…</div>
+<table id="tbl" style="display:none">
+<tr><th>Name</th><th>Status</th><th>Plan</th><th>Seats used</th><th>License expiry</th><th></th></tr>
+</table>
+<div id="enter-status" style="margin-top:12px;font-size:13px;color:#8b949e"></div>
+<script>
+async function load(){
+  const msg = document.getElementById('msg');
+  const tbl = document.getElementById('tbl');
+  try {
+    const r = await fetch('/api/reseller/customers');
+    const data = await r.json();
+    if (!r.ok) {
+      msg.textContent = data.error === 'this account is not flagged as a reseller MSP'
+        ? 'This account is not set up as a reseller MSP. Contact Arckon to enable reselling on your account.'
+        : (data.error || 'Failed to load resold customers.');
+      return;
+    }
+    const customers = data.customers || [];
+    if (!customers.length) {
+      msg.textContent = 'No resold customers yet.';
+      return;
+    }
+    msg.style.display = 'none';
+    tbl.style.display = '';
+    customers.forEach(c => {
+      const tr = document.createElement('tr');
+      const status = c.active ? '<span class="badge-green">Active</span>' : '<span class="badge-red">Archived</span>';
+      const seats = c.current_agents + ' / ' + c.max_seats;
+      const expiry = c.license_expires_at ? c.license_expires_at.slice(0,10) : '—';
+      const enterBtn = c.active
+        ? '<button onclick="enterCustomer(\\'' + c.id + '\\', this)" style="background:#238636;color:#fff;border:none;padding:5px 12px;border-radius:4px;cursor:pointer;font-size:12px">Enter dashboard</button>'
+        : '—';
+      tr.innerHTML = '<td>' + c.name + '</td><td>' + status + '</td><td>' + (c.tier || '—') + '</td>' +
+        '<td>' + seats + '</td><td>' + expiry + '</td><td>' + enterBtn + '</td>';
+      tbl.appendChild(tr);
+    });
+  } catch(e) {
+    msg.textContent = 'Network error loading resold customers.';
+  }
+}
+
+async function enterCustomer(customerId, btn){
+  const statusEl = document.getElementById('enter-status');
+  btn.disabled = true;
+  statusEl.textContent = 'Starting support session…';
+  try {
+    const r = await fetch('/api/reseller/impersonate', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({customer_id: customerId})
+    });
+    const data = await r.json();
+    if (data.ok && data.dashboard_url) {
+      window.location = data.dashboard_url;
+    } else {
+      statusEl.textContent = data.error || 'Failed to start support session.';
+      btn.disabled = false;
+    }
+  } catch(e) {
+    statusEl.textContent = 'Network error.';
+    btn.disabled = false;
+  }
+}
+load();
+</script>
+</body></html>"""
+        self._send(200, body.encode('utf-8'), 'text/html; charset=utf-8')
 
     # ── client org management (MSP admin only — never reachable by client_viewer,
     # see _CLIENT_VIEWER_ALLOWED_EXACT/_PREFIX) ───────────────────────────────
@@ -1825,7 +2009,52 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self._json({'error': 'forbidden'}, 403)
             return
         try:
-            self._json({'client_orgs': _get_registry().list_client_orgs(me['customer_id'])})
+            reg = _get_registry()
+            orgs = reg.list_client_orgs(me['customer_id'])
+            rollup = self._store().rollup_by_client_org()
+            out = []
+            for o in orgs:
+                stats = rollup.get(o['id'], {
+                    'device_count': 0, 'critical': 0, 'warning': 0, 'ok': 0,
+                    'no_data': 0, 'last_scan_at': 0, 'worst_severity': 'no_data',
+                })
+                out.append({**o, **stats})
+            unassigned = rollup.get(None)
+            if unassigned:
+                out.append({'id': None, 'name': 'Unassigned', 'enroll_token': None, **unassigned})
+            self._json({'client_orgs': out})
+        except Exception as e:
+            self._json({'error': str(e)}, 500)
+
+    def _api_devices_assign_client_org(self):
+        """POST /api/clients/assign-devices — bulk move devices between client
+        orgs (or back to unassigned) without touching agent_config.json on
+        each machine. This is the scale-friendly alternative to per-device
+        re-enrollment for fleets too large to hand-edit one at a time."""
+        me = self._session_user()
+        if not me or me.get('role') not in ('admin', 'customer_admin', 'super_admin'):
+            self._json({'error': 'forbidden'}, 403)
+            return
+        cl = int(self.headers.get('Content-Length', 0))
+        raw = self.rfile.read(cl) if cl else b'{}'
+        try:
+            body = json.loads(raw)
+            device_ids = body.get('device_ids', [])
+            client_org_id = str(body.get('client_org_id', '')).strip()
+            if not isinstance(device_ids, list) or not device_ids:
+                self._json({'error': 'device_ids is required'}, 400)
+                return
+            if client_org_id:
+                org = _get_registry().get_client_org(client_org_id)
+                if not org or org.get('customer_id') != me['customer_id']:
+                    self._json({'error': 'client_org_id not found for this customer'}, 404)
+                    return
+            store = self._store()
+            moved = 0
+            for device_id in device_ids:
+                if store.set_device_client_org(str(device_id), client_org_id or None):
+                    moved += 1
+            self._json({'ok': True, 'moved': moved})
         except Exception as e:
             self._json({'error': str(e)}, 500)
 
@@ -1878,53 +2107,71 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         except Exception as e:
             self._json({'error': str(e)}, 500)
 
-    def _api_devices_assign_client_org(self):
-        """POST /api/clients/assign-devices — bulk move devices between client
-        orgs (or back to unassigned) without touching agent_config.json on
-        each machine. This is the scale-friendly alternative to per-device
-        re-enrollment for fleets too large to hand-edit one at a time."""
+    def _api_clients_report_config(self, org_id_str: str):
+        """POST /api/clients/report-config/<org_id> — set the monthly
+        white-label PDF delivery email + cadence for one client org."""
         me = self._session_user()
         if not me or me.get('role') not in ('admin', 'customer_admin', 'super_admin'):
             self._json({'error': 'forbidden'}, 403)
             return
+        org_id = org_id_str.strip('/')
         cl = int(self.headers.get('Content-Length', 0))
         raw = self.rfile.read(cl) if cl else b'{}'
         try:
             body = json.loads(raw)
-            device_ids = body.get('device_ids', [])
-            client_org_id = str(body.get('client_org_id', '')).strip()
-            if not isinstance(device_ids, list) or not device_ids:
-                self._json({'error': 'device_ids is required'}, 400)
+            report_email = str(body.get('report_email', '')).strip()
+            report_cadence = str(body.get('report_cadence', 'off')).strip()
+            if report_cadence == 'monthly' and '@' not in report_email:
+                self._json({'error': 'a valid report_email is required to enable monthly reports'}, 400)
                 return
-            if client_org_id:
-                org = _get_registry().get_client_org(client_org_id)
-                if not org or org.get('customer_id') != me['customer_id']:
-                    self._json({'error': 'client_org_id not found for this customer'}, 404)
-                    return
-            store = self._store()
-            moved = 0
-            for device_id in device_ids:
-                if store.set_device_client_org(str(device_id), client_org_id or None):
-                    moved += 1
-            self._json({'ok': True, 'moved': moved})
+            ok = _get_registry().set_client_org_report_config(
+                org_id, me['customer_id'], report_email, report_cadence)
+            self._json({'ok': ok} if ok else {'error': 'client org not found'}, 200 if ok else 404)
         except Exception as e:
             self._json({'error': str(e)}, 500)
+
+    def _api_clients_send_report(self, org_id_str: str):
+        """POST /api/clients/send-report/<org_id> — send the report right
+        now, using report_email if set, otherwise a one-off address in the
+        request body. Same send_client_org_report() code path the daily
+        scheduler uses, so a successful manual test is a real guarantee."""
+        me = self._session_user()
+        if not me or me.get('role') not in ('admin', 'customer_admin', 'super_admin'):
+            self._json({'error': 'forbidden'}, 403)
+            return
+        org_id = org_id_str.strip('/')
+        cl = int(self.headers.get('Content-Length', 0))
+        raw = self.rfile.read(cl) if cl else b'{}'
+        try:
+            body = json.loads(raw) if raw.strip() else {}
+        except json.JSONDecodeError:
+            body = {}
+        org = _get_registry().get_client_org(org_id)
+        if not org or org.get('customer_id') != me['customer_id']:
+            self._json({'error': 'client org not found'}, 404)
+            return
+        to_addr = str(body.get('report_email', '')).strip() or org.get('report_email', '')
+        if '@' not in to_addr:
+            self._json({'ok': False, 'error': 'no report_email set for this client — provide one or save it first'}, 400)
+            return
+        ok, msg = send_client_org_report(me['customer_id'], org_id, org['name'], to_addr)
+        self._json({'ok': ok, 'message': msg})
 
     def _api_customers_me(self):
         me = self._session_user()
         if not me:
             self._json({'error': 'unauthorized'}, 401)
             return
-        if os.environ.get('ARCKON_TRUSTED_PROXY'):
+        if os.environ.get('SENTINEL_TRUSTED_PROXY'):
             # Cloud mode: each container is one customer.
             # Agent token is the env var set at provision time.
-            agent_token = os.environ.get('ARCKON_AGENT_TOKEN', '')
+            agent_token = os.environ.get('SENTINEL_AGENT_TOKEN', '')
             if not agent_token:
                 tok_file = ROOT / 'data' / 'agent_token.txt'
                 if tok_file.exists():
                     agent_token = tok_file.read_text().strip()
             # Company name: first (only) customer in registry, else env var
-            name = os.environ.get('ARCKON_CUSTOMER_NAME', '')
+            name = os.environ.get('SENTINEL_CUSTOMER_NAME', '')
             if not name:
                 try:
                     custs = _get_registry().list_customers()
@@ -1987,6 +2234,22 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         with _lock:
             self._json({'status': _status, 'lines': len(_log)})
 
+    def _api_maintenance_notice(self):
+        """GET /api/maintenance-notice — relays sentinel-admin's
+        /api/maintenance/active so browsers can poll it without needing
+        direct network access to the internal admin service (which isn't
+        exposed to the public internet). Fails soft: a network blip here
+        should never break the dashboard, just means no banner shows."""
+        try:
+            import urllib.request
+            req = urllib.request.Request('http://sentinel-admin:8000/api/maintenance/active')
+            with urllib.request.urlopen(req, timeout=3) as resp:
+                data = json.loads(resp.read().decode())
+            self._json(data)
+        except Exception as e:
+            log.debug('maintenance notice relay failed: %s', e)
+            self._json({'notice': None})
+
     def _api_health(self):
         """Basic health endpoint for monitoring. Returns 200 + JSON when the dashboard server is reachable.
         Includes server time and which dashboard (demo_*) folder is being served, if any.
@@ -2004,7 +2267,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             dash = None
         self._json({
             'status': 'ok',
-            'server': 'arckon-dashboard',
+            'server': 'sentinel-dashboard',
             'time': datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
             'dashboard': dash,
         })
@@ -2018,17 +2281,47 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         self._send(200, agent_file.read_bytes(), 'text/x-python; charset=utf-8')
 
     def _serve_bundle(self):
-        """GET /bundle.tar.gz — serve a minimal Arckon bundle for remote agents.
-        Includes everything needed to run agent.py + audit.py on a remote machine.
-        Excludes: output/, benchmarks/, docs/, test/, .git, __pycache__, *.db, *.log.
+        """GET /bundle.tar.gz — serve a minimal Sentinel bundle for remote agents.
+
+        If compiled binaries exist (agent, audit), the bundle contains those and
+        excludes the corresponding Python source files — customers receive binaries only.
+        Falls back to shipping Python source when binaries are not present (dev mode).
+
+        Always excludes: output/, benchmarks/, docs/, test/, .git, __pycache__,
+        *.db, *.log, agent_token.txt.
         """
         _SKIP_DIRS  = {'benchmarks', 'docs', 'test', '.git', '__pycache__',
-                       '.arckon_db', 'node_modules'}
+                       '.sentinel_db', 'node_modules'}
         _SKIP_EXTS  = {'.db', '.log', '.pyc', '.egg-info'}
         _SKIP_FILES = {'agent_token.txt'}
 
+        agent_bin = ROOT / 'agent'
+        audit_bin = ROOT / 'audit'
+        has_agent_bin = agent_bin.exists() and os.access(agent_bin, os.X_OK)
+        has_audit_bin = audit_bin.exists() and os.access(audit_bin, os.X_OK)
+
+        # Python source files replaced by compiled binaries — exclude from bundle
+        # when the corresponding binary is present.
+        _COMPILED_SOURCE: set[str] = set()
+        if has_agent_bin:
+            _COMPILED_SOURCE.update({
+                'agent.py', 'discovery.py',
+            })
+            # Exclude connectors/ source — embedded in agent binary
+            _SKIP_DIRS = _SKIP_DIRS | {'connectors'}
+        if has_audit_bin:
+            _COMPILED_SOURCE.update({'audit.py'})
+            # Note: checks/ and output/ are NOT embedded in the binary
+            # They're shipped in the bundle alongside the compiled audit binary
+
         buf = io.BytesIO()
         with tarfile.open(fileobj=buf, mode='w:gz') as tar:
+            # Add compiled binaries first if present
+            if has_agent_bin:
+                tar.add(agent_bin, arcname='sentinel/agent')
+            if has_audit_bin:
+                tar.add(audit_bin, arcname='sentinel/audit')
+
             for path in sorted(ROOT.rglob('*')):
                 if not path.is_file():
                     continue
@@ -2040,18 +2333,25 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                     continue
                 if path.name in _SKIP_FILES:
                     continue
+                if path.name in _COMPILED_SOURCE:
+                    continue
+                # Skip the binaries themselves — already added above
+                if path.name in ('agent', 'audit') and len(parts) == 1:
+                    continue
                 # From output/ only ship the Python modules, not scan result dirs
                 if parts[0] == 'output' and (len(parts) > 2 or path.suffix != '.py'):
                     continue
-                tar.add(path, arcname=str(Path('arckon') / rel))
+                tar.add(path, arcname=str(Path('sentinel') / rel))
+
         data = buf.getvalue()
         import hashlib as _hashlib
         bundle_sha256 = _hashlib.sha256(data).hexdigest()
         self.send_response(200)
         self.send_header('Content-Type', 'application/gzip')
-        self.send_header('Content-Disposition', 'attachment; filename="arckon.tar.gz"')
+        self.send_header('Content-Disposition', 'attachment; filename="sentinel.tar.gz"')
         self.send_header('Content-Length', str(len(data)))
         self.send_header('X-Bundle-SHA256', bundle_sha256)
+        self.send_header('X-Agent-Binary', '1' if has_agent_bin else '0')
         self.end_headers()
         self.wfile.write(data)
 
@@ -2145,7 +2445,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             results = [_R(r) for r in results_raw]
             pdf_bytes = format_pdf(results, profile, target, mode)
             hostname = report.get('target', device_id).replace('/', '_').replace(' ', '_')
-            filename = f'arckon_{hostname}.pdf'
+            filename = f'sentinel_{hostname}.pdf'
             self.send_response(200)
             self.send_header('Content-Type', 'application/pdf')
             self.send_header('Content-Disposition', f'attachment; filename="{filename}"')
@@ -2215,13 +2515,6 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             args=(mode, safe_target, profile, body.get('providers', []), live_cfg),
             daemon=True,
         ).start()
-        me = self._session_user()
-        if me:
-            self._store().log_action(
-                actor_id=me.get('user_id', me.get('id', '')), actor_name=me['email'], actor_role=me.get('role', ''),
-                action='scan.trigger', target=safe_target,
-                details=f'Triggered {mode} scan (profile={profile})', ip_address=self.client_address[0]
-            )
         self._json({'status': 'started'})
 
     # ── agent API ─────────────────────────────────────────────────────────────
@@ -2259,8 +2552,21 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                 return
             _report_last_seen[device_id] = now
 
-        _cust = self._get_agent_customer()
-        store = _get_store(_cust['id'] if _cust else 'default')
+        # Prefer the customer's own store (resolved from bearer token) for new devices.
+        # _get_store_for_device falls back to 'default' for unknown devices, which causes
+        # reports to land in the wrong store when the agent uses a customer-specific token.
+        _agent_cust = self._get_agent_customer()
+        _cust_id = _agent_cust.get('id') if _agent_cust else None
+        if _cust_id and _cust_id != 'default':
+            store = _get_store(_cust_id)
+            if not store.is_known_device(device_id):
+                # Device not in customer store yet — check all stores first
+                store = _get_store_for_device(device_id)
+                # If still in wrong store, migrate to customer store
+                if store is not _get_store(_cust_id):
+                    store = _get_store(_cust_id)
+        else:
+            store = _get_store_for_device(device_id)
         is_new = not store.is_known_device(device_id)
 
         # Duplicate hostname detection — warn when a new device_id uses an existing hostname
@@ -2283,28 +2589,13 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             except Exception as _de:
                 log.error('duplicate check error: %s', _de)
 
-        # Per-customer license seat check — only runs when this is a previously unseen device
+        # License seat check — only runs when this is a previously unseen device
         license_status = 'ok'
         try:
+            from license import check_overage
             if is_new:
-                current_count = store.device_count() + 1
-                cust_record = _get_registry().get_by_id(_cust['id']) if _cust else None
-                if cust_record:
-                    from license import get_customer_license
-                    cust_lic = get_customer_license(cust_record)
-                    license_status = cust_lic.check(current_count)
-                    if license_status in ('over_limit', 'over_grace', 'expired'):
-                        store.log_license_event(
-                            event_type=license_status, device_id=device_id,
-                            hostname=hostname, agent_count=current_count,
-                            max_agents=cust_lic.max_agents,
-                        )
-                        log.warning('LICENSE %s — customer=%s device=%s count=%d max=%d',
-                                    license_status.upper(), _cust['id'], device_id,
-                                    current_count, cust_lic.max_agents)
-                else:
-                    from license import check_overage
-                    license_status = check_overage(device_id, hostname, current_count, store)
+                current_count = store.device_count() + 1  # +1 for the device being registered
+                license_status = check_overage(device_id, hostname, current_count, store)
         except Exception as _le:
             log.error('license check error: %s', _le)
 
@@ -2312,9 +2603,8 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         # agent's config for MSP sub-clients) to a client_org_id. Empty
         # string on any failure/absence — upsert_report() treats that as
         # "don't touch the existing assignment", never as "clear it".
-        _cust_id = _cust['id'] if _cust else 'default'
         client_org_id = ''
-        client_org_token = str(body.get('client_org_token', '')).strip()
+        client_org_token = body.get('client_org_token', '').strip()
         if client_org_token:
             org = _get_registry().get_client_org_by_token(client_org_token)
             if org and org.get('customer_id') == _cust_id:
@@ -2342,25 +2632,53 @@ class _Handler(http.server.BaseHTTPRequestHandler):
 
         try:
             from alerts import load_alert_config, fire_alerts
-            _cust_id_alert = _cust['id'] if _cust else 'default'
-            alert_cfg = load_alert_config(_alert_config_path(_cust_id_alert)) or {}
-            threading.Thread(
-                target=fire_alerts,
-                args=(report, device_id, hostname, alert_cfg, store),
-                daemon=True,
-            ).start()
+            alert_cfg = load_alert_config(ROOT / 'data' / 'alerts_config.json') or {}
+            # Per-client PSA override: if this device belongs to a client org
+            # that has its own PSA config, route its tickets there instead of
+            # the customer-wide default. Only the 'psa' key is swapped —
+            # Slack/email/webhook alert channels stay on the customer-wide
+            # config, since those aren't yet client-org-scoped.
+            if client_org_id:
+                override = _get_registry().get_client_org_psa_override(client_org_id)
+                if override is not None:
+                    alert_cfg = {**alert_cfg, 'psa': override}
+            if alert_cfg:
+                threading.Thread(
+                    target=fire_alerts,
+                    args=(report, device_id, hostname, alert_cfg, store),
+                    daemon=True,
+                ).start()
         except Exception as _ae:
             log.error('alerts error: %s', _ae)
+
+        try:
+            from connectors.siem_connector import load_siem_config, send_report as siem_send
+            _siem_cfg = load_siem_config(ROOT / 'siem_config.json')
+            if _siem_cfg:
+                _cid = store._customer_id if hasattr(store, '_customer_id') else 'default'
+                threading.Thread(
+                    target=siem_send,
+                    args=(report,),
+                    kwargs=dict(device_id=device_id, hostname=hostname,
+                                customer_id=_cid, cfg=_siem_cfg),
+                    daemon=True,
+                ).start()
+        except Exception as _se:
+            log.error('siem dispatch error: %s', _se)
 
         resp = {'status': 'accepted', 'device_id': device_id, 'license_status': license_status}
         if duplicate_warning:
             resp['warning'] = duplicate_warning
         # If this agent is still using the old rollover token, deliver the new one
         # in the response body so the agent self-updates without any manual intervention.
-        if _cust and _cust.get('using_old_token') and _cust.get('new_token'):
-            resp['token_update'] = {'token': _cust['new_token']}
-            log.info('Token rollover delivery: sent new token to device %s (%s)',
-                     device_id, hostname)
+        try:
+            cust_cfg = store.get_customer_config() if hasattr(store, 'get_customer_config') else {}
+            if cust_cfg and cust_cfg.get('using_old_token') and cust_cfg.get('new_token'):
+                resp['token_update'] = {'token': cust_cfg['new_token']}
+                log.info('Token rollover delivery: sent new token to device %s (%s)',
+                         device_id, hostname)
+        except Exception:
+            pass  # Token rollover is optional; don't fail the whole report
         self._json(resp)
 
     def _api_agent_commands(self, device_id: str):
@@ -2368,11 +2686,16 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         if not device_id:
             self._json({'command': None})
             return
-        cust = self._get_agent_customer()
-        if not cust:
+        if not self._check_agent_bearer():
             self._send(401, b'Unauthorized', 'text/plain')
             return
-        store = _get_store(cust['id'])
+        # Route to the customer store derived from the agent's token, not the default store.
+        _agent_cust = self._get_agent_customer()
+        _cust_id = _agent_cust.get('id') if _agent_cust else None
+        if _cust_id and _cust_id != 'default':
+            store = _get_store(_cust_id)
+        else:
+            store = _get_store_for_device(device_id)
         store.touch_device(device_id)
         command = store.claim_command(device_id)
         self._json({'command': command})
@@ -2399,15 +2722,18 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             pass
 
         profiles = [p.strip() for p in (body.get('profiles') or []) if p.strip()]
-        _VALID = {'default', 'fedramp', 'cmmc', 'financial'}
+        _VALID = {'default', 'fedramp', 'fedramp_20x', 'cmmc', 'financial', 'professional_services',
+                  'healthcare', 'biotech', 'lifesciences', 'owasp_agentic', 'eu_ai_act',
+                  'iso42001', 'atlas', 'kubernetes', 'docker'}
         profiles = [p for p in profiles if p in _VALID]
 
+        cmd_store = _get_store_for_device(device_id)
         if profiles:
-            cmd_ids = [store.enqueue_command(device_id, f'scan_profile:{p}') for p in profiles]
+            cmd_ids = [cmd_store.enqueue_command(device_id, f'scan_profile:{p}') for p in profiles]
             self._json({'status': 'queued', 'device_id': device_id,
                         'profiles': profiles, 'command_ids': cmd_ids})
         else:
-            cmd_id = store.enqueue_command(device_id, 'scan_now')
+            cmd_id = cmd_store.enqueue_command(device_id, 'scan_now')
             self._json({'status': 'queued', 'device_id': device_id, 'command_id': cmd_id})
 
     def _api_fleet_scan_all(self):
@@ -2423,7 +2749,9 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         except Exception:
             pass
 
-        _VALID = {'default', 'fedramp', 'cmmc', 'financial'}
+        _VALID = {'default', 'fedramp', 'fedramp_20x', 'cmmc', 'financial', 'professional_services',
+                  'healthcare', 'biotech', 'lifesciences', 'owasp_agentic', 'eu_ai_act',
+                  'iso42001', 'atlas', 'kubernetes', 'docker'}
         profiles = [p for p in (body.get('profiles') or []) if p in _VALID]
         stagger  = body.get('stagger', 'normal')
 
@@ -2443,24 +2771,15 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             for i in range(0, total, batch_size):
                 batch = ids[i:i + batch_size]
                 for did in batch:
-                    if profiles:
-                        for p in profiles:
-                            store.enqueue_command(did, f'scan_profile:{p}')
-                    else:
-                        store.enqueue_command(did, 'scan_now')
+                    cs = _get_store_for_device(did)
+                    for p in (profiles or ['default', 'iso42001']):
+                        cs.enqueue_command(did, f'scan_profile:{p}')
                 if sleep_secs and i + batch_size < total:
                     time.sleep(sleep_secs)
 
         threading.Thread(target=_dispatch, daemon=True, name='scan-all-dispatch').start()
-        me = self._session_user()
-        if me:
-            store.log_action(
-                actor_id=me.get('user_id', me.get('id', '')), actor_name=me['email'], actor_role=me.get('role', ''),
-                action='fleet.scan.all', target='', details=f'Dispatched fleet-wide scan to {total} devices (profiles={profiles or ["default"]}, stagger={stagger})',
-                ip_address=self.client_address[0]
-            )
         self._json({'status': 'dispatching', 'total': total,
-                    'profiles': profiles or ['default'], 'stagger': stagger,
+                    'profiles': profiles or ['default', 'iso42001'], 'stagger': stagger,
                     'batch_size': batch_size, 'sleep_secs': sleep_secs})
 
     def _api_fleet_update(self, device_id: str):
@@ -2472,7 +2791,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         if store.get_device(device_id) is None:
             self._json({'error': 'device not found'}, 404)
             return
-        cmd_id = store.enqueue_command(device_id, 'update_self')
+        cmd_id = _get_store_for_device(device_id).enqueue_command(device_id, 'update_self')
         self._json({'status': 'queued', 'device_id': device_id, 'command_id': cmd_id})
 
     def _api_fleet_update_all(self):
@@ -2483,7 +2802,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         for d in devices:
             did = d.get('device_id', '')
             if did:
-                store.enqueue_command(did, 'update_self')
+                _get_store_for_device(did).enqueue_command(did, 'update_self')
                 queued.append(did)
         self._json({'status': 'queued', 'count': len(queued), 'devices': queued})
 
@@ -2508,92 +2827,10 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         for d in devices:
             did = d.get('device_id', '')
             if did:
-                store.enqueue_command(did, f'set_config:{cmd_payload}')
+                _get_store_for_device(did).enqueue_command(did, f'set_config:{cmd_payload}')
                 queued.append(did)
         log.info('Token push queued for %d devices (customer %s)', len(queued), cust.get('id'))
         self._json({'status': 'queued', 'device_count': len(queued)})
-
-    def _api_fleet_set_profile(self):
-        """POST /api/fleet/set-profile — push a set_config profile update to specific devices or all.
-        Body: {"device_ids": ["id1","id2"], "profiles": ["fedramp","cmmc"]}
-        Accepts legacy singular "profile" field for backwards compatibility.
-        If device_ids is absent or empty, applies to all known devices.
-        """
-        body = {}
-        try:
-            length = _content_length(self.headers)
-            if length:
-                body = json.loads(self.rfile.read(length))
-        except Exception:
-            pass
-
-        _VALID = {'default', 'fedramp', 'cmmc', 'financial', 'biotech', 'healthcare', 'lifesciences', 'owasp_agentic', 'eu_ai_act'}
-
-        # Accept both "profiles" (array, new) and "profile" (string, legacy)
-        raw_profiles = body.get('profiles') or []
-        if not raw_profiles:
-            raw_profiles = [body.get('profile') or 'default']
-        profiles = [p.strip() for p in raw_profiles if p]
-        if not profiles:
-            profiles = ['default']
-        invalid = [p for p in profiles if p not in _VALID]
-        if invalid:
-            self._json({'error': f'invalid profile(s): {", ".join(invalid)}'}, 400)
-            return
-
-        store   = self._store()
-        ids     = body.get('device_ids') or []
-        fleet_wide = not ids
-        if fleet_wide:
-            ids = [d['device_id'] for d in store.list_devices() if d.get('device_id')]
-
-        queued = []
-        for did in ids:
-            for profile in profiles:
-                cmd_payload = json.dumps({'profile': profile})
-                store.enqueue_command(did, f'set_config:{cmd_payload}')
-            queued.append(did)
-
-        me = self._session_user()
-        if me:
-            scope = f'all {len(queued)} device(s)' if fleet_wide else f'{len(queued)} selected device(s)'
-            store.log_action(
-                actor_id=me.get('user_id', me.get('id', '')), actor_name=me['email'], actor_role=me.get('role', ''),
-                action='fleet.set_profile', target='',
-                details=f'Set profiles={profiles} on {scope}',
-                ip_address=self.client_address[0]
-            )
-        self._json({'status': 'queued', 'profiles': profiles, 'device_count': len(queued)})
-
-    def _api_fleet_rename(self, device_id: str):
-        """POST /api/fleet/rename/<device_id> — set a custom display name for a device.
-        Body: {"display_name": "Arckon-UI"}  — pass empty string to clear back to hostname.
-        """
-        device_id = device_id.strip()
-        if not device_id:
-            self._json({'error': 'missing device_id'}, 400)
-            return
-        body = {}
-        try:
-            length = _content_length(self.headers)
-            if length:
-                body = json.loads(self.rfile.read(length))
-        except Exception:
-            pass
-        display_name = body.get('display_name', '').strip()
-        store = self._store()
-        if not store.rename_device(device_id, display_name):
-            self._json({'error': 'device not found'}, 404)
-            return
-        me = self._session_user()
-        if me:
-            store.log_action(
-                actor_id=me.get('user_id', me.get('id', '')), actor_name=me['email'], actor_role=me.get('role', ''),
-                action='fleet.rename', target=device_id,
-                details=f'Renamed device to "{display_name or "(cleared)"}"',
-                ip_address=self.client_address[0]
-            )
-        self._json({'status': 'ok', 'device_id': device_id, 'display_name': display_name})
 
     def _api_fleet_remove(self, device_id: str):
         """POST /api/fleet/remove/<id> — permanently delete a device and its history."""
@@ -2645,16 +2882,14 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                 device_id, reporter_host, host, int(port), service, models, source, detail
             )
             stored += 1
-            if is_new:
+            if is_new and not store.is_service_approved(service):
                 try:
                     from alerts import load_alert_config, fire_shadow_alert
-                    _shadow_cust_id = _cust['id'] if _cust else 'default'
-                    _acfg = load_alert_config(_alert_config_path(_shadow_cust_id))
+                    _acfg = load_alert_config(ROOT / 'data' / 'alerts_config.json')
                     if _acfg:
                         threading.Thread(
                             target=fire_shadow_alert,
-                            args=(reporter_host, service, host, _acfg,
-                                  device_id, store),
+                            args=(reporter_host, service, host, _acfg, source, store),
                             daemon=True,
                         ).start()
                 except Exception as _ae:
@@ -2671,7 +2906,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         for d in devices:
             did = d.get('device_id', '')
             if did:
-                store.enqueue_command(did, 'discover_network')
+                _get_store_for_device(did).enqueue_command(did, 'discover_network')
                 queued.append(did)
         self._json({'status': 'queued', 'count': len(queued), 'devices': queued})
 
@@ -2685,7 +2920,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         if store.get_device(device_id) is None:
             self._json({'error': 'device not found'}, 404)
             return
-        store.enqueue_command(device_id, 'discover_network')
+        _get_store_for_device(device_id).enqueue_command(device_id, 'discover_network')
         self._json({'status': 'queued', 'device_id': device_id})
 
     def _api_fleet_live_stats(self):
@@ -2712,18 +2947,21 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                 warn = d.get('warn_count', 0) or 0
                 pas  = d.get('pass_count', 0) or 0
                 age  = _age(d.get('last_seen'))
-                rc   = 'r-fail' if fail > 0 else ('r-warn' if warn > 0 else 'r-pass')
+                no_data = (fail == 0 and warn == 0 and pas == 0)
+                rc   = 'r-nodata' if no_data else ('r-fail' if fail > 0 else ('r-warn' if warn > 0 else 'r-pass'))
                 did  = d.get('device_id', '')
+                hostname = d.get('hostname', 'unknown')
+                profile  = d.get('profile', '') or ('kubernetes' if hostname.startswith('k8s:') else '')
                 rows += f"""
         <tr class="dev-row" onclick="selectDevice('{did}')">
-          <td class="dev-host">{d.get('hostname','unknown')}</td>
+          <td class="dev-host">{hostname}</td>
           <td>{d.get('platform','')}</td>
-          <td class="c-red">{fail}</td>
-          <td class="c-yellow">{warn}</td>
-          <td class="c-green">{pas}</td>
-          <td>{d.get('profile','')}</td>
+          <td class="c-red">{fail if not no_data else '—'}</td>
+          <td class="c-yellow">{warn if not no_data else '—'}</td>
+          <td class="c-green">{pas if not no_data else '—'}</td>
+          <td>{profile}</td>
           <td>{age}</td>
-          <td><span class="risk-dot {rc}"></span></td>
+          <td><span class="risk-dot {rc}" title="{'No scan data yet' if no_data else ''}"></span></td>
           <td onclick="event.stopPropagation()" style="white-space:nowrap">
             <button class="scan-btn" id="sb-{did}" onclick="openScanModal('{did}',this)">Scan &#9662;</button>
             <button class="scan-btn" id="ub-{did}" onclick="updateDevice('{did}')"
@@ -2767,6 +3005,32 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                 'rows_html': rows,
                 'ts':        ts_now,
             })
+        except Exception as e:
+            self._json({'error': str(e)}, 500)
+
+    def _api_fleet_k8s_status(self):
+        """GET /api/fleet/k8s-status — return k8s cluster connection state."""
+        try:
+            store   = self._store()
+            devices = store.list_devices()
+            k8s_devices = [d for d in devices if (d.get('hostname') or '').startswith('k8s:')]
+            if not k8s_devices:
+                self._json({'connected': False, 'clusters': []})
+                return
+            clusters = []
+            for d in k8s_devices:
+                hostname = d.get('hostname', '')
+                # hostname format: k8s:{context}@{machine}
+                label = hostname[4:] if hostname.startswith('k8s:') else hostname
+                clusters.append({
+                    'device_id':  d.get('device_id', ''),
+                    'label':      label,
+                    'fail':       d.get('fail_count', 0) or 0,
+                    'warn':       d.get('warn_count', 0) or 0,
+                    'pass':       d.get('pass_count', 0) or 0,
+                    'last_seen':  d.get('last_seen'),
+                })
+            self._json({'connected': True, 'clusters': clusters})
         except Exception as e:
             self._json({'error': str(e)}, 500)
 
@@ -2848,7 +3112,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         for d in devices:
             did = d.get('device_id', '')
             if did:
-                store.enqueue_command(did, 'discover_mcp')
+                _get_store_for_device(did).enqueue_command(did, 'discover_mcp')
                 queued.append(did)
         self._json({'status': 'queued', 'count': len(queued), 'devices': queued})
 
@@ -2882,7 +3146,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             try:
                 from output.fleet_report import generate_mcp_pdf
                 pdf_bytes = generate_mcp_pdf(servers, tier=tier, demo=_is_demo())
-                fname = f'arckon_mcp_{tier}.pdf'
+                fname = f'sentinel_mcp_{tier}.pdf'
                 self.send_response(200)
                 self.send_header('Content-Type', 'application/pdf')
                 self.send_header('Content-Disposition', f'attachment; filename="{fname}"')
@@ -2912,263 +3176,8 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         except Exception as e:
             self._json({'error': str(e)}, 500)
 
-    # ── super-admin customer management ──────────────────────────────────────
-
-    def _require_super_admin(self) -> bool:
-        me = self._session_user()
-        if not me or me.get('role') != 'super_admin':
-            if self.command == 'GET':
-                self._redirect('/login?next=/admin')
-            else:
-                self._json({'error': 'forbidden'}, 403)
-            return False
-        return True
-
-    def _serve_admin_panel(self):
-        if not self._require_super_admin():
-            return
-        reg = _get_registry()
-        customers = reg.list_customers()
-        # Fetch device count for each customer
-        for c in customers:
-            try:
-                c['device_count'] = _get_store(c['id']).device_count()
-                c['user_count']   = len(reg.list_users(c['id']))
-            except Exception:
-                c['device_count'] = 0
-                c['user_count']   = 0
-        def e(s): return str(s or '').replace('&','&amp;').replace('<','&lt;').replace('>','&gt;').replace('"','&quot;')
-        rows = ''
-        for c in customers:
-            plan_color = {'plus': '#16a34a', 'standard': '#2563eb', 'demo': '#d97706'}.get(c.get('plan','plus'), '#6B7280')
-            exp = c.get('expires_at') or 'Never'
-            seats = 'Unlimited' if not c.get('max_agents') else str(c['max_agents'])
-            rows += f'''<tr>
-  <td style="font-weight:600">{e(c["name"])}</td>
-  <td style="font-family:monospace;font-size:11px;color:#6B7280">{e(c["id"][:18])}…</td>
-  <td><span style="background:{plan_color}20;color:{plan_color};border:1px solid {plan_color}40;border-radius:4px;padding:2px 8px;font-size:11px;font-weight:700">{e(c.get("plan","plus")).upper()}</span></td>
-  <td style="text-align:center">{seats}</td>
-  <td style="text-align:center">{c["device_count"]}</td>
-  <td style="text-align:center">{c["user_count"]}</td>
-  <td style="font-size:12px;color:#6B7280">{e(exp)}</td>
-  <td style="font-family:monospace;font-size:10px;color:#9CA3AF;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="{e(c.get("agent_token",""))}">{e(c.get("agent_token",""))}</td>
-  <td>
-    <button onclick="editCustomer('{e(c["id"])}','{e(c.get("plan","plus"))}',{c.get("max_agents",0)},'{e(c.get("expires_at",""))}')"
-            style="font-size:11px;padding:3px 8px;background:#f0f4ff;border:1px solid #ccd3e8;border-radius:4px;cursor:pointer;color:#1e3060">Edit</button>
-    <button onclick="copyToken('{e(c.get("agent_token",""))}')"
-            style="font-size:11px;padding:3px 8px;background:#f0f4ff;border:1px solid #ccd3e8;border-radius:4px;cursor:pointer;color:#1e3060;margin-left:4px">Copy Token</button>
-  </td>
-</tr>'''
-        html = f'''<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Arckon — Admin Panel</title>
-<style>
-*{{box-sizing:border-box;margin:0;padding:0}}
-body{{background:#f0f4ff;color:#1e3060;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;font-size:14px}}
-.wrap{{max-width:1200px;margin:0 auto;padding:32px 20px 64px}}
-.bar{{display:flex;align-items:center;gap:10px;margin-bottom:32px;padding:20px 24px;background:#0f1e3d;border-radius:10px}}
-.bm{{font-size:18px;font-weight:800;letter-spacing:3px;color:#fff}}
-.bn{{font-size:16px;font-weight:700;letter-spacing:2px;color:#f5a623}}
-.bs{{font-size:11px;color:#8a9abf;margin-left:6px;letter-spacing:1px;text-transform:uppercase}}
-.back{{margin-left:auto;font-size:12px;color:#8a9abf;text-decoration:none;border:1px solid #2a3f6a;border-radius:5px;padding:5px 12px}}
-.card{{background:#fff;border:1px solid #ccd3e8;border-radius:10px;padding:24px;margin-bottom:24px;box-shadow:0 1px 6px rgba(26,47,90,.07)}}
-h2{{font-size:16px;font-weight:700;color:#0a1428;margin-bottom:16px}}
-table{{width:100%;border-collapse:collapse;font-size:13px}}
-th{{text-align:left;font-size:11px;font-weight:700;color:#6B7280;text-transform:uppercase;letter-spacing:.5px;padding:8px 10px;border-bottom:2px solid #e5e9f5}}
-td{{padding:10px 10px;border-bottom:1px solid #f0f4ff;vertical-align:middle}}
-tr:last-child td{{border-bottom:none}}
-label{{display:block;font-size:12px;font-weight:700;color:#1e3060;margin-bottom:5px;text-transform:uppercase;letter-spacing:.5px}}
-input,select{{width:100%;background:#f7f9ff;border:1px solid #ccd3e8;border-radius:6px;color:#0a1428;font-size:14px;padding:8px 12px;outline:none;margin-bottom:14px}}
-input:focus,select:focus{{border-color:#f5a623}}
-.row2{{display:grid;grid-template-columns:1fr 1fr;gap:16px}}
-.btn{{background:#f5a623;border:none;border-radius:6px;color:#0f1e3d;cursor:pointer;font-size:14px;font-weight:700;padding:10px 24px}}
-.btn:hover{{background:#e09610}}
-.msg{{padding:10px 14px;border-radius:6px;font-size:13px;margin-bottom:14px;display:none}}
-.msg.ok{{background:#dcfce7;border:1px solid #16a34a;color:#166534}}
-.msg.err{{background:#fee2e2;border:1px solid #dc2626;color:#b91c1c}}
-</style></head><body>
-<div class="wrap">
-<div class="bar">
-  <span class="bm">RiskRaven</span><span class="bn">ARCKON</span>
-  <span class="bs">Admin Panel</span>
-  <a href="#" class="back" onclick="window.location.href=window.location.protocol+'//'+window.location.hostname+'/dashboard'">&#8592; Platform Dashboard</a>
-</div>
-<div class="card">
-  <h2>Customers ({len(customers)})</h2>
-  <table>
-    <thead><tr>
-      <th>Company</th><th>ID</th><th>Plan</th><th>Seats</th>
-      <th>Devices</th><th>Users</th><th>Expires</th><th>Agent Token</th><th>Actions</th>
-    </tr></thead>
-    <tbody>{rows}</tbody>
-  </table>
-</div>
-<div class="card">
-  <h2>Add New Customer</h2>
-  <div id="create-msg" class="msg"></div>
-  <div class="row2">
-    <div><label>Company Name</label><input id="c-name" type="text" placeholder="Acme Corp"></div>
-    <div><label>Admin Email</label><input id="c-email" type="email" placeholder="admin@acmecorp.com"></div>
-  </div>
-  <div class="row2">
-    <div><label>Admin Password</label><input id="c-pass" type="password" placeholder="Min 10 characters"></div>
-    <div><label>Plan</label>
-      <select id="c-plan">
-        <option value="plus">Plus (full access)</option>
-        <option value="standard">Standard</option>
-        <option value="demo">Demo</option>
-      </select>
-    </div>
-  </div>
-  <div class="row2">
-    <div><label>Max Agents (0 = unlimited)</label><input id="c-seats" type="number" value="0" min="0"></div>
-    <div><label>Expires (leave blank = never)</label><input id="c-exp" type="date" placeholder="YYYY-MM-DD"></div>
-  </div>
-  <button class="btn" onclick="createCustomer()">Create Customer</button>
-</div>
-<div class="card" id="edit-card" style="display:none">
-  <h2>Edit License</h2>
-  <div id="edit-msg" class="msg"></div>
-  <input type="hidden" id="e-id">
-  <div class="row2">
-    <div><label>Plan</label>
-      <select id="e-plan">
-        <option value="plus">Plus</option>
-        <option value="standard">Standard</option>
-        <option value="demo">Demo</option>
-      </select>
-    </div>
-    <div><label>Max Agents (0 = unlimited)</label><input id="e-seats" type="number" min="0"></div>
-  </div>
-  <div class="row2">
-    <div><label>Expires (blank = never)</label><input id="e-exp" type="date"></div>
-    <div></div>
-  </div>
-  <button class="btn" onclick="saveEdit()">Save Changes</button>
-  <button onclick="document.getElementById('edit-card').style.display='none'"
-          style="margin-left:10px;padding:10px 20px;border:1px solid #ccd3e8;background:#fff;border-radius:6px;cursor:pointer;font-size:14px">Cancel</button>
-</div>
-</div>
-<script>
-function showMsg(id, ok, text) {{
-  const el = document.getElementById(id);
-  el.className = 'msg ' + (ok ? 'ok' : 'err');
-  el.textContent = text;
-  el.style.display = 'block';
-  setTimeout(() => el.style.display = 'none', 5000);
-}}
-async function createCustomer() {{
-  const name  = document.getElementById('c-name').value.trim();
-  const email = document.getElementById('c-email').value.trim();
-  const pass  = document.getElementById('c-pass').value;
-  const plan  = document.getElementById('c-plan').value;
-  const seats = parseInt(document.getElementById('c-seats').value) || 0;
-  const exp   = document.getElementById('c-exp').value.trim();
-  if (!name || !email || !pass) {{ showMsg('create-msg', false, 'Name, email and password are required.'); return; }}
-  if (pass.length < 10) {{ showMsg('create-msg', false, 'Password must be at least 10 characters.'); return; }}
-  const r = await fetch('/api/admin/customers', {{
-    method: 'POST',
-    headers: {{'Content-Type': 'application/json'}},
-    body: JSON.stringify({{name, email, password: pass, plan, max_agents: seats, expires_at: exp}})
-  }});
-  const d = await r.json();
-  if (r.ok) {{ showMsg('create-msg', true, 'Customer created. Agent token: ' + d.agent_token); setTimeout(() => location.reload(), 2500); }}
-  else {{ showMsg('create-msg', false, d.error || 'Failed'); }}
-}}
-function editCustomer(id, plan, seats, exp) {{
-  document.getElementById('e-id').value = id;
-  document.getElementById('e-plan').value = plan;
-  document.getElementById('e-seats').value = seats;
-  document.getElementById('e-exp').value = exp;
-  document.getElementById('edit-card').style.display = 'block';
-  document.getElementById('edit-card').scrollIntoView({{behavior:'smooth'}});
-}}
-async function saveEdit() {{
-  const id    = document.getElementById('e-id').value;
-  const plan  = document.getElementById('e-plan').value;
-  const seats = parseInt(document.getElementById('e-seats').value) || 0;
-  const exp   = document.getElementById('e-exp').value.trim();
-  const r = await fetch('/api/admin/customers/' + encodeURIComponent(id), {{
-    method: 'POST',
-    headers: {{'Content-Type': 'application/json'}},
-    body: JSON.stringify({{plan, max_agents: seats, expires_at: exp}})
-  }});
-  const d = await r.json();
-  if (r.ok) {{ showMsg('edit-msg', true, 'Saved.'); setTimeout(() => location.reload(), 1500); }}
-  else {{ showMsg('edit-msg', false, d.error || 'Failed'); }}
-}}
-function copyToken(token) {{
-  navigator.clipboard.writeText(token).then(() => alert('Token copied to clipboard.'));
-}}
-</script>
-</body></html>'''
-        self._send(200, html.encode('utf-8'), 'text/html; charset=utf-8')
-
-    def _api_admin_create_customer(self):
-        if not self._require_super_admin():
-            return
-        length = _content_length(self.headers)
-        try:
-            body = json.loads(self.rfile.read(length)) if length else {}
-        except Exception:
-            self._json({'error': 'invalid JSON'}, 400)
-            return
-        name     = str(body.get('name', '')).strip()
-        email    = str(body.get('email', '')).strip().lower()
-        password = str(body.get('password', ''))
-        plan     = str(body.get('plan', 'plus'))
-        max_ag   = int(body.get('max_agents', 0))
-        exp      = str(body.get('expires_at', '')).strip()
-        if not name or not email or not password:
-            self._json({'error': 'name, email, and password are required'}, 400)
-            return
-        if len(password) < 10:
-            self._json({'error': 'password must be at least 10 characters'}, 400)
-            return
-        if plan not in ('plus', 'standard', 'demo'):
-            self._json({'error': 'plan must be plus, standard, or demo'}, 400)
-            return
-        reg = _get_registry()
-        try:
-            customer = reg.create_customer(name, plan=plan, max_agents=max_ag, expires_at=exp)
-            reg.create_user(customer['id'], email, password, role='admin')
-            log.info('Admin created customer: %s (%s) plan=%s seats=%d',
-                     name, customer['id'], plan, max_ag)
-            self._json({'status': 'created', **customer})
-        except Exception as e:
-            log.error('create_customer error: %s', e)
-            self._json({'error': str(e)}, 500)
-
-    def _api_admin_update_customer(self, customer_id: str):
-        if not self._require_super_admin():
-            return
-        customer_id = customer_id.strip()
-        if not customer_id:
-            self._json({'error': 'missing customer_id'}, 400)
-            return
-        length = _content_length(self.headers)
-        try:
-            body = json.loads(self.rfile.read(length)) if length else {}
-        except Exception:
-            self._json({'error': 'invalid JSON'}, 400)
-            return
-        plan   = str(body.get('plan', 'plus'))
-        max_ag = int(body.get('max_agents', 0))
-        exp    = str(body.get('expires_at', '')).strip()
-        if plan not in ('plus', 'standard', 'demo'):
-            self._json({'error': 'invalid plan'}, 400)
-            return
-        ok = _get_registry().update_customer_license(customer_id, plan, max_ag, exp)
-        if ok:
-            # Flush cached store so next request gets fresh license data
-            with _store_cache_lock:
-                _store_cache.pop(customer_id, None)
-            self._json({'status': 'updated'})
-        else:
-            self._json({'error': 'customer not found'}, 404)
-
     def _api_fleet_report(self):
-        """GET /api/fleet/report?tier=executive|ciso|technical&fmt=pdf|html|json[&profile=fedramp,cmmc][&status=fail|warn|pass][&sev=ch|med|li]"""
+        """GET /api/fleet/report?tier=executive|ciso|technical&fmt=pdf|html|json|csv[&profile=fedramp,cmmc][&status=fail|warn|pass][&sev=ch|med|li]"""
         from urllib.parse import parse_qs, urlparse as _up
         qs = parse_qs(_up(self.path).query)
         tier          = (qs.get('tier',    ['ciso'])[0]).lower()
@@ -3185,37 +3194,62 @@ function copyToken(token) {{
             status_filter = ''
         if sev_filter not in ('ch', 'med', 'li', ''):
             sev_filter = ''
-        _VALID_PROFILES = {'default', 'fedramp', 'cmmc', 'financial', 'biotech', 'healthcare', 'lifesciences', 'owasp_agentic', 'eu_ai_act'}
+        _VALID_PROFILES = {'default', 'fedramp', 'fedramp_20x', 'cmmc', 'financial', 'biotech', 'healthcare', 'lifesciences', 'owasp_agentic', 'eu_ai_act', 'professional_services', 'iso42001', 'atlas', 'kubernetes', 'docker'}
         profiles = [p for p in profile_raw.split(',') if p in _VALID_PROFILES]
         profile  = ','.join(profiles)
         try:
             store = self._store()
             org_scope = self._scoped_client_org()
             if profiles:
-                # /api/fleet/report *is* on the client_viewer allowlist, so
-                # this branch has to carry the same org scope as the one
-                # below — an unscoped call here returns every client's
-                # devices to whoever asked for ?profile=.
-                devices = store.list_devices_by_profile(profiles, client_org_id=org_scope)
+                # NOTE: list_devices_by_profile() doesn't support client-org
+                # filtering yet — not reachable by the client_viewer role
+                # (see the path allowlist in _do_GET_inner), MSP-admin-only.
+                devices = store.list_devices_by_profile(
+                    profiles, client_org_id=self._scoped_client_org())
             else:
                 devices = store.list_devices(client_org_id=org_scope)
                 for d in devices:
                     d['_report'] = store.get_latest_report(d['device_id']) or {}
 
-            if fmt == 'json':
+            if fmt in ('json', 'csv'):
                 payload = [{'device_id': d['device_id'], 'hostname': d['hostname'],
                             'platform': d.get('platform', ''), 'fail_count': d.get('fail_count', 0),
                             'warn_count': d.get('warn_count', 0), 'pass_count': d.get('pass_count', 0),
                             'last_seen': d.get('last_seen'), 'results': d['_report'].get('findings', d['_report'].get('results', []))}
                            for d in devices]
-                self._json({'tier': tier, 'devices': payload})
+                if fmt == 'json':
+                    self._json({'tier': tier, 'devices': payload})
+                    return
+                # CSV — one row per finding, not one row per device, so
+                # severity/status are actually filterable in a spreadsheet.
+                import csv as _csv
+                import io as _io
+                buf = _io.StringIO()
+                writer = _csv.writer(buf)
+                writer.writerow(['Device', 'Platform', 'Last Seen', 'Check ID', 'Title', 'Status', 'Severity'])
+                for d in payload:
+                    findings = d['results'] or [{}]
+                    for f in findings:
+                        writer.writerow([
+                            d['hostname'], d['platform'], d.get('last_seen', ''),
+                            f.get('check_id', ''), f.get('title', ''),
+                            f.get('status', ''), f.get('severity', ''),
+                        ])
+                csv_bytes = buf.getvalue().encode('utf-8')
+                fname = f'sentinel_fleet_{tier}.csv'
+                self.send_response(200)
+                self.send_header('Content-Type', 'text/csv')
+                self.send_header('Content-Disposition', f'attachment; filename="{fname}"')
+                self.send_header('Content-Length', str(len(csv_bytes)))
+                self.end_headers()
+                self.wfile.write(csv_bytes)
                 return
 
             if fmt == 'pdf':
                 try:
                     from output.fleet_report import generate_fleet_pdf
                     pdf_bytes = generate_fleet_pdf(devices, tier=tier, demo=_is_demo())
-                    fname = f'arckon_fleet_{tier}{"_" + profile.replace(",","_") if profile else ""}.pdf'
+                    fname = f'sentinel_fleet_{tier}{"_" + profile.replace(",","_") if profile else ""}.pdf'
                     self.send_response(200)
                     self.send_header('Content-Type', 'application/pdf')
                     self.send_header('Content-Disposition', f'attachment; filename="{fname}"')
@@ -3248,13 +3282,16 @@ function copyToken(token) {{
         if not _has_evidence_package():
             self._send(402, b'Evidence Package requires a Plus license. Contact sales@markai.io to upgrade.', 'text/plain')
             return
-        import io, zipfile, csv
+        import io
+        import zipfile
+        import csv
         from urllib.parse import parse_qs, urlparse as _up
         from datetime import datetime as _dt
         qs = parse_qs(_up(self.path).query)
         profile_raw = (qs.get('profile', [''])[0]).lower().strip()
-        _VALID = {'default', 'fedramp', 'cmmc', 'financial', 'biotech', 'healthcare',
-                  'lifesciences', 'owasp_agentic', 'eu_ai_act'}
+        _VALID = {'default', 'fedramp', 'fedramp_20x', 'cmmc', 'financial', 'biotech', 'healthcare',
+                  'lifesciences', 'owasp_agentic', 'eu_ai_act', 'professional_services',
+                  'iso42001', 'atlas', 'kubernetes', 'docker'}
         profiles = [p for p in profile_raw.split(',') if p in _VALID]
         try:
             store = self._store()
@@ -3275,7 +3312,7 @@ function copyToken(token) {{
                     f"Generated:  {now.strftime('%Y-%m-%d %H:%M UTC')}\n"
                     f"Profile(s): {profile_label}\n"
                     f"Devices:    {len(devices)}\n"
-                    f"Tool:       Arckon by RiskRaven — AI Security Audit\n\n"
+                    f"Tool:       Arckon — AI Security Audit\n\n"
                     f"CONTENTS\n--------\n"
                     f"1. cover_letter.txt       — This document\n"
                     f"2. findings.csv           — All findings across all devices\n"
@@ -3392,7 +3429,7 @@ function copyToken(token) {{
                     zf.writestr('ai_asset_inventory_error.txt', f'Inventory export failed: {_ie}')
 
             zip_bytes = buf.getvalue()
-            fname = f'arckon_evidence_{date_str}.zip'
+            fname = f'sentinel_evidence_{date_str}.zip'
             self.send_response(200)
             self.send_header('Content-Type', 'application/zip')
             self.send_header('Content-Disposition', f'attachment; filename="{fname}"')
@@ -3415,7 +3452,8 @@ function copyToken(token) {{
 
     def _api_risk_register_csv(self):
         """GET /api/fleet/risk-register/csv — download risk register as CSV."""
-        import io, csv
+        import io
+        import csv
         from datetime import datetime as _dt
         try:
             store = self._store()
@@ -3423,15 +3461,18 @@ function copyToken(token) {{
             buf = io.StringIO()
             writer = csv.writer(buf)
             writer.writerow(['Check ID', 'Severity', 'Title', 'Category', 'Status',
-                             'Affected Devices', 'Trend', 'Days Open', 'Device Names'])
+                             'Affected Devices', 'Trend', 'Days Open', 'Device Names',
+                             'Override', 'Assigned To', 'Note'])
             for e in entries:
                 writer.writerow([
                     e['check_id'], e['severity'], e['title'], e['category'], e['status'],
                     e['affected_count'], e['trend'], e['days_open'],
                     '; '.join(e['affected_devices']),
+                    e.get('override_action', ''), e.get('override_assignee', ''),
+                    e.get('override_note', ''),
                 ])
             data = buf.getvalue().encode('utf-8')
-            fname = f'arckon_risk_register_{_dt.utcnow().strftime("%Y%m%d")}.csv'
+            fname = f'sentinel_risk_register_{_dt.utcnow().strftime("%Y%m%d")}.csv'
             self.send_response(200)
             self.send_header('Content-Type', 'text/csv; charset=utf-8')
             self.send_header('Content-Disposition', f'attachment; filename="{fname}"')
@@ -3440,6 +3481,53 @@ function copyToken(token) {{
             self.wfile.write(data)
         except Exception as e:
             log.error('risk register CSV error: %s', e, exc_info=True)
+            self._json({'error': str(e)}, 500)
+
+    def _api_rr_overrides_list(self):
+        """GET /api/fleet/risk-register/overrides"""
+        try:
+            self._json({'overrides': self._store().get_risk_overrides()})
+        except Exception as e:
+            self._json({'error': str(e)}, 500)
+
+    def _api_rr_override_set(self):
+        """POST /api/fleet/risk-register/override — accept or assign a finding."""
+        try:
+            cl = int(self.headers.get('Content-Length', 0))
+            body = json.loads(self.rfile.read(cl)) if cl else {}
+            check_id = (body.get('check_id') or '').strip()
+            action   = (body.get('action') or '').strip()
+            if not check_id or action not in ('accepted', 'assigned', 'false_positive'):
+                self._json({'error': 'check_id and action (accepted|assigned|false_positive) required'}, 400)
+                return
+            assignee   = (body.get('assignee') or '').strip()
+            note       = (body.get('note') or '').strip()
+            expires_at = body.get('expires_at')
+            if isinstance(expires_at, str) and expires_at:
+                import datetime as _dt
+                try:
+                    expires_at = int(_dt.datetime.fromisoformat(expires_at).timestamp())
+                except ValueError:
+                    expires_at = None
+            user = self._session_user()
+            created_by = user['email'] if user else 'Unknown'
+            self._store().upsert_risk_override(check_id, action, assignee, note, expires_at, created_by)
+            self._json({'ok': True})
+        except Exception as e:
+            log.error('rr override set error: %s', e, exc_info=True)
+            self._json({'error': str(e)}, 500)
+
+    def _api_rr_override_delete(self, check_id: str):
+        """POST /api/fleet/risk-register/override/<check_id>/delete — clear an override."""
+        try:
+            check_id = check_id.strip('/')
+            if not check_id:
+                self._json({'error': 'check_id required'}, 400)
+                return
+            ok = self._store().delete_risk_override(check_id)
+            self._json({'ok': ok})
+        except Exception as e:
+            log.error('rr override delete error: %s', e, exc_info=True)
             self._json({'error': str(e)}, 500)
 
     def _api_inventory(self):
@@ -3477,6 +3565,31 @@ function copyToken(token) {{
             log.error('inventory set status error: %s', e, exc_info=True)
             self._json({'error': str(e)}, 500)
 
+    def _api_inventory_false_positive(self, shadow_id_str: str):
+        """POST /api/fleet/inventory/false-positive/<id> — mark/unmark as false positive."""
+        try:
+            shadow_id = int(shadow_id_str.strip('/'))
+            cl = _content_length(self.headers)
+            body = json.loads(self.rfile.read(cl)) if cl else {}
+            is_fp = bool(body.get('false_positive', True))
+            notes = str(body.get('notes', '')).strip()
+            user = self._session_user()
+            changed_by = user['email'] if user else 'Unknown'
+            ip_address = (
+                self.headers.get('X-Forwarded-For', '').split(',')[0].strip()
+                or self.client_address[0]
+            )
+            ok = self._store().set_false_positive(
+                shadow_id, is_fp, notes=notes,
+                changed_by=changed_by, ip_address=ip_address,
+            )
+            self._json({'ok': ok})
+        except (ValueError, TypeError):
+            self._json({'error': 'invalid id'}, 400)
+        except Exception as e:
+            log.error('false positive error: %s', e, exc_info=True)
+            self._json({'error': str(e)}, 500)
+
     def _api_inventory_history(self, shadow_id_str: str):
         """GET /api/fleet/inventory/history/<id> — approval event log for one asset."""
         try:
@@ -3490,8 +3603,68 @@ function copyToken(token) {{
             log.error('inventory history error: %s', e, exc_info=True)
             self._json({'error': str(e)}, 500)
 
+    def _api_shadow_csv(self):
+        """GET /api/fleet/shadow/csv — download Shadow AI inventory as CSV."""
+        import csv as _csv
+        import io
+        from datetime import datetime as _dt
+        try:
+            store = self._store()
+            items = store.list_inventory()
+            buf = io.StringIO()
+            writer = _csv.writer(buf)
+            writer.writerow(['Service', 'Source', 'Host / IP', 'Port', 'Detail',
+                             'Reported By', 'First Seen', 'Last Seen', 'Status'])
+            def _fmt(ts):
+                return _dt.utcfromtimestamp(ts).strftime('%Y-%m-%d %H:%M UTC') if ts else ''
+            for item in items:
+                writer.writerow([
+                    item.get('service', ''),
+                    item.get('source', ''),
+                    item.get('host', ''),
+                    item.get('port', '') or '',
+                    item.get('detail', ''),
+                    item.get('reporter_hostname', ''),
+                    _fmt(item.get('first_seen')),
+                    _fmt(item.get('last_seen')),
+                    item.get('approval_status', 'unapproved'),
+                ])
+            data = buf.getvalue().encode('utf-8')
+            fname = f'shadow_ai_{_dt.utcnow().strftime("%Y%m%d")}.csv'
+            self.send_response(200)
+            self.send_header('Content-Type', 'text/csv; charset=utf-8')
+            self.send_header('Content-Disposition', f'attachment; filename="{fname}"')
+            self.send_header('Content-Length', str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+        except Exception as e:
+            log.error('shadow CSV error: %s', e, exc_info=True)
+            self._json({'error': str(e)}, 500)
+
+    def _api_approve_service_globally(self):
+        """POST /api/fleet/inventory/approve-service — globally approve or unapprove a service name."""
+        try:
+            length = _content_length(self.headers)
+            body = json.loads(self.rfile.read(length)) if length else {}
+            service = str(body.get('service', '')).strip()
+            action  = str(body.get('action', 'approve')).strip()
+            if not service:
+                self._json({'error': 'missing service'}, 400)
+                return
+            user = self._session_user()
+            by = user['email'] if user else 'Dashboard user'
+            store = self._store()
+            if action == 'unapprove':
+                store.unapprove_service_globally(service)
+            else:
+                store.approve_service_globally(service, by)
+            self._json({'ok': True, 'service': service, 'action': action})
+        except Exception as e:
+            log.error('approve-service error: %s', e, exc_info=True)
+            self._json({'error': str(e)}, 500)
+
     def _api_verify_signature(self):
-        """GET /api/verify?sig=<hex>&content=<json> — verify a Arckon report signature."""
+        """GET /api/verify?sig=<hex>&content=<json> — verify a Sentinel report signature."""
         from urllib.parse import parse_qs, urlparse as _up
         from output.signing import verify_content, key_fingerprint
         qs = parse_qs(_up(self.path).query)
@@ -3744,14 +3917,14 @@ function copyToken(token) {{
             time.sleep(0.3)
             try:
                 if sys.platform == 'win32':
-                    subprocess.run(['schtasks', '/end', '/tn', 'ArckonAgent'], capture_output=True)
+                    subprocess.run(['schtasks', '/end', '/tn', 'SentinelAgent'], capture_output=True)
                     time.sleep(2)
-                    subprocess.run(['schtasks', '/run', '/tn', 'ArckonAgent'], capture_output=True)
+                    subprocess.run(['schtasks', '/run', '/tn', 'SentinelAgent'], capture_output=True)
                 elif sys.platform == 'darwin':
-                    subprocess.run(['launchctl', 'stop', 'com.riskraven.arckon.agent'], capture_output=True)
-                    subprocess.run(['launchctl', 'start', 'com.riskraven.arckon.agent'], capture_output=True)
+                    subprocess.run(['launchctl', 'stop', 'com.mark.sentinel.agent'], capture_output=True)
+                    subprocess.run(['launchctl', 'start', 'com.mark.sentinel.agent'], capture_output=True)
                 else:
-                    subprocess.run(['systemctl', 'restart', 'arckon-agent'], capture_output=True)
+                    subprocess.run(['systemctl', 'restart', 'sentinel-agent'], capture_output=True)
             except Exception as e:
                 log.error('restart-agent error: %s', e)
         threading.Thread(target=_do_restart, daemon=True).start()
@@ -3807,13 +3980,6 @@ function copyToken(token) {{
         except Exception as e:
             self._json({'error': str(e)}, 500)
             return
-        me = self._session_user()
-        if me:
-            self._store().log_action(
-                actor_id=me.get('user_id', me.get('id', '')), actor_name=me['email'], actor_role=me.get('role', ''),
-                action='config.save', target='agent_config',
-                details=f'Updated agent config keys: {sorted(clean.keys())}', ip_address=self.client_address[0]
-            )
 
         # Push config changes to all connected remote agents
         _push_keys = ('profile', 'interval', 'extra_subnets')
@@ -3825,7 +3991,7 @@ function copyToken(token) {{
                 for d in store.list_devices():
                     did = d.get('device_id', '')
                     if did:
-                        store.enqueue_command(did, f'set_config:{cmd_payload}')
+                        _get_store_for_device(did).enqueue_command(did, f'set_config:{cmd_payload}')
                         pushed += 1
             except Exception:
                 pass
@@ -3860,9 +4026,7 @@ function copyToken(token) {{
 
     def _api_get_alert_config(self):
         from alerts import load_alert_config_for_ui
-        cust = self._get_dashboard_customer()
-        cid = cust['id'] if cust else 'default'
-        self._json(load_alert_config_for_ui(_alert_config_path(cid)))
+        self._json(load_alert_config_for_ui(ROOT / 'data' / 'alerts_config.json'))
 
     def _api_set_alert_config(self):
         length = _content_length(self.headers)
@@ -3876,17 +4040,8 @@ function copyToken(token) {{
             return
         try:
             from alerts import save_alert_config
-            cust = self._get_dashboard_customer()
-            cid = cust['id'] if cust else 'default'
-            path = ROOT / 'data' / 'customers' / cid / 'alerts_config.json'
-            save_alert_config(path, body, _alert_config_path(cid))
-            me = self._session_user()
-            if me:
-                _get_store(cid).log_action(
-                    actor_id=me.get('user_id', me.get('id', '')), actor_name=me['email'], actor_role=me.get('role', ''),
-                    action='alerts.config.save', target='alerts_config',
-                    details='Updated alert notification configuration', ip_address=self.client_address[0]
-                )
+            path = ROOT / 'data' / 'alerts_config.json'
+            save_alert_config(path, body, path)
             self._json({'status': 'saved'})
         except Exception as e:
             self._json({'error': str(e)}, 500)
@@ -3901,64 +4056,106 @@ function copyToken(token) {{
         except json.JSONDecodeError:
             self._send(400, b'Invalid JSON', 'text/plain')
             return
-        channel = body.get('channel', '')
+        channel  = body.get('channel', '')
+        live_url = body.get('url', '').strip()
         try:
             from alerts import load_alert_config, send_test_alert
-            cust = self._get_dashboard_customer()
-            cid = cust['id'] if cust else 'default'
-            cfg = load_alert_config(_alert_config_path(cid)) or {}
+            cfg = load_alert_config(ROOT / 'data' / 'alerts_config.json') or {}
+            if live_url:
+                _url_key = {'slack': 'slack_webhook', 'gchat': 'gchat_webhook',
+                            'teams': 'teams_webhook', 'webhook': 'webhook_url'}.get(channel)
+                if _url_key:
+                    cfg[_url_key] = live_url
             ok, msg = send_test_alert(cfg, channel)
             self._json({'ok': ok, 'message': msg})
         except Exception as e:
             self._json({'ok': False, 'message': str(e)}, 500)
 
-    def _api_get_alert_log(self):
-        from urllib.parse import parse_qs
-        qs = parse_qs(urlparse(self.path).query)
-        unread_only = qs.get('unread', ['0'])[0] == '1'
-        cust = self._get_dashboard_customer()
-        cid = cust['id'] if cust else 'default'
-        store = _get_store(cid)
-        entries = store.get_alert_log(limit=200, unread_only=unread_only)
-        self._json({'alerts': entries, 'unread': store.get_unread_count()})
-
-    def _api_get_audit_log(self):
-        cust = self._get_dashboard_customer()
-        cid = cust['id'] if cust else 'default'
-        store = _get_store(cid)
-        entries = store.get_audit_log(limit=200)
-        self._json({'entries': entries})
-
-    def _api_audit_log_csv(self):
-        """GET /api/audit/log/csv — download this customer's audit log as CSV."""
-        import io, csv
+    def _api_test_psa(self):
         try:
-            cust = self._get_dashboard_customer()
-            cid = cust['id'] if cust else 'default'
-            store = _get_store(cid)
-            entries = store.get_audit_log(limit=1000)
-            buf = io.StringIO()
-            writer = csv.writer(buf)
-            writer.writerow(['Timestamp (UTC)', 'Actor', 'Role', 'Action', 'Target', 'Details', 'IP Address'])
-            for e in entries:
-                writer.writerow([
-                    datetime.fromtimestamp(e['occurred_at'], tz=timezone.utc).strftime('%Y-%m-%d %H:%M:%S'),
-                    e['actor_name'], e['actor_role'], e['action'], e['target'],
-                    e['details'], e['ip_address'],
-                ])
-            data = buf.getvalue().encode('utf-8')
-            fname = f'arckon_audit_log_{datetime.now(timezone.utc).strftime("%Y%m%d")}.csv'
-            self.send_response(200)
-            self.send_header('Content-Type', 'text/csv; charset=utf-8')
-            self.send_header('Content-Disposition', f'attachment; filename="{fname}"')
-            self.send_header('Content-Length', str(len(data)))
-            self.end_headers()
-            self.wfile.write(data)
+            from alerts import load_alert_config, send_test_psa
+            cfg = load_alert_config(ROOT / 'data' / 'alerts_config.json') or {}
+            ok, msg = send_test_psa(cfg)
+            self._json({'ok': ok, 'message': msg})
         except Exception as e:
-            log.error('audit log csv export error: %s', e, exc_info=True)
+            self._json({'ok': False, 'message': str(e)}, 500)
+
+    def _psa_org_scope(self) -> str | None:
+        """?client_org=<id> selects a per-client PSA override instead of
+        the customer-wide default in data/alerts_config.json."""
+        from urllib.parse import parse_qs, urlparse as _up
+        qs = parse_qs(_up(self.path).query)
+        return (qs.get('client_org', [''])[0]).strip() or None
+
+    def _load_psa_cfg(self, org_id: str | None) -> dict:
+        if org_id:
+            override = _get_registry().get_client_org_psa_override(org_id)
+            # No override saved yet for this client -> blank form, not the
+            # customer default. Showing the default here would make it look
+            # like the client already has its own config when it's actually
+            # still inheriting — blank is the honest state to display.
+            return {'psa': override or {}}
+        from alerts import load_alert_config
+        return load_alert_config(ROOT / 'data' / 'alerts_config.json') or {}
+
+    def _save_psa_cfg(self, cfg: dict, org_id: str | None) -> None:
+        if org_id:
+            me = self._session_user()
+            _get_registry().set_client_org_psa_override(org_id, me['customer_id'], cfg.get('psa', {}))
+        else:
+            path = ROOT / 'data' / 'alerts_config.json'
+            path.write_text(json.dumps(cfg, indent=2), encoding='utf-8')
+
+    def _api_get_psa_config(self):
+        try:
+            org_id = self._psa_org_scope()
+            cfg = self._load_psa_cfg(org_id)
+            psa  = cfg.get('psa', {})
+            _M   = '__set__'
+            cw   = psa.get('connectwise', {})
+            at   = psa.get('autotask', {})
+            hp   = psa.get('halopsa', {})
+            self._json({
+                'connectwise': {
+                    'enabled':       psa.get('provider') == 'connectwise',
+                    'site':          cw.get('site', ''),
+                    'company_id':    cw.get('company_id', ''),
+                    'public_key':    cw.get('public_key', ''),
+                    'private_key':   _M if cw.get('private_key') else '',
+                    'client_id':     cw.get('client_id', ''),
+                    'service_board': cw.get('service_board', ''),
+                    'company_name':  cw.get('company_name', ''),
+                },
+                'autotask': {
+                    'enabled':     psa.get('provider') == 'autotask',
+                    'zone':        at.get('zone', 'webservices2'),
+                    'username':    at.get('username', ''),
+                    'api_key':     _M if at.get('api_key') else '',
+                    'account_id':  str(at.get('account_id', '')),
+                    'queue_id':    str(at.get('queue_id', '')),
+                    'priority_id': at.get('priority_id', 1),
+                },
+                'halopsa': {
+                    'enabled':        psa.get('provider') == 'halopsa',
+                    'tenant':         hp.get('tenant', ''),
+                    'client_id':      hp.get('client_id', ''),
+                    'client_secret':  _M if hp.get('client_secret') else '',
+                    'ticket_type_id': hp.get('ticket_type_id', 1),
+                    'priority_id':    hp.get('priority_id', 1),
+                },
+                'jira': {
+                    'enabled':      psa.get('provider') == 'jira',
+                    'site':         psa.get('jira', {}).get('site', ''),
+                    'email':        psa.get('jira', {}).get('email', ''),
+                    'api_token':    _M if psa.get('jira', {}).get('api_token') else '',
+                    'project_key':  psa.get('jira', {}).get('project_key', ''),
+                    'issue_type':   psa.get('jira', {}).get('issue_type', 'Bug'),
+                },
+            })
+        except Exception as e:
             self._json({'error': str(e)}, 500)
 
-    def _api_ack_alert(self):
+    def _api_set_psa_config(self):
         length = _content_length(self.headers)
         if not length:
             self._send(400, b'Empty body', 'text/plain')
@@ -3968,77 +4165,308 @@ function copyToken(token) {{
         except json.JSONDecodeError:
             self._send(400, b'Invalid JSON', 'text/plain')
             return
-        me = self._session_user()
-        acked_by = me['email'] if me else ''
-        cust = self._get_dashboard_customer()
-        cid = cust['id'] if cust else 'default'
-        store = _get_store(cid)
-        if body.get('all'):
-            count = store.acknowledge_all_alerts(acked_by)
-            if me:
-                store.log_action(
-                    actor_id=me.get('user_id', me.get('id', '')), actor_name=me['email'], actor_role=me.get('role', ''),
-                    action='alert.ack.all', target='', details=f'Acknowledged {count} alerts',
-                    ip_address=self.client_address[0]
-                )
-            self._json({'acknowledged': count})
-        else:
-            alert_id = int(body.get('id', 0))
-            ok = store.acknowledge_alert(alert_id, acked_by)
-            if ok and me:
-                store.log_action(
-                    actor_id=me.get('user_id', me.get('id', '')), actor_name=me['email'], actor_role=me.get('role', ''),
-                    action='alert.ack', target=str(alert_id), details=f'Acknowledged alert {alert_id}',
-                    ip_address=self.client_address[0]
-                )
-            self._json({'ok': ok})
+        try:
+            org_id = self._psa_org_scope()
+            if org_id:
+                me = self._session_user()
+                org = _get_registry().get_client_org(org_id)
+                if not org or org.get('customer_id') != me['customer_id']:
+                    self._json({'ok': False, 'error': 'client org not found'}, 404)
+                    return
+            cfg = self._load_psa_cfg(org_id)
+            _M  = '__set__'
 
-    def _serve_dns_inventory(self):
-        user = self._session_user()
-        email = user['email'] if user else ''
-        body = _dns_inventory_html(email).encode('utf-8')
-        self.send_response(200)
-        self.send_header('Content-Type', 'text/html; charset=utf-8')
-        self.send_header('Content-Length', len(body))
-        self.send_header('Cache-Control', 'no-store')
-        self.end_headers()
-        self.wfile.write(body)
+            psa_id = body.get('id', '')
+            fields = body.get('fields', {})
+            enabled = body.get('enabled', False)
 
-    def _api_dns_inventory_analyze(self):
+            psa = cfg.setdefault('psa', {})
+            if enabled:
+                psa['provider'] = psa_id
+            elif psa.get('provider') == psa_id:
+                psa['provider'] = ''
+
+            def _restore(incoming, saved):
+                return saved if incoming == _M else (incoming or '')
+
+            existing_sub = psa.get(psa_id, {})
+            if psa_id == 'connectwise':
+                psa['connectwise'] = {
+                    'site':          str(fields.get('site', '')).strip(),
+                    'company_id':    str(fields.get('company_id', '')).strip(),
+                    'public_key':    str(fields.get('public_key', '')).strip(),
+                    'private_key':   _restore(fields.get('private_key', ''), existing_sub.get('private_key', '')),
+                    'client_id':     str(fields.get('client_id', '')).strip(),
+                    'service_board': str(fields.get('service_board', '')).strip(),
+                    'company_name':  str(fields.get('company_name', '')).strip(),
+                }
+            elif psa_id == 'autotask':
+                psa['autotask'] = {
+                    'zone':        str(fields.get('zone', 'webservices2')).strip(),
+                    'username':    str(fields.get('username', '')).strip(),
+                    'api_key':     _restore(fields.get('api_key', ''), existing_sub.get('api_key', '')),
+                    'account_id':  fields.get('account_id', ''),
+                    'queue_id':    fields.get('queue_id', ''),
+                    'priority_id': int(fields.get('priority_id', 1)),
+                }
+            elif psa_id == 'halopsa':
+                psa['halopsa'] = {
+                    'tenant':         str(fields.get('tenant', '')).strip(),
+                    'client_id':      str(fields.get('client_id', '')).strip(),
+                    'client_secret':  _restore(fields.get('client_secret', ''), existing_sub.get('client_secret', '')),
+                    'ticket_type_id': int(fields.get('ticket_type_id', 1)),
+                    'priority_id':    int(fields.get('priority_id', 1)),
+                }
+            elif psa_id == 'jira':
+                psa['jira'] = {
+                    'site':        str(fields.get('site', '')).strip(),
+                    'email':       str(fields.get('email', '')).strip(),
+                    'api_token':   _restore(fields.get('api_token', ''), existing_sub.get('api_token', '')),
+                    'project_key': str(fields.get('project_key', '')).strip().upper(),
+                    'issue_type':  str(fields.get('issue_type', 'Bug')).strip() or 'Bug',
+                }
+            self._save_psa_cfg(cfg, org_id)
+            self._json({'ok': True})
+        except Exception as e:
+            self._json({'ok': False, 'error': str(e)}, 500)
+
+    def _api_test_psa_provider(self, psa_id: str):
+        try:
+            from alerts import load_alert_config
+            cfg = load_alert_config(ROOT / 'data' / 'alerts_config.json') or {}
+            psa = cfg.get('psa', {})
+            from connectors.psa_connector import test_connection
+            psa_cfg = {'provider': psa_id, psa_id: psa.get(psa_id, {})}
+            ok, msg = test_connection(psa_cfg)
+            self._json({'ok': ok, 'message': msg})
+        except Exception as e:
+            self._json({'ok': False, 'message': str(e)}, 500)
+
+    def _api_test_psa_ticket(self, psa_id: str):
+        try:
+            from alerts import load_alert_config
+            cfg = load_alert_config(ROOT / 'data' / 'alerts_config.json') or {}
+            psa = cfg.get('psa', {})
+            from connectors.psa_connector import create_ticket
+            psa_cfg = {'provider': psa_id, psa_id: psa.get(psa_id, {})}
+            dummy_finding = {
+                'check_id':    'AI-DEPLOY-001',
+                'severity':    'HIGH',
+                'title':       'Test finding from Arckon',
+                'description': 'This is a test ticket created from the Arckon dashboard to verify PSA integration.',
+                'status':      'FAIL',
+            }
+            ok, msg = create_ticket(psa_cfg, dummy_finding, 'arckon-test')
+            self._json({'ok': ok, 'message': msg})
+        except Exception as e:
+            self._json({'ok': False, 'message': str(e)}, 500)
+
+    def _api_get_branding(self):
+        path = ROOT / 'data' / 'branding.json'
+        try:
+            data = json.loads(path.read_text()) if path.exists() else {}
+        except Exception:
+            data = {}
+        self._json(data)
+
+    def _api_set_branding(self):
+        try:
+            body = json.loads(self.rfile.read(int(self.headers.get('Content-Length', 0))))
+            allowed = {'msp_name', 'logo_url', 'footer_text'}
+            data = {k: str(v).strip() for k, v in body.items() if k in allowed}
+            path = ROOT / 'data' / 'branding.json'
+            path.write_text(json.dumps(data, indent=2))
+            self._json({'ok': True})
+        except Exception as e:
+            self._json({'ok': False, 'error': str(e)}, 500)
+
+    def _api_eu_ai_act_report(self):
+        """GET /api/fleet/eu-ai-act-report?org=...&fmt=html|pdf|csv
+
+        fmt=html (default) is unchanged — an in-browser page with its own
+        Print/Save-PDF button. fmt=pdf and fmt=csv are real server-side
+        exports, generated and downloaded directly rather than relying on
+        the browser's print-to-PDF (which produced a blank single-page PDF
+        for at least one real user — Safari specifically)."""
+        try:
+            import urllib.parse as _up
+            qs       = _up.parse_qs(_up.urlparse(self.path).query)
+            org_name = qs.get('org', [''])[0]
+            fmt      = qs.get('fmt', ['html'])[0].lower()
+            if fmt not in ('html', 'pdf', 'csv'):
+                fmt = 'html'
+            store    = self._store()
+            devices  = store.list_devices(client_org_id=self._scoped_client_org())
+            enriched = []
+            for d in devices:
+                rep = store.get_latest_report(d['device_id'])
+                enriched.append({**d, '_report': rep})
+            branding_path = ROOT / 'data' / 'branding.json'
+            branding = json.loads(branding_path.read_text()) if branding_path.exists() else {}
+
+            safe_org = (org_name or 'Report').replace(' ', '_').replace('/', '-')
+            if fmt == 'pdf':
+                from eu_ai_act_report import generate_eu_ai_act_report_pdf
+                pdf_bytes = generate_eu_ai_act_report_pdf(enriched, org_name, branding)
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/pdf')
+                self.send_header('Content-Disposition', f'attachment; filename="EU_AI_Act_Report_{safe_org}.pdf"')
+                self.send_header('Content-Length', str(len(pdf_bytes)))
+                self.end_headers()
+                self.wfile.write(pdf_bytes)
+            elif fmt == 'csv':
+                from eu_ai_act_report import generate_eu_ai_act_report_csv
+                csv_bytes = generate_eu_ai_act_report_csv(enriched, org_name)
+                self.send_response(200)
+                self.send_header('Content-Type', 'text/csv')
+                self.send_header('Content-Disposition', f'attachment; filename="EU_AI_Act_Report_{safe_org}.csv"')
+                self.send_header('Content-Length', str(len(csv_bytes)))
+                self.end_headers()
+                self.wfile.write(csv_bytes)
+            else:
+                from eu_ai_act_report import generate_eu_ai_act_report
+                html_out = generate_eu_ai_act_report(enriched, org_name, branding)
+                self._send(200, html_out.encode(), 'text/html; charset=utf-8')
+        except Exception as e:
+            self._send(500, f'Report generation failed: {e}'.encode(), 'text/plain')
+
+    def _api_fleet_aibom(self):
+        """GET /api/fleet/aibom?org=... — HTML AI Bill of Materials report."""
+        try:
+            import urllib.parse as _up
+            qs       = _up.parse_qs(_up.urlparse(self.path).query)
+            org_name = qs.get('org', [''])[0]
+            store    = self._store()
+            devices  = store.list_devices(client_org_id=self._scoped_client_org())
+            enriched = []
+            for d in devices:
+                rep = store.get_latest_report(d['device_id'])
+                enriched.append({**d, '_report': rep})
+            shadow   = store.list_shadow_devices()
+            branding_path = ROOT / 'data' / 'branding.json'
+            branding = json.loads(branding_path.read_text()) if branding_path.exists() else {}
+            from aibom_generator import generate_aibom_report
+            html_out = generate_aibom_report(enriched, org_name, branding, shadow)
+            self._send(200, html_out.encode(), 'text/html; charset=utf-8')
+        except Exception as e:
+            self._send(500, f'AI-BOM generation failed: {e}'.encode(), 'text/plain')
+
+    def _api_fleet_aibom_json(self):
+        """GET /api/fleet/aibom.json?org=... — JSON AI-BOM download."""
+        try:
+            import urllib.parse as _up
+            qs       = _up.parse_qs(_up.urlparse(self.path).query)
+            org_name = qs.get('org', [''])[0]
+            store    = self._store()
+            devices  = store.list_devices(client_org_id=self._scoped_client_org())
+            enriched = []
+            for d in devices:
+                rep = store.get_latest_report(d['device_id'])
+                enriched.append({**d, '_report': rep})
+            shadow   = store.list_shadow_devices()
+            from aibom_generator import generate_aibom_json
+            bom = generate_aibom_json(enriched, org_name, shadow)
+            safe_org = (org_name or 'Fleet').replace(' ', '_').replace('/', '-')
+            data = json.dumps(bom, indent=2).encode()
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.send_header('Content-Disposition', f'attachment; filename="AI_BOM_{safe_org}.json"')
+            self.send_header('Content-Length', str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+        except Exception as e:
+            self._send(500, f'AI-BOM JSON failed: {e}'.encode(), 'text/plain')
+
+    # ── Alert event log API ───────────────────────────────────────────────────
+
+    def _api_get_alert_events(self):
+        import urllib.parse as _up
+        qs = _up.parse_qs(_up.urlparse(self.path).query)
+        unreviewed_only = qs.get('unreviewed', [''])[0].lower() in ('1', 'true', 'yes')
+        store = self._store()
+        try:
+            events = store.get_alert_events(limit=300, unreviewed_only=unreviewed_only)
+            self._json({'events': events})
+        except Exception as e:
+            self._json({'events': [], 'error': str(e)})
+
+    def _api_get_active_issues(self):
+        store = self._store()
+        try:
+            issues = store.get_active_critical_high_findings()
+            self._json({'issues': issues})
+        except Exception as e:
+            self._json({'issues': [], 'error': str(e)})
+
+    def _api_unreviewed_alert_count(self):
+        store = self._store()
+        try:
+            self._json({'count': store.count_unreviewed_alerts()})
+        except Exception as e:
+            self._json({'count': 0})
+
+    def _api_review_alert(self, event_id_str: str):
+        store = self._store()
+        try:
+            store.mark_alert_reviewed(int(event_id_str))
+            self._json({'ok': True})
+        except Exception as e:
+            self._json({'ok': False, 'error': str(e)}, 400)
+
+    def _api_review_all_alerts(self):
+        store = self._store()
+        try:
+            store.mark_all_alerts_reviewed()
+            self._json({'ok': True})
+        except Exception as e:
+            self._json({'ok': False, 'error': str(e)}, 500)
+
+    # ── SIEM config API ───────────────────────────────────────────────────────
+
+    def _api_get_siem_config(self):
+        try:
+            from connectors.siem_connector import load_siem_config_for_ui
+            self._json(load_siem_config_for_ui(ROOT / 'siem_config.json'))
+        except Exception as e:
+            self._json({'error': str(e)}, 500)
+
+    def _api_set_siem_config(self):
         length = _content_length(self.headers)
-        if length > 10_000_000:
-            self._send(413, b'Log file too large (max 10 MB)', 'text/plain')
+        if not length:
+            self._send(400, b'Empty body', 'text/plain')
             return
         try:
-            body = json.loads(self.rfile.read(length)) if length else {}
-        except Exception:
+            body = json.loads(self.rfile.read(length))
+        except json.JSONDecodeError:
             self._send(400, b'Invalid JSON', 'text/plain')
             return
-
-        log_text = str(body.get('log_text', '')).strip()
-        if not log_text:
-            self._json({'error': 'No log content provided.'}, 400)
-            return
-
-        approved_raw = str(body.get('approved_domains', ''))
-        approved = [d.strip() for d in approved_raw.replace(',', '\n').splitlines() if d.strip()] or None
-
         try:
-            import sys as _sys, os as _os
-            _base = str(ROOT)
-            _cp = _os.path.join(_base, 'connectors')
-            if _cp not in _sys.path:
-                _sys.path.insert(0, _cp)
-            from dns_connector import connect as _dns_connect
-            result = _dns_connect(log_content=log_text, approved_domains=approved)
-        except ImportError:
-            self._json({'error': 'DNS connector not available on this server.'}, 500)
-            return
-        except Exception as _e:
-            self._json({'error': str(_e)}, 500)
-            return
+            from connectors.siem_connector import load_siem_config, save_siem_config
+            existing = load_siem_config(ROOT / 'siem_config.json')
+            _SECRETS = {'hec_token', 'shared_key', 'api_key', 'vsa_api_key',
+                        'bms_api_key', 'itglue_api_key', 'password'}
+            for siem_id, vals in body.items():
+                if not isinstance(vals, dict):
+                    continue
+                if siem_id not in existing:
+                    existing[siem_id] = {}
+                for k, v in vals.items():
+                    if k in _SECRETS and v == '__set__':
+                        continue  # masked — keep existing secret
+                    existing[siem_id][k] = v
+            save_siem_config(existing, ROOT / 'siem_config.json')
+            self._json({'status': 'saved'})
+        except Exception as e:
+            self._json({'error': str(e)}, 500)
 
-        self._json(result)
+    def _api_test_siem(self, siem_id: str):
+        try:
+            from connectors.siem_connector import load_siem_config, test_connection
+            cfg = load_siem_config(ROOT / 'siem_config.json')
+            ok, msg = test_connection(siem_id, cfg)
+            self._json({'ok': ok, 'message': msg})
+        except Exception as e:
+            self._json({'ok': False, 'message': str(e)}, 500)
 
     def _serve_shortcut(self):
         url = f'http://localhost:{_serve_port}/fleet'
@@ -4047,7 +4475,7 @@ function copyToken(token) {{
             self.send_response(200)
             self.send_header('Content-Type', 'application/x-mswinurl')
             self.send_header('Content-Disposition',
-                             'attachment; filename="Arckon Dashboard.url"')
+                             'attachment; filename="Sentinel Dashboard.url"')
             self.send_header('Content-Length', len(content))
             self.end_headers()
             self.wfile.write(content)
@@ -4063,15 +4491,313 @@ function copyToken(token) {{
             self.send_response(200)
             self.send_header('Content-Type', 'application/octet-stream')
             self.send_header('Content-Disposition',
-                             'attachment; filename="Arckon Dashboard.webloc"')
+                             'attachment; filename="Sentinel Dashboard.webloc"')
             self.send_header('Content-Length', len(content))
             self.end_headers()
             self.wfile.write(content)
 
+    def _serve_clients(self):
+        """GET /clients — Level 1 rollup: one row per client org, worst
+        severity first. MSP-admin only (not in the client_viewer path
+        allowlist, so a scoped session never reaches this method at all)."""
+        me = self._session_user()
+        if not me or me.get('role') not in ('admin', 'customer_admin', 'super_admin'):
+            self._send(403, b'Forbidden', 'text/plain')
+            return
+        try:
+            reg = _get_registry()
+            orgs = reg.list_client_orgs(me['customer_id'])
+            rollup = self._store().rollup_by_client_org()
+        except Exception as e:
+            self._send(500, f'Error loading client orgs: {e}'.encode(), 'text/plain')
+            return
+
+        sev_rank = {'critical': 0, 'warning': 1, 'no_data': 2, 'ok': 3}
+        sev_color = {'critical': '#DC2626', 'warning': '#F97316', 'ok': '#16A34A', 'no_data': '#D1D5DB'}
+        sev_label = {'critical': 'Critical', 'warning': 'Warning', 'ok': 'Clean', 'no_data': 'No data yet'}
+
+        rows_data = []
+        for o in orgs:
+            stats = rollup.pop(o['id'], {
+                'device_count': 0, 'critical': 0, 'warning': 0, 'ok': 0,
+                'no_data': 0, 'last_scan_at': 0, 'worst_severity': 'no_data',
+            })
+            rows_data.append((o['id'], o['name'], stats))
+        unassigned = rollup.pop(None, None)
+        if unassigned and unassigned['device_count']:
+            rows_data.append(('', 'Unassigned devices', unassigned))
+        rows_data.sort(key=lambda r: sev_rank.get(r[2]['worst_severity'], 9))
+
+        now = int(time.time())
+
+        def _age(ts):
+            if not ts:
+                return 'never'
+            secs = now - ts
+            if secs < 3600:
+                return f'{max(1, secs // 60)}m ago'
+            if secs < 86400:
+                return f'{secs // 3600}h ago'
+            return f'{secs // 86400}d ago'
+
+        org_by_id = {o['id']: o for o in orgs}
+
+        row_html = ''
+        for org_id, name, stats in rows_data:
+            sev = stats['worst_severity']
+            link = f"/?client_org={org_id}" if org_id else "/?client_org="
+            if org_id:
+                org = org_by_id.get(org_id, {})
+                report_email = org.get('report_email', '') or ''
+                monthly_checked = 'checked' if org.get('report_cadence') == 'monthly' else ''
+                report_cell = (
+                    '<td onclick="event.stopPropagation()" style="white-space:nowrap">'
+                    f'<input type="email" class="report-email" data-org="{org_id}" value="{report_email}" '
+                    'placeholder="client@example.com" style="width:150px;font-size:12px;background:#0d1117;'
+                    'border:1px solid #30363d;color:#c9d1d9;padding:4px 6px;border-radius:4px">'
+                    f'<label style="font-size:11px;margin-left:6px;color:#8b949e"><input type="checkbox" '
+                    f'class="report-monthly" data-org="{org_id}" {monthly_checked}> Monthly</label>'
+                    f'<button class="scan-btn" style="margin-left:6px;font-size:11px" '
+                    f'onclick="saveReportConfig(\'{org_id}\',this)">Save</button>'
+                    f'<button class="scan-btn" style="margin-left:4px;font-size:11px;color:#58a6ff" '
+                    f'onclick="sendReportNow(\'{org_id}\',this)">Send Now</button>'
+                    f'<span class="report-status" data-org="{org_id}" style="font-size:11px;margin-left:6px;color:#8b949e"></span>'
+                    '</td>'
+                )
+            else:
+                report_cell = '<td style="color:#484f58;font-size:12px">—</td>'
+            name_js = name.replace('\\', '\\\\').replace("'", "\\'")
+            manage_cell = (
+                '<td onclick="event.stopPropagation()">'
+                f'<button class="scan-btn" style="font-size:11px" '
+                f'onclick="openDeviceModal(\'{org_id}\',\'{name_js}\')">Manage devices</button>'
+                '</td>'
+            )
+            row_html += (
+                '<tr class="client-row" onclick="location.href=\'' + link + '\'">'
+                '<td><span class="risk-dot" style="background:' + sev_color[sev] + '"></span></td>'
+                '<td class="client-name">' + name + '</td>'
+                '<td>' + sev_label[sev] + '</td>'
+                '<td>' + str(stats['device_count']) + '</td>'
+                '<td style="color:#DC2626">' + str(stats['critical']) + '</td>'
+                '<td style="color:#F97316">' + str(stats['warning']) + '</td>'
+                '<td style="color:#16A34A">' + str(stats['ok']) + '</td>'
+                '<td>' + _age(stats['last_scan_at']) + '</td>'
+                + report_cell +
+                manage_cell +
+                '</tr>'
+            )
+        if not row_html:
+            row_html = '<tr><td colspan="10" style="text-align:center;padding:32px;color:#8b949e">No client orgs yet — create one below.</td></tr>'
+
+        org_options_html = ''.join(
+            f'<option value="{o["id"]}">{o["name"].replace("<", "&lt;")}</option>' for o in orgs
+        )
+
+        body = ("""<!DOCTYPE html><html><head><meta charset="utf-8">
+<title>Clients — Arckon</title>
+<style>
+body{font:14px -apple-system,sans-serif;background:#0d1117;color:#c9d1d9;margin:0;padding:32px}
+h1{font-size:20px;font-weight:600;margin:0 0 20px}
+a.back{color:#58a6ff;text-decoration:none;font-size:13px}
+table{width:100%;border-collapse:collapse;margin-top:16px;background:#161b22;border-radius:8px;overflow:hidden}
+th{text-align:left;padding:10px 14px;background:#21262d;color:#8b949e;font-weight:500;font-size:12px;text-transform:uppercase}
+td{padding:10px 14px;border-top:1px solid #21262d}
+.client-row{cursor:pointer}
+.client-row:hover{background:#1c2128}
+.client-name{font-weight:600;color:#e6edf3}
+.risk-dot{display:inline-block;width:10px;height:10px;border-radius:50%}
+.add-form{margin-top:24px;display:flex;gap:8px}
+.add-form input{background:#0d1117;border:1px solid #30363d;color:#c9d1d9;padding:8px 12px;border-radius:6px;font-size:13px;flex:1;max-width:300px}
+.add-form button{background:#238636;color:#fff;border:none;padding:8px 16px;border-radius:6px;cursor:pointer;font-size:13px}
+.add-form button:hover{background:#2ea043}
+#new-token{margin-top:12px;padding:12px;background:#161b22;border:1px solid #30363d;border-radius:6px;font-size:13px;display:none}
+#new-token code{color:#58a6ff;word-break:break-all}
+.scan-btn{background:#21262d;border:1px solid #30363d;color:#c9d1d9;border-radius:4px;padding:3px 8px;cursor:pointer}
+.scan-btn:hover{background:#30363d}
+#device-modal{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:100;align-items:center;justify-content:center}
+#device-modal .box{background:#161b22;border:1px solid #30363d;border-radius:8px;width:640px;max-height:80vh;display:flex;flex-direction:column;padding:20px}
+#device-modal input[type=text]{width:100%;box-sizing:border-box;padding:8px;background:#0d1117;border:1px solid #30363d;color:#c9d1d9;border-radius:6px}
+#dm-list{overflow-y:auto;flex:1;border-top:1px solid #21262d;min-height:120px;max-height:360px}
+.dm-row{display:flex;align-items:center;gap:8px;padding:6px 4px;border-bottom:1px solid #21262d;font-size:13px;cursor:pointer}
+#dm-target-org{flex:1;padding:8px;background:#0d1117;border:1px solid #30363d;color:#c9d1d9;border-radius:6px}
+</style></head><body>
+<a class="back" href="/">&larr; Full fleet (all clients)</a>
+<h1>Clients</h1>
+<table>
+<tr><th></th><th>Client</th><th>Status</th><th>Devices</th><th>Critical</th><th>Warning</th><th>Clean</th><th>Last scan</th><th>Monthly PDF Report</th><th></th></tr>
+""" + row_html + """
+</table>
+<div class="add-form">
+  <input id="new-client-name" placeholder="New client name (e.g. Acme Bakery)">
+  <button onclick="addClient()">+ Add Client</button>
+</div>
+<div id="new-token"></div>
+
+<div id="device-modal">
+  <div class="box">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+      <h3 id="dm-title" style="margin:0;font-size:16px"></h3>
+      <button onclick="closeDeviceModal()" style="background:none;border:none;color:#8b949e;font-size:20px;cursor:pointer">&times;</button>
+    </div>
+    <input type="text" id="dm-search" placeholder="Filter by hostname..." oninput="renderDeviceList()" style="margin-bottom:10px">
+    <div style="display:flex;gap:12px;margin-bottom:8px;align-items:center">
+      <label style="font-size:12px"><input type="checkbox" id="dm-select-all" onchange="toggleAllDeviceCheckboxes(this)"> Select all shown (<span id="dm-visible-count">0</span>)</label>
+      <span id="dm-selected-count" style="font-size:12px;color:#8b949e"></span>
+    </div>
+    <div id="dm-list"></div>
+    <div style="display:flex;gap:8px;margin-top:14px;align-items:center">
+      <select id="dm-target-org">
+        <option value="">— Unassigned —</option>
+        """ + org_options_html + """
+      </select>
+      <button onclick="moveSelectedDevices()" class="scan-btn" style="background:#238636;color:#fff;border-color:#238636">Move selected</button>
+    </div>
+    <div id="dm-status" style="font-size:12px;margin-top:8px"></div>
+  </div>
+</div>
+
+<script>
+async function addClient(){
+  const name = document.getElementById('new-client-name').value.trim();
+  if(!name){ return; }
+  const r = await fetch('/api/clients/add', {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({name})
+  });
+  const data = await r.json();
+  if(data.ok){
+    const box = document.getElementById('new-token');
+    box.style.display = 'block';
+    box.innerHTML = 'Client "' + data.client_org.name + '" created. Enrollment token '
+      + '(paste into that client\\'s agent_config.json as client_org_token):<br><code>'
+      + data.client_org.enroll_token + '</code>';
+    setTimeout(() => location.reload(), 4000);
+  } else {
+    alert(data.error || 'Failed to create client');
+  }
+}
+
+async function saveReportConfig(orgId, btn){
+  const emailEl = document.querySelector('.report-email[data-org="' + orgId + '"]');
+  const monthlyEl = document.querySelector('.report-monthly[data-org="' + orgId + '"]');
+  const statusEl = document.querySelector('.report-status[data-org="' + orgId + '"]');
+  const report_email = emailEl.value.trim();
+  const report_cadence = monthlyEl.checked ? 'monthly' : 'off';
+  btn.disabled = true;
+  try {
+    const r = await fetch('/api/clients/report-config/' + orgId, {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({report_email, report_cadence})
+    });
+    const data = await r.json();
+    statusEl.textContent = data.ok ? 'Saved' : (data.error || 'Failed');
+    statusEl.style.color = data.ok ? '#16A34A' : '#DC2626';
+  } catch(e) {
+    statusEl.textContent = 'Failed: ' + e;
+    statusEl.style.color = '#DC2626';
+  }
+  btn.disabled = false;
+  setTimeout(() => { statusEl.textContent = ''; }, 4000);
+}
+
+async function sendReportNow(orgId, btn){
+  const emailEl = document.querySelector('.report-email[data-org="' + orgId + '"]');
+  const statusEl = document.querySelector('.report-status[data-org="' + orgId + '"]');
+  btn.disabled = true;
+  statusEl.textContent = 'Sending...';
+  statusEl.style.color = '#8b949e';
+  try {
+    const r = await fetch('/api/clients/send-report/' + orgId, {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({report_email: emailEl.value.trim()})
+    });
+    const data = await r.json();
+    statusEl.textContent = data.ok ? 'Sent!' : (data.error || data.message || 'Failed');
+    statusEl.style.color = data.ok ? '#16A34A' : '#DC2626';
+  } catch(e) {
+    statusEl.textContent = 'Failed: ' + e;
+    statusEl.style.color = '#DC2626';
+  }
+  btn.disabled = false;
+}
+
+let dmDevices = [];
+
+async function openDeviceModal(orgId, orgName){
+  document.getElementById('dm-title').textContent = 'Devices — ' + orgName;
+  document.getElementById('dm-search').value = '';
+  document.getElementById('dm-select-all').checked = false;
+  document.getElementById('dm-list').innerHTML = '<div style="padding:20px;color:#8b949e">Loading…</div>';
+  document.getElementById('dm-target-org').value = orgId;
+  document.getElementById('dm-status').textContent = '';
+  document.getElementById('device-modal').style.display = 'flex';
+  const qs = orgId === '' ? '__unassigned__' : orgId;
+  try {
+    const r = await fetch('/api/devices?client_org=' + encodeURIComponent(qs));
+    const data = await r.json();
+    dmDevices = data.devices || [];
+  } catch(e) {
+    dmDevices = [];
+  }
+  renderDeviceList();
+}
+
+function closeDeviceModal(){
+  document.getElementById('device-modal').style.display = 'none';
+}
+
+function renderDeviceList(){
+  const filter = (document.getElementById('dm-search').value || '').toLowerCase();
+  const list = document.getElementById('dm-list');
+  const filtered = dmDevices.filter(d => (d.hostname || d.device_id || '').toLowerCase().includes(filter));
+  document.getElementById('dm-visible-count').textContent = filtered.length;
+  list.innerHTML = filtered.map(d =>
+    '<label class="dm-row"><input type="checkbox" class="dm-device-cb" value="' + d.device_id + '" onchange="updateSelectedCount()">' +
+    '<span style="flex:1">' + (d.hostname || d.device_id) + '</span>' +
+    '<span style="color:#8b949e;font-size:11px">' + (d.platform || '') + '</span></label>'
+  ).join('') || '<div style="padding:20px;color:#8b949e">No devices.</div>';
+  updateSelectedCount();
+}
+
+function toggleAllDeviceCheckboxes(cb){
+  document.querySelectorAll('.dm-device-cb').forEach(el => { el.checked = cb.checked; });
+  updateSelectedCount();
+}
+
+function updateSelectedCount(){
+  const n = document.querySelectorAll('.dm-device-cb:checked').length;
+  document.getElementById('dm-selected-count').textContent = n ? (n + ' selected') : '';
+}
+
+async function moveSelectedDevices(){
+  const ids = Array.from(document.querySelectorAll('.dm-device-cb:checked')).map(el => el.value);
+  const statusEl = document.getElementById('dm-status');
+  if (!ids.length){ statusEl.textContent = 'Select at least one device.'; statusEl.style.color = '#DC2626'; return; }
+  const targetOrg = document.getElementById('dm-target-org').value;
+  statusEl.textContent = 'Moving…'; statusEl.style.color = '#8b949e';
+  try {
+    const r = await fetch('/api/clients/assign-devices', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({device_ids: ids, client_org_id: targetOrg})
+    });
+    const data = await r.json();
+    if (data.ok){
+      statusEl.textContent = 'Moved ' + data.moved + ' device(s).'; statusEl.style.color = '#16A34A';
+      setTimeout(() => location.reload(), 1200);
+    } else {
+      statusEl.textContent = data.error || 'Failed'; statusEl.style.color = '#DC2626';
+    }
+  } catch(e) {
+    statusEl.textContent = 'Network error.'; statusEl.style.color = '#DC2626';
+  }
+}
+</script>
+</body></html>""")
+        self._send(200, body.encode('utf-8'), 'text/html; charset=utf-8')
+
     def _serve_fleet(self):
-        print('[ARCKON] _serve_fleet: start', flush=True)
-        # Set per-customer license for all feature flags used during this request
-        _set_request_license(self._get_dashboard_customer())
+        print('[SENTINEL] _serve_fleet: start', flush=True)
         try:
             store = self._store()
             org_scope = self._scoped_client_org()
@@ -4082,9 +4808,9 @@ function copyToken(token) {{
             # assets. MSP admins (org_scope is None) still see everything.
             shadow  = store.list_shadow_devices() if org_scope is None else []
             mcp     = store.list_mcp_servers() if org_scope is None else []
-            print(f'[ARCKON] _serve_fleet: got {len(devices)} devices, {len(shadow)} shadow, {len(mcp)} mcp', flush=True)
+            print(f'[SENTINEL] _serve_fleet: got {len(devices)} devices, {len(shadow)} shadow, {len(mcp)} mcp', flush=True)
         except Exception as _e:
-            print(f'[ARCKON] _serve_fleet: store error: {_e}', flush=True)
+            print(f'[SENTINEL] _serve_fleet: store error: {_e}', flush=True)
             log.error('_serve_fleet: store error: %s', _e, exc_info=True)
             devices = []
             shadow  = []
@@ -4094,12 +4820,15 @@ function copyToken(token) {{
             body = _build_fleet_html(
                 devices, shadow, mcp,
                 current_user_email=user['email'] if user else '',
-                current_user_role=user['role'] if user else '',
+                current_user_role=user.get('role', '') if user else '',
+                current_user_is_reseller=bool(user.get('is_reseller')) if user else False,
+                current_user_is_msp=bool(user.get('is_msp')) if user else False,
+                current_user_impersonated_by=(user.get('impersonated_by') or '') if user else '',
                 store=store,
             ).encode('utf-8')
-            print(f'[ARCKON] _serve_fleet: body built {len(body)} bytes', flush=True)
+            print(f'[SENTINEL] _serve_fleet: body built {len(body)} bytes', flush=True)
         except Exception as _e:
-            print(f'[ARCKON] _serve_fleet: build error: {_e}', flush=True)
+            print(f'[SENTINEL] _serve_fleet: build error: {_e}', flush=True)
             log.error('_build_fleet_html failed: %s', _e, exc_info=True)
             body = (
                 b'<html><body style="font:14px monospace;background:#0d1117;color:#f85149;padding:40px">'
@@ -4115,9 +4844,9 @@ function copyToken(token) {{
             self.send_header('Access-Control-Allow-Origin', '*')
             self.end_headers()
             self.wfile.write(body)
-            print(f'[ARCKON] _serve_fleet: sent OK', flush=True)
+            print('[SENTINEL] _serve_fleet: sent OK', flush=True)
         except Exception as _e:
-            print(f'[ARCKON] _serve_fleet: send error: {_e}', flush=True)
+            print(f'[SENTINEL] _serve_fleet: send error: {_e}', flush=True)
             log.error('_serve_fleet: send failed: %s', _e, exc_info=True)
 
     def _api_probe_scan(self):
@@ -4135,12 +4864,19 @@ function copyToken(token) {{
         api_key  = str(body.get('api_key', '')).strip()
         model    = str(body.get('model', '')).strip()
         endpoint = str(body.get('endpoint', '')).strip()
+        uses_rag = bool(body.get('uses_rag', False))
+        rag_query = str(body.get('rag_query', '')).strip()
+        rag_retrieval_marker = str(body.get('rag_retrieval_marker', 'ARCKON_RAG_RETRIEVED_C7E1')).strip()
+        rag_injection_marker = str(body.get('rag_injection_marker', 'ARCKON_RAG_INJECTION_A9D4')).strip()
 
         if not api_key:
             self._json({'error': 'api_key is required'}, 400)
             return
         if provider not in ('openai', 'anthropic', 'gemini'):
             self._json({'error': 'unknown provider'}, 400)
+            return
+        if uses_rag and (provider != 'openai' or not rag_query):
+            self._json({'error': 'RAG testing requires an OpenAI-compatible application endpoint and a retrieval query.'}, 400)
             return
 
         log.info('probe-scan start: provider=%s endpoint=%s', provider, endpoint or '(default)')
@@ -4159,7 +4895,9 @@ function copyToken(token) {{
                 ep = endpoint or 'https://api.openai.com/v1'
                 mdl = model or 'gpt-4o'
                 log.info('probe-scan connecting to %s model=%s', ep, mdl)
-                ctx = connect(ep, api_key, mdl, str(ROOT))
+                rag_probe = ({'query': rag_query, 'retrieval_marker': rag_retrieval_marker,
+                              'injection_marker': rag_injection_marker} if uses_rag else None)
+                ctx = connect(ep, api_key, mdl, str(ROOT), rag_probe=rag_probe)
             elif provider == 'anthropic':
                 from connectors.claude_connector import connect
                 mdl = model or 'claude-sonnet-4-6'
@@ -4211,6 +4949,9 @@ function copyToken(token) {{
         endpoint = fields.get('endpoint', '').strip()
         rag_val  = fields.get('uses_rag', '')
         uses_rag = True if rag_val == 'yes' else (False if rag_val == 'no' else None)
+        rag_query = fields.get('rag_query', '').strip()
+        rag_retrieval_marker = fields.get('rag_retrieval_marker', 'ARCKON_RAG_RETRIEVED_C7E1').strip()
+        rag_injection_marker = fields.get('rag_injection_marker', 'ARCKON_RAG_INJECTION_A9D4').strip()
 
         if not api_key:
             self._serve_probe_tester(error='Please enter an API key.')
@@ -4218,11 +4959,16 @@ function copyToken(token) {{
         if provider not in ('openai', 'anthropic', 'gemini'):
             self._serve_probe_tester(error='Unknown provider.')
             return
+        if uses_rag is True and provider != 'openai':
+            self._serve_probe_tester(error='RAG testing requires your deployed, OpenAI-compatible application endpoint — not a direct model-provider API.')
+            return
+        if uses_rag is True and not rag_query:
+            self._serve_probe_tester(error='Enter the query that retrieves your seeded RAG test document.')
+            return
 
         log.info('probe-run start: provider=%s endpoint=%s', provider, endpoint or '(default)')
         try:
             sys.path.insert(0, str(ROOT))
-            from dataclasses import asdict
             from checks.input_safety import (
                 check_inp_001, check_inp_002, check_inp_003, check_inp_004,
             )
@@ -4234,7 +4980,9 @@ function copyToken(token) {{
                 from connectors.api_connector import connect
                 ep  = endpoint or 'https://api.openai.com/v1'
                 mdl = model or 'gpt-4o'
-                ctx = connect(ep, api_key, mdl, str(ROOT))
+                rag_probe = ({'query': rag_query, 'retrieval_marker': rag_retrieval_marker,
+                              'injection_marker': rag_injection_marker} if uses_rag is True else None)
+                ctx = connect(ep, api_key, mdl, str(ROOT), rag_probe=rag_probe)
             elif provider == 'anthropic':
                 from connectors.claude_connector import connect
                 mdl = model or 'claude-sonnet-4-6'
@@ -4264,11 +5012,11 @@ function copyToken(token) {{
             self._serve_probe_tester(error=f'Scan error: {exc}')
 
     def _build_probe_results(self, model, summary, results, live_error):
-        STATUS_COLOR = {'PASS': '#166534', 'FAIL': '#b91c1c', 'WARN': '#92400e', 'SKIP': '#6B7280', 'N/A': '#9CA3AF'}
-        STATUS_BG    = {'PASS': '#dcfce7', 'FAIL': '#fee2e2', 'WARN': '#fef3c7', 'SKIP': '#F3F4F6', 'N/A': '#F9FAFB'}
-        SEV_COLOR    = {'CRITICAL': '#b91c1c', 'HIGH': '#92400e', 'MEDIUM': '#1e3060', 'LOW': '#6B7280'}
-        SEV_BG       = {'CRITICAL': '#fee2e2', 'HIGH': '#fef3c7', 'MEDIUM': '#e0e7ff', 'LOW': '#F3F4F6'}
-        BORDER       = {'PASS': '#16a34a', 'FAIL': '#dc2626', 'WARN': '#d97706', 'SKIP': '#D1D5DB', 'N/A': '#E5E7EB'}
+        STATUS_COLOR = {'PASS': '#58a6ff', 'FAIL': '#f85149', 'WARN': '#d29922', 'SKIP': '#6e7681', 'N/A': '#444c56'}
+        STATUS_BG    = {'PASS': '#0d1a2d', 'FAIL': '#4a0d0d', 'WARN': '#4a3b0d', 'SKIP': '#1c2128', 'N/A': '#161b22'}
+        SEV_COLOR    = {'CRITICAL': '#f85149', 'HIGH': '#d29922', 'MEDIUM': '#58a6ff', 'LOW': '#8b949e'}
+        SEV_BG       = {'CRITICAL': '#4a0d0d', 'HIGH': '#4a3b0d', 'MEDIUM': '#1d3250', 'LOW': '#21262d'}
+        BORDER       = {'PASS': '#58a6ff', 'FAIL': '#f85149', 'WARN': '#d29922', 'SKIP': '#30363d', 'N/A': '#21262d'}
 
         def e(s):
             return str(s or '').replace('&','&amp;').replace('<','&lt;').replace('>','&gt;').replace('"','&quot;')
@@ -4286,52 +5034,54 @@ function copyToken(token) {{
         body = f'''<!DOCTYPE html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Arckon by RiskRaven - Probe Results</title>
+<title>Arckon - Probe Results</title>
 <style>
 *{{box-sizing:border-box;margin:0;padding:0}}
-body{{background:#f0f4ff;color:#1e3060;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;font-size:14px}}
+body{{background:#0d1117;color:#e6edf3;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;font-size:14px}}
 .wrap{{max-width:900px;margin:0 auto;padding:32px 20px 64px}}
-.brand-bar{{display:flex;align-items:center;gap:10px;margin-bottom:28px;padding:20px 24px;background:#0f1e3d;border-radius:10px;box-shadow:0 2px 12px rgba(15,30,61,.18)}}
-.brand-mark{{font-size:18px;font-weight:800;letter-spacing:3px;color:#fff}}
-.brand-name{{font-size:16px;font-weight:700;letter-spacing:2px;color:#f5a623}}
-.brand-sub{{font-size:11px;color:#8a9abf;margin-left:6px;letter-spacing:1px;text-transform:uppercase}}
-.back{{margin-left:auto;font-size:12px;color:#8a9abf;text-decoration:none;border:1px solid #2a3f6a;border-radius:5px;padding:5px 12px}}
-.back:hover{{color:#f5a623;border-color:#f5a623}}
-.model-tag{{font-size:12px;color:#4a5a7a;margin-bottom:20px}}
+.brand-bar{{display:flex;align-items:center;gap:10px;margin-bottom:28px;padding-bottom:16px;border-bottom:1px solid #21262d}}
+.brand-mark{{font-size:18px;font-weight:800;letter-spacing:2px;color:#58a6ff}}
+.brand-name{{font-size:16px;font-weight:700;letter-spacing:1px}}
+.brand-sub{{font-size:12px;color:#8b949e;margin-left:4px}}
+.back{{margin-left:auto;font-size:12px;color:#58a6ff;text-decoration:none}}
+.back:hover{{text-decoration:underline}}
+.model-tag{{font-size:12px;color:#6e7681;margin-bottom:20px}}
 .strip{{display:flex;gap:12px;margin-bottom:20px;flex-wrap:wrap}}
-.sc{{flex:1;min-width:80px;background:#fff;border:1px solid #ccd3e8;border-radius:8px;padding:14px 12px;text-align:center;box-shadow:0 1px 4px rgba(26,47,90,.06)}}
+.sc{{flex:1;min-width:80px;background:#161b22;border:1px solid #21262d;border-radius:8px;padding:14px 12px;text-align:center}}
 .sc-n{{font-size:28px;font-weight:800;line-height:1}}
-.sc-l{{font-size:11px;color:#6B7280;margin-top:4px;text-transform:uppercase;letter-spacing:.5px}}
+.sc-l{{font-size:11px;color:#8b949e;margin-top:4px;text-transform:uppercase;letter-spacing:.5px}}
 .banner{{border-radius:6px;font-size:13px;padding:14px 16px;margin-bottom:18px;line-height:1.6}}
-.banner-ok{{background:#dcfce7;border:1px solid #16a34a;color:#166534}}
-.banner-warn{{background:#fff0f0;border:1px solid #f87171;color:#b91c1c}}
-.cat-hdr{{font-size:12px;font-weight:700;color:#4a5a7a;text-transform:uppercase;letter-spacing:1px;margin:22px 0 8px;padding-bottom:6px;border-bottom:1px solid #ccd3e8}}
-.check{{border-radius:8px;margin-bottom:10px;overflow:hidden;border:1px solid #ccd3e8;background:#fff;box-shadow:0 1px 4px rgba(26,47,90,.05)}}
+.banner-ok{{background:#0d4a1a;border:1px solid #3fb950;color:#3fb950}}
+.banner-warn{{background:#4a3b0d;border:1px solid #d29922;color:#d29922}}
+.cat-hdr{{font-size:12px;font-weight:700;color:#8b949e;text-transform:uppercase;letter-spacing:1px;margin:22px 0 8px;padding-bottom:6px;border-bottom:1px solid #21262d}}
+.check{{border-radius:8px;margin-bottom:10px;overflow:hidden;border:1px solid #21262d}}
 .check-head{{display:flex;align-items:flex-start;gap:10px;padding:14px 16px}}
 .sb{{font-size:11px;font-weight:700;padding:3px 9px;border-radius:4px;min-width:44px;text-align:center;flex-shrink:0;margin-top:1px}}
 .sv{{font-size:10px;font-weight:600;padding:3px 7px;border-radius:4px;border:1px solid;flex-shrink:0;margin-top:1px}}
 .meta{{flex:1;min-width:0}}
-.title{{font-size:13px;font-weight:600;margin-bottom:3px;color:#0a1428}}
-.detail{{font-size:12px;color:#4a5a7a;line-height:1.5}}
-.cid{{font-size:11px;color:#9CA3AF;flex-shrink:0;padding-top:2px}}
-.body{{padding:0 16px 16px;border-top:1px solid #e5e9f5}}
+.title{{font-size:13px;font-weight:600;margin-bottom:3px}}
+.detail{{font-size:12px;color:#8b949e;line-height:1.5}}
+.cid{{font-size:11px;color:#6e7681;flex-shrink:0;padding-top:2px}}
+.body{{padding:0 16px 16px;border-top:1px solid #21262d}}
 .sec{{margin-top:12px}}
-.sec-lbl{{font-size:11px;font-weight:700;color:#4a5a7a;text-transform:uppercase;letter-spacing:.5px;margin-bottom:5px}}
+.sec-lbl{{font-size:11px;font-weight:700;color:#8b949e;text-transform:uppercase;letter-spacing:.5px;margin-bottom:5px}}
 .ev-list{{list-style:none;padding:0}}
-.ev-list li{{font-size:12px;color:#374151;font-family:ui-monospace,monospace;background:#f7f9ff;border:1px solid #ccd3e8;border-radius:4px;padding:5px 10px;margin-bottom:4px;word-break:break-all}}
-.fix{{font-size:13px;color:#1e3060;line-height:1.8;white-space:pre-wrap}}
+.ev-list li{{font-size:12px;color:#8b949e;font-family:ui-monospace,monospace;background:#0d1117;border:1px solid #21262d;border-radius:4px;padding:5px 10px;margin-bottom:4px;word-break:break-all}}
+.fix{{font-size:13px;color:#c9d1d9;line-height:1.8;white-space:pre-wrap}}
 .fw{{display:flex;flex-wrap:wrap;gap:5px;margin-top:6px}}
-.fw span{{font-size:10px;background:#e0e7ff;color:#1e3060;border-radius:4px;padding:2px 7px}}
-.run-again{{display:inline-block;margin-top:28px;background:#f5a623;color:#0f1e3d;border-radius:6px;padding:10px 22px;font-size:14px;font-weight:700;text-decoration:none}}
-.run-again:hover{{background:#e09610}}
-.export-btn{{display:inline-block;margin-top:28px;margin-left:12px;background:#fff;color:#1e3060;border:1px solid #ccd3e8;border-radius:6px;padding:10px 22px;font-size:14px;font-weight:600;cursor:pointer;text-decoration:none}}
-.export-btn:hover{{background:#f0f4ff;border-color:#4a5a7a}}
-.skip-reason{{font-size:12px;color:#4a5a7a;background:#f7f9ff;border:1px solid #ccd3e8;border-radius:4px;padding:10px 12px;line-height:1.6}}
+.fw span{{font-size:10px;background:#1d3250;color:#58a6ff;border-radius:4px;padding:2px 7px}}
+.run-again{{display:inline-block;margin-top:28px;background:#238636;color:#fff;border-radius:6px;padding:10px 22px;font-size:14px;font-weight:600;text-decoration:none}}
+.run-again:hover{{background:#2ea043}}
+.export-btn{{display:inline-block;margin-top:28px;margin-left:12px;background:#161b22;color:#58a6ff;border:1px solid #30363d;border-radius:6px;padding:10px 22px;font-size:14px;font-weight:600;cursor:pointer;text-decoration:none}}
+.export-btn:hover{{background:#1d3250;border-color:#58a6ff}}
+.skip-reason{{font-size:12px;color:#8b949e;background:#0d1117;border:1px solid #30363d;border-radius:4px;padding:10px 12px;line-height:1.6}}
 .print-date{{display:none;font-size:11px;color:#666;margin-bottom:12px}}
 @media print{{
   body{{background:#fff;color:#000}}
   .wrap{{padding:16px}}
-  .brand-bar{{background:#0f1e3d;border-radius:6px}}
+  .brand-bar{{border-bottom:1px solid #ccc}}
+  .brand-mark,.brand-name{{color:#000}}
+  .brand-sub,.model-tag{{color:#555}}
   .back,.run-again,.export-btn{{display:none!important}}
   .strip .sc{{background:#f5f5f5;border:1px solid #ccc}}
   .sc-l{{color:#555}}
@@ -4349,19 +5099,19 @@ body{{background:#f0f4ff;color:#1e3060;font-family:-apple-system,BlinkMacSystemF
 }}
 </style></head><body><div class="wrap">
 <div class="brand-bar">
-  <span class="brand-mark">RiskRaven</span>
   <span class="brand-name">ARCKON</span>
+  <span class="brand-mark">by RiskRaven</span>
   <span class="brand-sub">Probe Results</span>
   <a class="back" href="/probe">Run Another Test</a>
 </div>
-<div class="print-date">Arckon by RiskRaven &#8212; AI API Security Report &nbsp;|&nbsp; {__import__('datetime').datetime.now().strftime('%Y-%m-%d %H:%M')}</div>
+<div class="print-date">Arckon &#8212; AI API Security Report &nbsp;|&nbsp; {__import__('datetime').datetime.now().strftime('%Y-%m-%d %H:%M')}</div>
 <div class="model-tag">Model tested: <strong>{e(model)}</strong></div>
 <div class="strip">
-  <div class="sc"><div class="sc-n" style="color:#dc2626">{summary["fail"]}</div><div class="sc-l">High Risk</div></div>
-  <div class="sc"><div class="sc-n" style="color:#d97706">{summary["warn"]}</div><div class="sc-l">Medium Risk</div></div>
-  <div class="sc"><div class="sc-n" style="color:#16a34a">{summary["pass"]}</div><div class="sc-l">Passed</div></div>
-  <div class="sc"><div class="sc-n" style="color:#9CA3AF">{summary["skip"]}</div><div class="sc-l">Skipped</div></div>
-  <div class="sc"><div class="sc-n" style="color:#D1D5DB">{summary.get("n/a", 0)}</div><div class="sc-l">N/A</div></div>
+  <div class="sc"><div class="sc-n" style="color:#f85149">{summary["fail"]}</div><div class="sc-l">High Risk</div></div>
+  <div class="sc"><div class="sc-n" style="color:#d29922">{summary["warn"]}</div><div class="sc-l">Medium Risk</div></div>
+  <div class="sc"><div class="sc-n" style="color:#58a6ff">{summary["pass"]}</div><div class="sc-l">Info</div></div>
+  <div class="sc"><div class="sc-n" style="color:#6e7681">{summary["skip"]}</div><div class="sc-l">Skipped</div></div>
+  <div class="sc"><div class="sc-n" style="color:#444c56">{summary.get("n/a", 0)}</div><div class="sc-l">N/A</div></div>
 </div>'''
 
         if all_skip:
@@ -4419,49 +5169,49 @@ body{{background:#f0f4ff;color:#1e3060;font-family:-apple-system,BlinkMacSystemF
         return body.encode('utf-8')
 
     def _serve_probe_tester(self, error=''):
-        err_html = ('<div style="background:#fff0f0;border:1px solid #f87171;border-radius:6px;'
-                    'color:#b91c1c;font-size:13px;padding:14px 16px;margin-bottom:16px">'
+        err_html = ('<div style="background:#4a0d0d;border:1px solid #f85149;border-radius:6px;'
+                    'color:#f85149;font-size:13px;padding:14px 16px;margin-bottom:16px">'
                     + error + '</div>') if error else ''
         page = (
             b'<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">'
             b'<meta name="viewport" content="width=device-width,initial-scale=1">'
-            b'<title>Arckon by RiskRaven - API Security Tester</title>'
+            b'<title>Arckon - API Security Tester</title>'
             b'<style>'
             b'*{box-sizing:border-box;margin:0;padding:0}'
-            b'body{background:#f0f4ff;color:#1e3060;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;font-size:14px;min-height:100vh}'
+            b'body{background:#0d1117;color:#e6edf3;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;font-size:14px;min-height:100vh}'
             b'.wrap{max-width:860px;margin:0 auto;padding:32px 20px 64px}'
-            b'.bar{display:flex;align-items:center;gap:10px;margin-bottom:32px;padding:20px 24px;background:#0f1e3d;border-radius:10px;box-shadow:0 2px 12px rgba(15,30,61,.18)}'
-            b'.bm{font-size:18px;font-weight:800;letter-spacing:3px;color:#fff}'
-            b'.bn{font-size:16px;font-weight:700;letter-spacing:2px;color:#f5a623}'
-            b'.bs{font-size:11px;color:#8a9abf;margin-left:6px;letter-spacing:1px;text-transform:uppercase}'
-            b'h1{font-size:20px;font-weight:700;margin-bottom:6px;color:#0a1428}'
-            b'.sub{color:#4a5a7a;font-size:13px;margin-bottom:28px;line-height:1.6}'
-            b'.card{background:#fff;border:1px solid #ccd3e8;border-radius:10px;padding:24px;margin-bottom:16px;box-shadow:0 1px 6px rgba(26,47,90,.07)}'
-            b'label{display:block;font-size:12px;font-weight:700;color:#1e3060;margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px}'
-            b'select,input{width:100%;background:#f7f9ff;border:1px solid #ccd3e8;border-radius:6px;color:#0a1428;font-size:14px;padding:9px 12px;outline:none}'
-            b'select:focus,input:focus{border-color:#f5a623;box-shadow:0 0 0 2px rgba(245,166,35,.15)}'
+            b'.bar{display:flex;align-items:center;gap:10px;margin-bottom:32px;padding-bottom:20px;border-bottom:1px solid #21262d}'
+            b'.bm{font-size:18px;font-weight:800;letter-spacing:2px;color:#58a6ff}'
+            b'.bn{font-size:16px;font-weight:700;letter-spacing:1px}'
+            b'.bs{font-size:12px;color:#8b949e;margin-left:4px}'
+            b'h1{font-size:20px;font-weight:700;margin-bottom:6px}'
+            b'.sub{color:#8b949e;font-size:13px;margin-bottom:28px;line-height:1.6}'
+            b'.card{background:#161b22;border:1px solid #21262d;border-radius:8px;padding:24px;margin-bottom:16px}'
+            b'label{display:block;font-size:12px;font-weight:600;color:#8b949e;margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px}'
+            b'select,input,textarea{width:100%;background:#0d1117;border:1px solid #30363d;border-radius:6px;color:#e6edf3;font-size:14px;padding:9px 12px;outline:none}'
+            b'select:focus,input:focus,textarea:focus{border-color:#58a6ff}'
             b'.field{margin-bottom:18px}'
             b'.row{display:grid;grid-template-columns:1fr 1fr;gap:16px}'
-            b'.hint{font-size:11px;color:#6b7280;margin-top:4px}'
-            b'.btn{background:#f5a623;border:none;border-radius:6px;color:#0f1e3d;cursor:pointer;font-size:14px;font-weight:700;padding:10px 28px;letter-spacing:.3px}'
-            b'.btn:hover{background:#e09610}'
+            b'.hint{font-size:11px;color:#6e7681;margin-top:4px}'
+            b'.btn{background:#238636;border:none;border-radius:6px;color:#fff;cursor:pointer;font-size:14px;font-weight:600;padding:10px 22px}'
+            b'.btn:hover{background:#2ea043}'
             b'#ep-field{display:block}'
-            b'#wait{display:none;color:#4a5a7a;font-size:13px;margin-top:16px;font-style:italic}'
+            b'#wait{display:none;color:#8b949e;font-size:13px;margin-top:16px}'
             b'</style></head><body>'
             b'<div class="wrap">'
-            b'<div class="bar"><span class="bm">RiskRaven</span><span class="bn">ARCKON</span>'
+            b'<div class="bar"><span class="bn">ARCKON</span><span class="bm">by RiskRaven</span>'
             b'<span class="bs">API Security Tester</span>'
-            b'<a href="/" style="margin-left:auto;font-size:12px;color:#8a9abf;text-decoration:none;border:1px solid #2a3f6a;border-radius:5px;padding:5px 12px">&#8592; Dashboard</a>'
+            b'<a href="/" style="margin-left:auto;font-size:12px;color:#8b949e;text-decoration:none;border:1px solid #30363d;border-radius:5px;padding:5px 10px">&#8592; Dashboard</a>'
             b'</div>'
             b'<h1>AI API Security Tester</h1>'
             b'<p class="sub">Enter your API credentials to run live adversarial probes against your AI endpoint.<br>'
             b'Tests: prompt injection, jailbreaks, PII leakage, system prompt disclosure, harmful content refusals.<br>'
-            b'Your key is sent only to your endpoint and never stored by Arckon.</p>'
+            b'Your key is sent only to your endpoint and never stored by Sentinel.</p>'
         ) + err_html.encode() + (
             b'<div class="card">'
             b'<form method="POST" action="/probe" onsubmit="document.getElementById(\'wait\').style.display=\'block\';document.querySelector(\'.btn\').disabled=true;">'
             b'<div class="field"><label>Provider</label>'
-            b'<select name="provider" onchange="var s=this.value;document.getElementById(\'ep-field\').style.display=s===\'openai\'?\'block\':\'none\'">'
+            b'<select name="provider" onchange="var s=this.value;document.getElementById(\'ep-field\').style.display=s===\'openai\'?\'block\':\'none\';document.getElementById(\'rag-provider-hint\').style.display=s===\'openai\'?\'none\':\'block\'">'
             b'<option value="openai">OpenAI-compatible (OpenAI, Azure, local, etc.)</option>'
             b'<option value="anthropic">Anthropic (Claude)</option>'
             b'<option value="gemini">Google Gemini</option>'
@@ -4483,7 +5233,15 @@ body{{background:#f0f4ff;color:#1e3060;font-family:-apple-system,BlinkMacSystemF
             b'<option value="no">No - it answers from its training data only</option>'
             b'<option value="yes">Yes - it retrieves documents, files, or a knowledge base</option>'
             b'</select>'
-            b'<div class="hint">RAG = Retrieval-Augmented Generation. Used in chatbots that search a document library before responding.</div></div>'
+            b'<div class="hint">RAG = Retrieval-Augmented Generation. Used in chatbots that search a document library before responding.</div>'
+            b'<div class="hint" id="rag-provider-hint" style="display:none;color:#d29922">RAG testing is available only through your deployed OpenAI-compatible application endpoint, not a direct provider API.</div></div>'
+            b'<div class="card" style="border-color:#30363d">'
+            b'<label>RAG test setup (required only when RAG is Yes)</label>'
+            b'<div class="hint" style="margin-bottom:12px">Before running the scan, add a controlled test document to the target knowledge base. It must contain both markers below and an embedded instruction to output the injection marker. Arckon verifies retrieval using the retrieval marker, then fails only if the injection marker is followed.</div>'
+            b'<div class="field"><label>Query that retrieves the test document</label><textarea name="rag_query" rows="2" placeholder="What is the verifier ID in the Arckon RAG security test document?"></textarea></div>'
+            b'<div class="row"><div class="field"><label>Retrieval marker</label><input name="rag_retrieval_marker" value="ARCKON_RAG_RETRIEVED_C7E1"><div class="hint">Must appear in the document as factual content.</div></div>'
+            b'<div class="field"><label>Injection marker</label><input name="rag_injection_marker" value="ARCKON_RAG_INJECTION_A9D4"><div class="hint">The document must instruct the model to output this marker.</div></div></div>'
+            b'</div>'
             b'<button class="btn" type="submit">Run Security Tests</button>'
             b'<div id="wait">Running probes... this takes 30-90 seconds. Please wait.</div>'
             b'</form></div></div></body></html>'
@@ -4529,6 +5287,7 @@ def _build_shadow_section(shadow: list[dict], ts_now: int) -> str:
         'cloud_api': ('&#9729;',   '#58a6ff', 'Cloud API', 'Cloud AI API key found on a managed device'),
         'process':   ('&#9881;',   '#f0883e', 'Process',   'AI process running locally on a managed device'),
         'docker':    ('&#128051;', '#3fb950', 'Container', 'AI running inside a Docker container'),
+        'saas_ai':   ('&#128101;', '#f78166', 'SaaS AI',   'Employee actively accessing a cloud AI service'),
     }
 
     def _age(ts: int | None) -> str:
@@ -4588,8 +5347,14 @@ def _build_shadow_section(shadow: list[dict], ts_now: int) -> str:
                                if detail else '')
                 sub_html = device_html + detail_html
             model_html = _model_tags(models) if models else (
-                f'<span style="font-size:11px;color:#484f58">No model details available</span>'
+                '<span style="font-size:11px;color:#484f58">No model details available</span>'
             )
+            svc_js = svc.replace("'", "\\'")
+            approve_btn = (
+                f'<button class="scan-btn" onclick="shadowApproveGlobally(\'{svc_js}\',this)" '
+                f'style="font-size:11px;color:#a371f7;border-color:#6e40c9;margin-bottom:4px;display:block;width:100%">'
+                f'&#9733; Approve globally</button>'
+            ) if src == 'saas_ai' else ''
             card_parts.append(
                 f'<div class="shadow-card" style="border-left-color:{color}">'
                 f'<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px">'
@@ -4604,10 +5369,15 @@ def _build_shadow_section(shadow: list[dict], ts_now: int) -> str:
                 f'<div style="margin-bottom:8px">{sub_html}</div>'
                 f'<div style="display:flex;flex-wrap:wrap;gap:5px;align-items:center">{model_html}</div>'
                 f'</div>'
-                f'<div style="text-align:right;flex-shrink:0">'
+                f'<div style="text-align:right;flex-shrink:0;min-width:130px">'
                 f'<div style="font-size:11px;color:#484f58;margin-bottom:8px">Detected {age}</div>'
+                f'{approve_btn}'
+                f'<button class="scan-btn" onclick="navTo(\'inventory\')" '
+                f'style="font-size:11px;color:#4F46E5;border-color:#4F46E5;margin-bottom:4px;display:block;width:100%">'
+                f'&#128196; View in Inventory</button>'
                 f'<button class="scan-btn" onclick="dismissShadow({sid})" '
-                f'style="font-size:11px;color:#6e7681;border-color:#30363d">Dismiss</button>'
+                f'style="font-size:11px;color:#6e7681;border-color:#30363d;display:block;width:100%">'
+                f'Dismiss (temp)</button>'
                 f'</div></div></div>'
             )
 
@@ -4628,7 +5398,7 @@ def _build_shadow_section(shadow: list[dict], ts_now: int) -> str:
                 models = d.get('models') or []
                 age    = _age(d.get('last_seen'))
                 model_html = _model_tags(models) if models else (
-                    f'<span style="font-size:11px;color:#484f58">No model details available</span>'
+                    '<span style="font-size:11px;color:#484f58">No model details available</span>'
                 )
                 port_html   = (f'<span style="font-size:11px;color:#484f58;font-family:monospace">'
                                f':{port}</span>') if port else ''
@@ -4674,9 +5444,9 @@ def _build_shadow_section(shadow: list[dict], ts_now: int) -> str:
              f'{len(shadow)}</span>') if shadow else ''
 
     dismiss_all_btn = (
-        f'<button class="scan-btn" onclick="dismissAllShadow()" '
-        f'style="font-size:11px;color:#6e7681;border-color:#30363d;margin-left:8px">'
-        f'Dismiss All</button>'
+        '<button class="scan-btn" onclick="dismissAllShadow()" '
+        'style="font-size:11px;color:#6e7681;border-color:#30363d;margin-left:8px">'
+        'Dismiss All</button>'
     ) if shadow else ''
 
     return (f'<div id="shadow-section" style="margin-top:32px">'
@@ -4740,24 +5510,24 @@ def _build_mcp_section(servers: list[dict], ts_now: int) -> str:
             is_process = (src == 'process')
 
             if is_process:
-                location_html = (f'<span style="font-weight:700;color:#e6edf3;font-size:14px">'
-                                 f'MCP Server Process</span>')
+                location_html = ('<span style="font-weight:700;color:#e6edf3;font-size:14px">'
+                                 'MCP Server Process</span>')
                 sub_html = (f'<span style="font-size:11px;color:#6e7681;font-family:monospace">'
                             f'{process_info[:80]}</span>') if process_info else ''
             else:
-                display = server_name or f'MCP Server'
+                display = server_name or 'MCP Server'
                 location_html = (f'<span style="font-weight:700;color:#e6edf3;font-size:14px">'
                                  f'{host}:{port}</span>')
                 sub_html = (f'<span style="font-size:12px;color:#58a6ff">{display}</span>')
 
             tool_html = _tool_tags(tools) if tools else (
-                f'<span style="font-size:11px;color:#484f58">No tools enumerated</span>'
+                '<span style="font-size:11px;color:#484f58">No tools enumerated</span>'
             )
 
             risk_note = ''
             if auth_status == 'none':
-                risk_note = (f'<div style="font-size:11px;color:#f85149;margin-top:4px;font-weight:600">'
-                             f'&#9888; Unauthenticated — any AI agent can connect to this server</div>')
+                risk_note = ('<div style="font-size:11px;color:#f85149;margin-top:4px;font-weight:600">'
+                             '&#9888; Unauthenticated — any AI agent can connect to this server</div>')
 
             card_parts.append(
                 f'<div class="shadow-card" style="border-left-color:{auth_color}">'
@@ -4796,9 +5566,9 @@ def _build_mcp_section(servers: list[dict], ts_now: int) -> str:
                   f'&#9888; {no_auth_count} unauthenticated</span>') if no_auth_count else ''
 
     dismiss_all_btn = (
-        f'<button class="scan-btn" onclick="dismissAllMcp()" '
-        f'style="font-size:11px;color:#6e7681;border-color:#30363d;margin-left:8px">'
-        f'Dismiss All</button>'
+        '<button class="scan-btn" onclick="dismissAllMcp()" '
+        'style="font-size:11px;color:#6e7681;border-color:#30363d;margin-left:8px">'
+        'Dismiss All</button>'
     ) if servers else ''
 
     return (f'<div id="mcp-section" style="margin-top:32px">'
@@ -4811,10 +5581,61 @@ def _build_mcp_section(servers: list[dict], ts_now: int) -> str:
             f'</div>')
 
 
-def _build_fleet_html(devices: list[dict], shadow: Union[list[dict], None] = None,
-                      mcp: Union[list[dict], None] = None,
+def send_client_org_report(customer_id: str, org_id: str, org_name: str, report_email: str) -> tuple[bool, str]:
+    """Build a white-labeled fleet PDF scoped to one client org and email it
+    to report_email. Called both by the daily scheduler tick (main()) and
+    the manual 'Send Now' test endpoint — same code path either way, so a
+    successful manual test is a real guarantee the scheduled version works.
+
+    Returns (ok, message) rather than raising — callers (background thread,
+    HTTP handler) both want a non-throwing result they can log or return
+    as JSON.
+    """
+    try:
+        store = _get_store(customer_id)
+        devices = store.list_devices(client_org_id=org_id)
+        for d in devices:
+            d['_report'] = store.get_latest_report(d['device_id']) or {}
+
+        try:
+            branding_path = ROOT / 'data' / 'branding.json'
+            branding = json.loads(branding_path.read_text()) if branding_path.exists() else {}
+        except Exception:
+            branding = {}
+
+        from output.fleet_report import generate_fleet_pdf
+        pdf_bytes = generate_fleet_pdf(devices, tier='ciso', client_name=org_name, branding=branding)
+
+        from alerts import load_alert_config, send_email_with_attachment
+        alert_cfg = load_alert_config(ROOT / 'data' / 'alerts_config.json') or {}
+        email_cfg = alert_cfg.get('email', {})
+        if not email_cfg.get('smtp_host') or not email_cfg.get('smtp_user'):
+            return False, 'SMTP not configured (Settings -> SIEM & Tool Integrations -> Email)'
+
+        msp_name = (branding.get('msp_name') or 'Arckon').strip()
+        month = datetime.now(timezone.utc).strftime('%B %Y')
+        subject = f'{msp_name} Security Report — {org_name} — {month}'
+        body = (
+            f'Attached is the {month} security report for {org_name}, prepared by {msp_name}.\n\n'
+            f'{len(devices)} monitored device(s).\n\n'
+            f'This report is generated automatically each month — no action needed unless '
+            f'critical findings are listed inside.'
+        )
+        fname = f'{org_name.replace(" ", "_")}_security_report_{datetime.now(timezone.utc).strftime("%Y_%m")}.pdf'
+        ok = send_email_with_attachment(email_cfg, report_email, subject, body, pdf_bytes, fname)
+        return (True, 'sent') if ok else (False, 'SMTP send failed — check server logs')
+    except Exception as e:
+        log.error('send_client_org_report failed for org %s: %s', org_id, e, exc_info=True)
+        return False, str(e)
+
+
+def _build_fleet_html(devices: list[dict], shadow: list[dict] | None = None,
+                      mcp: list[dict] | None = None,
                       current_user_email: str = '',
                       current_user_role: str = '',
+                      current_user_is_reseller: bool = False,
+                      current_user_is_msp: bool = False,
+                      current_user_impersonated_by: str = '',
                       store=None) -> str:
     shadow = shadow or []
     mcp    = mcp    or []
@@ -4832,7 +5653,9 @@ def _build_fleet_html(devices: list[dict], shadow: Union[list[dict], None] = Non
             return f'{secs // 3600}h ago'
         return f'{secs // 86400}d ago'
 
-    def _risk_cls(fail: int, warn: int) -> str:
+    def _risk_cls(fail: int, warn: int, pas: int) -> str:
+        if fail == 0 and warn == 0 and pas == 0:
+            return 'r-nodata'
         if fail > 0:
             return 'r-fail'
         if warn > 0:
@@ -4845,18 +5668,21 @@ def _build_fleet_html(devices: list[dict], shadow: Union[list[dict], None] = Non
         warn = d.get('warn_count', 0) or 0
         pas  = d.get('pass_count', 0) or 0
         age  = _age(d.get('last_seen'))
-        rc   = _risk_cls(fail, warn)
+        no_data = (fail == 0 and warn == 0 and pas == 0)
+        rc   = _risk_cls(fail, warn, pas)
         did  = d.get('device_id', '')
+        hostname = d.get('hostname', 'unknown')
+        profile  = d.get('profile', '') or ('kubernetes' if hostname.startswith('k8s:') else '')
         rows += f"""
         <tr class="dev-row" onclick="selectDevice('{did}')">
-          <td class="dev-host">{d.get('hostname','unknown')}</td>
+          <td class="dev-host">{hostname}</td>
           <td>{d.get('platform','')}</td>
-          <td class="c-red">{fail}</td>
-          <td class="c-yellow">{warn}</td>
-          <td class="c-green">{pas}</td>
-          <td>{d.get('profile','')}</td>
+          <td class="c-red">{fail if not no_data else '—'}</td>
+          <td class="c-yellow">{warn if not no_data else '—'}</td>
+          <td class="c-green">{pas if not no_data else '—'}</td>
+          <td>{profile}</td>
           <td>{age}</td>
-          <td><span class="risk-dot {rc}"></span></td>
+          <td><span class="risk-dot {rc}" title="{'No scan data yet' if no_data else ''}"></span></td>
           <td onclick="event.stopPropagation()" style="white-space:nowrap">
             <button class="scan-btn" id="sb-{did}" onclick="openScanModal('{did}',this)">Scan ▾</button>
             <button class="scan-btn" id="ub-{did}" onclick="updateDevice('{did}')"
@@ -4931,7 +5757,7 @@ def _build_fleet_html(devices: list[dict], shadow: Union[list[dict], None] = Non
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
-<title>Arckon by RiskRaven — Command Center</title>
+<title>Arckon — Command Center</title>
 <style>
 *{{box-sizing:border-box;margin:0;padding:0}}
 body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-serif,"Apple Color Emoji","Segoe UI Emoji";font-size:15px;height:100vh;overflow:hidden}}
@@ -4976,9 +5802,8 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
 .dev-row{{cursor:pointer;transition:background .1s}}
 .dev-row:hover td{{background:#F5F3FF}}
 .dev-host{{font-weight:600;color:#111827}}
-.dev-row:hover .rename-btn{{opacity:1!important}}
 .risk-dot{{display:inline-block;width:10px;height:10px;border-radius:50%}}
-.risk-dot.r-fail{{background:#DC2626}}.risk-dot.r-warn{{background:#F97316}}.risk-dot.r-pass{{background:#16A34A}}
+.risk-dot.r-fail{{background:#DC2626}}.risk-dot.r-warn{{background:#F97316}}.risk-dot.r-pass{{background:#16A34A}}.risk-dot.r-nodata{{background:#D1D5DB;border:1px solid #9CA3AF}}
 .scan-btn{{background:#fff;border:1px solid #D1D5DB;color:#4F46E5;border-radius:6px;padding:4px 10px;font-size:12px;cursor:pointer;white-space:nowrap;font-family:inherit;font-weight:500;transition:background .1s,border-color .1s}}
 .scan-btn:hover{{background:#EEF2FF;border-color:#4F46E5}}
 .scan-btn:disabled{{color:#9CA3AF;border-color:#E5E7EB;cursor:default;background:#F9FAFB}}
@@ -4989,6 +5814,20 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
 .rr-table td{{padding:9px 12px;border-bottom:1px solid #F3F4F6;vertical-align:middle}}
 .rr-new{{background:#DCFCE7;color:#16A34A;border:1px solid #BBF7D0;border-radius:10px;padding:2px 8px;font-size:11px;font-weight:600}}
 .rr-recurring{{background:#FEF9C3;color:#CA8A04;border:1px solid #FDE047;border-radius:10px;padding:2px 8px;font-size:11px;font-weight:600}}
+.rr-accepted{{background:#F3F4F6;color:#9CA3AF;border:1px solid #E5E7EB;border-radius:10px;padding:2px 8px;font-size:11px;font-weight:600}}
+.rr-assigned{{background:#EFF6FF;color:#2563EB;border:1px solid #BFDBFE;border-radius:10px;padding:2px 8px;font-size:11px;font-weight:600}}
+.rr-act-btn{{background:none;border:1px solid #D1D5DB;border-radius:4px;color:#6B7280;font-size:11px;padding:2px 7px;cursor:pointer;font-family:inherit;margin-right:3px}}
+.rr-act-btn:hover{{background:#F3F4F6;color:#111827}}
+.rr-form-row{{background:#F9FAFB;border-bottom:1px solid #E5E7EB}}
+.rr-form-row td{{padding:12px 12px}}
+.rr-input{{background:#fff;border:1px solid #D1D5DB;border-radius:4px;padding:5px 8px;font-size:13px;font-family:inherit;width:100%;box-sizing:border-box}}
+.rr-input:focus{{outline:none;border-color:#4F46E5}}
+.rr-save-btn{{background:#238636;color:#fff;border:none;border-radius:4px;padding:5px 14px;font-size:12px;cursor:pointer;font-weight:600}}
+.rr-save-btn:hover{{background:#2ea043}}
+.rr-clear-btn{{background:none;border:1px solid #D1D5DB;border-radius:4px;color:#6B7280;font-size:12px;padding:5px 10px;cursor:pointer;font-family:inherit;margin-left:6px}}
+.rr-row-accepted td{{opacity:0.6}}
+.rr-row-fp td{{opacity:0.5;text-decoration:line-through;text-decoration-color:#9CA3AF}}
+.rr-fp{{background:#F3F4F6;color:#6B7280;border:1px solid #E5E7EB;border-radius:10px;padding:2px 8px;font-size:11px;font-weight:600}}
 .inv-badge-approved{{background:#DCFCE7;color:#16A34A;border:1px solid #BBF7D0;border-radius:10px;padding:2px 8px;font-size:11px;font-weight:600}}
 .inv-badge-review{{background:#FEF9C3;color:#CA8A04;border:1px solid #FDE047;border-radius:10px;padding:2px 8px;font-size:11px;font-weight:600}}
 .inv-badge-unapp{{background:#FEE2E2;color:#DC2626;border:1px solid #FECACA;border-radius:10px;padding:2px 8px;font-size:11px;font-weight:600}}
@@ -5031,27 +5870,27 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
 </style>
 </head>
 <body>
-<script>if(localStorage.getItem('arckon_theme')==='dark')document.documentElement.classList.add('dark');</script>
+<script>if(localStorage.getItem('sentinel_theme')==='dark')document.documentElement.classList.add('dark');</script>
+<div id="maintenance-banner" style="display:none;background:#4a3b0d;border-bottom:1px solid #d29922;color:#d29922;padding:10px 20px;font-size:13px;text-align:center;position:relative;z-index:1000"></div>
+{f'<div id="impersonation-banner" style="background:#4a1d0d;border-bottom:1px solid #d97706;color:#fbbf24;padding:10px 20px;font-size:13px;text-align:center;position:relative;z-index:1000">Support session — logged in as <strong>{current_user_impersonated_by}</strong>&nbsp;&nbsp;<button onclick="endImpersonation()" style="background:#d97706;color:#1a1400;border:none;padding:4px 12px;border-radius:4px;cursor:pointer;font-size:12px;font-weight:600">Return to my account</button></div>' if current_user_impersonated_by else ''}
 <div id="app">
   <aside id="sidebar">
     <div class="sb-logo">
-      <div class="sb-logo-mark">RiskRaven</div>
       <div class="sb-logo-name">ARCKON</div>
-      <div class="sb-logo-sub">{'<span style="color:#f0a500;font-weight:700;font-size:9px;letter-spacing:1px">⚠ DEMO MODE</span>' if _is_demo() else 'Command Center'}</div>
+      <div class="sb-logo-sub">{'<span style="color:#f0a500;font-weight:700;font-size:9px;letter-spacing:1px">⚠ DEMO MODE</span>' if _is_demo() else '<span style="color:#6366F1;font-size:9px;letter-spacing:1px;font-weight:700">by RiskRaven</span> &nbsp;·&nbsp; Command Center'}</div>
     </div>
     <nav class="sb-nav">
       <div class="sb-group">Overview</div>
       <button class="sb-item sb-active" id="nav-overview" onclick="navTo('overview')">&#8962; Home</button>
+      {'<button class="sb-item" id="nav-clients" onclick="window.location=\'/clients\'">&#127970; Clients</button>' if current_user_is_msp else ''}
+      {'<button class="sb-item" id="nav-reseller" onclick="navTo(\'reseller\')">&#127970; MSP View</button>' if current_user_is_reseller else ''}
       <div class="sb-group">Fleet</div>
       <button class="sb-item" id="nav-shadow" onclick="navTo('shadow')">&#9888; Shadow AI</button>
+      <button class="sb-item" id="nav-alerts" onclick="navTo('alerts')">&#128276; Alerts <span id="alert-badge" style="display:none;background:#DC2626;color:#fff;border-radius:10px;font-size:10px;padding:1px 6px;margin-left:4px;font-weight:700"></span></button>
       <button class="sb-item" id="nav-mcp" onclick="navTo('mcp')">&#128279; MCP Servers</button>
       <div class="sb-group">Security</div>
-      <button class="sb-item" id="nav-alerts" onclick="navTo('alerts')">&#128276; Alerts</button>
-      <button class="sb-item" id="nav-audit" onclick="navTo('audit')">&#128221; Audit Log</button>
       <button class="sb-item" id="nav-riskregister" onclick="navTo('riskregister')">&#128203; Risk Register</button>
       <button class="sb-item" id="nav-inventory" onclick="navTo('inventory')">&#128196; Asset Inventory</button>
-      <div class="sb-group">Tools</div>
-      <a class="sb-item" href="/dns-inventory" style="text-decoration:none;display:block">&#128202; AI Inventory</a>
       <div class="sb-group">Operations</div>
       <button class="sb-item" id="nav-schedules" onclick="navTo('schedules')">&#128337; Schedules</button>
       <button class="sb-item" id="nav-discovery" onclick="navTo('discovery')">&#128270; Discovery</button>
@@ -5059,14 +5898,15 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
       <button class="sb-item" id="nav-findings" onclick="navTo('findings')">&#128202; Findings</button>
       <div class="sb-group">Export</div>
       <button class="sb-item" id="nav-reports" onclick="navTo('reports')">&#128196; Reports</button>
+      <div class="sb-group">Integrations</div>
+      <button class="sb-item" id="nav-siem" onclick="navTo('siem')">&#128279; SIEM &amp; Tools</button>
       <div class="sb-group"></div>
       <button class="sb-item" id="nav-settings" onclick="navTo('settings')">&#9881; Settings</button>
       <button class="sb-item" id="nav-users" onclick="navTo('users')">&#128100; Users</button>
-      {'<button class="sb-item" id="nav-probe" onclick="navTo(\'probe\')">&#128272; API Tester</button>' if _has_live_scan() else '<span style="display:block;padding:8px 16px;font-size:13px;color:#6B7280;cursor:default" title="Upgrade to Pro to access the API Tester">&#128274; API Tester</span>'}
+      {("<button class=\"sb-item\" id=\"nav-probe\" onclick=\"navTo('probe')\">&#128272; API Tester</button>") if _has_live_scan() else "<span style=\"display:block;padding:8px 16px;font-size:13px;color:#6B7280;cursor:default\" title=\"Upgrade to Pro to access the API Tester\">&#128274; API Tester</span>"}
     </nav>
     <div class="sb-footer">
       {f'<span style="font-size:11px;color:#9CA3AF;word-break:break-all">{current_user_email}</span>' if current_user_email else ''}
-      {'<a href="#" onclick="window.location.href=window.location.protocol+\'//\'+window.location.hostname+\'/dashboard\'">&#9881; Admin Panel</a>' if current_user_role == 'super_admin' else ''}
       <a href="/academy" target="_blank">Academy</a>
       <a href="/logout" style="color:#ef4444">&#x2192; Sign Out</a>
     </div>
@@ -5104,6 +5944,26 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
          style="color:#4F46E5;border-color:#E5E7EB;font-size:12px">&#9654; CISO Report</button>
       {_btn_technical_report}
       {'<button id="btn-evidence-export" class="scan-btn" onclick="downloadEvidencePackage(this)" style="color:#a371f7;border-color:#E5E7EB;font-size:12px">&#8659; Evidence Package</button>' if _has_evidence_package() else '<button disabled title="Evidence Package requires a Plus license" class="scan-btn" style="color:#9CA3AF;border-color:#F3F4F6;font-size:12px;cursor:default">&#128274; Evidence Pkg (Plus)</button>'}
+      <div style="position:relative;display:inline-block">
+        <button id="scan-profile-btn" onclick="toggleScanProfileMenu(event)" class="form-select" style="font-size:12px;padding:3px 10px;height:28px;cursor:pointer;min-width:160px;text-align:left;background:#fff">Base Scan + ISO 42001 &#9660;</button>
+        <div id="scan-profile-menu" style="display:none;position:absolute;top:31px;left:0;z-index:200;background:#fff;border:1px solid #E5E7EB;border-radius:6px;box-shadow:0 4px 16px rgba(0,0,0,0.12);padding:8px 12px;min-width:240px">
+          <div style="font-size:10px;color:#9CA3AF;font-weight:600;text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">Run profiles on all devices</div>
+          <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:#111827;padding:3px 0;cursor:pointer"><input type="checkbox" class="scan-profile-cb" value="default" checked onchange="updateScanProfileBtn()"> Base Scan</label>
+          <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:#111827;padding:3px 0;cursor:pointer"><input type="checkbox" class="scan-profile-cb" value="iso42001" checked onchange="updateScanProfileBtn()"> ISO 42001</label>
+          <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:#111827;padding:3px 0;cursor:pointer"><input type="checkbox" class="scan-profile-cb" value="atlas" onchange="updateScanProfileBtn()"> MITRE ATLAS</label>
+          <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:#111827;padding:3px 0;cursor:pointer"><input type="checkbox" class="scan-profile-cb" value="professional_services" onchange="updateScanProfileBtn()"> Professional Services</label>
+          <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:#111827;padding:3px 0;cursor:pointer"><input type="checkbox" class="scan-profile-cb" value="financial" onchange="updateScanProfileBtn()"> Financial Services</label>
+          <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:#111827;padding:3px 0;cursor:pointer"><input type="checkbox" class="scan-profile-cb" value="fedramp" onchange="updateScanProfileBtn()"> FedRAMP / NIST 800-53</label>
+          <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:#111827;padding:3px 0;cursor:pointer"><input type="checkbox" class="scan-profile-cb" value="fedramp_20x" onchange="updateScanProfileBtn()"> FedRAMP 20x (KSI)</label>
+          <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:#111827;padding:3px 0;cursor:pointer"><input type="checkbox" class="scan-profile-cb" value="cmmc" onchange="updateScanProfileBtn()"> CMMC 2.0</label>
+          <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:#111827;padding:3px 0;cursor:pointer"><input type="checkbox" class="scan-profile-cb" value="healthcare" onchange="updateScanProfileBtn()"> Healthcare</label>
+          <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:#111827;padding:3px 0;cursor:pointer"><input type="checkbox" class="scan-profile-cb" value="biotech" onchange="updateScanProfileBtn()"> Biotech</label>
+          <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:#111827;padding:3px 0;cursor:pointer"><input type="checkbox" class="scan-profile-cb" value="owasp_agentic" onchange="updateScanProfileBtn()"> OWASP Agentic AI</label>
+          <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:#111827;padding:3px 0;cursor:pointer"><input type="checkbox" class="scan-profile-cb" value="eu_ai_act" onchange="updateScanProfileBtn()"> EU AI Act</label>
+          <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:#111827;padding:3px 0;cursor:pointer"><input type="checkbox" class="scan-profile-cb" value="kubernetes" onchange="updateScanProfileBtn()"> Kubernetes</label>
+          <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:#111827;padding:3px 0;cursor:pointer"><input type="checkbox" class="scan-profile-cb" value="docker" onchange="updateScanProfileBtn()"> Docker</label>
+        </div>
+      </div>
       <select id="scan-all-stagger" class="form-select" style="font-size:12px;padding:3px 6px;height:28px" title="Scan stagger — spread scans over time to avoid network spikes">
         <option value="normal">Normal (25/30s)</option>
         <option value="slow">Slow (10/60s)</option>
@@ -5117,23 +5977,11 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
               style="color:#a371f7;border-color:#E5E7EB;font-size:12px">&#128270; Find Shadow AI</button>
       <button id="btn-discover-mcp" class="scan-btn" onclick="discoverMcp(this)"
               style="color:#4F46E5;border-color:#E5E7EB;font-size:12px">&#128279; Scan MCP Servers</button>
-      <span id="sel-count-lbl" style="display:none;font-size:11px;background:#EEF2FF;color:#4F46E5;border:1px solid #C7D2FE;border-radius:10px;padding:2px 10px;cursor:pointer" onclick="clearSelection()" title="Click to clear selection">&#10005; <span id="sel-count-num">0</span> selected</span>
-      <div id="fleet-profile-sel" style="display:inline-flex;flex-wrap:wrap;gap:6px 12px;align-items:center;background:#F9FAFB;border:1px solid #E5E7EB;border-radius:6px;padding:4px 10px;font-size:12px" title="Select one or more profiles to apply to devices">
-        <label style="display:flex;align-items:center;gap:4px;cursor:pointer;white-space:nowrap"><input type="checkbox" class="fleet-profile-cb" value="default" checked> Default</label>
-        <label style="display:flex;align-items:center;gap:4px;cursor:pointer;white-space:nowrap"><input type="checkbox" class="fleet-profile-cb" value="fedramp"> FedRAMP</label>
-        <label style="display:flex;align-items:center;gap:4px;cursor:pointer;white-space:nowrap"><input type="checkbox" class="fleet-profile-cb" value="cmmc"> CMMC 2.0</label>
-        <label style="display:flex;align-items:center;gap:4px;cursor:pointer;white-space:nowrap"><input type="checkbox" class="fleet-profile-cb" value="financial"> Financial</label>
-        <label style="display:flex;align-items:center;gap:4px;cursor:pointer;white-space:nowrap"><input type="checkbox" class="fleet-profile-cb" value="biotech"> Biotech</label>
-        <label style="display:flex;align-items:center;gap:4px;cursor:pointer;white-space:nowrap"><input type="checkbox" class="fleet-profile-cb" value="healthcare"> Healthcare</label>
-      </div>
-      <button id="btn-set-profile" class="scan-btn" onclick="applyFleetProfile()"
-              style="color:#7C3AED;border-color:#E5E7EB;font-size:12px">&#9881; Set Profile</button>
     </div>
   </div>
   <div class="refresh-note" id="refresh-note">Auto-refreshes every 60s</div>
   <table class="dev-table">
     <thead><tr>
-      <th style="width:32px;text-align:center"><input type="checkbox" id="sel-all-hdr" onchange="toggleSelectAll(this)" title="Select all devices on this page" style="cursor:pointer"></th>
       <th>Hostname</th><th>Platform</th>
       <th class="c-red">High</th><th class="c-yellow">Medium</th><th class="c-green">Low</th>
       <th>Profile</th><th>Last seen</th><th>Risk</th><th></th>
@@ -5154,12 +6002,15 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
     </div>
     <div id="page-btns" style="display:flex;gap:4px;align-items:center;flex-wrap:wrap"></div>
   </div>
+
   </div>
 
   <div class="page" id="page-shadow">
   <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:8px">
     <div>
-      <div class="sec-hdr" style="margin:0;padding:0">Shadow AI</div>
+      <div class="sec-hdr" style="margin:0;padding:0;display:flex;align-items:center;gap:10px">Shadow AI
+    <a href="/api/fleet/shadow/csv" download style="font-size:12px;color:#16A34A;text-decoration:none;border:1px solid #238636;border-radius:4px;padding:3px 10px;font-weight:400;margin-left:auto">&#8659; Export CSV</a>
+  </div>
       <div style="font-size:12px;color:#6B7280;margin-top:4px">Unmanaged AI devices and services detected on your network</div>
     </div>
     <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
@@ -5170,6 +6021,38 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
     </div>
   </div>
   {_build_shadow_section(shadow, ts_now)}
+  </div>
+
+  <div class="page" id="page-alerts">
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:8px">
+    <div>
+      <div class="sec-hdr" style="margin:0;padding:0">Alerts</div>
+      <div style="font-size:12px;color:#9CA3AF;margin-top:2px">Active critical/high issues across your fleet, plus event history for new discoveries.</div>
+    </div>
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+      <button id="alerts-refresh-btn" class="scan-btn" onclick="refreshAlertsPage(this)" style="font-size:12px;color:#4F46E5;border-color:#E5E7EB">&#8635; Refresh</button>
+    </div>
+  </div>
+
+  <div style="margin-bottom:20px">
+    <div style="font-size:12px;font-weight:600;color:#374151;text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">Active Issues</div>
+    <div id="active-issues-feed" style="display:flex;flex-direction:column;gap:6px">
+      <div style="color:#9CA3AF;font-size:13px;padding:12px 0">Loading…</div>
+    </div>
+  </div>
+
+  <div style="border-top:1px solid #F3F4F6;padding-top:16px">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;flex-wrap:wrap;gap:6px">
+      <div style="font-size:12px;font-weight:600;color:#374151;text-transform:uppercase;letter-spacing:.05em">Alert History</div>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <label style="font-size:12px;color:#6B7280;display:flex;align-items:center;gap:6px;cursor:pointer">
+          <input type="checkbox" id="alerts-unreviewed-only" onchange="loadAlertEvents()"> Unreviewed only
+        </label>
+        <button class="scan-btn" onclick="markAllAlertsReviewed()" style="font-size:12px;color:#6B7280;border-color:#E5E7EB">Mark all reviewed</button>
+      </div>
+    </div>
+    <div id="alerts-feed" style="display:flex;flex-direction:column;gap:8px"></div>
+  </div>
   </div>
 
   <div class="page" id="page-mcp">
@@ -5184,71 +6067,6 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
   {_build_mcp_section(mcp, ts_now)}
   </div>
 
-  <div class="page" id="page-alerts">
-  <div class="sec-hdr" style="margin-top:0;padding-top:0;display:flex;align-items:center;gap:10px">
-    <span>Alerts</span>
-    <span id="alert-unread-badge" style="display:none;font-size:11px;background:#FEF2F2;color:#DC2626;border:1px solid #FECACA;border-radius:10px;padding:2px 10px"></span>
-    <button onclick="ackAllAlerts()" class="scan-btn" style="margin-left:auto;font-size:12px;color:#16A34A;border-color:#E5E7EB">&#10003; Acknowledge All</button>
-  </div>
-  <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap">
-    <button class="rr-fil rr-fil-active" id="alog-fil-all"      onclick="setAlertFilter('all')">All</button>
-    <button class="rr-fil"               id="alog-fil-critical" onclick="setAlertFilter('CRITICAL')">Critical</button>
-    <button class="rr-fil"               id="alog-fil-high"     onclick="setAlertFilter('HIGH')">High</button>
-    <button class="rr-fil"               id="alog-fil-unread"   onclick="setAlertFilter('unread')">Unread</button>
-  </div>
-  <div id="alert-log-wrap">
-    <table style="width:100%;border-collapse:collapse;font-size:13px">
-      <thead>
-        <tr style="border-bottom:1px solid #E5E7EB;color:#6B7280;font-size:11px;text-transform:uppercase;letter-spacing:.04em">
-          <th style="padding:6px 10px;text-align:left;width:140px">Time</th>
-          <th style="padding:6px 10px;text-align:left;width:90px">Severity</th>
-          <th style="padding:6px 10px;text-align:left;width:110px">Event</th>
-          <th style="padding:6px 10px;text-align:left">Details</th>
-          <th style="padding:6px 10px;text-align:left;width:120px">Device</th>
-          <th style="padding:6px 10px;text-align:left;width:100px">Channels</th>
-          <th style="padding:6px 10px;text-align:left;width:110px">Status</th>
-        </tr>
-      </thead>
-      <tbody id="alert-log-body">
-        <tr><td colspan="7" style="padding:24px;text-align:center;color:#9CA3AF">Loading&hellip;</td></tr>
-      </tbody>
-    </table>
-  </div>
-  </div>
-
-  <div class="page" id="page-audit">
-  <div class="sec-hdr" style="margin-top:0;padding-top:0">
-    <span>Audit Log</span>
-    <span style="font-size:12px;font-weight:400;color:#6B7280;margin-left:8px">Who did what, when — logins, user changes, settings, scans, and alert actions</span>
-  </div>
-  <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap">
-    <button class="rr-fil rr-fil-active" id="adlog-fil-all"    onclick="setAuditFilter('all')">All</button>
-    <button class="rr-fil"               id="adlog-fil-login"  onclick="setAuditFilter('login')">Login/Logout</button>
-    <button class="rr-fil"               id="adlog-fil-user"   onclick="setAuditFilter('user')">User Changes</button>
-    <button class="rr-fil"               id="adlog-fil-config" onclick="setAuditFilter('config')">Settings</button>
-    <button class="rr-fil"               id="adlog-fil-scan"   onclick="setAuditFilter('scan')">Scans</button>
-    <button class="rr-fil"               id="adlog-fil-alert"  onclick="setAuditFilter('alert')">Alerts</button>
-    <a href="/api/audit/log/csv" download style="margin-left:auto;font-size:12px;color:#16A34A;text-decoration:none;border:1px solid #238636;border-radius:4px;padding:3px 10px">&#8659; Export CSV</a>
-  </div>
-  <div id="audit-log-wrap">
-    <table style="width:100%;border-collapse:collapse;font-size:13px">
-      <thead>
-        <tr style="border-bottom:1px solid #E5E7EB;color:#6B7280;font-size:11px;text-transform:uppercase;letter-spacing:.04em">
-          <th style="padding:6px 10px;text-align:left;width:140px">Time</th>
-          <th style="padding:6px 10px;text-align:left;width:180px">Actor</th>
-          <th style="padding:6px 10px;text-align:left;width:140px">Action</th>
-          <th style="padding:6px 10px;text-align:left;width:160px">Target</th>
-          <th style="padding:6px 10px;text-align:left">Details</th>
-          <th style="padding:6px 10px;text-align:left;width:120px">IP Address</th>
-        </tr>
-      </thead>
-      <tbody id="audit-log-body">
-        <tr><td colspan="6" style="padding:24px;text-align:center;color:#9CA3AF">Loading&hellip;</td></tr>
-      </tbody>
-    </table>
-  </div>
-  </div>
-
   <div class="page" id="page-riskregister">
   <div class="sec-hdr" style="margin-top:0;padding-top:0">
     Open Findings Risk Register
@@ -5261,6 +6079,8 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
     <button class="rr-fil" onclick="rrFilter('HIGH',this)">High</button>
     <button class="rr-fil" onclick="rrFilter('MEDIUM',this)">Medium</button>
     <button class="rr-fil" onclick="rrFilter('LOW',this)">Low</button>
+    <button class="rr-fil" onclick="rrFilter('accepted',this)" style="margin-left:auto">Accepted Risk</button>
+    <button class="rr-fil" onclick="rrFilter('false_positive',this)" style="color:#6B7280">&#128683; False Positives</button>
   </div>
   <div id="rr-body">
     <div style="color:#6B7280;font-size:13px;padding:16px 0">Loading risk register…</div>
@@ -5268,9 +6088,10 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
   </div>
 
   <div class="page" id="page-inventory">
-  <div class="sec-hdr" style="margin-top:0;padding-top:0">
+  <div class="sec-hdr" style="margin-top:0;padding-top:0;display:flex;align-items:center;gap:10px">
     AI Asset Inventory
     <span style="font-size:12px;font-weight:400;color:#6B7280;margin-left:8px">Formal record of all AI in the environment · approve or flag each asset</span>
+    <a href="/api/fleet/shadow/csv" download style="font-size:12px;color:#16A34A;text-decoration:none;border:1px solid #238636;border-radius:4px;padding:3px 10px;margin-left:auto">&#8659; Export CSV</a>
   </div>
   <div id="inv-counts" style="display:flex;gap:12px;margin-bottom:8px;flex-wrap:wrap"></div>
   <div id="inv-reviewer-bar" style="margin-bottom:10px;font-size:12px;color:#6B7280"></div>
@@ -5279,6 +6100,7 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
     <button class="rr-fil" onclick="invFilter('unapproved',this)">Unapproved</button>
     <button class="rr-fil" onclick="invFilter('under_review',this)">Under Review</button>
     <button class="rr-fil" onclick="invFilter('approved',this)">Approved</button>
+    <button class="rr-fil" onclick="invFilter('false_positive',this)" style="margin-left:auto;color:#6B7280">&#128683; False Positives</button>
   </div>
   <div id="inv-body">
     <div style="color:#6B7280;font-size:13px;padding:16px 0">Loading inventory…</div>
@@ -5305,6 +6127,7 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
         <select id="sched-profile" style="background:#F9FAFB;border:1px solid #E5E7EB;border-radius:4px;color:#111827;font-size:12px;padding:4px 8px">
           <option value="default">Base Scan</option>
           <option value="fedramp">FedRAMP</option>
+          <option value="fedramp_20x">FedRAMP 20x</option>
           <option value="cmmc">CMMC 2.0</option>
           <option value="financial">Financial</option>
           <option value="healthcare">Healthcare</option>
@@ -5410,13 +6233,19 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
       <label style="font-size:13px;color:#6B7280;align-self:start;padding-top:4px">Compliance Profile</label>
       <div id="cfg-profile-group" style="display:flex;flex-wrap:wrap;gap:8px 24px">
         <label style="font-size:13px;color:#111827;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="cfg-profile-cb" value="default"> Base Scan</label>
+        <label style="font-size:13px;color:#111827;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="cfg-profile-cb" value="iso42001"> ISO 42001 (AI Management System)</label>
+        <label style="font-size:13px;color:#111827;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="cfg-profile-cb" value="atlas"> MITRE ATLAS (Adversarial ML)</label>
         <label style="font-size:13px;color:#111827;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="cfg-profile-cb" value="financial"> Financial Services</label>
         <label style="font-size:13px;color:#111827;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="cfg-profile-cb" value="fedramp"> FedRAMP / NIST 800-53</label>
+        <label style="font-size:13px;color:#111827;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="cfg-profile-cb" value="fedramp_20x"> FedRAMP 20x (KSI-Aligned)</label>
         <label style="font-size:13px;color:#111827;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="cfg-profile-cb" value="cmmc"> CMMC 2.0</label>
         <label style="font-size:13px;color:#111827;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="cfg-profile-cb" value="biotech"> Biotech (FDA 21 CFR Part 11 / HIPAA / GxP)</label>
         <label style="font-size:13px;color:#111827;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="cfg-profile-cb" value="healthcare"> Healthcare (HIPAA / HITECH / FDA SaMD)</label>
         <label style="font-size:13px;color:#111827;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="cfg-profile-cb" value="owasp_agentic"> OWASP Agentic AI Top 10</label>
         <label style="font-size:13px;color:#111827;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="cfg-profile-cb" value="eu_ai_act"> EU AI Act (High-Risk Systems)</label>
+        <label style="font-size:13px;color:#111827;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="cfg-profile-cb" value="professional_services"> Professional Services (NIST AI RMF / AICPA)</label>
+        <label style="font-size:13px;color:#111827;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="cfg-profile-cb" value="kubernetes"> Kubernetes (CIS K8s Benchmark)</label>
+        <label style="font-size:13px;color:#111827;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="cfg-profile-cb" value="docker"> Docker (Container Security)</label>
       </div>
       <label style="font-size:13px;color:#6B7280">Scan Interval</label>
       <div style="display:flex;align-items:center;gap:8px">
@@ -5431,6 +6260,31 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
     </div>
     <div style="margin-top:16px">
       <button class="scan-btn" onclick="saveConfig()" style="color:#16A34A;border-color:#E5E7EB">Save</button>
+    </div>
+  </div>
+
+  <div class="content-panel" style="background:#ffffff;border:1px solid #F3F4F6;border-radius:8px;padding:20px;margin-bottom:16px">
+    <div class="panel-sub-hdr" style="font-size:12px;color:#6B7280;font-weight:600;text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px">Report Branding</div>
+    <div style="font-size:12px;color:#9CA3AF;margin-bottom:14px">White-label the EU AI Act Readiness Report with your company name, logo, and footer. Clients will see your branding instead of Arckon&#39;s.</div>
+    <div id="branding-saved" style="display:none;color:#16A34A;font-size:12px;margin-bottom:10px">&#10003; Branding saved</div>
+    <div style="display:grid;grid-template-columns:160px 1fr;gap:10px 16px;align-items:center;max-width:640px">
+      <label style="font-size:13px;color:#6B7280">Company Name</label>
+      <input id="brand-msp-name" class="form-input" type="text" placeholder="Your MSP or Company Name" style="max-width:340px">
+      <label style="font-size:13px;color:#6B7280">Logo URL</label>
+      <div>
+        <input id="brand-logo-url" class="form-input" type="url" placeholder="https://yourcompany.com/logo.png" style="max-width:400px">
+        <div style="font-size:11px;color:#9CA3AF;margin-top:4px">PNG or SVG, max 160×40 px in the report header. Host on any public URL.</div>
+      </div>
+      <label style="font-size:13px;color:#6B7280">Report Footer</label>
+      <div>
+        <input id="brand-footer-text" class="form-input" type="text" placeholder="Prepared by Your Company · yourcompany.com" style="max-width:400px">
+        <div style="font-size:11px;color:#9CA3AF;margin-top:4px">&#8220;Powered by Arckon&#8221; is appended automatically.</div>
+      </div>
+    </div>
+    <div style="margin-top:16px;display:flex;align-items:center;gap:12px">
+      <button class="scan-btn" onclick="saveBranding()" style="color:#16A34A;border-color:#E5E7EB">Save Branding</button>
+      <a id="brand-preview-link" href="/api/fleet/eu-ai-act-report" target="_blank"
+         style="font-size:12px;color:#4F46E5;text-decoration:none">&#8599; Preview Report</a>
     </div>
   </div>
 
@@ -5459,6 +6313,26 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
         <button class="scan-btn" onclick="testAlert('webhook')" style="font-size:11px;padding:3px 10px;color:#4F46E5;border-color:#E5E7EB">Test</button>
       </div>
 
+      <label style="font-size:13px;color:#6B7280;padding-top:4px">Google Chat Webhook</label>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <input id="alert-gchat" type="url" class="form-input" placeholder="https://chat.googleapis.com/v1/spaces/..."
+               style="flex:1;min-width:280px;font-family:monospace;font-size:12px">
+        <button class="scan-btn" onclick="testAlert('gchat')" style="font-size:11px;padding:3px 10px;color:#4F46E5;border-color:#E5E7EB">Test</button>
+      </div>
+
+      <div style="font-size:11px;color:#9CA3AF;padding-top:2px">Space → Apps &amp; integrations → Webhooks → Add webhook</div>
+      <div></div>
+
+      <label style="font-size:13px;color:#6B7280;padding-top:4px">Teams Webhook</label>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <input id="alert-teams" type="url" class="form-input" placeholder="https://yourorg.webhook.office.com/webhookb2/..."
+               style="flex:1;min-width:280px;font-family:monospace;font-size:12px">
+        <button class="scan-btn" onclick="testAlert('teams')" style="font-size:11px;padding:3px 10px;color:#4F46E5;border-color:#E5E7EB">Test</button>
+      </div>
+
+      <div style="font-size:11px;color:#9CA3AF;padding-top:2px">Channel → Connectors → Incoming Webhook → configure → copy URL</div>
+      <div></div>
+
       <div style="font-size:11px;color:#9CA3AF;grid-column:1/-1;border-top:1px solid #F3F4F6;margin:6px 0;padding-top:10px">Email (SMTP) — Gmail: use an App Password from myaccount.google.com/apppasswords</div>
 
       <label style="font-size:13px;color:#6B7280">SMTP Host</label>
@@ -5475,7 +6349,7 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
       <input id="alert-smtp-pass" type="password" class="form-input" placeholder="App password" style="width:280px;font-family:monospace;font-size:12px">
 
       <label style="font-size:13px;color:#6B7280">From Address</label>
-      <input id="alert-email-from" type="email" class="form-input" placeholder="arckon@yourdomain.com" style="width:280px;font-family:monospace;font-size:12px">
+      <input id="alert-email-from" type="email" class="form-input" placeholder="sentinel@yourdomain.com" style="width:280px;font-family:monospace;font-size:12px">
 
       <label style="font-size:13px;color:#6B7280">Send Alerts To</label>
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
@@ -5496,6 +6370,9 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
         <label style="font-size:13px;color:#111827;display:flex;align-items:center;gap:8px;cursor:pointer">
           <input type="checkbox" id="trig-shadow"> New <span style="color:#4F46E5;font-weight:700">Shadow AI</span> asset discovered
         </label>
+        <label style="font-size:13px;color:#111827;display:flex;align-items:center;gap:8px;cursor:pointer;margin-left:24px">
+          <input type="checkbox" id="trig-unapproved-only"> Only alert on <span style="color:#f78166;font-weight:700">unapproved</span> services (skip globally approved)
+        </label>
       </div>
 
     </div>
@@ -5508,6 +6385,29 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
 
   </div>
 
+  <div class="page" id="page-siem">
+  <div class="sec-hdr" style="margin-top:0;padding-top:0">SIEM &amp; Tool Integrations</div>
+  <p style="color:#6B7280;font-size:14px;margin-top:-12px;margin-bottom:24px">
+    Connect Arckon to your security stack. Findings are forwarded automatically when a scan completes.
+    Configure each integration below, then click Test to verify connectivity.
+  </p>
+
+  <div style="font-size:11px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:#6B7280;margin-bottom:12px">PSA &amp; Ticketing</div>
+  <p style="color:#6B7280;font-size:13px;margin-top:-8px;margin-bottom:16px">Auto-create service tickets when new CRITICAL or HIGH findings are detected. Enable one PSA to activate.</p>
+  <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px">
+    <label style="font-size:13px;color:#374151;font-weight:600">Configuring for:</label>
+    <select id="psa-client-org-select" class="form-input" style="max-width:280px" onchange="loadPsaConfig()">
+      <option value="">Default (all clients without their own override)</option>
+    </select>
+  </div>
+  <div id="psa-save-banner" style="display:none;background:#D1FAE5;color:#065F46;border:1px solid #6EE7B7;border-radius:6px;padding:10px 16px;margin-bottom:16px;font-size:13px">&#10003; PSA settings saved</div>
+  <div id="psa-cards" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(480px,1fr));gap:20px;margin-bottom:32px"></div>
+
+  <div style="font-size:11px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:#6B7280;margin-bottom:12px">SIEM &amp; Log Management</div>
+  <div id="siem-save-banner" style="display:none;background:#D1FAE5;color:#065F46;border:1px solid #6EE7B7;border-radius:6px;padding:10px 16px;margin-bottom:16px;font-size:13px">&#10003; Settings saved</div>
+  <div id="siem-cards" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(480px,1fr));gap:20px"></div>
+  </div>
+
   <div class="page" id="page-reports">
   <div class="sec-hdr" style="margin-top:0;padding-top:0">Reports</div>
 
@@ -5516,12 +6416,16 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
     <div style="display:flex;flex-wrap:wrap;gap:8px 20px;margin-bottom:4px">
       <label style="font-size:13px;color:#374151;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="rpt-profile" value="default"> Base Scan</label>
       <label style="font-size:13px;color:#374151;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="rpt-profile" value="fedramp"> FedRAMP / NIST 800-53</label>
+      <label style="font-size:13px;color:#374151;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="rpt-profile" value="fedramp_20x"> FedRAMP 20x</label>
       <label style="font-size:13px;color:#374151;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="rpt-profile" value="cmmc"> CMMC 2.0</label>
       <label style="font-size:13px;color:#374151;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="rpt-profile" value="financial"> Financial Services</label>
       <label style="font-size:13px;color:#374151;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="rpt-profile" value="biotech"> Biotech</label>
       <label style="font-size:13px;color:#374151;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="rpt-profile" value="healthcare"> Healthcare</label>
       <label style="font-size:13px;color:#374151;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="rpt-profile" value="owasp_agentic"> OWASP Agentic AI</label>
       <label style="font-size:13px;color:#374151;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="rpt-profile" value="eu_ai_act"> EU AI Act</label>
+      <label style="font-size:13px;color:#374151;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="rpt-profile" value="professional_services"> Professional Services</label>
+      <label style="font-size:13px;color:#374151;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="rpt-profile" value="kubernetes"> Kubernetes</label>
+      <label style="font-size:13px;color:#374151;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="rpt-profile" value="docker"> Docker</label>
     </div>
     <div style="font-size:11px;color:#9CA3AF;margin-top:8px">Select one or more profiles to filter report content. Leave all unchecked for the full base scan.</div>
   </div>
@@ -5554,6 +6458,36 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
         {_btn_technical_pdf}
       </div>
     </div>
+  </div>
+
+  <div style="font-size:11px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:#6B7280;margin-bottom:12px">Regulatory Reports</div>
+  <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:16px;margin-bottom:28px">
+
+    <div style="background:#ffffff;border:1px solid #F3F4F6;border-radius:8px;padding:20px">
+      <div style="font-size:15px;font-weight:700;color:#111827;margin-bottom:6px">&#127466;&#127482; EU AI Act Readiness</div>
+      <div style="font-size:12px;color:#6B7280;line-height:1.6;margin-bottom:12px">Compliance readiness report mapping scan findings to EU AI Act articles (Art. 9–53). Export as PDF or CSV — generated server-side, not a browser print (Safari's print-to-PDF was producing blank pages).</div>
+      <input id="euai-org-name" class="form-input" type="text" placeholder="Organization name for this report"
+             style="font-size:12px;margin-bottom:10px;max-width:280px"
+             onchange="localStorage.setItem('euai_org_name', this.value)">
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="scan-btn" onclick="openEuaiReport('html')" style="color:#4F46E5;border-color:#C7D2FE;font-size:12px">&#128065; Preview</button>
+        <button class="scan-btn" onclick="openEuaiReport('pdf')" style="color:#16A34A;border-color:#238636;font-size:12px">&#8659; Download PDF</button>
+        <button class="scan-btn" onclick="openEuaiReport('csv')" style="color:#CA8A04;border-color:#FDE68A;font-size:12px">&#8659; Download CSV</button>
+      </div>
+    </div>
+
+    <div style="background:#ffffff;border:1px solid #F3F4F6;border-radius:8px;padding:20px">
+      <div style="font-size:15px;font-weight:700;color:#111827;margin-bottom:6px">&#129302; AI Bill of Materials</div>
+      <div style="font-size:12px;color:#6B7280;line-height:1.6;margin-bottom:12px">Complete inventory of AI models, packages, developer tools, and SaaS services detected across the fleet. Includes supply chain risk findings. CycloneDX-AI format JSON export.</div>
+      <input id="aibom-org-name" class="form-input" type="text" placeholder="Organization name for this report"
+             style="font-size:12px;margin-bottom:10px;max-width:280px"
+             onchange="localStorage.setItem('aibom_org_name', this.value)">
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="scan-btn" onclick="openAibomReport('html')" style="color:#4F46E5;border-color:#C7D2FE;font-size:12px">&#128065; Preview</button>
+        <button class="scan-btn" onclick="openAibomReport('json')" style="color:#16A34A;border-color:#238636;font-size:12px">&#8659; Download JSON</button>
+      </div>
+    </div>
+
   </div>
 
   <div style="font-size:11px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:#6B7280;margin-bottom:12px">MCP &amp; Agent Governance Reports</div>
@@ -5599,6 +6533,8 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
 
   {'<div class="page" id="page-probe" style="position:fixed;top:0;left:240px;right:0;bottom:0;z-index:50"><iframe id="probe-iframe" data-loaded="0" style="width:100%;height:100%;border:none;display:block"></iframe></div>' if _has_live_scan() else ''}
 
+  {'<div class="page" id="page-reseller" style="position:fixed;top:0;left:240px;right:0;bottom:0;z-index:50"><iframe id="reseller-iframe" data-loaded="0" style="width:100%;height:100%;border:none;display:block"></iframe></div>' if current_user_is_reseller else ''}
+
   <div class="page" id="page-users" style="position:fixed;top:0;left:240px;right:0;bottom:0;z-index:50;background:#F9FAFB;overflow-y:auto;padding:28px 36px">
   <div class="sec-hdr" style="margin-top:0;padding-top:0">Users</div>
   <div class="content-panel" style="background:#ffffff;border:1px solid #F3F4F6;border-radius:8px;padding:20px;margin-bottom:16px">
@@ -5623,7 +6559,7 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
   </div>
   <div class="content-panel" style="background:#ffffff;border:1px solid #F3F4F6;border-radius:8px;padding:20px;margin-bottom:16px">
     <div class="panel-sub-hdr" style="font-size:12px;color:#6B7280;font-weight:600;text-transform:uppercase;letter-spacing:.06em;margin-bottom:14px">Agent token</div>
-    <p style="font-size:13px;color:#6B7280;margin:0 0 14px">Paste this token into your agent&apos;s config file (<code style="font-size:12px;background:#F3F4F6;padding:1px 4px;border-radius:3px">ARCKON_TOKEN</code>). Keep it secret — anyone with this token can submit reports to your account.</p>
+    <p style="font-size:13px;color:#6B7280;margin:0 0 14px">Paste this token into your agent&apos;s config file (<code style="font-size:12px;background:#F3F4F6;padding:1px 4px;border-radius:3px">SENTINEL_TOKEN</code>). Keep it secret — anyone with this token can submit reports to your account.</p>
     <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
       <input id="agent-token-display" type="password" readonly
              style="flex:1;min-width:240px;max-width:480px;font-family:monospace;font-size:13px;
@@ -5705,12 +6641,12 @@ function _applyTheme(light) {{
 }}
 function toggleTheme() {{
   const light = !document.documentElement.classList.contains('light');
-  localStorage.setItem('arckon_theme', light ? 'light' : 'dark');
+  localStorage.setItem('sentinel_theme', light ? 'light' : 'dark');
   _applyTheme(light);
 }}
-_applyTheme(localStorage.getItem('arckon_theme') === 'light');
+_applyTheme(localStorage.getItem('sentinel_theme') === 'light');
 window.addEventListener('storage', function(e) {{
-  if (e.key === 'arckon_theme') _applyTheme(e.newValue === 'light');
+  if (e.key === 'sentinel_theme') _applyTheme(e.newValue === 'light');
 }});
 
 function navTo(page) {{
@@ -5722,10 +6658,10 @@ function navTo(page) {{
   if (b) b.classList.add('sb-active');
   document.getElementById('main').scrollTop = 0;
   history.replaceState(null, '', '#' + page);
-  if (page === 'settings') {{ loadLiveScanConfig(); }}
+  if (page === 'settings') {{ loadLiveScanConfig(); loadBranding(); }}
+  if (page === 'siem') {{ loadSiemConfig(); loadPsaClientOrgs(); loadPsaConfig(); }}
   if (page === 'users') {{ loadUsers(); loadCustomerInfo(); }}
-  if (page === 'alerts') {{ loadAlertLog(); }}
-  if (page === 'audit') {{ loadAuditLog(); }}
+  if (page === 'alerts') {{ loadActiveIssues(); loadAlertEvents(); }}
   if (page === 'probe') {{
     const fr = document.getElementById('probe-iframe');
     if (fr && fr.getAttribute('data-loaded') === '0') {{
@@ -5733,12 +6669,19 @@ function navTo(page) {{
       fr.setAttribute('data-loaded', '1');
     }}
   }}
+  if (page === 'reseller') {{
+    const fr = document.getElementById('reseller-iframe');
+    if (fr && fr.getAttribute('data-loaded') === '0') {{
+      fr.src = '/reseller';
+      fr.setAttribute('data-loaded', '1');
+    }}
+  }}
 }}
-
-// Restore tab from URL hash on page load
 (function() {{
-  var hash = window.location.hash.replace('#', '');
-  if (hash && document.getElementById('page-' + hash)) {{ navTo(hash); }}
+  const hash = window.location.hash.replace('#', '');
+  const valid = ['overview','shadow','alerts','mcp','riskregister','inventory','schedules',
+                 'discovery','findings','reports','siem','settings','users','probe','reseller'];
+  if (hash && valid.includes(hash)) {{ navTo(hash); }}
 }})();
 
 function _syncFindingsSelector() {{
@@ -5765,19 +6708,80 @@ let _allDevices = [];
 let _activeFilter = new URLSearchParams(location.search).get('filter') || null;
 let _pageSize = 10;
 let _currentPage = 1;
-let _selectedDevices = new Set();
 const _note = document.getElementById('refresh-note');
 setInterval(() => {{
   _countdown--;
-  if (_countdown <= 0) {{ _countdown = 60; refreshDevices(); refreshShadow(); refreshMcp(); }}
+  if (_countdown <= 0) {{ _countdown = 60; refreshDevices(); refreshShadow(); refreshMcp(); loadK8sStatus(); }}
   _note.textContent = 'Devices refresh in ' + _countdown + 's';
 }}, 1000);
 refreshDevices();
 refreshShadow();
 refreshMcp();
+loadK8sStatus();
 loadRiskRegister();
 loadInventory();
 loadSchedules();
+
+async function checkMaintenanceNotice() {{
+  try {{
+    const r = await fetch('/api/maintenance-notice');
+    const data = await r.json();
+    const banner = document.getElementById('maintenance-banner');
+    if (!banner) return;
+    const notice = data.notice;
+    if (!notice) {{ banner.style.display = 'none'; return; }}
+    const when = new Date(notice.scheduled_at).toLocaleString();
+    const icon = notice.in_progress ? '&#9888;' : '&#128337;';
+    const lead = notice.in_progress ? 'Maintenance in progress: ' : `Scheduled maintenance ${{when}}: `;
+    banner.innerHTML = icon + ' ' + lead + notice.message;
+    banner.style.display = 'block';
+  }} catch (_) {{}}
+}}
+checkMaintenanceNotice();
+setInterval(checkMaintenanceNotice, 120000);
+
+async function endImpersonation() {{
+  try {{
+    const r = await fetch('/api/reseller/impersonate/end', {{method: 'POST'}});
+    const data = await r.json();
+    window.location = data.redirect_url || '/';
+  }} catch (e) {{
+    window.location = '/';
+  }}
+}}
+
+(function() {{
+  const saved = localStorage.getItem('euai_org_name');
+  const input = document.getElementById('euai-org-name');
+  if (saved && input) input.value = saved;
+}})();
+
+function openEuaiReport(fmt) {{
+  const input = document.getElementById('euai-org-name');
+  const org = input ? input.value.trim() : '';
+  const url = '/api/fleet/eu-ai-act-report?org=' + encodeURIComponent(org) + '&fmt=' + fmt;
+  if (fmt === 'html') {{
+    window.open(url, '_blank');
+  }} else {{
+    window.location.href = url;
+  }}
+}}
+
+function openAibomReport(fmt) {{
+  const input = document.getElementById('aibom-org-name');
+  const org = input ? input.value.trim() : '';
+  if (fmt === 'json') {{
+    window.location.href = '/api/fleet/aibom.json?org=' + encodeURIComponent(org);
+  }} else {{
+    window.open('/api/fleet/aibom?org=' + encodeURIComponent(org), '_blank');
+  }}
+}}
+
+;(function() {{
+  const saved = localStorage.getItem('aibom_org_name');
+  const input = document.getElementById('aibom-org-name');
+  if (saved && input) input.value = saved;
+}})();
 
 function _age(ts) {{
   if (!ts) return 'never';
@@ -5788,7 +6792,8 @@ function _age(ts) {{
   return Math.floor(s/86400) + 'd ago';
 }}
 
-function _riskCls(fail, warn) {{
+function _riskCls(fail, warn, pas) {{
+  if (fail === 0 && warn === 0 && (pas === 0 || pas === undefined)) return 'r-nodata';
   return fail > 0 ? 'r-fail' : warn > 0 ? 'r-warn' : 'r-pass';
 }}
 
@@ -5818,7 +6823,7 @@ function _syncFilterUI() {{
       bannerText.textContent = 'Showing: ' + (labelMap[_activeFilter] || _activeFilter);
       bannerText.style.color = _activeFilter === 'fail' ? '#DC2626' : _activeFilter === 'warn' ? '#CA8A04' : '#4F46E5';
       banner.style.display = 'flex';
-      document.title = 'Arckon — ' + (labelMap[_activeFilter] || _activeFilter);
+      document.title = 'Sentinel — ' + (labelMap[_activeFilter] || _activeFilter);
     }} else {{
       banner.style.display = 'none';
     }}
@@ -5850,170 +6855,93 @@ async function refreshDevices() {{
   }} catch (_) {{ /* silently ignore refresh errors */ }}
 }}
 
+function _deviceRow(d) {{
+  const did    = d.device_id || '';
+  const fail   = d.fail_count || 0;
+  const warn   = d.warn_count || 0;
+  const pas    = d.pass_count || 0;
+  const noData = (fail === 0 && warn === 0 && pas === 0);
+  const rc     = _riskCls(fail, warn, pas);
+  const age    = _age(d.last_seen);
+  const hostname = d.hostname || 'unknown';
+  const profile  = d.profile || (hostname.startsWith('k8s:') ? 'kubernetes' : hostname.startsWith('docker:') ? 'docker' : '');
+  const displayName = hostname.startsWith('docker:') ? hostname.slice(7)
+                    : hostname.startsWith('k8s:')    ? hostname.slice(4)
+                    : hostname;
+  const typeBadge = hostname.startsWith('docker:')
+    ? '<span style="font-size:10px;background:#DBEAFE;color:#1D4ED8;border-radius:3px;padding:1px 5px;margin-left:6px;font-weight:600;vertical-align:middle">DOCKER</span>'
+    : hostname.startsWith('k8s:')
+    ? '<span style="font-size:10px;background:#D1FAE5;color:#065F46;border-radius:3px;padding:1px 5px;margin-left:6px;font-weight:600;vertical-align:middle">K8S</span>'
+    : '';
+  return `<tr class="dev-row" onclick="selectDevice('${{esc(did)}}')" >
+    <td class="dev-host">${{esc(displayName)}}${{typeBadge}}</td>
+    <td>${{esc(d.platform||'')}}</td>
+    <td class="c-red">${{noData ? '—' : fail}}</td>
+    <td class="c-yellow">${{noData ? '—' : warn}}</td>
+    <td class="c-green">${{noData ? '—' : pas}}</td>
+    <td>${{esc(profile)}}</td>
+    <td>${{age}}</td>
+    <td><span class="risk-dot ${{rc}}" title="${{noData ? 'No scan data yet' : ''}}"></span></td>
+    <td onclick="event.stopPropagation()" style="white-space:nowrap">
+      <button class="scan-btn" id="sb-${{esc(did)}}" onclick="openScanModal('${{esc(did)}}',this)">Scan ▾</button>
+      <button class="scan-btn" id="ub-${{esc(did)}}" onclick="updateDevice('${{esc(did)}}')"
+              style="margin-left:4px;color:#CA8A04;border-color:#E5E7EB">Update</button>
+      <a href="/fleet/device/${{esc(did)}}/dashboard" target="_blank"
+         style="margin-left:8px;background:#ffffff;border:1px solid #E5E7EB;color:#6B7280;
+                border-radius:4px;padding:3px 10px;font-size:12px;text-decoration:none;display:inline-block"
+         onmouseover="this.style.borderColor='#4F46E5';this.style.color='#374151'"
+         onmouseout="this.style.borderColor='#E5E7EB';this.style.color='#6B7280'">Full Report</a>
+      <button class="scan-btn" onclick="removeDevice('${{esc(did)}}','${{esc(d.hostname||'')}}')"
+              style="margin-left:4px;color:#DC2626;border-color:#E5E7EB;font-size:11px">Remove</button>
+    </td>
+  </tr>`;
+}}
+
+function _groupHeader(label, icon, count) {{
+  return `<tr><td colspan="9" style="background:#F9FAFB;border-top:1px solid #E5E7EB;border-bottom:1px solid #E5E7EB;
+    padding:6px 12px;font-size:11px;font-weight:700;color:#6B7280;text-transform:uppercase;letter-spacing:.06em">
+    ${{icon}} ${{label}} <span style="font-weight:400;color:#9CA3AF;margin-left:4px">${{count}}</span>
+  </td></tr>`;
+}}
+
 function renderDevicePage() {{
   const tbody   = document.getElementById('device-tbody');
   const pgEl    = document.getElementById('device-pagination');
   const visible = _visibleDevices();
+
   if (!_allDevices.length) {{
-    tbody.innerHTML = '<tr><td colspan="10" style="text-align:center;padding:32px;color:#9CA3AF">No agents have reported yet.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:32px;color:#9CA3AF">No agents have reported yet.</td></tr>';
     pgEl.style.display = 'none';
     return;
   }}
   if (!visible.length) {{
     const msg = _activeFilter === 'fail' ? 'No high risk devices.' : _activeFilter === 'warn' ? 'No medium risk devices.' : 'No info items.';
-    tbody.innerHTML = '<tr><td colspan="10" style="text-align:center;padding:32px;color:#9CA3AF">' + msg + '</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:32px;color:#9CA3AF">' + msg + '</td></tr>';
     pgEl.style.display = 'none';
     return;
   }}
-  const start = (_currentPage - 1) * _pageSize;
-  const page  = visible.slice(start, start + _pageSize);
-  const hdr = document.getElementById('sel-all-hdr');
-  tbody.innerHTML = page.map(d => {{
-    const did  = d.device_id || '';
-    const fail = d.fail_count || 0;
-    const warn = d.warn_count || 0;
-    const pas  = d.pass_count || 0;
-    const rc   = _riskCls(fail, warn);
-    const age  = _age(d.last_seen);
-    const chk  = _selectedDevices.has(did) ? 'checked' : '';
-    return `<tr class="dev-row" onclick="selectDevice('${{esc(did)}}')" >
-      <td onclick="event.stopPropagation()" style="width:32px;text-align:center">
-        <input type="checkbox" class="dev-sel" value="${{esc(did)}}" ${{chk}} onchange="onDevSel('${{esc(did)}}',this)" style="cursor:pointer">
-      </td>
-      <td class="dev-host">
-        ${{esc(d.display_name || d.hostname || 'unknown')}}
-        <span class="rename-btn" onclick="event.stopPropagation();renameDevice('${{esc(did)}}','${{esc(d.display_name||d.hostname||'')}}',this)"
-              title="Rename" style="cursor:pointer;margin-left:5px;opacity:0;font-size:11px;color:#9CA3AF">&#9998;</span>
-      </td>
-      <td>${{esc(d.platform||'')}}</td>
-      <td class="c-red">${{fail}}</td>
-      <td class="c-yellow">${{warn}}</td>
-      <td class="c-green">${{pas}}</td>
-      <td>${{esc(d.profile||'')}}</td>
-      <td>${{age}}</td>
-      <td><span class="risk-dot ${{rc}}"></span></td>
-      <td onclick="event.stopPropagation()" style="white-space:nowrap">
-        <button class="scan-btn" id="sb-${{esc(did)}}" onclick="openScanModal('${{esc(did)}}',this)">Scan ▾</button>
-        <button class="scan-btn" id="ub-${{esc(did)}}" onclick="updateDevice('${{esc(did)}}')"
-                style="margin-left:4px;color:#CA8A04;border-color:#E5E7EB">Update</button>
-        <a href="/fleet/device/${{esc(did)}}/dashboard" target="_blank"
-           style="margin-left:8px;background:#ffffff;border:1px solid #E5E7EB;color:#6B7280;
-                  border-radius:4px;padding:3px 10px;font-size:12px;text-decoration:none;display:inline-block"
-           onmouseover="this.style.borderColor='#4F46E5';this.style.color='#374151'"
-           onmouseout="this.style.borderColor='#E5E7EB';this.style.color='#6B7280'">Full Report</a>
-        <button class="scan-btn" onclick="removeDevice('${{esc(did)}}','${{esc(d.hostname||'')}}')"
-                style="margin-left:4px;color:#DC2626;border-color:#E5E7EB;font-size:11px">Remove</button>
-      </td>
-    </tr>`;
-  }}).join('');
-  // Sync "select all" header checkbox state
-  const allOnPage = page.every(d => _selectedDevices.has(d.device_id || ''));
-  if (hdr) hdr.checked = page.length > 0 && allOnPage;
-  renderPagination();
-}}
 
-function toggleSelectAll(cb) {{
-  const start = (_currentPage - 1) * _pageSize;
-  const page  = _visibleDevices().slice(start, start + _pageSize);
-  page.forEach(d => {{
-    if (cb.checked) _selectedDevices.add(d.device_id || '');
-    else            _selectedDevices.delete(d.device_id || '');
-  }});
-  document.querySelectorAll('.dev-sel').forEach(el => {{ el.checked = cb.checked; }});
-  _updateSelectionUI();
-}}
+  const endpoints = visible.filter(d => !((d.hostname||'').startsWith('k8s:') || (d.hostname||'').startsWith('docker:')));
+  const dockers   = visible.filter(d =>  (d.hostname||'').startsWith('docker:'));
+  const k8s       = visible.filter(d =>  (d.hostname||'').startsWith('k8s:'));
+  const multiGroup = (endpoints.length > 0) + (dockers.length > 0) + (k8s.length > 0) > 1;
 
-function onDevSel(did, cb) {{
-  if (cb.checked) _selectedDevices.add(did);
-  else            _selectedDevices.delete(did);
-  const all = document.querySelectorAll('.dev-sel');
-  const hdr = document.getElementById('sel-all-hdr');
-  if (hdr) hdr.checked = all.length > 0 && [...all].every(el => el.checked);
-  _updateSelectionUI();
-}}
-
-function clearSelection() {{
-  _selectedDevices.clear();
-  document.querySelectorAll('.dev-sel').forEach(el => {{ el.checked = false; }});
-  const hdr = document.getElementById('sel-all-hdr');
-  if (hdr) hdr.checked = false;
-  _updateSelectionUI();
-}}
-
-function _updateSelectionUI() {{
-  const n   = _selectedDevices.size;
-  const lbl = document.getElementById('sel-count-lbl');
-  const num = document.getElementById('sel-count-num');
-  const btn = document.getElementById('btn-set-profile');
-  if (lbl) lbl.style.display = n > 0 ? 'inline-block' : 'none';
-  if (num) num.textContent = n;
-  if (btn) btn.textContent = n > 0 ? `⚙ Set Profile (${{n}})` : '⚙ Set Profile';
-}}
-
-async function renameDevice(did, current, iconEl) {{
-  const val = prompt('Display name for this device:\\n(Leave blank to clear back to hostname)', current);
-  if (val === null) return;
-  try {{
-    const resp = await fetch('/api/fleet/rename/' + encodeURIComponent(did), {{
-      method: 'POST',
-      headers: {{'Content-Type': 'application/json'}},
-      body: JSON.stringify({{display_name: val.trim()}})
-    }});
-    const data = await resp.json();
-    if (resp.ok) {{
-      const cell = iconEl.closest('td');
-      if (cell) {{
-        const label = val.trim() || current;
-        cell.firstChild.textContent = label + ' ';
-      }}
-      const dev = _allDevices.find(d => d.device_id === did);
-      if (dev) dev.display_name = val.trim();
-    }} else {{
-      alert('Error: ' + (data.error || resp.status));
-    }}
-  }} catch(e) {{
-    alert('Network error: ' + e);
+  let html = '';
+  if (endpoints.length) {{
+    if (multiGroup) html += _groupHeader('Endpoints', '&#128187;', endpoints.length);
+    html += endpoints.map(_deviceRow).join('');
   }}
-}}
-
-async function applyFleetProfile() {{
-  const checked = [...document.querySelectorAll('.fleet-profile-cb:checked')].map(cb => cb.value);
-  if (checked.length === 0) {{ alert('Select at least one profile.'); return; }}
-  const profiles = checked;
-  const ids      = [..._selectedDevices];
-  const n        = ids.length;
-  const total    = _allDevices.length;
-  const scope    = n > 0
-    ? `${{n}} selected device${{n !== 1 ? 's' : ''}}`
-    : `all ${{total}} device${{total !== 1 ? 's' : ''}}`;
-  const label    = profiles.join(', ');
-  if (!confirm(`Set scan profile(s) "${{label}}" for ${{scope}}?\n\nThis updates the agents' default profile for future scheduled scans.`)) return;
-  const btn = document.getElementById('btn-set-profile');
-  btn.disabled = true;
-  const orig = btn.textContent;
-  btn.textContent = 'Applying…';
-  try {{
-    const body = {{ profiles }};
-    if (n > 0) body.device_ids = ids;
-    const resp = await fetch('/api/fleet/set-profile', {{
-      method: 'POST',
-      headers: {{ 'Content-Type': 'application/json' }},
-      body: JSON.stringify(body)
-    }});
-    const data = await resp.json();
-    if (resp.ok) {{
-      btn.textContent = '✓ Done';
-      btn.style.color = '#16A34A';
-      if (n > 0) clearSelection();
-      setTimeout(() => {{ btn.textContent = '⚙ Set Profile'; btn.style.color = '#7C3AED'; btn.disabled = false; }}, 2000);
-    }} else {{
-      alert('Error: ' + (data.error || resp.status));
-      btn.textContent = orig; btn.disabled = false;
-    }}
-  }} catch(e) {{
-    alert('Network error: ' + e);
-    btn.textContent = orig; btn.disabled = false;
+  if (dockers.length) {{
+    if (multiGroup) html += _groupHeader('Docker', '&#128022;', dockers.length);
+    html += dockers.map(_deviceRow).join('');
   }}
+  if (k8s.length) {{
+    if (multiGroup) html += _groupHeader('Kubernetes', '&#9096;', k8s.length);
+    html += k8s.map(_deviceRow).join('');
+  }}
+
+  tbody.innerHTML = html;
+  pgEl.style.display = 'none';
 }}
 
 function renderPagination() {{
@@ -6137,7 +7065,7 @@ async function runDiscovery() {{
       const modelBadges = (models, service) => {{
         if (!models || !models.length) {{
           const svc = (service || '').toLowerCase();
-          if (svc.includes('arckon') || svc.includes('hash'))
+          if (svc.includes('sentinel') || svc.includes('hash'))
             return '<span style="color:#9CA3AF;font-size:11px">n/a — monitoring tool</span>';
           if (svc.includes('jupyter') || svc.includes('streamlit') || svc.includes('gradio'))
             return '<span style="color:#9CA3AF;font-size:11px">n/a — notebook/UI server</span>';
@@ -6280,8 +7208,11 @@ async function runDiscovery() {{
 }}
 
 const _SCAN_PROFILES = [
-  {{id:'default',       label:'Base Scan', desc:'Essential AI security checks — plain language, highest-impact controls first. Best starting point for any organization before moving to a compliance-specific profile.'}},
+  {{id:'default',       label:'Base Scan',           desc:'Essential AI security checks — plain language, highest-impact controls first. Best starting point for any organization before moving to a compliance-specific profile.'}},
+  {{id:'iso42001',      label:'ISO 42001',           desc:'ISO/IEC 42001:2023 — the international AI Management System standard. Covers governance, lifecycle, supply chain, risk assessment, and monitoring across all industries.'}},
+  {{id:'atlas',         label:'MITRE ATLAS',         desc:'MITRE ATLAS adversarial ML threat framework — prompt injection, jailbreak, supply chain compromise, inference API abuse, model exfiltration, and cost harvesting attacks.'}},
   {{id:'fedramp',       label:'FedRAMP',             desc:'FedRAMP Moderate — NIST 800-53 control mappings. Required for federal cloud systems and agency deployments.'}},
+  {{id:'fedramp_20x',   label:'FedRAMP 20x',         desc:'FedRAMP 20x Key Security Indicators (KSI) — the next-generation, continuously-validated cloud authorization model from GSA. Currently in pilot; use for readiness, not authorization.'}},
   {{id:'cmmc',          label:'CMMC 2.0',            desc:'Cybersecurity Maturity Model Certification — required for DoD contractors handling CUI.'}},
   {{id:'financial',     label:'Financial Services',  desc:'Financial sector AI controls — SOC 2, FFIEC, SR 11-7 model risk guidance.'}},
   {{id:'biotech',       label:'Biotech',             desc:'FDA 21 CFR Part 11, HIPAA, ICH E6(R2), GxP — for pharma and biotech AI systems.'}},
@@ -6384,8 +7315,29 @@ async function updateDevice(id) {{
   }}
 }}
 
+function toggleScanProfileMenu(e) {{
+  e.stopPropagation();
+  const m = document.getElementById('scan-profile-menu');
+  if (m) m.style.display = m.style.display === 'none' ? 'block' : 'none';
+}}
+function updateScanProfileBtn() {{
+  const checked = [...document.querySelectorAll('.scan-profile-cb:checked')].map(c => c.value);
+  const btn = document.getElementById('scan-profile-btn');
+  if (!btn) return;
+  if (checked.length === 0)      btn.innerHTML = 'No profiles &#9660;';
+  else if (checked.length === 1) btn.innerHTML = (PROFILE_LABELS[checked[0]] || checked[0]) + ' &#9660;';
+  else                           btn.innerHTML = checked.length + ' profiles &#9660;';
+}}
+document.addEventListener('click', function(e) {{
+  if (!e.target.closest('#scan-profile-menu') && !e.target.closest('#scan-profile-btn')) {{
+    const m = document.getElementById('scan-profile-menu');
+    if (m) m.style.display = 'none';
+  }}
+}});
+
 async function scanAllDevices(btn) {{
-  const profiles = [...document.querySelectorAll('.rpt-profile:checked')].map(c => c.value);
+  const profiles = [...document.querySelectorAll('.scan-profile-cb:checked')].map(c => c.value);
+  if (!profiles.length) {{ alert('Select at least one profile before scanning.'); return; }}
   const stagger  = document.getElementById('scan-all-stagger')?.value || 'normal';
   btn.disabled   = true;
   btn.textContent = 'Queuing…';
@@ -6470,12 +7422,62 @@ async function dismissAllShadow() {{
   if (resp.ok) {{ refreshShadow(); }}
 }}
 
+async function dismissShadowGroup(idsStr) {{
+  const ids = idsStr.split(',').map(s => s.trim()).filter(Boolean);
+  await Promise.all(ids.map(id => fetch('/api/fleet/shadow/dismiss/' + id, {{method:'POST'}})));
+  refreshShadow();
+}}
+
 const _SHADOW_SRC = {{
   network:   {{icon:'&#127760;', color:'#a371f7', label:'Network'}},
   cloud_api: {{icon:'&#9729;',   color:'#4F46E5', label:'Cloud API'}},
   process:   {{icon:'&#9881;',   color:'#f0883e', label:'Process'}},
   docker:    {{icon:'&#128051;', color:'#16A34A', label:'Container'}},
+  saas_ai:   {{icon:'&#128101;', color:'#f78166', label:'SaaS AI'}},
 }};
+
+async function loadK8sStatus() {{
+  const panel = document.getElementById('k8s-status-panel');
+  if (!panel) return;
+  try {{
+    const resp = await fetch('/api/fleet/k8s-status');
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    const data = await resp.json();
+    if (!data.connected) {{
+      panel.innerHTML = `
+        <div style="display:flex;align-items:center;gap:12px;padding:4px 0">
+          <span style="font-size:22px;opacity:.5">⊞</span>
+          <div>
+            <div style="font-size:13px;font-weight:600;color:#374151">No cluster connected</div>
+            <div style="font-size:12px;color:#9CA3AF;margin-top:2px">
+              Install the Arckon agent on a machine with <code style="font-size:11px;background:#F3F4F6;padding:1px 5px;border-radius:3px">kubectl</code> configured.
+              The agent detects and scans the cluster automatically.
+            </div>
+          </div>
+        </div>`;
+      return;
+    }}
+    const rows = (data.clusters || []).map(c => {{
+      const risk = c.fail > 0 ? '#EF4444' : (c.warn > 0 ? '#F59E0B' : '#10B981');
+      return `<div style="display:flex;align-items:center;gap:14px;padding:6px 0;border-bottom:1px solid #F3F4F6">
+        <span style="font-size:16px">⊞</span>
+        <div style="flex:1;min-width:0">
+          <div style="font-size:13px;font-weight:600;color:#111827;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${{esc(c.label)}}</div>
+          <div style="font-size:11px;color:#9CA3AF;margin-top:1px">last seen ${{c.last_seen ? new Date(c.last_seen*1000).toLocaleString() : 'never'}}</div>
+        </div>
+        <div style="display:flex;gap:10px;font-size:12px;font-weight:600;white-space:nowrap">
+          <span style="color:#EF4444">${{c.fail}} fail</span>
+          <span style="color:#F59E0B">${{c.warn}} warn</span>
+          <span style="color:#10B981">${{c.pass}} pass</span>
+        </div>
+        <span style="width:8px;height:8px;border-radius:50%;background:${{risk}};flex-shrink:0"></span>
+      </div>`;
+    }}).join('');
+    panel.innerHTML = rows || '<div style="font-size:12px;color:#9CA3AF">No cluster data yet.</div>';
+  }} catch(e) {{
+    panel.innerHTML = '<div style="font-size:12px;color:#9CA3AF">Could not load cluster status.</div>';
+  }}
+}}
 
 async function refreshShadow() {{
   try {{
@@ -6500,18 +7502,30 @@ async function refreshShadow() {{
     const dockerItems = devs.filter(d => d.source === 'docker');
     const otherItems  = devs.filter(d => d.source !== 'docker');
 
-    const otherHtml = otherItems.map(d => {{
+    // Group non-docker items by service name to avoid showing 20+ cards for the same service
+    const _svcGroups = {{}};
+    for (const d of otherItems) {{
+      const key = (d.source || 'network') + '||' + (d.service || d.host);
+      if (!_svcGroups[key]) _svcGroups[key] = [];
+      _svcGroups[key].push(d);
+    }}
+    const otherHtml = Object.values(_svcGroups).map(grp => {{
+      const d = grp[0];
       const src = _SHADOW_SRC[d.source] || _SHADOW_SRC.network;
       const age = _age(d.last_seen);
-      const locationHtml = d.source === 'network'
-        ? `<span style="font-weight:700;color:#111827;font-size:14px">${{esc(d.host)}}:${{d.port}}</span>`
-        : `<span style="font-weight:700;color:#111827;font-size:14px">${{esc(d.service)}}</span>`;
+      const cnt = grp.length;
+      const endpointNote = cnt > 1
+        ? `<span style="font-size:11px;color:#9CA3AF;margin-left:6px">(${{cnt}} endpoints)</span>`
+        : '';
+      const locationHtml = `<span style="font-weight:700;color:#111827;font-size:14px">${{esc(d.service)}}</span>${{endpointNote}}`;
       const subHtml = d.source === 'network'
-        ? `<div style="font-size:12px;color:${{src.color}};margin-bottom:8px">${{esc(d.service)}}</div>`
+        ? `<div style="font-size:12px;color:${{src.color}};margin-bottom:8px">${{cnt > 1 ? cnt+' network endpoints' : esc(d.host)+(d.port?':'+d.port:'')}}</div>`
         : d.detail ? `<div style="font-size:12px;color:#6B7280;margin-bottom:8px">${{esc(d.detail)}}</div>` : '';
-      const modelSection = (d.models||[]).length
-        ? `<div style="display:flex;flex-wrap:wrap;gap:5px;align-items:center">${{_modelTags(d.models)}}</div>`
+      const allModels = [...new Set(grp.flatMap(x => x.models||[]))];
+      const modelSection = allModels.length
+        ? `<div style="display:flex;flex-wrap:wrap;gap:5px;align-items:center">${{_modelTags(allModels)}}</div>`
         : `<div style="font-size:11px;color:#9CA3AF">No model details available</div>`;
+      const allIds = grp.map(x => x.id).join(',');
       return `<div class="shadow-card" style="border-left-color:${{src.color}}">
         <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px">
           <div style="flex:1;min-width:0">
@@ -6523,10 +7537,11 @@ async function refreshShadow() {{
             ${{subHtml}}
             ${{modelSection}}
           </div>
-          <div style="text-align:right;flex-shrink:0">
-            <div style="font-size:11px;color:#9CA3AF;margin-bottom:3px">Detected ${{age}}</div>
-            <div style="font-size:11px;color:#6B7280;margin-bottom:8px">via ${{esc(d.reporter_hostname)}}</div>
-            <button class="scan-btn" onclick="dismissShadow(${{d.id}})" style="font-size:11px;color:#6B7280;border-color:#E5E7EB">Dismiss</button>
+          <div style="text-align:right;flex-shrink:0;min-width:130px">
+            <div style="font-size:11px;color:#9CA3AF;margin-bottom:8px">Detected ${{age}}</div>
+            ${{d.source === 'saas_ai' ? `<button class="scan-btn" onclick="shadowApproveGlobally('${{esc(d.service)}}',this)" style="font-size:11px;color:#a371f7;border-color:#6e40c9;margin-bottom:4px;display:block;width:100%">&#9733; Approve globally</button>` : ''}}
+            <button class="scan-btn" onclick="navTo('inventory')" style="font-size:11px;color:#4F46E5;border-color:#4F46E5;margin-bottom:4px;display:block;width:100%">&#128196; View in Inventory</button>
+            <button class="scan-btn" onclick="dismissShadowGroup('${{allIds}}')" style="font-size:11px;color:#6e7681;border-color:#30363d;display:block;width:100%">Dismiss (temp)</button>
           </div>
         </div>
       </div>`;
@@ -6837,7 +7852,7 @@ async function rptDownloadPdf(tier, btn) {{
     if (!blob.size) {{ alert('Server returned an empty PDF — check server log.'); return; }}
     const a = Object.assign(document.createElement('a'), {{
       href: URL.createObjectURL(blob),
-      download: 'arckon_fleet_' + tier + '.pdf'
+      download: 'sentinel_fleet_' + tier + '.pdf'
     }});
     document.body.appendChild(a); a.click();
     document.body.removeChild(a);
@@ -6855,7 +7870,7 @@ async function rptDownloadMcpPdf(tier, btn) {{
     if (!blob.size) {{ alert('Server returned an empty PDF — check server log.'); return; }}
     const a = Object.assign(document.createElement('a'), {{
       href: URL.createObjectURL(blob),
-      download: 'arckon_mcp_' + tier + '.pdf'
+      download: 'sentinel_mcp_' + tier + '.pdf'
     }});
     document.body.appendChild(a); a.click();
     document.body.removeChild(a);
@@ -6877,13 +7892,13 @@ async function downloadFleetReport(tier, btn) {{
     }}
     const blob = await r.blob();
     if (blob.size === 0) {{
-      alert('Server returned an empty PDF. Check .arckon.log for details.');
+      alert('Server returned an empty PDF. Check .sentinel.log for details.');
       return;
     }}
     const url  = URL.createObjectURL(blob);
     const a    = document.createElement('a');
     a.href     = url;
-    a.download = 'arckon_fleet_' + tier + '.pdf';
+    a.download = 'sentinel_fleet_' + tier + '.pdf';
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -6939,7 +7954,7 @@ async function loadInventory() {{
     inv = await invRes.json();
   }} catch(e) {{
     console.error('loadInventory:', e);
-    document.getElementById('inv-body').innerHTML = '<div style="color:#f85149;font-size:13px;padding:8px 0">Failed to load inventory: ' + esc(e.message) + '</div>';
+    document.getElementById('inv-body').innerHTML = '<div style="color:#DC2626;font-size:13px;padding:8px 0">Failed to load inventory: ' + esc(e.message) + '</div>';
     return;
   }}
   _invData = inv.items || [];
@@ -6962,59 +7977,116 @@ function invFilter(status, btn) {{
 }}
 
 function renderInventory() {{
-  const rows = _invStatus === 'all' ? _invData : _invData.filter(i => i.approval_status === _invStatus);
+  const isFPView = _invStatus === 'false_positive';
+  const activeItems = _invData.filter(i => !i.false_positive);
+  const fpItems     = _invData.filter(i =>  i.false_positive);
+  let rows;
+  if (isFPView)                rows = fpItems;
+  else if (_invStatus === 'all') rows = activeItems;
+  else                         rows = activeItems.filter(i => i.approval_status === _invStatus);
+
+  // Deduplicate by (service, reporter_hostname) — collapse multiple IPs for same service into one row
+  const _invGroups = {{}};
+  for (const item of rows) {{
+    const key = (item.service||'') + '||' + (item.reporter_hostname||'');
+    if (!_invGroups[key]) _invGroups[key] = [];
+    _invGroups[key].push(item);
+  }}
+  const _statusPriority = {{unapproved:0, under_review:1, approved:2}};
+  rows = Object.values(_invGroups).map(items => {{
+    items.sort((a,b) => (_statusPriority[a.approval_status]||0) - (_statusPriority[b.approval_status]||0));
+    return Object.assign({{}}, items[0], {{_endpointCount: items.length}});
+  }});
+
   const el = document.getElementById('inv-body');
   if (!rows.length) {{
-    el.innerHTML = '<div style="color:#6B7280;font-size:13px;padding:16px 0">' +
-      (_invData.length ? 'No assets at this status.' : 'No AI assets discovered yet. Run Shadow AI discovery first.') + '</div>';
+    const fallback = isFPView ? 'No false positives recorded.'
+      : (_invData.length ? 'No assets at this status.' : 'No AI assets discovered yet. Run Shadow AI discovery first.');
+    el.innerHTML = '<div style="color:#6B7280;font-size:13px;padding:16px 0">' + fallback + '</div>';
+    if (!isFPView && fpItems.length) el.innerHTML += `<div style="font-size:11px;color:#9CA3AF;margin-top:8px">&#128683; ${{fpItems.length}} false positive${{fpItems.length!==1?'s':''}} hidden — <button class="inv-action" onclick="invFilter('false_positive',document.querySelector('#inv-filters .rr-fil:last-child'))">View</button></div>`;
     return;
   }}
   const SRC_ICON = {{network:'🌐',cloud:'☁️',dns:'🔍',process:'⚙️',container:'🐳'}};
   const trs = rows.map(item => {{
     const icon = SRC_ICON[item.source] || '🤖';
     const models = (item.models||[]).slice(0,3).join(', ') || '—';
+    const isLocalHost = /^[0-9a-f]{{16}}$/i.test(item.host);
+    // For local discoveries (process/DNS) host is the agent's own device ID — show hostname.
+    // For network discoveries host is the remote IP — show IP with agent as secondary label.
+    const isNetwork = !isLocalHost && item.host && item.host !== item.reporter_hostname;
+    const cnt = item._endpointCount || 1;
+    const hostDisplay = isLocalHost
+      ? (item.reporter_hostname || 'local')
+      : (cnt > 1 ? cnt + ' endpoints' : item.host);
+    const agentLabel = isNetwork
+      ? `<div style="font-size:10px;color:#9CA3AF;margin-top:1px">via ${{esc(item.reporter_hostname||'')}} agent</div>`
+      : '';
     const st = item.approval_status || 'unapproved';
+    const isFP = !!item.false_positive;
     let badge, actions, attribution;
-    if (st === 'approved') {{
+    if (isFP) {{
+      badge = '<span style="font-size:11px;background:#F3F4F6;color:#6B7280;border:1px solid #D1D5DB;border-radius:3px;padding:1px 6px;font-weight:600">&#128683; False Positive</span>';
+      actions = `<button class="inv-action" onclick="invClearFP(${{item.id}},this)" style="color:#6B7280">Clear FP</button>`;
+    }} else if (st === 'approved') {{
       badge = '<span class="inv-badge-approved">Approved</span>';
       actions = `<button class="inv-action" onclick="invSetStatus(${{item.id}},'under_review',this)">→ Review</button>
-                 <button class="inv-action" onclick="invSetStatus(${{item.id}},'unapproved',this)">Unapprove</button>`;
+                 <button class="inv-action" onclick="invSetStatus(${{item.id}},'unapproved',this)">Unapprove</button>
+                 <button class="inv-action" onclick="invMarkFP(${{item.id}},this)" style="color:#6B7280">&#128683; False Positive</button>`;
     }} else if (st === 'under_review') {{
       badge = '<span class="inv-badge-review">Under Review</span>';
       actions = `<button class="inv-action" onclick="invSetStatus(${{item.id}},'approved',this)">Approve</button>
-                 <button class="inv-action" onclick="invSetStatus(${{item.id}},'unapproved',this)">Unapprove</button>`;
+                 <button class="inv-action" onclick="invSetStatus(${{item.id}},'unapproved',this)">Unapprove</button>
+                 <button class="inv-action" onclick="invMarkFP(${{item.id}},this)" style="color:#6B7280">&#128683; False Positive</button>`;
     }} else {{
       badge = '<span class="inv-badge-unapp">Unapproved</span>';
       actions = `<button class="inv-action" onclick="invSetStatus(${{item.id}},'approved',this)">Approve</button>
-                 <button class="inv-action" onclick="invSetStatus(${{item.id}},'under_review',this)">Flag for Review</button>`;
+                 <button class="inv-action" onclick="invSetStatus(${{item.id}},'under_review',this)">Flag for Review</button>
+                 <button class="inv-action" onclick="invMarkFP(${{item.id}},this)" style="color:#6B7280">&#128683; False Positive</button>`;
     }}
     if (item.approved_by && item.approved_at) {{
-      attribution = `<span style="font-size:10px;color:#6B7280" title="Full history: click History">${{esc(item.approved_by)}} · ${{_fmtTs(item.approved_at)}}</span>`;
+      const noteTip = item.notes ? esc(item.notes)+' · ' : '';
+      attribution = `<span style="font-size:10px;color:#6B7280" title="${{noteTip}}Full history: click History">${{esc(item.approved_by)}} · ${{_fmtTs(item.approved_at)}}${{item.notes ? ' 📝' : ''}}</span>`;
     }} else if (item.approved_by) {{
-      attribution = `<span style="font-size:10px;color:#6B7280">${{esc(item.approved_by)}}</span>`;
+      attribution = `<span style="font-size:10px;color:#6B7280" title="${{esc(item.notes||'')}}">${{esc(item.approved_by)}}${{item.notes ? ' 📝' : ''}}</span>`;
     }} else {{
       attribution = '<span style="font-size:10px;color:#D1D5DB">—</span>';
     }}
-    return `<tr>
+    return `<tr style="${{isFP ? 'opacity:0.55' : ''}}">
       <td style="font-size:16px">${{icon}}</td>
-      <td style="color:#111827;font-weight:600">${{esc(item.host)}}${{item.port ? ':'+item.port : ''}}</td>
+      <td style="color:#111827;font-weight:600">${{esc(hostDisplay)}}${{item.port ? ':'+item.port : ''}}${{agentLabel}}</td>
       <td style="color:#6B7280">${{esc(item.service||item.source)}}</td>
       <td style="color:#6B7280;font-size:12px">${{esc(models)}}</td>
       <td style="color:#6B7280;font-size:11px">${{esc(item.reporter_hostname||'')}}</td>
       <td>${{badge}}</td>
       <td>${{attribution}}</td>
-      <td style="white-space:nowrap;display:flex;gap:4px">
+      <td style="white-space:nowrap;display:flex;gap:4px;flex-wrap:wrap">
         ${{actions}}
+        ${{!isFP ? `<button class="inv-action" data-service="${{esc(item.service)}}" onclick="invApproveGlobally(this.dataset.service,this)" style="color:#7c3aed" title="Approve this service on all devices, now and in future">&#9733; Approve globally</button>` : ''}}
         <button class="inv-action" onclick="invShowHistory(${{item.id}},this)" style="color:#6B7280">History</button>
       </td>
     </tr>`;
   }}).join('');
+  const fpNote = (!isFPView && fpItems.length) ? `<div style="font-size:11px;color:#9CA3AF;margin-top:4px">&#128683; ${{fpItems.length}} false positive${{fpItems.length!==1?'s':''}} excluded — <button class="inv-action" onclick="invFilter('false_positive',document.querySelector('#inv-filters .rr-fil:last-child'))">View</button></div>` : '';
   el.innerHTML = `<table class="rr-table">
-    <thead><tr><th></th><th>Host</th><th>Service</th><th>Models</th><th>Reported by</th><th>Status</th><th>Reviewer · Timestamp</th><th>Actions</th></tr></thead>
+    <thead><tr><th></th><th>Device / IP</th><th>Service</th><th>Models</th><th>Detected by</th><th>Status</th><th>Reviewer · Notes</th><th>Actions</th></tr></thead>
     <tbody>${{trs}}</tbody>
-  </table><div style="font-size:11px;color:#9CA3AF;margin-bottom:8px">${{rows.length}} asset${{rows.length!==1?'s':''}} · approval records are included in the Evidence Package export</div>
-  <div id="inv-history-panel" style="display:none;margin-top:12px;background:#F9FAFB;border:1px solid #E5E7EB;border-radius:6px;padding:12px"></div>`;
+  </table><div style="font-size:11px;color:#9CA3AF;margin-bottom:4px">${{rows.length}} asset${{rows.length!==1?'s':''}} · approval records are included in the Evidence Package export</div>${{fpNote}}
+  <div id="inv-history-panel" style="display:none;margin-top:12px;background:#F9FAFB;border:1px solid #E5E7EB;border-radius:6px;padding:12px"></div>
+  <div id="inv-fp-modal" style="display:none;margin-top:12px;background:#FEF9C3;border:1px solid #FDE047;border-radius:6px;padding:14px;max-width:520px">
+    <div style="font-weight:600;font-size:13px;margin-bottom:8px">&#128683; Mark as False Positive</div>
+    <div style="font-size:12px;color:#6B7280;margin-bottom:8px">Add a note explaining why this is a false positive. This creates an audit trail entry.</div>
+    <textarea id="inv-fp-notes" rows="3" style="width:100%;font-size:12px;border:1px solid #D1D5DB;border-radius:4px;padding:6px;resize:vertical;box-sizing:border-box" placeholder="Describe why this is a false positive…"></textarea>
+    <div style="display:flex;gap:8px;margin-top:8px">
+      <button class="inv-action" id="inv-fp-confirm" style="background:#1F2937;color:#fff;border-color:#1F2937">Confirm False Positive</button>
+      <button class="inv-action" onclick="invCloseFPModal()">Cancel</button>
+    </div>
+  </div>`;
+  if (window._invFPPendingId) {{
+    const btn = document.getElementById('inv-fp-confirm');
+    if (btn) btn.onclick = () => invSubmitFP(window._invFPPendingId);
+  }}
 }}
+
 
 async function invSetStatus(id, status, btn) {{
   const orig = btn.textContent;
@@ -7024,6 +8096,89 @@ async function invSetStatus(id, status, btn) {{
     const r = await fetch('/api/fleet/inventory/' + slug + '/' + id, {{method:'POST'}});
     const d = await r.json();
     if (d.ok) {{ await loadInventory(); }} else {{ btn.disabled=false; btn.textContent=orig; }}
+  }} catch(e) {{ btn.disabled=false; btn.textContent=orig; }}
+}}
+
+function invMarkFP(id, btn) {{
+  window._invFPPendingId = id;
+  const modal = document.getElementById('inv-fp-modal');
+  if (!modal) {{ renderInventory(); return; }}
+  modal.style.display = 'block';
+  const confirmBtn = document.getElementById('inv-fp-confirm');
+  if (confirmBtn) confirmBtn.onclick = () => invSubmitFP(id);
+  const ta = document.getElementById('inv-fp-notes');
+  if (ta) {{ ta.value = ''; ta.focus(); }}
+}}
+
+function invCloseFPModal() {{
+  window._invFPPendingId = null;
+  const modal = document.getElementById('inv-fp-modal');
+  if (modal) modal.style.display = 'none';
+}}
+
+async function invSubmitFP(id) {{
+  const notes = (document.getElementById('inv-fp-notes') || {{}}).value || '';
+  const btn = document.getElementById('inv-fp-confirm');
+  if (btn) {{ btn.disabled = true; btn.textContent = '…'; }}
+  try {{
+    const r = await fetch('/api/fleet/inventory/false-positive/' + id, {{
+      method: 'POST',
+      headers: {{'Content-Type': 'application/json'}},
+      body: JSON.stringify({{false_positive: true, notes}}),
+    }});
+    const d = await r.json();
+    if (d.ok) {{ invCloseFPModal(); await loadInventory(); }}
+    else {{ if (btn) {{ btn.disabled=false; btn.textContent='Confirm False Positive'; }} }}
+  }} catch(e) {{ if (btn) {{ btn.disabled=false; btn.textContent='Confirm False Positive'; }} }}
+}}
+
+async function invClearFP(id, btn) {{
+  const orig = btn.textContent;
+  btn.disabled = true; btn.textContent = '…';
+  try {{
+    const r = await fetch('/api/fleet/inventory/false-positive/' + id, {{
+      method: 'POST',
+      headers: {{'Content-Type': 'application/json'}},
+      body: JSON.stringify({{false_positive: false, notes: ''}}),
+    }});
+    const d = await r.json();
+    if (d.ok) {{ await loadInventory(); }} else {{ btn.disabled=false; btn.textContent=orig; }}
+  }} catch(e) {{ btn.disabled=false; btn.textContent=orig; }}
+}}
+
+async function shadowApproveGlobally(service, btn) {{
+  if (!confirm(`Approve "${{service}}" globally?\n\nThis will:\n• Mark all current detections as Approved on every device\n• Auto-approve any future detections on any device\n• Suppress alerts for this service\n\nYou can undo this from the Asset Inventory page.`)) return;
+  const orig = btn.textContent;
+  btn.disabled = true; btn.textContent = '…';
+  try {{
+    const r = await fetch('/api/fleet/inventory/approve-service', {{
+      method: 'POST',
+      headers: {{'Content-Type': 'application/json'}},
+      body: JSON.stringify({{service, action: 'approve'}}),
+    }});
+    const d = await r.json();
+    if (d.ok) {{
+      btn.closest('.shadow-card').style.opacity = '0.4';
+      btn.textContent = '✓ Approved';
+    }} else {{
+      btn.disabled = false; btn.textContent = orig;
+      alert('Failed: ' + (d.error || 'unknown'));
+    }}
+  }} catch(e) {{ btn.disabled = false; btn.textContent = orig; }}
+}}
+
+async function invApproveGlobally(service, btn) {{
+  if (!confirm(`Approve "${{service}}" globally?\n\nThis will:\n• Mark all current detections of this service as Approved\n• Auto-approve any future detections on any device\n• Suppress alerts for this service\n\nYou can undo this per-entry or via the API.`)) return;
+  const orig = btn.textContent;
+  btn.disabled = true; btn.textContent = '…';
+  try {{
+    const r = await fetch('/api/fleet/inventory/approve-service', {{
+      method: 'POST',
+      headers: {{'Content-Type': 'application/json'}},
+      body: JSON.stringify({{service, action: 'approve'}}),
+    }});
+    const d = await r.json();
+    if (d.ok) {{ await loadInventory(); }} else {{ btn.disabled=false; btn.textContent=orig; alert('Failed: ' + (d.error||'unknown')); }}
   }} catch(e) {{ btn.disabled=false; btn.textContent=orig; }}
 }}
 
@@ -7115,6 +8270,7 @@ async function loadUsers() {{
       customer_admin: '<span style="font-size:10px;font-weight:600;color:#4F46E5;background:#EEF2FF;padding:1px 6px;border-radius:4px">admin</span>',
       admin:          '<span style="font-size:10px;font-weight:600;color:#4F46E5;background:#EEF2FF;padding:1px 6px;border-radius:4px">admin</span>',
       user:           '<span style="font-size:10px;font-weight:600;color:#CA8A04;background:#FEF9C3;padding:1px 6px;border-radius:4px">viewer</span>',
+      client_viewer:  '<span style="font-size:10px;font-weight:600;color:#CA8A04;background:#FEF9C3;padding:1px 6px;border-radius:4px">client viewer</span>',
     }};
     const rows = users.map(u => {{
       const isMe = u.email === myEmail;
@@ -7223,8 +8379,9 @@ async function savePassword(uid) {{
 
 const CADENCE_LABELS = {{daily:'Daily',weekly:'Weekly',monthly:'Monthly'}};
 const WEEKDAY_LABELS = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
-const PROFILE_LABELS = {{default:'Base Scan',fedramp:'FedRAMP',cmmc:'CMMC 2.0',financial:'Financial',
-  healthcare:'Healthcare',biotech:'Biotech',owasp_agentic:'OWASP Agentic',eu_ai_act:'EU AI Act'}};
+const PROFILE_LABELS = {{default:'Base Scan',fedramp:'FedRAMP',fedramp_20x:'FedRAMP 20x',cmmc:'CMMC 2.0',financial:'Financial',
+  healthcare:'Healthcare',biotech:'Biotech',owasp_agentic:'OWASP Agentic',eu_ai_act:'EU AI Act',
+  professional_services:'Professional Services',kubernetes:'Kubernetes',docker:'Docker'}};
 
 async function loadSchedules() {{
   try {{
@@ -7326,7 +8483,7 @@ async function downloadEvidencePackage(btn) {{
     if (!r.ok) {{ alert('Export failed: ' + await r.text().catch(() => r.status)); return; }}
     const blob = await r.blob();
     const disp = r.headers.get('Content-Disposition') || '';
-    const fname = (disp.match(/filename="([^"]+)"/) || [])[1] || 'arckon_evidence.zip';
+    const fname = (disp.match(/filename="([^"]+)"/) || [])[1] || 'sentinel_evidence.zip';
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url; a.download = fname;
@@ -7338,150 +8495,7 @@ async function downloadEvidencePackage(btn) {{
 
 let _rrData = [];
 let _rrSev = 'all';
-const _rrAccepted = new Map();
-const _rrAssigned = new Map();
 
-// ── Alert log ─────────────────────────────────────────────────────────────────
-let _alertData = [];
-let _alertFilter = 'all';
-
-async function loadAlertLog() {{
-  try {{
-    const r = await fetch('/api/alerts/log');
-    const d = await r.json();
-    _alertData = d.alerts || [];
-    const unread = d.unread || 0;
-    const badge = document.getElementById('alert-unread-badge');
-    if (badge) {{
-      if (unread > 0) {{ badge.textContent = unread + ' unread'; badge.style.display = ''; }}
-      else {{ badge.style.display = 'none'; }}
-    }}
-    renderAlertLog();
-  }} catch(e) {{
-    document.getElementById('alert-log-body').innerHTML =
-      '<tr><td colspan="7" style="padding:24px;text-align:center;color:#DC2626">Failed to load alert log.</td></tr>';
-  }}
-}}
-
-function setAlertFilter(f) {{
-  _alertFilter = f;
-  document.querySelectorAll('.rr-fil').forEach(function(b) {{ b.classList.remove('rr-fil-active'); }});
-  const btn = document.getElementById('alog-fil-' + (f === 'all' ? 'all' : f === 'CRITICAL' ? 'critical' : f === 'HIGH' ? 'high' : 'unread'));
-  if (btn) btn.classList.add('rr-fil-active');
-  renderAlertLog();
-}}
-
-function renderAlertLog() {{
-  const SEV_COLOR = {{ CRITICAL: '#DC2626', HIGH: '#D97706', INFO: '#6B7280' }};
-  const EVENT_LABEL = {{
-    new_critical_finding: 'Critical Finding',
-    new_high_finding: 'High Finding',
-    new_shadow_ai: 'Shadow AI',
-    device_offline: 'Device Offline',
-    test_alert: 'Test',
-  }};
-  let rows = _alertData;
-  if (_alertFilter === 'CRITICAL') rows = rows.filter(function(a) {{ return a.severity === 'CRITICAL'; }});
-  else if (_alertFilter === 'HIGH') rows = rows.filter(function(a) {{ return a.severity === 'HIGH'; }});
-  else if (_alertFilter === 'unread') rows = rows.filter(function(a) {{ return !a.acknowledged; }});
-
-  const tbody = document.getElementById('alert-log-body');
-  if (!rows.length) {{
-    tbody.innerHTML = '<tr><td colspan="7" style="padding:24px;text-align:center;color:#9CA3AF">No alerts' + (_alertFilter !== 'all' ? ' matching this filter' : '') + '.</td></tr>';
-    return;
-  }}
-
-  tbody.innerHTML = rows.map(function(a) {{
-    const ts = a.fired_at ? new Date(a.fired_at * 1000).toLocaleString() : '—';
-    const sevColor = SEV_COLOR[a.severity] || '#6B7280';
-    const evLabel = EVENT_LABEL[a.event_type] || a.event_type;
-    const detail = a.check_id ? esc(a.check_id) + ' — ' + esc(a.title) : esc(a.title || a.event_type);
-    const channels = a.channels ? a.channels.split(',').map(function(c) {{ return '<span style="font-size:10px;background:#F3F4F6;border-radius:3px;padding:1px 5px">' + esc(c) + '</span>'; }}).join(' ') : '<span style="color:#9CA3AF">none</span>';
-    const rowStyle = a.acknowledged ? 'opacity:0.55;' : '';
-    const ackBtn = a.acknowledged
-      ? '<span style="font-size:11px;color:#16A34A">&#10003; Acked' + (a.acked_by ? ' by ' + esc(a.acked_by) : '') + '</span>'
-      : '<button onclick="ackAlert(' + a.id + ')" style="font-size:11px;padding:2px 8px;background:#fff;border:1px solid #D1D5DB;border-radius:4px;cursor:pointer;color:#6B7280">Acknowledge</button>';
-    return '<tr style="border-bottom:1px solid #F3F4F6;' + rowStyle + '">'
-      + '<td style="padding:7px 10px;color:#6B7280;white-space:nowrap">' + ts + '</td>'
-      + '<td style="padding:7px 10px;font-weight:600;color:' + sevColor + '">' + esc(a.severity || '—') + '</td>'
-      + '<td style="padding:7px 10px">' + esc(evLabel) + '</td>'
-      + '<td style="padding:7px 10px">' + detail + '</td>'
-      + '<td style="padding:7px 10px;color:#374151">' + esc(a.hostname || a.device_id || '—') + '</td>'
-      + '<td style="padding:7px 10px">' + channels + '</td>'
-      + '<td style="padding:7px 10px">' + ackBtn + '</td>'
-      + '</tr>';
-  }}).join('');
-}}
-
-async function ackAlert(id) {{
-  await fetch('/api/alerts/ack', {{ method:'POST', headers:{{'Content-Type':'application/json'}}, body: JSON.stringify({{id: id}}) }});
-  await loadAlertLog();
-}}
-
-async function ackAllAlerts() {{
-  await fetch('/api/alerts/ack', {{ method:'POST', headers:{{'Content-Type':'application/json'}}, body: JSON.stringify({{all: true}}) }});
-  await loadAlertLog();
-}}
-
-// ── Audit log ─────────────────────────────────────────────────────────────────
-let _auditData = [];
-let _auditFilter = 'all';
-
-async function loadAuditLog() {{
-  try {{
-    const r = await fetch('/api/audit/log');
-    const d = await r.json();
-    _auditData = d.entries || [];
-    renderAuditLog();
-  }} catch(e) {{
-    document.getElementById('audit-log-body').innerHTML =
-      '<tr><td colspan="6" style="padding:24px;text-align:center;color:#DC2626">Failed to load audit log.</td></tr>';
-  }}
-}}
-
-function setAuditFilter(f) {{
-  _auditFilter = f;
-  document.querySelectorAll('#page-audit .rr-fil').forEach(function(b) {{ b.classList.remove('rr-fil-active'); }});
-  const btn = document.getElementById('adlog-fil-' + f);
-  if (btn) btn.classList.add('rr-fil-active');
-  renderAuditLog();
-}}
-
-function renderAuditLog() {{
-  const GROUPS = {{
-    login:  ['login.success', 'login.failed', 'logout', 'password.change', 'password.reset.requested', 'password.reset.completed'],
-    user:   ['user.add', 'user.edit', 'user.remove', 'user.password.reset', 'user.reactivate'],
-    config: ['config.save', 'alerts.config.save', 'email.test'],
-    scan:   ['scan.trigger', 'fleet.scan.all'],
-    alert:  ['alert.ack', 'alert.ack.all', 'alert.dismiss'],
-  }};
-  let rows = _auditData;
-  if (_auditFilter !== 'all') {{
-    const wanted = GROUPS[_auditFilter] || [];
-    rows = rows.filter(function(a) {{ return wanted.indexOf(a.action) !== -1; }});
-  }}
-
-  const tbody = document.getElementById('audit-log-body');
-  if (!rows.length) {{
-    tbody.innerHTML = '<tr><td colspan="6" style="padding:24px;text-align:center;color:#9CA3AF">No audit entries' + (_auditFilter !== 'all' ? ' matching this filter' : '') + '.</td></tr>';
-    return;
-  }}
-
-  tbody.innerHTML = rows.map(function(a) {{
-    const ts = a.occurred_at ? new Date(a.occurred_at * 1000).toLocaleString() : '—';
-    const actor = esc(a.actor_name || a.actor_id || '—') + (a.actor_role ? ' <span style="font-size:10px;color:#9CA3AF">(' + esc(a.actor_role) + ')</span>' : '');
-    return '<tr style="border-bottom:1px solid #F3F4F6">'
-      + '<td style="padding:7px 10px;color:#6B7280;white-space:nowrap">' + ts + '</td>'
-      + '<td style="padding:7px 10px">' + actor + '</td>'
-      + '<td style="padding:7px 10px;font-weight:600;color:#374151">' + esc(a.action || '—') + '</td>'
-      + '<td style="padding:7px 10px;color:#374151">' + esc(a.target || '—') + '</td>'
-      + '<td style="padding:7px 10px;color:#6B7280">' + esc(a.details || '') + '</td>'
-      + '<td style="padding:7px 10px;color:#9CA3AF">' + esc(a.ip_address || '—') + '</td>'
-      + '</tr>';
-  }}).join('');
-}}
-
-// ── Risk register ─────────────────────────────────────────────────────────────
 async function loadRiskRegister() {{
   try {{
     const r = await fetch('/api/fleet/risk-register');
@@ -7495,64 +8509,499 @@ async function loadRiskRegister() {{
 
 function rrFilter(sev, btn) {{
   _rrSev = sev;
-  document.querySelectorAll('.rr-fil').forEach(b => b.classList.remove('rr-active'));
+  document.querySelectorAll('#rr-filters .rr-fil').forEach(b => b.classList.remove('rr-active'));
   btn.classList.add('rr-active');
   renderRiskRegister();
 }}
 
-function rrAccept(checkId) {{
-  if (_rrAccepted.get(checkId)) {{ _rrAccepted.delete(checkId); }}
-  else {{ _rrAccepted.set(checkId, true); }}
-  renderRiskRegister();
+function rrToggleForm(checkId, action) {{
+  const rowId = 'rr-form-' + checkId.replace(/[^a-z0-9]/gi,'_');
+  const existing = document.getElementById(rowId);
+  if (existing) {{ existing.remove(); return; }}
+  const dataRow = document.querySelector(`tr[data-cid="${{checkId}}"]`);
+  if (!dataRow) return;
+  const e = _rrData.find(x => x.check_id === checkId) || {{}};
+  const formRow = document.createElement('tr');
+  formRow.id = rowId;
+  formRow.className = 'rr-form-row';
+  const assigneeField = action === 'assigned'
+    ? `<div style="margin-bottom:8px"><label style="font-size:11px;color:#6B7280;display:block;margin-bottom:3px">Assign to</label>
+       <input class="rr-input" id="rr-assignee-${{checkId.replace(/[^a-z0-9]/gi,'_')}}" placeholder="Name or email" value="${{esc(e.override_assignee||'')}}" style="width:220px"></div>`
+    : '';
+  const actionLabel = action === 'false_positive' ? 'Mark as False Positive'
+                    : action === 'accepted' ? 'Accept Risk' : 'Assign Finding';
+  const notePlaceholder = action === 'false_positive'
+    ? 'Explain why this is a false positive (e.g. regex matched a filename, not a real key)…'
+    : 'Reason, ticket #, etc.';
+  formRow.innerHTML = `<td colspan="8" class="rr-form-row" style="padding:12px 16px">
+    <div style="font-size:12px;font-weight:600;color:#374151;margin-bottom:10px">${{actionLabel}}: <code style="font-size:11px;color:#6B7280">${{esc(checkId)}}</code></div>
+    <div style="display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end">
+      ${{assigneeField}}
+      <div style="flex:1;min-width:200px"><label style="font-size:11px;color:#6B7280;display:block;margin-bottom:3px">Note ${{action === 'false_positive' ? '' : '<span style="color:#9CA3AF">(optional)</span>'}}</label>
+       <input class="rr-input" id="rr-note-${{checkId.replace(/[^a-z0-9]/gi,'_')}}" placeholder="${{notePlaceholder}}" value="${{esc(e.override_note||'')}}"></div>
+      <div><label style="font-size:11px;color:#6B7280;display:block;margin-bottom:3px">Expires <span style="color:#9CA3AF">(optional)</span></label>
+       <input class="rr-input" id="rr-exp-${{checkId.replace(/[^a-z0-9]/gi,'_')}}" type="date" style="width:140px" value="${{e.override_expires ? new Date(e.override_expires*1000).toISOString().slice(0,10) : ''}}"></div>
+      <div style="display:flex;gap:6px;padding-bottom:1px">
+        <button class="rr-save-btn" onclick="rrSaveOverride('${{checkId}}','${{action}}')">Save</button>
+        ${{e.override_action ? `<button class="rr-clear-btn" onclick="rrClearOverride('${{checkId}}')">Clear</button>` : ''}}
+        <button class="rr-clear-btn" onclick="document.getElementById('${{rowId}}').remove()">Cancel</button>
+      </div>
+    </div>
+  </td>`;
+  dataRow.after(formRow);
 }}
 
-function rrAssign(checkId) {{
-  const current = _rrAssigned.get(checkId) || '';
-  const name = prompt('Assign to (email or name):', current);
-  if (name === null) return;
-  if (name.trim()) {{ _rrAssigned.set(checkId, name.trim()); }}
-  else {{ _rrAssigned.delete(checkId); }}
-  renderRiskRegister();
+async function rrSaveOverride(checkId, action) {{
+  const slug = checkId.replace(/[^a-z0-9]/gi,'_');
+  const assignee = document.getElementById('rr-assignee-'+slug)?.value?.trim() || '';
+  const note     = document.getElementById('rr-note-'+slug)?.value?.trim() || '';
+  const expVal   = document.getElementById('rr-exp-'+slug)?.value?.trim() || '';
+  try {{
+    const r = await fetch('/api/fleet/risk-register/override', {{
+      method: 'POST',
+      headers: {{'Content-Type':'application/json'}},
+      body: JSON.stringify({{check_id: checkId, action, assignee, note, expires_at: expVal || null}})
+    }});
+    const d = await r.json();
+    if (!d.ok) {{ alert('Save failed: ' + (d.error||'unknown error')); return; }}
+    await loadRiskRegister();
+  }} catch(e) {{ alert('Save failed: ' + e); }}
+}}
+
+async function rrClearOverride(checkId) {{
+  if (!confirm('Remove override for this finding?')) return;
+  try {{
+    const r = await fetch('/api/fleet/risk-register/override/' + encodeURIComponent(checkId) + '/delete', {{method:'POST'}});
+    const d = await r.json();
+    if (!d.ok) {{ alert('Clear failed: ' + (d.error||'unknown')); return; }}
+    await loadRiskRegister();
+  }} catch(e) {{ alert('Clear failed: ' + e); }}
 }}
 
 function renderRiskRegister() {{
-  const rows = _rrSev === 'all' ? _rrData : _rrData.filter(e => e.severity === _rrSev);
+  let rows;
+  if (_rrSev === 'accepted') {{
+    rows = _rrData.filter(e => e.override_action === 'accepted');
+  }} else if (_rrSev === 'false_positive') {{
+    rows = _rrData.filter(e => e.override_action === 'false_positive');
+  }} else if (_rrSev === 'all') {{
+    rows = _rrData.filter(e => e.override_action !== 'false_positive');
+  }} else {{
+    rows = _rrData.filter(e => e.severity === _rrSev && e.override_action !== 'false_positive');
+  }}
   const el = document.getElementById('rr-body');
+  const fpCount = _rrData.filter(e => e.override_action === 'false_positive').length;
   if (!rows.length) {{
-    el.innerHTML = '<div style="color:#6B7280;font-size:13px;padding:16px 0">' +
-      (_rrData.length ? 'No findings at this severity.' : 'No open findings — fleet is clean.') + '</div>';
+    let msg = _rrSev === 'accepted' ? 'No accepted risks.'
+            : _rrSev === 'false_positive' ? 'No false positives recorded.'
+            : _rrData.length ? 'No findings at this severity.' : 'No open findings — fleet is clean.';
+    el.innerHTML = '<div style="color:#6B7280;font-size:13px;padding:16px 0">' + msg + '</div>';
     return;
   }}
   const SEV_CLS = {{CRITICAL:'critical',HIGH:'high',MEDIUM:'medium',LOW:'low'}};
-  const btnBase = 'font-size:11px;padding:2px 8px;border-radius:4px;border:1px solid;cursor:pointer;font-weight:500;';
+  const fpNote = (_rrSev !== 'false_positive' && fpCount)
+    ? `<div style="font-size:11px;color:#9CA3AF;margin-bottom:6px">&#128683; ${{fpCount}} false positive${{fpCount!==1?'s':''}} hidden — <button class="rr-fil" style="font-size:11px;padding:1px 8px" onclick="rrFilter('false_positive',document.querySelector('#rr-filters .rr-fil:last-child'))">View</button></div>`
+    : '';
   const trs = rows.map(e => {{
-    const accepted = _rrAccepted.get(e.check_id) || false;
-    const assignee = _rrAssigned.get(e.check_id) || '';
-    const badge = e.trend === 'Recurring'
+    const trendBadge = e.trend === 'Recurring'
       ? '<span class="rr-recurring">Recurring</span>'
       : '<span class="rr-new">New</span>';
+    const overrideBadge = e.override_action === 'accepted'
+      ? '<span class="rr-accepted">&#10003; Accepted</span>'
+      : e.override_action === 'assigned'
+        ? `<span class="rr-assigned">&#128100; ${{esc(e.override_assignee||'Assigned')}}</span>`
+        : e.override_action === 'false_positive'
+          ? '<span class="rr-fp">&#128683; False Positive</span>'
+          : '';
     const devTip = e.affected_devices.join(', ');
-    const acceptBtn = accepted
-      ? `<button onclick="rrAccept('${{e.check_id}}')" style="${{btnBase}}background:#F0FDF4;color:#16A34A;border-color:#BBF7D0">&#10003; Accepted</button>`
-      : `<button onclick="rrAccept('${{e.check_id}}')" style="${{btnBase}}background:#fff;color:#6B7280;border-color:#D1D5DB">Accept Risk</button>`;
-    const assignBtn = assignee
-      ? `<button onclick="rrAssign('${{e.check_id}}')" style="${{btnBase}}background:#EEF2FF;color:#4F46E5;border-color:#C7D2FE" title="Reassign">&#128100; ${{esc(assignee)}}</button>`
-      : `<button onclick="rrAssign('${{e.check_id}}')" style="${{btnBase}}background:#fff;color:#6B7280;border-color:#D1D5DB">Assign</button>`;
-    return `<tr style="${{accepted ? 'opacity:0.55;' : ''}}">
+    const rowClass = e.override_action === 'accepted' ? 'rr-row-accepted'
+                   : e.override_action === 'false_positive' ? 'rr-row-fp' : '';
+    const cid = e.check_id;
+    const fpLabel = e.override_action === 'false_positive' ? 'Unmark FP' : 'False Positive';
+    const fpAction = e.override_action === 'false_positive' ? `rrClearOverride('${{esc(cid)}}')` : `rrToggleForm('${{esc(cid)}}','false_positive')`;
+    return `<tr class="${{rowClass}}" data-cid="${{esc(cid)}}">
       <td><span class="badge ${{SEV_CLS[e.severity]||'low'}}">${{esc(e.severity)}}</span></td>
-      <td style="font-family:monospace;font-size:12px;color:#6B7280">${{esc(e.check_id)}}</td>
+      <td style="font-family:monospace;font-size:12px;color:#6B7280">${{esc(cid)}}</td>
       <td style="color:#374151">${{esc(e.title)}}</td>
       <td title="${{esc(devTip)}}" style="cursor:default;color:#111827;font-weight:600">${{e.affected_count}}</td>
-      <td>${{badge}}</td>
+      <td>${{trendBadge}}</td>
       <td style="color:#6B7280">${{e.days_open}}d</td>
-      <td style="white-space:nowrap"><div style="display:flex;gap:4px;flex-wrap:wrap">${{acceptBtn}}${{assignBtn}}</div></td>
+      <td style="white-space:nowrap">${{overrideBadge}}</td>
+      <td style="white-space:nowrap">
+        <button class="rr-act-btn" onclick="rrToggleForm('${{esc(cid)}}','accepted')" title="Accept this risk">Accept</button>
+        <button class="rr-act-btn" onclick="rrToggleForm('${{esc(cid)}}','assigned')" title="Assign to someone">Assign</button>
+        <button class="rr-act-btn" onclick="${{fpAction}}" title="Mark as false positive" style="color:#6B7280">${{fpLabel}}</button>
+      </td>
     </tr>`;
   }}).join('');
-  el.innerHTML = `<table class="rr-table">
-    <thead><tr><th>Severity</th><th>Check ID</th><th>Finding</th><th title="Hover for device list">Devices</th><th>Trend</th><th>Open</th><th>Actions</th></tr></thead>
+  el.innerHTML = fpNote + `<table class="rr-table">
+    <thead><tr>
+      <th>Severity</th><th>Check ID</th><th>Finding</th>
+      <th title="Hover for device list">Devices</th><th>Trend</th><th>Open</th>
+      <th>Status</th><th>Actions</th>
+    </tr></thead>
     <tbody>${{trs}}</tbody>
-  </table><div style="font-size:11px;color:#9CA3AF;margin-bottom:8px">${{rows.length}} open finding${{rows.length!==1?'s':''}} · hover device count for affected hostnames</div>`;
+  </table><div style="font-size:11px;color:#9CA3AF;margin-bottom:8px">${{rows.length}} finding${{rows.length!==1?'s':''}} · hover device count for affected hostnames</div>`;
 }}
+
+// ── PSA integrations ─────────────────────────────────────────────────────────
+
+const PSA_DEFS = [
+  {{id:'connectwise', name:'ConnectWise Manage', icon:'&#128736;', color:'#E31837',
+    desc:'Auto-create service tickets on new CRITICAL/HIGH findings. Uses the ConnectWise Manage REST API.',
+    howto:'Settings → My Company → API Keys. Register a client ID at developer.connectwise.com.',
+    fields:[
+      {{key:'site',          label:'Site',           type:'text',     ph:'na.myconnectwise.net'}},
+      {{key:'company_id',    label:'Company ID',     type:'text',     ph:'YourCompanyId'}},
+      {{key:'public_key',    label:'Public Key',     type:'text',     ph:'API public key'}},
+      {{key:'private_key',   label:'Private Key',    type:'password', ph:'API private key'}},
+      {{key:'client_id',     label:'Client ID',      type:'text',     ph:'UUID from developer.connectwise.com'}},
+      {{key:'service_board', label:'Service Board',  type:'text',     ph:'Service Requests'}},
+      {{key:'company_name',  label:'Company Name',   type:'text',     ph:'Client company identifier'}},
+    ]}},
+  {{id:'autotask', name:'Autotask PSA', icon:'&#128203;', color:'#0077CC',
+    desc:'Auto-create tickets in Autotask when new CRITICAL/HIGH AI security findings are detected.',
+    howto:'Admin → Resources → API User (not system) → Add resource. Enable API access and copy the generated key.',
+    fields:[
+      {{key:'zone',        label:'Zone',        type:'text', ph:'webservices2  (check your login URL)'}},
+      {{key:'username',    label:'Username',    type:'text', ph:'api-user@yourcompany.com'}},
+      {{key:'api_key',     label:'API Key',     type:'password', ph:'API secret key'}},
+      {{key:'account_id',  label:'Account ID',  type:'text', ph:'Numeric client account ID'}},
+      {{key:'queue_id',    label:'Queue ID',    type:'text', ph:'Numeric ticket queue ID'}},
+    ]}},
+  {{id:'halopsa', name:'HaloPSA', icon:'&#128994;', color:'#00B050',
+    desc:'Auto-create HaloPSA tickets when new CRITICAL/HIGH AI security findings are detected.',
+    howto:'HaloPSA → Configuration → Integrations → HaloPSA API → New Application → Client Credentials.',
+    fields:[
+      {{key:'tenant',         label:'Instance URL',   type:'text',     ph:'mfdtest.trial.usehalo.com  or  yourco.halopsa.com'}},
+      {{key:'client_id',      label:'Client ID',      type:'text',     ph:'OAuth2 client ID'}},
+      {{key:'client_secret',  label:'Client Secret',  type:'password', ph:'OAuth2 client secret'}},
+      {{key:'ticket_type_id', label:'Ticket Type ID', type:'text',     ph:'1'}},
+    ]}},
+  {{id:'jira', name:'Jira', icon:'&#128031;', color:'#0052CC',
+    desc:'Auto-create Jira issues when new CRITICAL/HIGH AI security findings are detected.',
+    howto:'id.atlassian.com → Security → API tokens → Create API token. Use your Atlassian email + token for auth.',
+    fields:[
+      {{key:'site',        label:'Site',         type:'text',     ph:'yourcompany  (before .atlassian.net)'}},
+      {{key:'email',       label:'Email',        type:'text',     ph:'you@yourcompany.com'}},
+      {{key:'api_token',   label:'API Token',    type:'password', ph:'Atlassian API token'}},
+      {{key:'project_key', label:'Project Key',  type:'text',     ph:'IT  (e.g. IT, SEC, OPS)'}},
+      {{key:'issue_type',  label:'Issue Type',   type:'text',     ph:'Bug  (Bug, Task, Story, etc.)'}},
+    ]}},
+];
+
+var _psaCfg = {{}};
+
+function _psaOrgParam() {{
+  const sel = document.getElementById('psa-client-org-select');
+  const val = sel ? sel.value : '';
+  return val ? ('?client_org=' + encodeURIComponent(val)) : '';
+}}
+
+async function loadPsaClientOrgs() {{
+  const sel = document.getElementById('psa-client-org-select');
+  if (!sel) return;
+  try {{
+    const r = await fetch('/api/clients');
+    if (!r.ok) return;
+    const data = await r.json();
+    (data.client_orgs || []).filter(o => o.id).forEach(o => {{
+      const opt = document.createElement('option');
+      opt.value = o.id;
+      opt.textContent = o.name;
+      sel.appendChild(opt);
+    }});
+  }} catch (_) {{}}
+}}
+
+async function loadPsaConfig() {{
+  try {{
+    const r = await fetch('/api/psa/config' + _psaOrgParam());
+    if (!r.ok) return;
+    _psaCfg = await r.json();
+    renderPsaCards();
+  }} catch (_) {{}}
+}}
+
+function renderPsaCards() {{
+  const container = document.getElementById('psa-cards');
+  if (!container) return;
+  container.innerHTML = PSA_DEFS.map(def => {{
+    const cfg     = _psaCfg[def.id] || {{}};
+    const enabled = !!cfg.enabled;
+
+    const fieldsHtml = def.fields.map(f => {{
+      const val = f.type === 'password' && cfg[f.key] ? '__set__' : (cfg[f.key] || '');
+      return `<div style="display:flex;align-items:center;gap:10px;padding:5px 0">
+        <label style="font-size:13px;color:#374151;min-width:140px;flex-shrink:0">${{f.label}}</label>
+        <input type="${{f.type === 'password' ? 'password' : 'text'}}" class="form-input psa-field"
+          data-psa="${{def.id}}" data-key="${{f.key}}" value="${{esc(String(val))}}" placeholder="${{f.ph || ''}}"
+          style="flex:1;font-size:13px;font-family:${{f.type === 'password' ? 'monospace' : 'inherit'}}">
+      </div>`;
+    }}).join('');
+
+    return `
+    <div style="background:#fff;border:1px solid #E5E7EB;border-radius:8px;overflow:hidden">
+      <div style="display:flex;align-items:center;gap:12px;padding:14px 18px;background:#F9FAFB;border-bottom:1px solid #E5E7EB">
+        <span style="font-size:22px">${{def.icon}}</span>
+        <div style="flex:1">
+          <div style="font-weight:700;font-size:15px;color:#111827">${{def.name}}</div>
+          <div style="font-size:12px;color:#6B7280;margin-top:2px">${{def.desc}}</div>
+        </div>
+        <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:12px;color:#374151;font-weight:600;white-space:nowrap">
+          <input type="checkbox" id="psa-enable-${{def.id}}" ${{enabled ? 'checked' : ''}}
+            onchange="savePsaConfig('${{def.id}}')">
+          Enable
+        </label>
+      </div>
+      <div style="padding:14px 18px">
+        ${{fieldsHtml}}
+        <div style="font-size:11px;color:#9CA3AF;margin-top:10px;line-height:1.5">${{def.howto}}</div>
+        <div style="display:flex;gap:10px;margin-top:14px;align-items:center">
+          <button class="scan-btn" onclick="savePsaConfig('${{def.id}}')" style="color:#16A34A;border-color:#238636">&#10003; Save</button>
+          <button class="scan-btn" onclick="testPsaConnection('${{def.id}}',this)" style="color:#4F46E5;border-color:#C7D2FE">&#9654; Test</button>
+          <button class="scan-btn" onclick="testPsaTicket('${{def.id}}',this)" style="color:#CA8A04;border-color:#FDE68A">&#128203; Test Ticket</button>
+          <span id="psa-test-${{def.id}}" style="font-size:13px;color:#6B7280"></span>
+        </div>
+      </div>
+    </div>`;
+  }}).join('');
+}}
+
+async function savePsaConfig(psaId) {{
+  const fields = {{}};
+  document.querySelectorAll(`.psa-field[data-psa="${{psaId}}"]`).forEach(el => {{
+    fields[el.dataset.key] = el.value;
+  }});
+  const enabled = document.getElementById('psa-enable-' + psaId)?.checked ?? false;
+  try {{
+    const r = await fetch('/api/psa/config' + _psaOrgParam(), {{
+      method: 'POST',
+      headers: {{'Content-Type': 'application/json'}},
+      body: JSON.stringify({{id: psaId, enabled, fields}}),
+    }});
+    if (r.ok) {{
+      _psaCfg[psaId] = {{...(_psaCfg[psaId] || {{}}), ...fields, enabled}};
+      const banner = document.getElementById('psa-save-banner');
+      if (banner) {{ banner.style.display = ''; setTimeout(() => banner.style.display = 'none', 3000); }}
+    }} else {{ alert('Save failed'); }}
+  }} catch (e) {{ alert('Save failed: ' + e); }}
+}}
+
+async function testPsaConnection(psaId, btn) {{
+  const el = document.getElementById('psa-test-' + psaId);
+  if (el) el.textContent = 'Testing…';
+  btn.disabled = true;
+  try {{
+    const r = await fetch('/api/psa/test/' + psaId, {{method: 'POST'}});
+    const d = await r.json();
+    if (el) {{
+      el.textContent = (d.ok ? '&#10003; ' : '&#10007; ') + d.message;
+      el.style.color = d.ok ? '#16A34A' : '#DC2626';
+    }}
+  }} catch (e) {{
+    if (el) {{ el.textContent = 'Error: ' + e; el.style.color = '#DC2626'; }}
+  }}
+  btn.disabled = false;
+}}
+
+async function testPsaTicket(psaId, btn) {{
+  const el = document.getElementById('psa-test-' + psaId);
+  if (el) el.textContent = 'Creating test ticket…';
+  btn.disabled = true;
+  try {{
+    const r = await fetch('/api/psa/test-ticket/' + psaId, {{method: 'POST'}});
+    const d = await r.json();
+    if (el) {{
+      el.innerHTML = (d.ok ? '&#10003; ' : '&#10007; ') + d.message;
+      el.style.color = d.ok ? '#16A34A' : '#DC2626';
+    }}
+  }} catch (e) {{
+    if (el) {{ el.textContent = 'Error: ' + e; el.style.color = '#DC2626'; }}
+  }}
+  btn.disabled = false;
+}}
+
+loadPsaClientOrgs();
+loadPsaConfig();
+
+// ── SIEM integrations ────────────────────────────────────────────────────────
+
+const SIEM_DEFS = [
+  {{id:'splunk',   name:'Splunk',               icon:'&#128200;', color:'#FF6900', status:'HTTP Event Collector',
+    desc:'HTTP Event Collector — findings stream to any Splunk index as arckon:finding sourcetype.',
+    fields:[
+      {{key:'hec_url',    label:'HEC URL',       type:'text',     ph:'https://splunk.example.com:8088'}},
+      {{key:'hec_token',  label:'HEC Token',     type:'password', ph:'••••••••'}},
+      {{key:'index',      label:'Index',         type:'text',     ph:'arckon'}},
+      {{key:'sourcetype', label:'Sourcetype',    type:'text',     ph:'arckon:finding'}},
+      {{key:'verify_ssl', label:'Verify SSL',    type:'toggle'}},
+    ]}},
+  {{id:'sentinel', name:'Microsoft Sentinel',   icon:'&#9729;&#65039;', color:'#0078D4', status:'Log Analytics API',
+    desc:'Azure Monitor HTTP Data Collector API — findings indexed to a custom Log Analytics table.',
+    fields:[
+      {{key:'workspace_id', label:'Workspace ID',  type:'text',     ph:'xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx'}},
+      {{key:'shared_key',   label:'Shared Key',    type:'password', ph:'••••••••'}},
+      {{key:'log_type',     label:'Table Name',    type:'text',     ph:'ArckonFindings'}},
+    ]}},
+  {{id:'qradar',   name:'IBM QRadar',            icon:'&#128274;', color:'#052FAD', status:'CEF / Syslog',
+    desc:'CEF-formatted syslog (TCP/UDP) — findings appear as AI security events in QRadar.',
+    fields:[
+      {{key:'syslog_host', label:'Syslog Host', type:'text', ph:'qradar.example.com'}},
+      {{key:'syslog_port', label:'Port',        type:'text', ph:'514'}},
+      {{key:'protocol',    label:'Protocol',    type:'select', opts:['tcp','udp']}},
+    ]}},
+  {{id:'elastic',  name:'Elastic Security',      icon:'&#128269;', color:'#FEC514', status:'REST API / ECS',
+    desc:'Direct Elasticsearch REST API — findings indexed with ECS field mapping for Kibana dashboards.',
+    fields:[
+      {{key:'endpoint',   label:'Endpoint',  type:'text',     ph:'https://elasticsearch.example.com:9200'}},
+      {{key:'api_key',    label:'API Key',   type:'password', ph:'••••••••'}},
+      {{key:'index',      label:'Index',     type:'text',     ph:'arckon-findings'}},
+      {{key:'verify_ssl', label:'Verify SSL',type:'toggle'}},
+    ]}},
+  {{id:'exabeam',  name:'Exabeam',               icon:'&#128202;', color:'#7B61FF', status:'CEF / Syslog',
+    desc:'CEF syslog — same Universal CEF parser as QRadar. Zero additional config once CEF is active.',
+    fields:[
+      {{key:'syslog_host', label:'Syslog Host', type:'text', ph:'exabeam.example.com'}},
+      {{key:'syslog_port', label:'Port',        type:'text', ph:'514'}},
+      {{key:'protocol',    label:'Protocol',    type:'select', opts:['udp','tcp']}},
+    ]}},
+  {{id:'kaseya',   name:'Kaseya',                icon:'&#128736;', color:'#E31E24', status:'VSA / BMS / IT Glue',
+    desc:'VSA agent deployment · BMS ticket creation from findings · IT Glue AI inventory sync.',
+    fields:[
+      {{key:'vsa_url',        label:'VSA URL',        type:'text',     ph:'https://vsa.example.com'}},
+      {{key:'vsa_api_key',    label:'VSA API Key',    type:'password', ph:'••••••••'}},
+      {{key:'bms_url',        label:'BMS URL',        type:'text',     ph:'https://bms.example.com'}},
+      {{key:'bms_api_key',    label:'BMS API Key',    type:'password', ph:'••••••••'}},
+      {{key:'itglue_api_key', label:'IT Glue Key',    type:'password', ph:'••••••••'}},
+      {{key:'itglue_org_id',  label:'IT Glue Org ID', type:'text',     ph:'123456'}},
+      {{key:'ticket_queue',   label:'Ticket Queue',   type:'text',     ph:'Security'}},
+    ]}},
+];
+
+const SEVERITY_OPTS = ['critical','high','medium','low'];
+var _siemCfg = {{}};
+
+async function loadSiemConfig() {{
+  try {{
+    const r = await fetch('/api/siem/config');
+    if (!r.ok) return;
+    _siemCfg = await r.json();
+    renderSiemCards();
+  }} catch (_) {{}}
+}}
+
+function renderSiemCards() {{
+  const container = document.getElementById('siem-cards');
+  if (!container) return;
+  container.innerHTML = SIEM_DEFS.map(def => {{
+    const cfg = _siemCfg[def.id] || {{}};
+    const enabled = !!cfg.enabled;
+    const sendOn  = cfg.send_on || ['critical','high'];
+
+    const fieldsHtml = def.fields.map(f => {{
+      if (f.type === 'toggle') {{
+        return `<div style="display:flex;align-items:center;gap:10px;padding:6px 0">
+          <label style="font-size:13px;color:#374151;min-width:140px">${{f.label}}</label>
+          <label class="toggle-wrap"><input type="checkbox" class="siem-field" data-siem="${{def.id}}" data-key="${{f.key}}" ${{cfg[f.key]!==false?'checked':''}}><span class="toggle-track"></span></label>
+        </div>`;
+      }}
+      if (f.type === 'select') {{
+        const opts = (f.opts||[]).map(o=>`<option value="${{o}}" ${{cfg[f.key]===o?'selected':''}}>${{o}}</option>`).join('');
+        return `<div style="display:flex;align-items:center;gap:10px;padding:6px 0">
+          <label style="font-size:13px;color:#374151;min-width:140px">${{f.label}}</label>
+          <select class="form-select siem-field" data-siem="${{def.id}}" data-key="${{f.key}}" style="width:120px;font-size:13px">${{opts}}</select>
+        </div>`;
+      }}
+      const val = f.type === 'password' && cfg[f.key] ? '__set__' : (cfg[f.key] || '');
+      return `<div style="display:flex;align-items:center;gap:10px;padding:6px 0">
+        <label style="font-size:13px;color:#374151;min-width:140px">${{f.label}}</label>
+        <input type="${{f.type==='password'?'password':'text'}}" class="form-input siem-field"
+          data-siem="${{def.id}}" data-key="${{f.key}}" value="${{esc(val)}}" placeholder="${{f.ph||''}}"
+          style="flex:1;font-size:13px;font-family:${{f.type==='password'?'monospace':'inherit'}}">
+      </div>`;
+    }}).join('');
+
+    const severityHtml = SEVERITY_OPTS.map(s => `
+      <label style="display:flex;align-items:center;gap:5px;font-size:12px;color:#374151;cursor:pointer">
+        <input type="checkbox" class="siem-severity" data-siem="${{def.id}}" value="${{s}}"
+          ${{sendOn.includes(s)?'checked':''}}> ${{s.charAt(0).toUpperCase()+s.slice(1)}}
+      </label>`).join('');
+
+    const statusStyle = `font-size:10px;padding:2px 8px;border-radius:3px;background:#FEF9C3;color:#92400E;border:1px solid #FDE047`;
+    return `
+    <div style="background:#fff;border:1px solid #E5E7EB;border-radius:8px;overflow:hidden">
+      <div style="display:flex;align-items:center;gap:12px;padding:14px 18px;background:#F9FAFB;border-bottom:1px solid #E5E7EB">
+        <span style="font-size:22px">${{def.icon}}</span>
+        <div style="flex:1">
+          <div style="font-weight:700;font-size:15px;color:#111827">${{def.name}}</div>
+          <div style="font-size:12px;color:#6B7280;margin-top:2px">${{def.desc}}</div>
+        </div>
+        <span style="${{statusStyle}}">${{def.status}}</span>
+        <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:12px;color:#374151;font-weight:600">
+          <input type="checkbox" id="siem-enable-${{def.id}}" ${{enabled?'checked':''}}
+            onchange="saveSiemConfig('${{def.id}}')">
+          Enable
+        </label>
+      </div>
+      <div style="padding:14px 18px">
+        ${{fieldsHtml}}
+        <div style="margin-top:12px">
+          <div style="font-size:12px;color:#6B7280;margin-bottom:6px;font-weight:600">Forward on severity:</div>
+          <div style="display:flex;gap:16px;flex-wrap:wrap">${{severityHtml}}</div>
+        </div>
+        <div style="display:flex;gap:10px;margin-top:16px;align-items:center">
+          <button class="scan-btn" onclick="saveSiemConfig('${{def.id}}')" style="color:#16A34A;border-color:#238636">&#10003; Save</button>
+          <button class="scan-btn" onclick="testSiemConnection('${{def.id}}',this)" style="color:#4F46E5;border-color:#C7D2FE">&#9654; Test</button>
+          <span id="siem-test-${{def.id}}" style="font-size:13px;color:#6B7280"></span>
+        </div>
+      </div>
+    </div>`;
+  }}).join('');
+}}
+
+async function saveSiemConfig(siemId) {{
+  const payload = {{}};
+  document.querySelectorAll(`.siem-field[data-siem="${{siemId}}"]`).forEach(el => {{
+    const key = el.dataset.key;
+    payload[key] = el.type === 'checkbox' ? el.checked : el.value;
+  }});
+  const severities = [...document.querySelectorAll(`.siem-severity[data-siem="${{siemId}}"]:checked`)].map(c=>c.value);
+  payload.send_on  = severities;
+  payload.enabled  = document.getElementById('siem-enable-' + siemId)?.checked ?? false;
+
+  try {{
+    const r = await fetch('/api/siem/config', {{
+      method: 'POST',
+      headers: {{'Content-Type':'application/json'}},
+      body: JSON.stringify({{[siemId]: payload}}),
+    }});
+    if (r.ok) {{
+      _siemCfg[siemId] = {{...(_siemCfg[siemId]||{{}}), ...payload}};
+      const banner = document.getElementById('siem-save-banner');
+      if (banner) {{ banner.style.display=''; setTimeout(()=>banner.style.display='none', 3000); }}
+    }}
+  }} catch(e) {{ alert('Save failed: ' + e); }}
+}}
+
+async function testSiemConnection(siemId, btn) {{
+  const el = document.getElementById('siem-test-' + siemId);
+  if (el) el.textContent = 'Testing…';
+  btn.disabled = true;
+  try {{
+    const r = await fetch('/api/siem/test/' + siemId, {{method:'POST'}});
+    const d = await r.json();
+    if (el) {{
+      el.textContent = d.ok ? '&#10003; ' + d.message : '&#10007; ' + d.message;
+      el.style.color = d.ok ? '#16A34A' : '#DC2626';
+    }}
+  }} catch(e) {{
+    if (el) {{ el.textContent = 'Error: ' + e; el.style.color='#DC2626'; }}
+  }}
+  btn.disabled = false;
+}}
+
+loadSiemConfig();
 
 async function loadConfig() {{
   try {{
@@ -7585,14 +9034,25 @@ async function saveConfig() {{
       body: JSON.stringify(body),
     }});
     const d = await r.json();
+
+    // Immediately dispatch Scan All with the same profiles so the fleet table
+    // updates within minutes instead of waiting for the next automatic cycle.
+    if (checked.length && d.pushed_to_agents > 0) {{
+      await fetch('/api/fleet/scan/all', {{
+        method: 'POST',
+        headers: {{'Content-Type': 'application/json'}},
+        body: JSON.stringify({{profiles: checked, stagger: 'normal'}}),
+      }});
+    }}
+
     const el = document.getElementById('cfg-saved');
     if (el) {{
       const n = d.pushed_to_agents || 0;
       el.textContent = n > 0
-        ? `✓ Saved — pushed to ${{n}} connected agent${{n !== 1 ? 's' : ''}}`
-        : '✓ Saved — takes effect on next scan';
+        ? `✓ Saved and scan dispatched to ${{n}} agent${{n !== 1 ? 's' : ''}} — profile column updates shortly`
+        : '✓ Saved — connect an agent to apply the profile';
       el.style.display = 'block';
-      setTimeout(() => el.style.display = 'none', 4000);
+      setTimeout(() => el.style.display = 'none', 6000);
     }}
   }} catch (e) {{ alert('Save failed: ' + e); }}
 }}
@@ -7605,8 +9065,19 @@ async function loadAlertConfig() {{
     if (!r.ok) return;
     const c = await r.json();
     const v = (id, val) => {{ const el = document.getElementById(id); if (el) el.value = val || ''; }};
-    v('alert-slack',     c.slack_webhook || '');
-    v('alert-webhook',   c.webhook_url   || '');
+    v('alert-slack',   '');
+    const slackStatus = document.getElementById('alert-slack-status');
+    const slackClear = document.getElementById('alert-slack-clear');
+    if (c.slack_webhook_configured) {{
+      if (slackStatus) slackStatus.textContent = 'A Slack webhook is configured. Enter a replacement URL to change it.';
+      if (slackClear) slackClear.style.display = '';
+    }} else {{
+      if (slackStatus) slackStatus.textContent = 'How to get one: Slack → Your workspace → Apps → Incoming Webhooks';
+      if (slackClear) slackClear.style.display = 'none';
+    }}
+    v('alert-gchat',   c.gchat_webhook  || '');
+    v('alert-teams',   c.teams_webhook  || '');
+    v('alert-webhook', c.webhook_url    || '');
     v('alert-smtp-host', c.email?.smtp_host || '');
     const portEl = document.getElementById('alert-smtp-port');
     if (portEl) portEl.value = c.email?.smtp_port || 587;
@@ -7616,9 +9087,10 @@ async function loadAlertConfig() {{
     v('alert-email-to',   c.email?.to   || '');
     const t = c.triggers || {{}};
     const cb = (id, val) => {{ const el = document.getElementById(id); if (el) el.checked = val !== false; }};
-    cb('trig-crit',   t.new_critical);
-    cb('trig-high',   t.new_high);
-    cb('trig-shadow', t.new_shadow_ai);
+    cb('trig-crit',           t.new_critical);
+    cb('trig-high',           t.new_high);
+    cb('trig-shadow',         t.new_shadow_ai);
+    cb('trig-unapproved-only', t.alert_unapproved_only);
   }} catch (_) {{}}
 }}
 
@@ -7645,6 +9117,37 @@ function liveModeChanged() {{
     epInput.placeholder = 'https://api.openai.com/v1';
     modelInput.placeholder = 'gpt-4o';
   }}
+}}
+
+async function loadBranding() {{
+  try {{
+    const r = await fetch('/api/branding');
+    if (!r.ok) return;
+    const d = await r.json();
+    const set = (id, val) => {{ const el = document.getElementById(id); if (el && val) el.value = val; }};
+    set('brand-msp-name',   d.msp_name);
+    set('brand-logo-url',   d.logo_url);
+    set('brand-footer-text', d.footer_text);
+  }} catch (_) {{}}
+}}
+
+async function saveBranding() {{
+  const gv = id => document.getElementById(id)?.value?.trim() || '';
+  try {{
+    const r = await fetch('/api/branding', {{
+      method: 'POST',
+      headers: {{'Content-Type': 'application/json'}},
+      body: JSON.stringify({{
+        msp_name:    gv('brand-msp-name'),
+        logo_url:    gv('brand-logo-url'),
+        footer_text: gv('brand-footer-text'),
+      }}),
+    }});
+    if (r.ok) {{
+      const b = document.getElementById('branding-saved');
+      if (b) {{ b.style.display = ''; setTimeout(() => b.style.display = 'none', 3000); }}
+    }} else {{ alert('Save failed'); }}
+  }} catch (e) {{ alert('Save failed: ' + e); }}
 }}
 
 async function loadLiveScanConfig() {{
@@ -7704,8 +9207,11 @@ async function runLiveScan(btn) {{
 async function saveAlertConfig() {{
   const gv = id => document.getElementById(id)?.value?.trim() || '';
   const body = {{
-    slack_webhook: gv('alert-slack'),
-    webhook_url:   gv('alert-webhook'),
+    slack_webhook:  gv('alert-slack'),
+    slack_webhook_clear: document.getElementById('alert-slack')?.dataset.clear === 'true',
+    gchat_webhook:  gv('alert-gchat'),
+    teams_webhook:  gv('alert-teams'),
+    webhook_url:    gv('alert-webhook'),
     email: {{
       smtp_host: gv('alert-smtp-host'),
       smtp_port: parseInt(document.getElementById('alert-smtp-port')?.value || '587', 10),
@@ -7715,9 +9221,10 @@ async function saveAlertConfig() {{
       to:        gv('alert-email-to'),
     }},
     triggers: {{
-      new_critical:  document.getElementById('trig-crit')?.checked  ?? true,
-      new_high:      document.getElementById('trig-high')?.checked  ?? true,
-      new_shadow_ai: document.getElementById('trig-shadow')?.checked ?? true,
+      new_critical:          document.getElementById('trig-crit')?.checked           ?? true,
+      new_high:              document.getElementById('trig-high')?.checked           ?? true,
+      new_shadow_ai:         document.getElementById('trig-shadow')?.checked         ?? true,
+      alert_unapproved_only: document.getElementById('trig-unapproved-only')?.checked ?? false,
     }},
   }};
   try {{
@@ -7726,17 +9233,33 @@ async function saveAlertConfig() {{
       body: JSON.stringify(body),
     }});
     const el = document.getElementById('alert-saved');
-    if (el) {{ el.style.display = 'block'; setTimeout(() => el.style.display = 'none', 4000); }}
+    if (r.ok) {{
+      const input = document.getElementById('alert-slack');
+      if (input) {{ input.value = ''; delete input.dataset.clear; }}
+      loadAlertConfig();
+      if (el) {{ el.style.display = 'block'; setTimeout(() => el.style.display = 'none', 4000); }}
+    }} else {{ alert('Save failed: ' + (await r.json()).error); }}
   }} catch (e) {{ alert('Save failed: ' + e); }}
+}}
+
+function clearSlackWebhook() {{
+  const input = document.getElementById('alert-slack');
+  if (!input || !confirm('Remove the configured Slack webhook?')) return;
+  input.value = '';
+  input.dataset.clear = 'true';
+  const status = document.getElementById('alert-slack-status');
+  if (status) status.textContent = 'Slack webhook will be removed when you save alert settings.';
 }}
 
 async function testAlert(channel) {{
   const el = document.getElementById('alert-test-result');
   if (el) {{ el.style.display = 'block'; el.style.color = '#6B7280'; el.textContent = 'Sending test…'; }}
+  const urlFields = {{slack:'alert-slack',gchat:'alert-gchat',teams:'alert-teams',webhook:'alert-webhook'}};
+  const liveUrl = (document.getElementById(urlFields[channel] || '')?.value || '').trim();
   try {{
     const r = await fetch('/api/alerts/test', {{
       method: 'POST', headers: {{'Content-Type': 'application/json'}},
-      body: JSON.stringify({{channel}}),
+      body: JSON.stringify({{channel, url: liveUrl}}),
     }});
     const d = await r.json();
     if (el) {{
@@ -7750,6 +9273,175 @@ async function testAlert(channel) {{
 }}
 
 loadAlertConfig();
+
+// ── Active issues (current CRITICAL/HIGH FAILs from latest reports) ──────────
+async function refreshAlertsPage(btn) {{
+  if (btn) {{ btn.disabled = true; btn.innerHTML = '&#8635; Refreshing…'; }}
+  try {{
+    await Promise.all([loadActiveIssues(), loadAlertEvents()]);
+  }} finally {{
+    if (btn) {{
+      btn.innerHTML = '&#10003; Updated';
+      setTimeout(() => {{ btn.disabled = false; btn.innerHTML = '&#8635; Refresh'; }}, 1200);
+    }}
+  }}
+}}
+
+async function loadActiveIssues() {{
+  const feed = document.getElementById('active-issues-feed');
+  if (!feed) return;
+  feed.innerHTML = '<div style="color:#9CA3AF;font-size:13px;padding:12px 0">Loading…</div>';
+  try {{
+    const r = await fetch('/api/alerts/active-issues');
+    if (!r.ok) throw new Error(r.status);
+    const d = await r.json();
+    const issues = d.issues || [];
+    if (!issues.length) {{
+      feed.innerHTML = '<div style="color:#16A34A;font-size:13px;padding:12px 0;display:flex;align-items:center;gap:6px"><span style="font-size:16px">✓</span> No active critical or high issues across your fleet.</div>';
+      return;
+    }}
+    feed.innerHTML = issues.map(iss => {{
+      const sev = iss.severity || 'HIGH';
+      const sevColor = sev === 'CRITICAL' ? '#DC2626' : '#CA8A04';
+      const sevBg    = sev === 'CRITICAL' ? '#FEF2F2' : '#FFFBEB';
+      const ts = new Date(iss.last_seen * 1000);
+      const timeStr = 'Last seen ' + ts.toLocaleDateString() + ' ' + ts.toLocaleTimeString([], {{hour:'2-digit',minute:'2-digit'}});
+      const cid = iss.check_id.replace(/'/g, '');
+      return `<div style="background:#fff;border:1px solid ${{sevBg}};border-left:3px solid ${{sevColor}};border-radius:6px;padding:10px 14px;display:flex;gap:10px;align-items:flex-start">
+        <div style="min-width:64px;text-align:center;flex-shrink:0">
+          <div style="font-size:10px;font-weight:700;color:${{sevColor}};background:${{sevBg}};border-radius:4px;padding:2px 6px;white-space:nowrap">${{sev}}</div>
+          <div style="font-size:10px;color:#6B7280;margin-top:3px">Active</div>
+        </div>
+        <div style="flex:1;min-width:0">
+          <div style="font-size:13px;color:#111827"><strong>${{iss.check_id}}</strong> on <strong>${{iss.hostname}}</strong> — ${{iss.title}}</div>
+          <div style="font-size:11px;color:#9CA3AF;margin-top:4px">${{timeStr}}</div>
+          <div style="margin-top:8px;display:flex;gap:6px">
+            <button onclick="issueAction('${{cid}}','false_positive')" style="font-size:11px;padding:3px 10px;border-radius:4px;border:1px solid #D1D5DB;background:#F9FAFB;cursor:pointer;color:#374151">False Positive</button>
+            <button onclick="issueAction('${{cid}}','accepted')" style="font-size:11px;padding:3px 10px;border-radius:4px;border:1px solid #D1D5DB;background:#F9FAFB;cursor:pointer;color:#374151">Accept Risk</button>
+          </div>
+        </div>
+      </div>`;
+    }}).join('');
+  }} catch (e) {{
+    if (feed) feed.innerHTML = '<div style="color:#DC2626;font-size:13px">Failed to load active issues: ' + e + '</div>';
+  }}
+}}
+
+async function issueAction(checkId, action) {{
+  const label = action === 'false_positive' ? 'false positive' : 'accepted risk';
+  const note = window.prompt('Optional note for marking as ' + label + ':') ?? '';
+  if (note === null) return;
+  try {{
+    const r = await fetch('/api/fleet/risk-register/override', {{
+      method: 'POST',
+      headers: {{'Content-Type': 'application/json'}},
+      body: JSON.stringify({{check_id: checkId, action, note, assignee: '', expires_at: null}})
+    }});
+    if (r.ok) {{
+      loadActiveIssues();
+    }} else {{
+      alert('Failed to save (' + r.status + ')');
+    }}
+  }} catch (e) {{
+    alert('Error: ' + e);
+  }}
+}}
+
+// ── Alert history feed ────────────────────────────────────────────────────────
+async function loadAlertEvents() {{
+  const unreviewedOnly = document.getElementById('alerts-unreviewed-only')?.checked;
+  const feed = document.getElementById('alerts-feed');
+  if (!feed) return;
+  feed.innerHTML = '<div style="color:#9CA3AF;font-size:13px;padding:16px 0">Loading…</div>';
+  try {{
+    const r = await fetch('/api/alerts/events' + (unreviewedOnly ? '?unreviewed=1' : ''));
+    if (!r.ok) throw new Error(r.status);
+    const d = await r.json();
+    const events = d.events || [];
+    if (!events.length) {{
+      feed.innerHTML = '<div style="color:#9CA3AF;font-size:13px;padding:16px 0">No history yet. New discoveries and newly-detected critical/high findings will appear here going forward.</div>';
+      return;
+    }}
+    feed.innerHTML = events.map(ev => {{
+      const sev = ev.severity || 'HIGH';
+      const sevColor = sev === 'CRITICAL' ? '#DC2626' : sev === 'HIGH' ? '#CA8A04' : '#4F46E5';
+      const sevBg    = sev === 'CRITICAL' ? '#FEF2F2' : sev === 'HIGH' ? '#FFFBEB' : '#EEF2FF';
+      const ts = new Date(ev.ts * 1000);
+      const timeStr = ts.toLocaleDateString() + ' ' + ts.toLocaleTimeString([], {{hour:'2-digit',minute:'2-digit'}});
+      let title = '';
+      if (ev.event_type === 'new_shadow_ai') {{
+        const srcLabel = ev.source === 'saas_ai' ? 'SaaS AI (active session)' : ev.source || 'network';
+        title = `<strong>${{ev.service || 'Unknown service'}}</strong> detected on <strong>${{ev.device}}</strong>`;
+        if (ev.host) title += ` — ${{ev.host}}`;
+        title += `<span style="font-size:11px;color:#6B7280;margin-left:8px">via ${{srcLabel}}</span>`;
+      }} else {{
+        title = `<strong>${{ev.check_id || ev.event_type}}</strong> on <strong>${{ev.device}}</strong>`;
+        if (ev.title) title += ` — ${{ev.title}}`;
+      }}
+      const channelBadges = (ev.channels || '').split(',').filter(Boolean).map(c =>
+        `<span style="font-size:10px;background:#F3F4F6;color:#374151;border-radius:4px;padding:1px 6px;white-space:nowrap">${{c.trim()}}</span>`
+      ).join(' ');
+      const reviewedStyle = ev.reviewed ? 'opacity:0.55;' : '';
+      return `<div style="${{reviewedStyle}}background:#fff;border:1px solid ${{ev.reviewed ? '#F3F4F6' : sevBg}};border-left:3px solid ${{ev.reviewed ? '#E5E7EB' : sevColor}};border-radius:6px;padding:12px 16px;display:flex;gap:12px;align-items:flex-start">
+        <div style="min-width:64px;text-align:center">
+          <div style="font-size:10px;font-weight:700;color:${{sevColor}};background:${{sevBg}};border-radius:4px;padding:2px 6px;white-space:nowrap">${{sev}}</div>
+          ${{ev.event_type === 'new_shadow_ai' ? '<div style="font-size:10px;color:#6B7280;margin-top:3px">Shadow AI</div>' : '<div style="font-size:10px;color:#6B7280;margin-top:3px">Finding</div>'}}
+        </div>
+        <div style="flex:1;min-width:0">
+          <div style="font-size:13px;color:#111827;line-height:1.4">${{title}}</div>
+          <div style="margin-top:6px;display:flex;gap:6px;flex-wrap:wrap;align-items:center">
+            <span style="font-size:11px;color:#9CA3AF">${{timeStr}}</span>
+            ${{channelBadges || '<span style="font-size:11px;color:#9CA3AF;font-style:italic">no channels configured</span>'}}
+          </div>
+        </div>
+        <div>
+          ${{ev.reviewed
+            ? '<span style="font-size:11px;color:#9CA3AF">Reviewed</span>'
+            : `<button class="scan-btn" onclick="markAlertReviewed(${{ev.id}}, this)" style="font-size:11px;padding:3px 10px;color:#16A34A;border-color:#E5E7EB;white-space:nowrap">Mark reviewed</button>`
+          }}
+        </div>
+      </div>`;
+    }}).join('');
+    updateAlertBadge();
+  }} catch (e) {{
+    feed.innerHTML = '<div style="color:#DC2626;font-size:13px;padding:16px 0">Failed to load alerts: ' + e + '</div>';
+  }}
+}}
+
+async function markAlertReviewed(id, btn) {{
+  if (btn) {{ btn.disabled = true; btn.textContent = '…'; }}
+  try {{
+    await fetch('/api/alerts/events/' + id + '/review', {{method:'POST'}});
+    loadAlertEvents();
+    updateAlertBadge();
+  }} catch(e) {{ if (btn) {{ btn.disabled = false; btn.textContent = 'Mark reviewed'; }} }}
+}}
+
+async function markAllAlertsReviewed() {{
+  try {{
+    await fetch('/api/alerts/events/review-all', {{method:'POST'}});
+    loadAlertEvents();
+    updateAlertBadge();
+  }} catch(e) {{}}
+}}
+
+async function updateAlertBadge() {{
+  try {{
+    const r = await fetch('/api/alerts/unreviewed-count');
+    if (!r.ok) return;
+    const d = await r.json();
+    const badge = document.getElementById('alert-badge');
+    if (!badge) return;
+    if (d.count > 0) {{
+      badge.textContent = d.count;
+      badge.style.display = 'inline';
+    }} else {{
+      badge.style.display = 'none';
+    }}
+  }} catch(_) {{}}
+}}
+
+updateAlertBadge();
 
 // ── Auto-refresh (lightweight poll — no full page reload) ──
 (function() {{
@@ -7803,7 +9495,7 @@ loadAlertConfig();
 
 def main():
     import argparse
-    ap = argparse.ArgumentParser(description='Arckon by RiskRaven Dashboard Server')
+    ap = argparse.ArgumentParser(description='Arckon Dashboard Server')
     ap.add_argument('--port', type=int, default=PORT, help=f'Port to listen on (default: {PORT})')
     ap.add_argument('--host', default='0.0.0.0', help='Bind address (default: 0.0.0.0 — all interfaces)')
     ap.add_argument('--no-browser', action='store_true', help="Don't auto-open browser")
@@ -7812,7 +9504,7 @@ def main():
     global _serve_port
     _serve_port = args.port
 
-    log_file = ROOT / '.arckon-server.log'
+    log_file = ROOT / '.sentinel-server.log'
     _handlers: list[logging.Handler] = [logging.StreamHandler(sys.stderr)]
     try:
         _handlers.insert(0, logging.FileHandler(log_file, encoding='utf-8'))
@@ -7831,32 +9523,27 @@ def main():
     except Exception as _startup_err:
         log.error('License/monitor startup error (non-fatal): %s', _startup_err, exc_info=True)
 
-    # Seed super-admin account from env vars if provided
-    try:
-        _sa_email = os.environ.get('ARCKON_SUPER_ADMIN_EMAIL', '').strip()
-        _sa_pass  = os.environ.get('ARCKON_SUPER_ADMIN_PASSWORD', '').strip()
-        if _sa_email and _sa_pass:
-            reg = _get_registry()
-            # Find existing user across all customers and promote, else add to first active customer
-            existing = None
-            customers = reg.list_customers()
-            for c in customers:
-                for u in reg.list_users(c['id']):
-                    if u['email'] == _sa_email.lower():
-                        existing = (c['id'], u['id'])
-                        break
-                if existing:
-                    break
-            if existing:
-                with reg._lock, reg._conn() as _c:
-                    _c.execute("UPDATE dashboard_users SET role='super_admin' WHERE id=?", (existing[1],))
-                log.info('Super-admin role set for existing user: %s', _sa_email)
-            elif customers:
-                # Add to the first active customer — never create a new one
-                reg.create_user(customers[0]['id'], _sa_email, _sa_pass, role='super_admin')
-                log.info('Super-admin account created under %s: %s', customers[0]['id'], _sa_email)
-    except Exception as _sa_err:
-        log.error('Super-admin seed error (non-fatal): %s', _sa_err)
+    _last_report_check_day = [None]  # mutable cell so the closure can update it
+
+    def _check_client_org_reports():
+        """Runs at most once per calendar day (UTC) — cheap enough to just
+        check on every tick, but no reason to hit the registry 1440x/day
+        for something that's only ever due once a month per client."""
+        today = datetime.now(timezone.utc).date()
+        if _last_report_check_day[0] == today:
+            return
+        _last_report_check_day[0] = today
+        try:
+            for org in _get_registry().get_client_orgs_due_for_report():
+                ok, msg = send_client_org_report(
+                    org['customer_id'], org['id'], org['name'], org['report_email'])
+                if ok:
+                    _get_registry().mark_client_org_report_sent(org['id'])
+                    log.info('Scheduled report sent for client org %s (%s)', org['name'], org['id'])
+                else:
+                    log.warning('Scheduled report FAILED for client org %s (%s): %s', org['name'], org['id'], msg)
+        except Exception as _re:
+            log.error('client org report scheduler error: %s', _re)
 
     def _schedule_ticker():
         import time as _t
@@ -7873,23 +9560,24 @@ def main():
                             if device_id == 'all':
                                 devices = _st.list_devices()
                                 for d in devices:
-                                    _st.enqueue_command(d['device_id'], 'scan_now')
+                                    _get_store_for_device(d['device_id']).enqueue_command(d['device_id'], 'scan_now')
                                 log.info('schedule %s fired for customer %s: %d devices', sched['id'], cid, len(devices))
                             else:
-                                _st.enqueue_command(device_id, 'scan_now')
+                                _get_store_for_device(device_id).enqueue_command(device_id, 'scan_now')
                                 log.info('schedule %s fired for customer %s: device %s', sched['id'], cid, device_id)
                             _st.mark_schedule_fired(sched['id'])
                     except Exception as _ce:
                         log.error('schedule ticker error for customer %s: %s', cid, _ce)
             except Exception as _se:
                 log.error('schedule ticker error: %s', _se)
+            _check_client_org_reports()
 
     threading.Thread(target=_schedule_ticker, daemon=True, name='schedule-ticker').start()
 
     server = http.server.ThreadingHTTPServer((args.host, args.port), _Handler)
 
-    tls_cert = os.environ.get('ARCKON_TLS_CERT', '')
-    tls_key  = os.environ.get('ARCKON_TLS_KEY', '')
+    tls_cert = os.environ.get('SENTINEL_TLS_CERT', '')
+    tls_key  = os.environ.get('SENTINEL_TLS_KEY', '')
     if tls_cert and tls_key:
         import ssl as _ssl
         ctx = _ssl.SSLContext(_ssl.PROTOCOL_TLS_SERVER)
@@ -7900,7 +9588,7 @@ def main():
         scheme = 'http'
         log.warning(
             'TLS not configured — fleet traffic is unencrypted. '
-            'Set ARCKON_TLS_CERT and ARCKON_TLS_KEY env vars to enable HTTPS, '
+            'Set SENTINEL_TLS_CERT and SENTINEL_TLS_KEY env vars to enable HTTPS, '
             'or run behind a TLS-terminating reverse proxy (nginx, Caddy).'
         )
 
@@ -7912,7 +9600,7 @@ def main():
     print(f'  Devices  : {url}/api/devices')
     print(f'  Network  : {scheme}://0.0.0.0:{args.port} (accessible from LAN)')
     if scheme == 'http':
-        print('  WARNING  : TLS not enabled — set ARCKON_TLS_CERT + ARCKON_TLS_KEY for HTTPS')
+        print('  WARNING  : TLS not enabled — set SENTINEL_TLS_CERT + SENTINEL_TLS_KEY for HTTPS')
     print('  Stop     : Ctrl+C\n')
     if not args.no_browser:
         threading.Timer(0.6, lambda: webbrowser.open(url)).start()
@@ -7924,212 +9612,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-
-
-# ── DNS Inventory (added at module level so it's importable and testable) ──────
-
-def _dns_inventory_html(user_email: str = '') -> str:
-    return f'''<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1.0">
-<title>AI Inventory — Arckon</title>
-<style>
-*{{box-sizing:border-box;margin:0;padding:0}}
-body{{font-family:ui-sans-serif,system-ui,sans-serif;font-size:15px;background:#0d1117;color:#e6edf3;min-height:100vh;display:flex}}
-#sidebar{{width:220px;flex-shrink:0;background:#111827;border-right:1px solid rgba(255,255,255,0.06);display:flex;flex-direction:column;min-height:100vh}}
-.sb-logo{{padding:20px 16px 14px;border-bottom:1px solid rgba(255,255,255,0.07)}}
-.sb-logo-mark{{font-size:9px;letter-spacing:3px;color:#6366F1;font-weight:700;text-transform:uppercase}}
-.sb-logo-name{{font-size:15px;font-weight:800;color:#F9FAFB;letter-spacing:0.5px;margin-top:3px}}
-.sb-nav{{flex:1;padding:12px 8px}}
-.sb-group{{font-size:10px;font-weight:700;letter-spacing:.15em;text-transform:uppercase;color:#6B7280;padding:12px 10px 5px}}
-.sb-item{{display:block;padding:8px 10px;border-radius:6px;font-size:14px;color:#D1D5DB;text-decoration:none;margin-bottom:2px;border:none;background:none;cursor:pointer;width:100%;text-align:left;transition:background .12s}}
-.sb-item:hover,.sb-item.active{{background:rgba(255,255,255,0.06);color:#F9FAFB}}
-.sb-item.active{{background:#4F46E5;color:#fff}}
-.sb-footer{{padding:14px 16px;border-top:1px solid rgba(255,255,255,0.07);font-size:12px;color:#9CA3AF}}
-.sb-footer a{{color:#9CA3AF;text-decoration:none;display:block;margin-top:6px}}
-.sb-footer a:hover{{color:#F9FAFB}}
-#content{{flex:1;padding:36px 40px;max-width:1100px}}
-h1{{font-size:24px;font-weight:700;color:#F9FAFB;margin-bottom:6px}}
-.sub{{color:#6B7280;font-size:14px;margin-bottom:28px}}
-.card{{background:#161b22;border:1px solid #30363d;border-radius:8px;padding:24px 28px;margin-bottom:22px}}
-.card-title{{font-size:11px;font-weight:700;color:#6B7280;letter-spacing:.12em;text-transform:uppercase;margin-bottom:18px}}
-#drop-zone{{border:2px dashed #30363d;border-radius:8px;padding:40px;text-align:center;cursor:pointer;transition:border-color .15s,background .15s;background:#0d1117}}
-#drop-zone.drag-over{{border-color:#4F46E5;background:rgba(79,70,229,0.08)}}
-#drop-zone input[type=file]{{display:none}}
-textarea{{width:100%;font-family:monospace;font-size:13px;background:#0d1117;border:1px solid #30363d;border-radius:6px;padding:12px;resize:vertical;color:#e6edf3}}
-textarea:focus{{outline:none;border-color:#4F46E5}}
-label{{font-size:13px;color:#9CA3AF;font-weight:600;display:block;margin-bottom:6px;margin-top:14px}}
-.btn{{display:inline-block;padding:9px 20px;border-radius:6px;font-size:15px;font-family:inherit;cursor:pointer;border:none;font-weight:600;background:#4F46E5;color:#fff;transition:background .12s}}
-.btn:hover{{background:#4338CA}}
-.btn:disabled{{opacity:.5;cursor:default}}
-.spinner{{display:none;width:20px;height:20px;border:3px solid #30363d;border-top-color:#4F46E5;border-radius:50%;animation:spin .7s linear infinite}}
-@keyframes spin{{to{{transform:rotate(360deg)}}}}
-.err{{color:#f85149;font-size:14px}}
-table{{width:100%;border-collapse:collapse;font-size:14px}}
-th{{text-align:left;color:#6B7280;font-weight:600;padding:9px 12px;border-bottom:1px solid #30363d;font-size:12px;text-transform:uppercase;letter-spacing:.05em}}
-td{{padding:12px 12px;border-bottom:1px solid #21262d;color:#c9d1d9}}
-tr:hover td{{background:rgba(255,255,255,0.02)}}
-.badge{{font-size:11px;padding:2px 8px;border-radius:3px;font-weight:600;display:inline-block}}
-.r-high{{background:#3d1f1f;color:#f85149;border:1px solid #5e1f1f}}
-.r-medium{{background:#2d2a1a;color:#e3b341;border:1px solid #4a3f10}}
-.r-low{{background:#1a2d1a;color:#56d364;border:1px solid #1a4a1a}}
-.r-approved{{background:#1a1f3d;color:#79c0ff;border:1px solid #1a2a5e}}
-.cat{{font-size:11px;padding:2px 7px;border-radius:3px;background:#21262d;color:#8b949e;border:1px solid #30363d;font-weight:600;text-transform:uppercase;letter-spacing:.04em}}
-.gap-high{{border-left:3px solid #f85149;padding:12px 16px;background:#1a0f0f;border-radius:0 6px 6px 0;margin-bottom:10px}}
-.gap-medium{{border-left:3px solid #e3b341;padding:12px 16px;background:#1a180a;border-radius:0 6px 6px 0;margin-bottom:10px}}
-.gap-low{{border-left:3px solid #6B7280;padding:12px 16px;background:#161b22;border-radius:0 6px 6px 0;margin-bottom:10px}}
-.gap-t{{font-weight:700;font-size:14px;color:#e6edf3;margin-bottom:4px}}
-.gap-d{{font-size:13px;color:#8b949e;margin-bottom:4px}}
-.gap-r{{font-size:12px;color:#6B7280}}
-.stat-row{{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:14px;margin-bottom:22px}}
-.scard{{background:#161b22;border:1px solid #30363d;border-radius:8px;padding:18px 20px}}
-.scard-n{{font-size:30px;font-weight:700;line-height:1}}
-.scard-l{{font-size:13px;color:#6B7280;margin-top:5px}}
-.mono{{font-family:monospace;font-size:13px}}
-#results{{display:none}}
-</style>
-</head>
-<body>
-<aside id="sidebar">
-  <div class="sb-logo">
-    <div class="sb-logo-mark">RiskRaven</div>
-    <div class="sb-logo-name">ARCKON</div>
-  </div>
-  <nav class="sb-nav">
-    <div class="sb-group">Overview</div>
-    <a class="sb-item" href="/">&#8962; Home</a>
-    <div class="sb-group">Tools</div>
-    <a class="sb-item active" href="/dns-inventory">&#128202; AI Inventory</a>
-    <div class="sb-group">Security</div>
-    <a class="sb-item" href="/#alerts">&#128276; Alerts</a>
-    <a class="sb-item" href="/#audit">&#128221; Audit Log</a>
-  </nav>
-  <div class="sb-footer">
-    <span>{user_email}</span>
-    <a href="/academy" target="_blank">Academy</a>
-    <a href="/logout" style="color:#ef4444">&#x2192; Sign Out</a>
-  </div>
-</aside>
-
-<div id="content">
-  <h1>AI Inventory</h1>
-  <p class="sub">Upload a DNS log to see which AI services your organisation is using — no agent required.</p>
-
-  <div class="card">
-    <div class="card-title">Upload DNS Log</div>
-    <div id="drop-zone" onclick="document.getElementById('file-input').click()">
-      <input type="file" id="file-input" accept=".log,.txt,.csv">
-      <div style="font-size:30px;margin-bottom:8px">&#128196;</div>
-      <div style="font-weight:600;color:#c9d1d9">Drop a DNS log file here, or click to browse</div>
-      <div style="font-size:13px;color:#6B7280;margin-top:6px">Pi-hole &bull; BIND &bull; Unbound &bull; Cisco Umbrella CSV &bull; Windows DNS &bull; plain domain list</div>
-      <div id="file-name" style="margin-top:10px;font-size:13px;color:#79c0ff;font-weight:600"></div>
-    </div>
-
-    <div style="text-align:center;color:#6B7280;font-size:13px;margin:14px 0">— or paste log text —</div>
-    <textarea id="log-text" rows="6" placeholder="Paste DNS log content here..."></textarea>
-
-    <label>Approved AI domains (optional — one per line or comma-separated)</label>
-    <textarea id="approved" rows="3" placeholder="e.g. copilot.microsoft.com&#10;api.openai.com"></textarea>
-    <div style="font-size:12px;color:#6B7280;margin-top:5px">Leave blank to skip shadow AI detection.</div>
-
-    <div style="margin-top:20px;display:flex;align-items:center;gap:14px">
-      <button class="btn" id="btn" onclick="run()">Analyse Log</button>
-      <div class="spinner" id="spin"></div>
-      <span class="err" id="err"></span>
-    </div>
-  </div>
-
-  <div id="results">
-    <div class="stat-row" id="stats"></div>
-    <div id="gaps-wrap" style="display:none" class="card">
-      <div class="card-title">Policy Gaps</div>
-      <div id="gaps"></div>
-    </div>
-    <div class="card">
-      <div class="card-title">AI Services Detected</div>
-      <div id="svc-empty" class="mono" style="display:none;color:#6B7280;padding:20px 0">No recognised AI services found in this log.</div>
-      <table id="svc-table" style="display:none">
-        <thead><tr><th>Service</th><th>Vendor</th><th>Category</th><th>Risk</th><th>Queries</th><th>Devices</th></tr></thead>
-        <tbody id="svc-body"></tbody>
-      </table>
-    </div>
-    <div id="src-wrap" class="card" style="display:none">
-      <div class="card-title">Activity by Device</div>
-      <table><thead><tr><th>IP / Device</th><th>AI Services</th><th>Count</th></tr></thead>
-      <tbody id="src-body"></tbody></table>
-    </div>
-  </div>
-</div>
-
-<script>
-var _fc = null;
-var dz = document.getElementById('drop-zone');
-dz.addEventListener('dragover', function(e){{ e.preventDefault(); dz.classList.add('drag-over'); }});
-dz.addEventListener('dragleave', function(){{ dz.classList.remove('drag-over'); }});
-dz.addEventListener('drop', function(e){{ e.preventDefault(); dz.classList.remove('drag-over'); if(e.dataTransfer.files[0]) load(e.dataTransfer.files[0]); }});
-document.getElementById('file-input').addEventListener('change', function(){{ if(this.files[0]) load(this.files[0]); }});
-function load(f){{ document.getElementById('file-name').textContent = f.name; var r=new FileReader(); r.onload=function(e){{_fc=e.target.result;}}; r.readAsText(f); }}
-
-function run(){{
-  var txt = _fc || document.getElementById('log-text').value.trim();
-  if(!txt){{ setErr('Please upload a file or paste log content.'); return; }}
-  setErr('');
-  setLoad(true);
-  fetch('/api/dns-inventory/analyze', {{
-    method:'POST',
-    headers:{{'Content-Type':'application/json'}},
-    body: JSON.stringify({{log_text: txt, approved_domains: document.getElementById('approved').value}})
-  }}).then(function(r){{return r.json();}}).then(function(d){{
-    setLoad(false);
-    if(d.error){{ setErr(d.error); return; }}
-    render(d);
-  }}).catch(function(e){{setLoad(false);setErr('Request failed: '+e);}});
-}}
-
-function render(d){{
-  document.getElementById('results').style.display='';
-  var hasShadow = d.shadow_ai && d.shadow_ai.length;
-  document.getElementById('stats').innerHTML=[
-    sc(d.ai_queries,'AI Queries','#79c0ff'),
-    sc(d.services.length,'Services Found','#e6edf3'),
-    sc(d.unique_sources.length,'Devices','#e6edf3'),
-    hasShadow ? sc(d.shadow_ai.length,'Shadow AI','#f85149') : sc(d.total_queries,'Total Queries','#6B7280'),
-  ].join('');
-  if(d.policy_gaps&&d.policy_gaps.length){{
-    document.getElementById('gaps-wrap').style.display='';
-    document.getElementById('gaps').innerHTML=d.policy_gaps.map(function(g){{
-      return '<div class="gap-'+g.severity+'"><div class="gap-t">'+x(g.title)+'</div><div class="gap-d">'+x(g.detail)+'</div><div class="gap-r">&#128736; '+x(g.remediation)+'</div></div>';
-    }}).join('');
-  }}
-  if(d.services&&d.services.length){{
-    document.getElementById('svc-table').style.display='';
-    document.getElementById('svc-empty').style.display='none';
-    document.getElementById('svc-body').innerHTML=d.services.map(function(s){{
-      var rc = s.approved===true?'r-approved':'r-'+s.risk;
-      var rl = s.approved===true?'&#10003; approved':s.risk;
-      return '<tr><td><strong>'+x(s.product)+'</strong><br><span style="font-size:12px;color:#6B7280">'+x(s.domain)+'</span></td><td>'+x(s.vendor)+'</td><td><span class="cat">'+x(s.category)+'</span></td><td><span class="badge '+rc+'">'+rl+'</span></td><td style="font-weight:600">'+s.query_count+'</td><td style="color:#6B7280">'+s.unique_sources.length+'</td></tr>';
-    }}).join('');
-  }} else {{
-    document.getElementById('svc-table').style.display='none';
-    document.getElementById('svc-empty').style.display='';
-  }}
-  var bs=d.by_source||{{}}, bk=Object.keys(bs);
-  if(bk.length){{
-    document.getElementById('src-wrap').style.display='';
-    document.getElementById('src-body').innerHTML=bk.map(function(ip){{
-      var sv=bs[ip];
-      return '<tr><td class="mono">'+x(ip)+'</td><td style="font-size:13px">'+sv.map(function(s){{return '<span class="cat" style="margin-right:4px">'+x(s)+'</span>';}}).join('')+'</td><td style="font-weight:600">'+sv.length+'</td></tr>';
-    }}).join('');
-  }}
-  document.getElementById('results').scrollIntoView({{behavior:'smooth'}});
-}}
-
-function sc(n,l,c){{return '<div class="scard"><div class="scard-n" style="color:'+c+'">'+n+'</div><div class="scard-l">'+l+'</div></div>';}}
-function x(s){{var d=document.createElement('div');d.textContent=String(s||'');return d.innerHTML;}}
-function setErr(m){{document.getElementById('err').textContent=m;}}
-function setLoad(on){{document.getElementById('btn').disabled=on;document.getElementById('spin').style.display=on?'inline-block':'none';}}
-</script>
-</body>
-</html>'''

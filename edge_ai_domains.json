@@ -1,0 +1,9 @@
+[
+  {"domain":"chatgpt.com","provider":"OpenAI","category":"generative_ai","confidence":"high"},
+  {"domain":"openai.com","provider":"OpenAI","category":"generative_ai","confidence":"high"},
+  {"domain":"claude.ai","provider":"Anthropic","category":"generative_ai","confidence":"high"},
+  {"domain":"anthropic.com","provider":"Anthropic","category":"generative_ai","confidence":"high"},
+  {"domain":"gemini.google.com","provider":"Google","category":"generative_ai","confidence":"high"},
+  {"domain":"perplexity.ai","provider":"Perplexity","category":"generative_ai","confidence":"high"},
+  {"domain":"grok.com","provider":"xAI","category":"generative_ai","confidence":"high"}
+]

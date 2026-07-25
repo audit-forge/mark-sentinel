@@ -4,6 +4,11 @@ Produces human-readable terminal output with SMB-friendly language option.
 """
 from datetime import date
 from checks import CheckResult, PASS, FAIL, WARN, SKIP
+from checks.deploy import CI_TEST_CREDENTIAL_TITLE
+
+# Results carrying one of these titles describe a narrower situation than the
+# generic per-check SMB copy — use the result's own details instead.
+_DETAILS_OVER_SMB_TITLES = frozenset({CI_TEST_CREDENTIAL_TITLE})
 
 _STATUS_ICON = {PASS: "✅", FAIL: "🔴", WARN: "⚠️ ", SKIP: "⏭ "}
 _STATUS_LABEL = {PASS: "PASS", FAIL: "FAIL", WARN: "WARN", SKIP: "SKIP"}
@@ -53,13 +58,6 @@ _SMB_DETAILS = {
     "AI-GOV-003": "No plan for what to do if something goes wrong with your AI.",
     "AI-GOV-004": "No documented process for humans to review AI decisions on important matters.",
     "AI-GOV-005": "No list of all the AI tools and models your business uses.",
-}
-
-# Titles a check can take on when it reclassifies a finding. When a result
-# carries one of these, its own details describe the narrower situation, so the
-# generic SMB text for that check_id would be misleading.
-_SPECIAL_TITLES = {
-    "AI-DEPLOY-002": "CI Test Credential Hygiene",
 }
 
 _MODE_LABELS = {
@@ -232,9 +230,8 @@ def _format_result(r: CheckResult, is_smb: bool, show_fix: bool = True,
     sev_tag = f" [{r.severity}]" if r.status in (FAIL, WARN) else ""
     lines.append(f"  {icon} [{label}]{sev_tag} {r.check_id}: {r.title}")
 
-    use_smb = (is_smb and r.check_id in _SMB_DETAILS
-               and _SPECIAL_TITLES.get(r.check_id) != r.title)
-    details = _SMB_DETAILS[r.check_id] if use_smb else (r.details or "")
+    use_smb = is_smb and r.check_id in _SMB_DETAILS and r.title not in _DETAILS_OVER_SMB_TITLES
+    details = _SMB_DETAILS.get(r.check_id) if use_smb else (r.details or "")
     lines += _wrap(details, indent="     ")
 
     if r.evidence:

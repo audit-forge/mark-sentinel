@@ -79,19 +79,27 @@ Your AI tool probably connects to other systems — maybe your customer database
 - Kubernetes ConfigMap containing a password
 
 ### WARN Criteria — CI Test Credential Hygiene
-A PostgreSQL URL is reclassified as a CI test fixture (status `WARN`, severity `LOW`, title `CI Test Credential Hygiene`) only when **all four** conditions hold:
+When **every** credential hit in the scan is a GitHub Actions CI fixture, the finding is
+reported as **WARN / LOW** under the title **`CI Test Credential Hygiene`** instead of
+FAIL / HIGH. A hit qualifies as a CI fixture only when **all** of the following hold:
 
-1. The file path is a GitHub Actions workflow — `.github/workflows/*.yml` or `.github/workflows/*.yaml`
-2. The URL host is loopback — `localhost` or `127.0.0.1`
-3. The **same workflow file** declares a `postgres` service container (a `services:` block with a `postgres` image or service key)
-4. The **same workflow file** sets a test-named `POSTGRES_DB` (the database name contains `test`)
+1. The file path is under `.github/workflows/` (`.yml` / `.yaml`)
+2. The hit is a PostgreSQL connection string whose host is `localhost` or `127.0.0.1`
+3. The same workflow file declares a `postgres` service container (`services:` + `image: postgres`)
+4. The same workflow file sets a test-named `POSTGRES_DB` (value containing `test`)
 
-Such a credential reaches nothing but a throwaway service container inside the CI runner, so it is not a production exposure and does not warrant a HIGH finding.
+Such a credential is scoped to the ephemeral CI runner and grants no access to any external
+system. It is still reported — never suppressed — and evidence records only the file, line,
+credential type, and local host. Credential values are never extracted, displayed, or persisted.
 
-Scope rules:
-- The reclassified result is returned **only when every credential found in the scan qualifies**. A single external, unknown, or otherwise non-qualifying credential — including a loopback PostgreSQL URL in a workflow that fails any of the four conditions — returns the standard `FAIL` / `HIGH` / `No Hardcoded Credentials in Model Config` result. Mixed scans are reported as `FAIL` / `HIGH`; the qualifying fixtures are noted in a single summary evidence line.
-- Evidence for a qualifying fixture is limited to file, line, credential type, and host. The fixture password is never captured, masked, displayed, or stored — classification runs before any capture-group handling, so the value is never read out of the line at all.
-- Reporting surfaces (plain-English output, dashboard executive report) use the result's own details for this title rather than the generic "database takeover" risk text.
+If **any** hit does not meet all four conditions — an external or unknown host, a
+non-workflow path, a workflow with no postgres service, a non-test database name, or any
+other credential type — the check stays **FAIL / HIGH** with the standard remediation.
+Mixed input (CI fixture plus a real credential) is always FAIL / HIGH.
+
+Reporting note: because this title describes a narrower situation than AI-DEPLOY-002's
+generic "database takeover" business-risk copy, the plain-English and dashboard outputs
+render the finding's own details rather than that generic text.
 
 ### Remediation
 1. Audit all config files for credential patterns: `grep -rn "password\|token\|secret\|bearer\|auth" ./config/`

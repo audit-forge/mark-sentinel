@@ -1,5 +1,5 @@
 """
-Fixture validation tests for M.A.R.K. Sentinel.
+Fixture validation tests for Arckon by RiskRaven.
 Run: pytest test/run_fixture_validation.py -v
 """
 import json
@@ -144,7 +144,7 @@ class TestSarifOutput:
         assert sarif["version"] == "2.1.0"
         assert len(sarif["runs"]) == 1
         run = sarif["runs"][0]
-        assert run["tool"]["driver"]["name"] == "M.A.R.K. Sentinel"
+        assert run["tool"]["driver"]["name"] == "Arckon by RiskRaven"
         assert len(run["results"]) > 0
 
     def test_sarif_fail_maps_to_error(self):

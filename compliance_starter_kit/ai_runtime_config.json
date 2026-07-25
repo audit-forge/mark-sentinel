@@ -1,0 +1,11 @@
+{
+  "_README": "Declare the runtime AI controls YOUR system ACTUALLY has. Do NOT claim controls you haven't implemented — that is falsifying a compliance control. If you don't log inference or cap tokens yet, implement it first, then set these flags.",
+  "organisation": "[YOUR ORGANISATION]",
+  "ai_system": "[YOUR AI SYSTEM NAME]",
+  "last_updated": "[YYYY-MM-DD]",
+  "log_requests": false,
+  "monitoring": { "enabled": false, "_set_true_when": "you actually log AI inference activity to a file/DB" },
+  "anomaly_detection": { "enabled": false, "_set_true_when": "you have anomaly/drift detection or alerting" },
+  "token_budget": 0,
+  "_token_note": "set a real per-request or daily token cap you actually enforce (e.g. max_tokens); leave 0 if you do not cap tokens"
+}

@@ -1,0 +1,19 @@
+services:
+  arckon-edge-dns:
+    build:
+      context: ../..
+      dockerfile: deploy/Dockerfile.edge-dns
+    image: arckon/edge-dns:1.0.0
+    restart: unless-stopped
+    environment:
+      ARCKON_SENSOR_ID: ${ARCKON_SENSOR_ID:?set a stable sensor ID}
+    volumes:
+      # Mount only the resolver log directory. This container has no packet capture.
+      - ${ARCKON_DNS_LOG_DIR:?set resolver log directory}:/logs:ro
+    command:
+      - --source
+      - ${ARCKON_DNS_SOURCE:-dnsmasq}
+      - --sensor-id
+      - ${ARCKON_SENSOR_ID}
+      - --log-file
+      - /logs/${ARCKON_DNS_LOG_FILE:-dnsmasq.log}

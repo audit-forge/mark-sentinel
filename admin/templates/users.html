@@ -13,7 +13,7 @@
 {% elif request.query_params.get('error') == 'exists' %}
 <div class="error">A user with that email already exists.</div>
 {% elif request.query_params.get('error') == 'noclientorg' %}
-<div class="error">A client viewer must be assigned to a client org belonging to that customer.</div>
+<div class="error">Select a valid client org for the client viewer role.</div>
 {% endif %}
 
 <div class="card">
@@ -30,7 +30,7 @@
       </div>
       <div class="form-group" style="max-width:180px">
         <label>Role</label>
-        <select name="role" onchange="document.getElementById('add-client-org-group').style.display = this.value === 'client_viewer' ? '' : 'none'">
+        <select name="role" id="add-role-select" onchange="document.getElementById('add-client-org-group').style.display = this.value === 'client_viewer' ? '' : 'none'">
           {% if user.role == 'super_admin' %}
           <option value="super_admin">super_admin</option>
           <option value="customer_admin">customer_admin</option>
@@ -59,7 +59,7 @@
           {% endfor %}
         </select>
         {% if not client_orgs %}
-        <div style="font-size:12px;color:#6B7280;margin-top:4px">No client orgs yet — create one from that customer's dashboard first.</div>
+        <div style="font-size:12px;color:#6B7280;margin-top:4px">No client orgs yet — add one from the /clients page first.</div>
         {% endif %}
       </div>
       <button type="submit" class="btn btn-primary">Add User</button>
@@ -120,7 +120,7 @@
   {% endif %}
 </div>
 
-{% if user.role == 'super_admin' %}
+{% if user.role in ('super_admin', 'customer_admin') %}
 <div class="card">
   <div class="card-title">Edit User</div>
   <form method="post" action="/users/edit">
@@ -137,7 +137,9 @@
       <div class="form-group" style="max-width:200px">
         <label>Role</label>
         <select name="role" onchange="document.getElementById('edit-client-org-group').style.display = this.value === 'client_viewer' ? '' : 'none'">
+          {% if user.role == 'super_admin' %}
           <option value="super_admin">super_admin</option>
+          {% endif %}
           <option value="customer_admin">customer_admin</option>
           <option value="user">user</option>
           <option value="client_viewer">client viewer</option>

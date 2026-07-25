@@ -1,0 +1,60 @@
+name: Build & Deploy
+
+on:
+  push:
+    branches: [feat/user-manager, main]
+    paths:
+      - 'agent.py'
+      - 'discovery.py'
+      - 'server.py'
+      - 'audit.py'
+      - 'checks/**'
+      - 'connectors/**'
+      - 'profiles/**'
+      - 'scripts/Dockerfile.build'
+      - 'requirements.txt'
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Compile binaries (linux/amd64)
+        run: |
+          docker buildx build \
+            --platform linux/amd64 \
+            --file scripts/Dockerfile.build \
+            --output type=local,dest=dist \
+            .
+          echo "=== Built binaries ==="
+          ls -lh dist/
+
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Set up gcloud CLI
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Upload to GCS deploy bucket
+        run: |
+          # Upload all deployment artifacts to GCS
+          gsutil cp dist/agent dist/audit \
+            server.py discovery.py agent.py \
+            gs://arckon-deploy-artifacts/latest/
+
+          # Write a deploy manifest so the GCP instance knows a new deploy is ready
+          echo "{\"sha\":\"${{ github.sha }}\",\"ref\":\"${{ github.ref_name }}\",\"ts\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}" \
+            | gsutil cp - gs://arckon-deploy-artifacts/latest/manifest.json
+
+          echo "=== Uploaded to gs://arckon-deploy-artifacts/latest/ ==="
+          gsutil ls -l gs://arckon-deploy-artifacts/latest/

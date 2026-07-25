@@ -1,0 +1,8 @@
+FROM python:3.12-alpine
+
+WORKDIR /app
+RUN addgroup -S arckon && adduser -S -G arckon arckon
+COPY arckon_version.py edge_dns.py edge_ai_domains.json ./
+USER arckon
+
+ENTRYPOINT ["python", "edge_dns.py"]

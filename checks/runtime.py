@@ -213,7 +213,10 @@ def check_runtime_001(ctx: ScanContext) -> CheckResult:
             "  • Datadog APM: set DD_TRACE_ENABLED=true + DD_APM_ENABLED=true\n"
             "  • Langfuse: set LANGFUSE_PUBLIC_KEY + LANGFUSE_SECRET_KEY\n"
             "  • Arize: set ARIZE_API_KEY or PHOENIX_COLLECTOR_ENDPOINT\n"
-            '  • Hash: "monitoring": {"enabled": true, "db_path": "...activity.db", "retention_days": 30}'
+            '  • Hash: "monitoring": {"enabled": true, "db_path": "...activity.db", "retention_days": 30}\n'
+            "Record the control in `compliance/ai_runtime_config.json` (template: "
+            "`compliance_starter_kit/ai_runtime_config.json`) in the directory Arckon scans — but only enable a "
+            "flag for a control you genuinely operate. Never declare a control you do not actually have."
         ),
         evidence=[],
     )
@@ -304,7 +307,10 @@ def check_runtime_002(ctx: ScanContext) -> CheckResult:
             "  • Datadog: configure anomaly monitor on token usage metric\n"
             "  • AWS: add CloudWatch alarm on InvocationCount or TokenCount\n"
             '  • Hash: "monitoring": {"enabled": true, "anomaly_detection": {"enabled": true}}\n'
-            "  • Generic: add circuit_breaker or spike_protection in your API gateway config"
+            "  • Generic: add circuit_breaker or spike_protection in your API gateway config\n"
+            "Record the control in `compliance/ai_runtime_config.json` (template: "
+            "`compliance_starter_kit/ai_runtime_config.json`) in the directory Arckon scans — but only enable a "
+            "flag for a control you genuinely operate. Never declare a control you do not actually have."
         ),
         evidence=[],
     )
@@ -340,7 +346,10 @@ def check_runtime_003(ctx: ScanContext) -> CheckResult:
                 '  "agents": {\n'
                 '    "human_oversight": true,\n'
                 '    "require_confirmation": ["deploy", "send_email", "delete_file"]\n'
-                '  }'
+                '  }\n'
+                "Record the control in `compliance/ai_runtime_config.json` (template: "
+                "`compliance_starter_kit/ai_runtime_config.json`) in the directory Arckon scans — but only enable a "
+                "flag for a control you genuinely operate. Never declare a control you do not actually have."
             ),
             evidence=[],
         )
@@ -388,7 +397,10 @@ def check_runtime_004(ctx: ScanContext) -> CheckResult:
             '    "anthropic": {"max_tokens": 8192}\n'
             '  }\n'
             'Or set a global budget:\n'
-            '  "monitoring": {"token_budget_daily": 500000}'
+            '  "monitoring": {"token_budget_daily": 500000}\n'
+            "Record the control in `compliance/ai_runtime_config.json` (template: "
+            "`compliance_starter_kit/ai_runtime_config.json`) in the directory Arckon scans — but only enable a "
+            "flag for a control you genuinely operate. Never declare a control you do not actually have."
         ),
         evidence=[],
     )
@@ -458,7 +470,10 @@ def check_runtime_005(ctx: ScanContext) -> CheckResult:
             '    "enabled": true,\n'
             '    "retention_days": 30,\n'
             '    "prompt_audit": true\n'
-            '  }'
+            '  }\n'
+            "Record the control in `compliance/ai_runtime_config.json` (template: "
+            "`compliance_starter_kit/ai_runtime_config.json`) in the directory Arckon scans — but only enable a "
+            "flag for a control you genuinely operate. Never declare a control you do not actually have."
         ),
         evidence=[],
     )

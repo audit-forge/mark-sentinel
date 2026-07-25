@@ -1,0 +1,22 @@
+{
+  "name": "Kubernetes Cluster Security",
+  "description": "CIS Kubernetes Benchmark and NSA/CISA hardening checks for AI workloads running in Kubernetes. Covers privileged containers, RBAC, network policies, image integrity, and secrets management. Use with --mode k8s.",
+  "checks": [
+    "AI-K8S-001",
+    "AI-K8S-002",
+    "AI-K8S-003",
+    "AI-K8S-004",
+    "AI-K8S-005",
+    "AI-K8S-006",
+    "AI-K8S-007",
+    "AI-K8S-008",
+    "AI-K8S-009",
+    "AI-K8S-010"
+  ],
+  "default_output": "plain",
+  "include_remediation": true,
+  "framework_emphasis": null,
+  "include_frameworks": true,
+  "severity_threshold": "LOW",
+  "smb_language": false
+}

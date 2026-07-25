@@ -6,7 +6,25 @@ from fastapi import Request, HTTPException
 
 from db import StaleSessionError, revalidate_user
 
-SECRET_KEY = os.environ.get("SECRET_KEY", "changeme-set-in-env")
+def _load_secret_key() -> str:
+    key = os.environ.get("SECRET_KEY", "")
+    if not key:
+        key_file = os.environ.get("SECRET_KEY_FILE", "")
+        if key_file:
+            try:
+                import pathlib
+                p = pathlib.Path(key_file)
+                key = p.read_text().strip() if p.is_file() else ""
+            except Exception:
+                key = ""
+    if not key:
+        raise RuntimeError(
+            "SECRET_KEY is not set. Provide it via SECRET_KEY env var "
+            "or SECRET_KEY_FILE pointing to a file containing the key."
+        )
+    return key
+
+SECRET_KEY = _load_secret_key()
 ALGORITHM = "HS256"
 TOKEN_EXPIRE_HOURS = 8
 
@@ -22,28 +40,25 @@ def verify_password(plain: str, hashed: str) -> bool:
 
 
 def create_token(user_id: str, role: str, customer_id: str | None, email: str = "",
-                 client_org_id: str | None = None) -> str:
+                  client_org_id: str | None = None, impersonated_by: str | None = None,
+                  expire_minutes: int | None = None) -> str:
     payload = {
         "sub": user_id,
         "role": role,
         "customer_id": customer_id,
         "client_org_id": client_org_id,
         "email": email,
-        "exp": datetime.now(timezone.utc) + timedelta(hours=TOKEN_EXPIRE_HOURS),
+        "exp": datetime.now(timezone.utc) + (
+            timedelta(minutes=expire_minutes) if expire_minutes else timedelta(hours=TOKEN_EXPIRE_HOURS)
+        ),
     }
+    if impersonated_by:
+        payload["impersonated_by"] = impersonated_by
     return jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
 
 
 def get_current_user(request: Request) -> dict:
-    """Authenticate the request and return the caller's *current* identity.
-
-    The cookie proves who is calling; the users table decides what they may do
-    right now. The signed claims are therefore only trusted for "sub", and
-    role/customer_id/client_org_id are re-read from the database on every
-    request — a JWT minted before a role change, a client-org move or a
-    deactivation must not keep granting the access it was minted with. Those
-    values also leave here as the X-Arckon-* headers /auth/verify hands to the
-    customer vhosts, so a stale claim would propagate into every container."""
+    """Authenticate a token, then re-read its current authorization state."""
     token = request.cookies.get("token")
     if not token:
         raise HTTPException(status_code=401)
@@ -54,7 +69,6 @@ def get_current_user(request: Request) -> dict:
     try:
         current = revalidate_user(claims.get("sub"))
     except StaleSessionError:
-        # Deleted or deactivated: fail closed, exactly as an expired token does.
         raise HTTPException(status_code=401)
     return {**claims, **current}
 

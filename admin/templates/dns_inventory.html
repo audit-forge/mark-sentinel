@@ -55,7 +55,7 @@
 </div>
 
 <!-- Results -->
-<div id="results">
+<div id="results" style="display:none">
 
   <!-- Summary stats -->
   <div class="grid-stats" id="stats-grid" style="grid-template-columns:repeat(auto-fit,minmax(160px,1fr))"></div>
@@ -94,7 +94,8 @@
     <table>
       <thead>
         <tr>
-          <th>IP / Device</th>
+          <th>Hostname</th>
+          <th>IP / Source</th>
           <th>AI Services Used</th>
           <th>Count</th>
         </tr>
@@ -106,7 +107,7 @@
 </div>
 
 <script>
-var _fileContent = null;
+var _selectedFile = null;
 
 var dz = document.getElementById('drop-zone');
 dz.addEventListener('dragover', function(e){ e.preventDefault(); dz.classList.add('drag-over'); });
@@ -121,24 +122,35 @@ document.getElementById('file-input').addEventListener('change', function(){
 });
 
 function loadFile(f){
+  if(f.size > 200 * 1024 * 1024){
+    _selectedFile = null;
+    showError('File exceeds the 200 MB upload limit.');
+    return;
+  }
+  _selectedFile = f;
   document.getElementById('file-name').textContent = f.name;
-  var reader = new FileReader();
-  reader.onload = function(e){ _fileContent = e.target.result; };
-  reader.readAsText(f);
+  clearError();
 }
 
 function runAnalysis(){
-  var logText = _fileContent || document.getElementById('log-text').value.trim();
-  if(!logText){ showError('Please upload a file or paste log content.'); return; }
+  var logText = document.getElementById('log-text').value.trim();
+  if(!_selectedFile && !logText){ showError('Please upload a file or paste log content.'); return; }
   clearError();
   setLoading(true);
 
   var fd = new FormData();
-  fd.append('log_text', logText);
+  if(_selectedFile) fd.append('log_file', _selectedFile, _selectedFile.name);
+  else fd.append('log_text', logText);
   fd.append('approved_domains', document.getElementById('approved-domains').value);
 
   fetch('/dns-inventory/analyze', { method:'POST', body: fd })
-    .then(function(r){ return r.json(); })
+    .then(function(r){
+      if(r.status === 413) throw new Error('File too large — try a smaller log excerpt');
+      return r.text().then(function(t){
+        if(!r.ok){ throw new Error('Server error ' + r.status + ': ' + t.substring(0,120)); }
+        try { return JSON.parse(t); } catch(e){ throw new Error('Unexpected response: ' + t.substring(0,120)); }
+      });
+    })
     .then(function(data){
       setLoading(false);
       if(data.error){ showError(data.error); return; }
@@ -148,7 +160,7 @@ function runAnalysis(){
 }
 
 function renderResults(d){
-  document.getElementById('results').style.display = '';
+  document.getElementById('results').style.display = 'block';
 
   // Stats
   var hasShadow = d.shadow_ai && d.shadow_ai.length > 0;
@@ -196,14 +208,21 @@ function renderResults(d){
 
   // By-source
   var bySource = d.by_source || {};
+  var sourceHostnames = d.source_hostnames || {};
+  var fullIpRe = /^\d+\.\d+\.\d+\.\d+$/;
   var srcKeys = Object.keys(bySource);
   if(srcKeys.length){
     document.getElementById('sources-section').style.display = '';
-    document.getElementById('sources-tbody').innerHTML = srcKeys.map(function(ip){
-      var svcs = bySource[ip];
+    document.getElementById('sources-tbody').innerHTML = srcKeys.map(function(source){
+      var svcs = bySource[source];
+      var names = sourceHostnames[source] || [];
+      var sourceIsIp = fullIpRe.test(source) || source.indexOf(':') !== -1;
+      var hostname = names.length ? names.join(', ') : (sourceIsIp ? '—' : source);
+      var address = sourceIsIp ? source : '—';
       return '<tr>' +
-        '<td class="source-ip">' + esc(ip) + '</td>' +
-        '<td style="font-size:13px">' + svcs.map(function(s){ return '<span class="cat-badge" style="margin-right:4px">' + esc(s) + '</span>'; }).join('') + '</td>' +
+        '<td><strong>' + esc(hostname) + '</strong></td>' +
+        '<td class="source-ip">' + esc(address) + '</td>' +
+        '<td style="font-size:13px">' + svcs.map(function(s){ return '<span class="cat-badge" style="margin-right:4px">' + esc(s) + '</span>'; }).join(', ') + '</td>' +
         '<td style="font-weight:600">' + svcs.length + '</td>' +
         '</tr>';
     }).join('');

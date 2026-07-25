@@ -1,5 +1,5 @@
 """
-M.A.R.K. Sentinel — License enforcement, telemetry, and device monitoring
+RiskRaven Arckon — License enforcement, telemetry, and device monitoring
 
 License file (license.json) sits next to server.py.
 Fields:
@@ -9,22 +9,45 @@ Fields:
   grace_pct            — overage % tolerance before hard-alert (default 10)
   expires_at           — ISO date "YYYY-MM-DD"
   issued_at            — ISO date
-  issued_by            — "M.A.R.K. AI Systems"
+  issued_by            — "RiskRaven"
   webhook_url          — (optional) overage + stale-device alerts → customer channel
-  telemetry_url        — (set by M.A.R.K.) rolling usage reports → M.A.R.K. endpoint
+  telemetry_url        — (set by RiskRaven) rolling usage reports → Arckon endpoint
   telemetry_interval_h — hours between usage reports (default 24)
   stale_alert_hours    — hours of silence before a device is flagged unreachable (default 26)
 
 Enforcement is always soft — agents are never blocked from reporting.
 """
+import hashlib
+import hmac
 import json
 import logging
+import os
 import threading
 import time
 from datetime import date
 from pathlib import Path
 from typing import Optional
 import urllib.request
+
+# License signing key — set LICENSE_SIGNING_KEY env var on the server.
+# generate_license.py uses the same key to sign; license.py verifies on load.
+_SIGNING_KEY = os.environ.get('LICENSE_SIGNING_KEY', '').encode()
+
+
+def _sign(data: dict) -> str:
+    """Return HMAC-SHA256 hex digest of the canonical JSON (keys sorted, no sig field)."""
+    payload = {k: v for k, v in sorted(data.items()) if k != 'sig'}
+    canon = json.dumps(payload, sort_keys=True, separators=(',', ':'))
+    return hmac.new(_SIGNING_KEY, canon.encode(), hashlib.sha256).hexdigest()
+
+
+def _verify(data: dict) -> bool:
+    """Return True if the license sig field matches the computed HMAC, or signing is disabled."""
+    if not _SIGNING_KEY:
+        return True   # signing not enforced — dev/internal mode
+    expected = _sign(data)
+    provided = data.get('sig', '')
+    return hmac.compare_digest(expected, provided)
 
 log = logging.getLogger('sentinel.license')
 
@@ -49,7 +72,7 @@ class License:
         self.grace_pct            = float(data.get('grace_pct', _DEFAULT_GRACE))
         self.expires_at           = data.get('expires_at', '')
         self.issued_at            = data.get('issued_at', '')
-        self.issued_by            = data.get('issued_by', 'M.A.R.K. AI Systems')
+        self.issued_by            = data.get('issued_by', 'RiskRaven')
         self.webhook_url          = data.get('webhook_url', '')
         self.telemetry_url        = data.get('telemetry_url', '')
         self.telemetry_interval_h = float(data.get('telemetry_interval_h', 24))
@@ -129,6 +152,9 @@ def load_license(path: Path) -> License:
         if path.exists():
             try:
                 data = json.loads(path.read_text(encoding='utf-8'))
+                if not _verify(data):
+                    log.error('License signature invalid — falling back to demo plan')
+                    data = {'plan': 'demo'}
                 _license = License(data)
                 log.info(
                     'License: %s — %d seats, expires %s, telemetry every %.0fh, stale threshold %.0fh',

@@ -20,7 +20,7 @@ Config file (agent_config.json):
     "target":           "~",
     "profile":          "default",
     "interval":         7200,
-    "client_org_token": "optional — MSP client-org enrollment token"
+    "client_org_token": "optional — MSP client-org enrollment token from the Clients page"
   }
 
 Environment overrides:
@@ -53,10 +53,14 @@ import time
 from pathlib import Path
 from urllib import error as _urlerr
 from urllib import request as _urlreq
+from arckon_version import VERSION
 
-ROOT = Path(__file__).parent
+# When running as a Nuitka onefile compiled binary, __file__ points to a temp
+# directory, not the directory where the binary actually is. Use sys.argv[0]
+# to find the executable location instead.
+_exec_path = Path(sys.argv[0]).resolve()
+ROOT = _exec_path.parent if _exec_path.is_file() else Path(__file__).parent
 DEFAULT_CONFIG = ROOT / 'agent_config.json'
-VERSION = '1.0.0'
 _PROCESS_NAME = 'sentinel-agent'
 
 
@@ -206,18 +210,30 @@ def run_scan(target: str, profile: str) -> dict | None:
     Captures stdout (JSON) separately from stderr (progress output).
     """
     audit_script = ROOT / 'audit.py'
-    if not audit_script.exists():
-        log.error('audit.py not found at %s', audit_script)
-        return None
+    audit_binary = ROOT / 'audit'
 
-    cmd = [
-        sys.executable, str(audit_script),
-        '--mode', 'config',
-        '--target', target,
-        '--profile', profile,
-        '--output', 'json',
-        '--quiet',
-    ]
+    # Use compiled binary if available, fall back to Python script
+    if audit_binary.exists() and os.access(audit_binary, os.X_OK):
+        cmd = [
+            str(audit_binary),
+            '--mode', 'config',
+            '--target', target,
+            '--profile', profile,
+            '--output', 'json',
+            '--quiet',
+        ]
+    elif audit_script.exists():
+        cmd = [
+            sys.executable, str(audit_script),
+            '--mode', 'config',
+            '--target', target,
+            '--profile', profile,
+            '--output', 'json',
+            '--quiet',
+        ]
+    else:
+        log.error('Neither audit binary nor audit.py found at %s', ROOT)
+        return None
     log.info('Scan: %s', ' '.join(cmd))
 
     try:
@@ -462,6 +478,7 @@ def self_update(config: dict) -> bool:
         if expected_hash and actual_hash != expected_hash:
             log.error('self_update: bundle hash mismatch (expected %s got %s)', expected_hash, actual_hash)
             return False
+        agent_binary_updated = False
         with tarfile.open(fileobj=io.BytesIO(data), mode='r:gz') as tar:
             for member in tar.getmembers():
                 # strip leading 'sentinel/' prefix from archive paths
@@ -482,8 +499,20 @@ def self_update(config: dict) -> bool:
                 dest.parent.mkdir(parents=True, exist_ok=True)
                 with tar.extractfile(member) as src, open(dest, 'wb') as dst:
                     dst.write(src.read())
+                # Mark executable bits for compiled binaries
+                if rel.name in ('agent', 'audit') and len(rel.parts) == 1:
+                    dest.chmod(0o755)
+                    if rel.name == 'agent':
+                        agent_binary_updated = True
+
         log.info('self_update: bundle extracted — restarting')
-        os.execv(sys.executable, [sys.executable] + sys.argv)
+        # If a compiled agent binary was shipped, exec it directly.
+        # Otherwise fall back to re-running with the Python interpreter.
+        agent_bin = ROOT / 'agent'
+        if agent_binary_updated and agent_bin.exists() and os.access(agent_bin, os.X_OK):
+            os.execv(str(agent_bin), [str(agent_bin)] + sys.argv[1:])
+        else:
+            os.execv(sys.executable, [sys.executable] + sys.argv)
     except Exception as e:
         log.error('self_update failed: %s', e)
         return False
@@ -625,26 +654,322 @@ def _resolve_home() -> str:
     return '/'
 
 
-def run_cycle(config: dict) -> bool:
-    target      = _resolve_home() if config.get('target', '~') in ('.', '~', '') else config.get('target')
-    profile_raw = config.get('profile', 'default')
-    profile     = profile_raw.split(',')[0].strip() or 'default'
-    device_id   = _device_id()
-    hostname  = socket.gethostname()
+def _k8s_env() -> dict:
+    """Return env vars that help kubectl find the right kubeconfig when running as root.
+    Rancher Desktop and Docker Desktop install kubeconfig under the user's home, not /root.
+    Also ensures kubectl is in PATH by adding common homebrew locations."""
+    env = os.environ.copy()
 
-    log.info('Device: %s  Hostname: %s  Target: %s  Profile: %s',
-             device_id, hostname, target, profile)
+    # Add homebrew kubectl to PATH if not present
+    homebrew_paths = ['/opt/homebrew/bin', '/usr/local/bin']
+    current_path = env.get('PATH', '')
+    for hb_path in homebrew_paths:
+        if hb_path not in current_path:
+            env['PATH'] = f"{hb_path}:{current_path}"
+            break
 
-    report = run_scan(target, profile)
+    if os.geteuid() == 0 and 'KUBECONFIG' not in env:
+        # Search for kubeconfig in all user home directories
+        search_roots = [Path('/Users'), Path('/home')]
+        for base in search_roots:
+            if not base.exists():
+                continue
+            for home in base.iterdir():
+                cfg = home / '.kube' / 'config'
+                if cfg.exists():
+                    env['KUBECONFIG'] = str(cfg)
+                    env['HOME'] = str(home)
+                    break
+            if 'KUBECONFIG' in env:
+                break
+    return env
+
+
+def _k8s_cluster_context() -> str:
+    """Return kubectl context name if a cluster is reachable, else empty string."""
+    try:
+        env = _k8s_env()
+        r = subprocess.run(
+            ['kubectl', 'config', 'current-context'],
+            capture_output=True, text=True, timeout=5, env=env,
+        )
+        if r.returncode != 0:
+            return ''
+        ctx = r.stdout.strip()
+        r2 = subprocess.run(
+            ['kubectl', 'cluster-info', '--context', ctx],
+            capture_output=True, timeout=5, env=env,
+        )
+        return ctx if r2.returncode == 0 else ''
+    except Exception:
+        return ''
+
+
+def _k8s_device_id(server_url: str) -> str:
+    """Stable 16-char device ID derived from the cluster's API server URL."""
+    return hashlib.sha256(f'k8s:{server_url}'.encode()).hexdigest()[:16]
+
+
+def run_k8s_scan(context_name: str) -> dict | None:
+    """Run a k8s-mode Sentinel audit and return the parsed JSON report."""
+    audit_script = ROOT / 'audit.py'
+    audit_binary = ROOT / 'audit'
+
+    # Use compiled binary if available, fall back to Python script
+    if audit_binary.exists() and os.access(audit_binary, os.X_OK):
+        cmd = [
+            str(audit_binary),
+            '--mode', 'k8s',
+            '--profile', 'kubernetes',
+            '--output', 'json',
+            '--quiet',
+        ]
+    elif audit_script.exists():
+        cmd = [
+            sys.executable, str(audit_script),
+            '--mode', 'k8s',
+            '--profile', 'kubernetes',
+            '--output', 'json',
+            '--quiet',
+        ]
+    else:
+        return None
+    log.info('K8s scan: %s (context: %s)', ' '.join(cmd[:5]), context_name)
+    try:
+        proc = subprocess.run(
+            cmd, capture_output=True, text=True, encoding='utf-8',
+            timeout=120, cwd=str(ROOT), env=_k8s_env(),
+        )
+    except subprocess.TimeoutExpired:
+        log.error('K8s scan timed out after 120s')
+        return None
+    except Exception as e:
+        log.error('Failed to launch K8s scan: %s', e)
+        return None
+
+    stdout = proc.stdout.strip()
+    if not stdout:
+        log.error('K8s scan produced no output (exit %d): %s',
+                  proc.returncode, (proc.stderr or '')[-300:])
+        return None
+    json_start = stdout.find('{')
+    if json_start > 0:
+        stdout = stdout[json_start:]
+    try:
+        report = json.loads(stdout)
+    except json.JSONDecodeError as e:
+        log.error('Could not parse K8s scan JSON: %s', e)
+        return None
+    # Discard reports where audit.py reported cluster unreachable (exit 1, empty results)
+    if report.get('error') or not report.get('results'):
+        log.warning('K8s scan returned no results: %s',
+                    report.get('error', 'empty results — cluster may have been unreachable during scan'))
+        return None
+    return report
+
+
+def run_k8s_cycle(config: dict) -> bool:
+    """Detect a live K8s cluster, scan it, and report findings as a separate device."""
+    ctx_name = _k8s_cluster_context()
+    if not ctx_name:
+        return True  # no cluster reachable — not an error
+
+    from connectors.kubectl_connector import cluster_server_url
+    server_url    = cluster_server_url()
+    device_id     = _k8s_device_id(server_url or ctx_name)
+    machine_host  = os.environ.get('SENTINEL_HOSTNAME', '').strip() or socket.gethostname()
+    hostname      = f'k8s:{ctx_name}@{machine_host}'
+
+    log.info('K8s cluster detected: %s  Device: %s  Host: %s', ctx_name, device_id, machine_host)
+    report = run_k8s_scan(ctx_name)
     if report is None:
         return False
 
     summary = report.get('summary', {})
-    log.info('Scan complete — FAIL:%d WARN:%d PASS:%d',
+    log.info('K8s scan complete — FAIL:%d WARN:%d PASS:%d',
              summary.get('fail', 0), summary.get('warn', 0), summary.get('pass', 0))
+    return report_to_server(report, config, device_id, hostname)
 
+
+_DOCKER_BIN = next(
+    (p for p in ['/usr/local/bin/docker', '/usr/bin/docker', '/opt/homebrew/bin/docker']
+     if Path(p).exists()),
+    'docker',
+)
+
+
+def _docker_env() -> dict:
+    """Return env vars that help docker CLI find Docker Desktop's socket when running as root.
+    On macOS, Docker Desktop exposes its socket under the user's home dir, not /var/run/docker.sock."""
+    env = os.environ.copy()
+    if sys.platform == 'darwin' and os.geteuid() == 0:
+        # Try each logged-in user's Docker Desktop socket
+        for home in Path('/Users').iterdir():
+            sock = home / '.docker' / 'run' / 'docker.sock'
+            if sock.exists():
+                env['DOCKER_HOST'] = f'unix://{sock}'
+                break
+    return env
+
+
+def _docker_running() -> bool:
+    """Return True if a Docker daemon is reachable on this machine."""
+    try:
+        r = subprocess.run(
+            [_DOCKER_BIN, 'info', '--format', '{{.ServerVersion}}'],
+            capture_output=True, text=True, timeout=5, env=_docker_env(),
+        )
+        return r.returncode == 0 and bool(r.stdout.strip())
+    except Exception:
+        return False
+
+
+def run_docker_security_scan() -> dict | None:
+    """Run docker-mode audit and return parsed JSON report."""
+    audit_script = ROOT / 'audit.py'
+    audit_binary = ROOT / 'audit'
+    if audit_binary.exists() and os.access(audit_binary, os.X_OK):
+        cmd = [str(audit_binary), '--mode', 'docker', '--profile', 'docker',
+               '--output', 'json', '--quiet']
+    elif audit_script.exists():
+        cmd = [sys.executable, str(audit_script), '--mode', 'docker', '--profile', 'docker',
+               '--output', 'json', '--quiet']
+    else:
+        log.error('Neither audit binary nor audit.py found at %s', ROOT)
+        return None
+    log.info('Docker security scan: %s', ' '.join(cmd[:5]))
+    try:
+        env = os.environ.copy()
+        if sys.platform == 'darwin' and os.geteuid() == 0:
+            from pathlib import Path as _Path
+            for home in _Path('/Users').iterdir():
+                sock = home / '.docker' / 'run' / 'docker.sock'
+                if sock.exists():
+                    env['DOCKER_HOST'] = f'unix://{sock}'
+                    break
+        proc = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8',
+                              timeout=120, cwd=str(ROOT), env=env)
+    except subprocess.TimeoutExpired:
+        log.error('Docker scan timed out')
+        return None
+    except Exception as e:
+        log.error('Failed to launch docker scan: %s', e)
+        return None
+    stdout = proc.stdout.strip()
+    if not stdout:
+        log.error('Docker scan produced no output (exit %d): %s',
+                  proc.returncode, (proc.stderr or '')[-300:])
+        return None
+    json_start = stdout.find('{')
+    if json_start > 0:
+        stdout = stdout[json_start:]
+    try:
+        return json.loads(stdout)
+    except json.JSONDecodeError as e:
+        log.error('Could not parse docker scan JSON: %s', e)
+        return None
+
+
+def run_docker_cycle(config: dict) -> bool:
+    """Detect a running Docker daemon, run container security checks, report as a fleet device."""
+    if not _docker_running():
+        return True  # no docker daemon — not an error
+
+    machine_host = os.environ.get('SENTINEL_HOSTNAME', '').strip() or socket.gethostname()
+    device_id    = hashlib.sha256(f'docker:{_hardware_seed()}'.encode()).hexdigest()[:16]
+    hostname     = f'docker:{machine_host}'
+
+    log.info('Docker daemon detected on %s  Device: %s', machine_host, device_id)
+    report = run_docker_security_scan()
+    if report is None:
+        return False
+
+    summary = report.get('summary', {})
+    log.info('Docker scan complete — FAIL:%d WARN:%d PASS:%d',
+             summary.get('fail', 0), summary.get('warn', 0), summary.get('pass', 0))
+    return report_to_server(report, config, device_id, hostname)
+
+
+def run_ai_connections_cycle(config: dict) -> bool:
+    """Scan active TCP connections for known SaaS AI services and report as shadow_devices."""
+    device_id = _device_id()
+    hostname  = os.environ.get('SENTINEL_HOSTNAME', '').strip() or socket.gethostname()
+    try:
+        sys.path.insert(0, str(ROOT))
+        from checks.ai_connections import scan as _ai_scan
+        results = _ai_scan()
+    except Exception as e:
+        log.warning('AI connection scan error (non-fatal): %s', e)
+        return True  # non-fatal
+    if results:
+        log.info('AI connections: %d active SaaS AI sessions detected', len(results))
+        report_discovery(results, config, device_id, hostname)
+    return True
+
+
+def _merge_reports(reports: list[dict]) -> dict:
+    """Merge multiple profile scan reports into one combined report."""
+    if len(reports) == 1:
+        return reports[0]
+    seen_checks: set[str] = set()
+    merged_findings: list[dict] = []
+    summary = {'total_evaluated': 0, 'pass': 0, 'warn': 0, 'fail': 0, 'skip': 0,
+               'has_critical_fail': False, 'critical_count': 0}
+    profile_names: list[str] = []
+    base = reports[0]
+    for rpt in reports:
+        pname = rpt.get('profile', '')
+        if pname and pname not in profile_names:
+            profile_names.append(pname)
+        for finding in rpt.get('findings', []):
+            cid = finding.get('check_id', '')
+            if cid in seen_checks:
+                continue
+            seen_checks.add(cid)
+            merged_findings.append(finding)
+            status = finding.get('status', '')
+            if status == 'PASS':
+                summary['pass'] += 1
+            elif status == 'WARN':
+                summary['warn'] += 1
+            elif status == 'FAIL':
+                summary['fail'] += 1
+                if finding.get('severity') == 'CRITICAL':
+                    summary['critical_count'] += 1
+                    summary['has_critical_fail'] = True
+            summary['total_evaluated'] += 1
+    merged = dict(base)
+    merged['profile'] = ', '.join(profile_names)
+    merged['findings'] = merged_findings
+    merged['summary'] = summary
+    return merged
+
+
+def run_cycle(config: dict) -> bool:
+    target     = _resolve_home() if config.get('target', '~') in ('.', '~', '') else config.get('target')
+    profiles   = [p.strip() for p in config.get('profile', 'default').split(',') if p.strip()] or ['default']
+    device_id  = _device_id()
+    hostname   = os.environ.get('SENTINEL_HOSTNAME', '').strip() or socket.gethostname()
+
+    log.info('Device: %s  Hostname: %s  Target: %s  Profiles: %s',
+             device_id, hostname, target, ', '.join(profiles))
+
+    reports: list[dict] = []
+    for profile in profiles:
+        rpt = run_scan(target, profile)
+        if rpt is None:
+            log.warning('Scan failed for profile %s — skipping', profile)
+            continue
+        s = rpt.get('summary', {})
+        log.info('Profile %s — FAIL:%d WARN:%d PASS:%d', profile,
+                 s.get('fail', 0), s.get('warn', 0), s.get('pass', 0))
+        reports.append(rpt)
+
+    if not reports:
+        return False
+
+    report = _merge_reports(reports)
     _notify_critical_findings(report)
-
     return report_to_server(report, config, device_id, hostname)
 
 
@@ -899,7 +1224,7 @@ def main() -> None:
         SCAN_JITTER   = 120   # ±2 min per scan — prevents thundering herd on large fleets
 
         device_id = _device_id()
-        hostname  = socket.gethostname()
+        hostname  = os.environ.get('SENTINEL_HOSTNAME', '').strip() or socket.gethostname()
 
         # Startup jitter: stagger first scan across fleet so mass reboots don't
         # create a thundering herd. Capped at half the scan interval.
@@ -924,6 +1249,18 @@ def main() -> None:
                 last_scan = time.time()
                 if ok:
                     last_success = last_scan
+                try:
+                    run_k8s_cycle(cfg)
+                except Exception as e:
+                    log.warning('K8s scan cycle error (non-fatal): %s', e)
+                try:
+                    run_docker_cycle(cfg)
+                except Exception as e:
+                    log.warning('Docker scan cycle error (non-fatal): %s', e)
+                try:
+                    run_ai_connections_cycle(cfg)
+                except Exception as e:
+                    log.warning('AI connection scan cycle error (non-fatal): %s', e)
 
             # Poll for on-demand command
             cmd = poll_for_command(cfg, device_id)
@@ -937,6 +1274,18 @@ def main() -> None:
                 last_scan = time.time()
                 if ok:
                     last_success = last_scan
+                try:
+                    run_k8s_cycle(cfg)
+                except Exception as e:
+                    log.warning('K8s on-demand scan error (non-fatal): %s', e)
+                try:
+                    run_docker_cycle(cfg)
+                except Exception as e:
+                    log.warning('Docker on-demand scan error (non-fatal): %s', e)
+                try:
+                    run_ai_connections_cycle(cfg)
+                except Exception as e:
+                    log.warning('AI connection on-demand scan error (non-fatal): %s', e)
             elif cmd and cmd.startswith('scan_profile:'):
                 profile_override = cmd[len('scan_profile:'):]
                 log.info('On-demand scan with profile override: %s', profile_override)

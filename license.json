@@ -1,13 +1,15 @@
 {
-  "customer_id": "mark-demo",
-  "licensed_to": "M.A.R.K. AI Systems — Demo",
+  "customer_id": "mfdynamicsllc",
+  "licensed_to": "MF Dynamics LLC",
   "max_agents": 0,
-  "grace_pct": 10,
-  "expires_at": "",
-  "issued_at": "2026-05-19",
+  "grace_pct": 10.0,
+  "expires_at": "2028-05-20",
+  "issued_at": "2026-06-19",
   "issued_by": "M.A.R.K. AI Systems",
-  "plan": "demo",
+  "plan": "plus",
+  "webhook_url": "",
   "telemetry_url": "",
-  "telemetry_interval_h": 24,
-  "stale_alert_hours": 26
+  "telemetry_interval_h": 24.0,
+  "stale_alert_hours": 26.0,
+  "sig": "5151999d98b5dafd15140fb799034e1acbc159be3c60af1217bda1e3c2a5626f"
 }

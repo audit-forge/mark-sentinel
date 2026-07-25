@@ -1,0 +1,53 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: arckon-edge-dns
+  namespace: arckon
+  labels:
+    app.kubernetes.io/name: arckon-edge-dns
+    app.kubernetes.io/version: "1.0.0"
+    app.kubernetes.io/component: edge-sensor
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: arckon-edge-dns
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: arckon-edge-dns
+    spec:
+      containers:
+        - name: edge-dns
+          image: ghcr.io/hash-ai/arckon-edge-dns:1.0.0
+          args:
+            - --source
+            - dnsmasq
+            - --sensor-id
+            - site-a-dns
+            - --log-file
+            - /logs/dnsmasq.log
+          volumeMounts:
+            - name: resolver-log
+              mountPath: /logs
+              readOnly: true
+          resources:
+            requests:
+              cpu: 25m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            capabilities:
+              drop: ["ALL"]
+      volumes:
+        # Replace this with a read-only PVC or supported log-forwarding sidecar.
+        # A random Kubernetes node does not see LAN/mobile DNS traffic by itself.
+        - name: resolver-log
+          hostPath:
+            path: /var/log
+            type: Directory

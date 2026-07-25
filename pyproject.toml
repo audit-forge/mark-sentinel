@@ -3,9 +3,9 @@ requires = ["hatchling>=1.13,<2.0"]
 build-backend = "hatchling.build"
 
 [project]
-name = "mark-sentinel"
-version = "0.1.0"
-description = "M.A.R.K. Sentinel — AI Security Audit Tool (packaged entry)"
+name = "arckon"
+version = "1.0.0"
+description = "Arckon AI Security Platform"
 readme = "README.md"
 requires-python = ">=3.11"
 authors = [ { name = "Keith Ferguson", email = "keithferg2018@gmail.com" } ]
@@ -24,16 +24,17 @@ dependencies = [
 ]
 
 [project.scripts]
-mark-sentinel = "server:main"
+arckon = "server:main"
 
 [tool.hatch.build.targets.wheel]
 include = ["**/*"]
 
+
 [tool.ruff]
-target-version = "py311"
+target-version = "py312"
 exclude = [
-    "server.py",
-    "admin/",
+    "server.py",          # contains embedded JS f-string templates that confuse ruff
+    "admin/",             # separate admin app — not part of sentinel core
     "test/",
     "tests/",
     ".git",
@@ -41,5 +42,12 @@ exclude = [
 ]
 
 [tool.ruff.lint]
+# Only enforce clear-cut errors; ignore style opinions
 select = ["E", "F", "W"]
-ignore = ["E501", "E402", "E701", "E702", "E741", "F401"]
+ignore = [
+    "E501",   # line too long — server.py HTML/JS lines are intentionally long
+    "E402",   # module-level import not at top — used in conditional imports
+    "E702",   # multiple statements on one line — intentional in storage queries
+    "E741",   # ambiguous variable name — l used in list comprehensions
+    "F401",   # unused import — some are re-exported
+]

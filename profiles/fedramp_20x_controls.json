@@ -1,0 +1,208 @@
+{
+  "AI-DEPLOY-001": [
+    "KSI-IAM-APM",
+    "KSI-IAM-ELP",
+    "KSI-IAM-JIT",
+    "KSI-IAM-SNU"
+  ],
+  "AI-DEPLOY-002": [
+    "KSI-CMT-RMV",
+    "KSI-IAM-ELP",
+    "KSI-MLA-EVC",
+    "KSI-SVC-ACM"
+  ],
+  "AI-DEPLOY-003": [
+    "KSI-MLA-OSM",
+    "KSI-MLA-RVL",
+    "KSI-MLA-LET",
+    "KSI-CMT-LMC"
+  ],
+  "AI-DEPLOY-004": [
+    "KSI-IAM-APM",
+    "KSI-IAM-ELP",
+    "KSI-CNA-MAT",
+    "KSI-CNA-RNT"
+  ],
+  "AI-DEPLOY-005": [
+    "KSI-CNA-MAT",
+    "KSI-SVC-SIN",
+    "KSI-CNA-ULN",
+    "KSI-PIY-RSD"
+  ],
+  "AI-DEPLOY-006": [
+    "KSI-SVC-EIS",
+    "KSI-CNA-MAT",
+    "KSI-CNA-RNT",
+    "KSI-CNA-RVP"
+  ],
+  "AI-INP-001": [
+    "KSI-CNA-MAT",
+    "KSI-PIY-RSD"
+  ],
+  "AI-INP-002": [
+    "KSI-CNA-MAT",
+    "KSI-CNA-RNT",
+    "KSI-CNA-ULN",
+    "KSI-PIY-RSD"
+  ],
+  "AI-INP-003": [
+    "KSI-PIY-RSD",
+    "KSI-CMT-LMC",
+    "KSI-CMT-RMV",
+    "KSI-CMT-RVP"
+  ],
+  "AI-INP-004": [
+    "KSI-CNA-MAT",
+    "KSI-PIY-RSD"
+  ],
+  "AI-INP-005": [
+    "KSI-CNA-RVP",
+    "KSI-INR-RIR",
+    "KSI-MLA-LET",
+    "KSI-MLA-OSM"
+  ],
+  "AI-OUT-001": [
+    "KSI-RPL-ABO",
+    "KSI-SVC-RUD"
+  ],
+  "AI-OUT-002": [
+    "KSI-MLA-OSM",
+    "KSI-MLA-RVL",
+    "KSI-INR-RIR",
+    "KSI-MLA-LET"
+  ],
+  "AI-OUT-003": [
+    "KSI-CNA-MAT",
+    "KSI-PIY-RSD"
+  ],
+  "AI-OUT-004": [
+    "KSI-CNA-MAT",
+    "KSI-PIY-RSD"
+  ],
+  "AI-OUT-005": [
+    "KSI-CMT-LMC",
+    "KSI-CMT-RMV",
+    "KSI-CNA-MAT",
+    "KSI-MLA-EVC"
+  ],
+  "AI-AGENT-001": [
+    "KSI-CMT-LMC",
+    "KSI-CMT-RMV",
+    "KSI-IAM-AAM",
+    "KSI-IAM-ELP"
+  ],
+  "AI-AGENT-002": [
+    "KSI-IAM-AAM",
+    "KSI-IAM-ELP",
+    "KSI-IAM-JIT",
+    "KSI-IAM-SNU"
+  ],
+  "AI-AGENT-003": [
+    "KSI-PIY-RSD",
+    "KSI-CMT-LMC",
+    "KSI-CMT-RMV",
+    "KSI-CMT-RVP"
+  ],
+  "AI-AGENT-004": [
+    "KSI-CNA-MAT",
+    "KSI-IAM-APM",
+    "KSI-IAM-ELP",
+    "KSI-IAM-JIT"
+  ],
+  "AI-AGENT-005": [
+    "KSI-MLA-OSM",
+    "KSI-MLA-RVL",
+    "KSI-MLA-LET",
+    "KSI-CMT-LMC"
+  ],
+  "AI-AGENT-006": [
+    "KSI-CNA-MAT",
+    "KSI-CNA-RNT",
+    "KSI-CNA-ULN",
+    "KSI-MLA-OSM"
+  ],
+  "AI-SUPPLY-001": [
+    "KSI-CMT-RMV",
+    "KSI-PIY-GIV",
+    "KSI-SVC-VRI",
+    "KSI-CMT-LMC"
+  ],
+  "AI-SUPPLY-002": [
+    "KSI-MLA-EVC",
+    "KSI-SVC-VRI",
+    "KSI-CMT-RMV",
+    "KSI-CNA-DFP"
+  ],
+  "AI-SUPPLY-003": [
+    "KSI-MLA-EVC",
+    "KSI-CMT-RMV",
+    "KSI-SVC-ACM",
+    "KSI-SVC-VRI"
+  ],
+  "AI-SUPPLY-004": [
+    "KSI-MLA-RVL",
+    "KSI-IAM-AAM",
+    "KSI-IAM-APM",
+    "KSI-IAM-ELP"
+  ],
+  "AI-SUPPLY-005": [
+    "KSI-CMT-RMV",
+    "KSI-CNA-DFP",
+    "KSI-CNA-IBP",
+    "KSI-IAM-ELP"
+  ],
+  "AI-SUPPLY-006": [
+    "KSI-CMT-LMC",
+    "KSI-CMT-RMV",
+    "KSI-IAM-APM",
+    "KSI-IAM-ELP"
+  ],
+  "AI-GOV-003": [
+    "KSI-MLA-OSM",
+    "KSI-INR-AAR",
+    "KSI-INR-RIR",
+    "KSI-INR-RPI"
+  ],
+  "AI-GOV-004": [
+    "KSI-IAM-AAM",
+    "KSI-IAM-APM",
+    "KSI-IAM-ELP",
+    "KSI-IAM-JIT"
+  ],
+  "AI-GOV-005": [
+    "KSI-CMT-RMV",
+    "KSI-PIY-GIV",
+    "KSI-SVC-VRI",
+    "KSI-CMT-LMC"
+  ],
+  "AI-RUNTIME-001": [
+    "KSI-MLA-LET",
+    "KSI-MLA-OSM",
+    "KSI-MLA-RVL",
+    "KSI-CMT-LMC"
+  ],
+  "AI-RUNTIME-002": [
+    "KSI-MLA-OSM",
+    "KSI-INR-RIR",
+    "KSI-MLA-RVL",
+    "KSI-INR-AAR"
+  ],
+  "AI-RUNTIME-003": [
+    "KSI-IAM-AAM",
+    "KSI-IAM-ELP",
+    "KSI-IAM-JIT",
+    "KSI-IAM-SNU"
+  ],
+  "AI-RUNTIME-004": [
+    "KSI-CMT-LMC",
+    "KSI-CMT-RMV",
+    "KSI-CNA-MAT",
+    "KSI-CNA-RVP"
+  ],
+  "AI-RUNTIME-005": [
+    "KSI-MLA-OSM",
+    "KSI-IAM-JIT",
+    "KSI-RPL-ABO",
+    "KSI-SVC-RUD"
+  ]
+}

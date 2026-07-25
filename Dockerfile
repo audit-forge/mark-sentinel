@@ -1,32 +1,14 @@
-# ── Stage 1: Compile scanner binaries only (audit + demo) ────────────────────
-# server.py runs as Python — it's behind auth and changes frequently.
-# audit.py and demo.py are the actual IP — compiled to native binaries.
-FROM --platform=linux/amd64 python:3.12.4-slim AS builder
-WORKDIR /src
+# ── Binaries are compiled locally on the developer machine, not here. ─────────
+# Run ./scripts/build_binaries.sh on your Mac before building this image.
+# That produces dist/audit and dist/agent (linux/amd64 via Docker buildx).
+# The Dockerfile simply copies them in — keeps the image build fast and avoids
+# needing GCC/Nuitka on the deployment target.
+#
+# What gets compiled (source → binary):
+#   audit.py + checks/  → dist/audit   (scanner IP — never distributed)
+#   agent.py + discovery.py + connectors/ → dist/agent  (shipped to customers)
+#   server.py           → stays Python  (server-side only, never leaves our infra)
 
-RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-recommends \
-    gcc g++ patchelf ccache make libffi-dev && \
-    rm -rf /var/lib/apt/lists/*
-
-COPY requirements.txt ./
-RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir --upgrade setuptools wheel && \
-    pip install --no-cache-dir -r requirements.txt && \
-    pip install --no-cache-dir nuitka ordered-set
-
-# Copy only the files needed for compilation so layer cache survives server.py changes
-COPY audit.py checks/ profiles/ ./
-COPY scripts/ ./scripts/
-
-RUN python -m nuitka --standalone --assume-yes-for-downloads \
-    --output-dir=/build/audit --output-filename=audit \
-    audit.py
-
-RUN python -m nuitka --standalone --assume-yes-for-downloads \
-    --output-dir=/build/demo --output-filename=demo \
-    scripts/demo.py
-
-# ── Stage 2: Python runtime with compiled scanners ───────────────────────────
 FROM --platform=linux/amd64 python:3.12.4-slim
 WORKDIR /app
 ENV PYTHONUNBUFFERED=1
@@ -40,21 +22,15 @@ RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir --upgrade setuptools wheel && \
     pip install --no-cache-dir -r requirements.txt
 
-# Copy all Python source for the server
+# Copy all source (server.py and supporting server-side modules)
 COPY . .
 
-# Overwrite audit and demo with compiled binaries from builder.
-# Nuitka --standalone binaries are NOT self-contained single files — they
-# require their bundled .so extension modules (e.g. _struct.so, _socket.so)
-# to sit alongside the executable at runtime. Copy the whole *.dist/ output
-# directory, not just the binary, or the binary fails at the first stdlib
-# import that needs a compiled extension (struct, socket, etc).
-COPY --from=builder /build/audit/audit.dist/ /app/
-COPY --from=builder /build/demo/demo.dist/ /app/scripts/
-RUN chmod +x /app/audit /app/scripts/demo
-
-RUN --mount=type=bind,from=builder,source=/src,target=/build-src \
-    cp /build-src/license.json /app/ 2>/dev/null || true
+# Copy pre-built Linux binaries compiled locally via scripts/build_binaries.sh
+# If dist/ doesn't exist, the COPY is skipped and the server falls back to
+# serving Python source (dev mode — source is still present in /app).
+COPY dist/audit* /app/audit
+COPY dist/agent* /app/agent
+RUN chmod +x /app/audit /app/agent 2>/dev/null || true
 
 RUN chown -R sentinel:sentinel /app
 USER sentinel
