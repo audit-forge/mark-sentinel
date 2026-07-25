@@ -133,6 +133,23 @@ Every finding includes:
 
 Arckon does NOT auto-remediate. All fixes require human approval. This is by design — the tool is advisory, not autonomous.
 
+### 2.9 Findings → Your Existing Tools
+
+When a scan detects a new CRITICAL or HIGH finding, Arckon delivers it automatically — no manual export, no separate dashboard to check — into whatever tools the customer already runs day to day. This fires within seconds of the scan completing, is deduplicated (a repeat finding won't re-fire for 24 hours), and only triggers on genuinely *new* findings, not ones already open from a previous scan.
+
+**What's built and proven today:**
+
+- **Chat / collaboration:** Slack, Microsoft Teams, Google Chat, and generic webhooks — pick any (or all) of them.
+- **Ticketing / PM:** ConnectWise Manage, Autotask PSA, HaloPSA, and Jira — a service ticket or issue is created automatically, assigned the right priority based on severity.
+- **Wiki / documentation:** Notion — a page is created automatically under whatever parent page or database the customer designates.
+- **Email and SIEM forwarding** (Splunk, Sentinel, and others) round out the list.
+
+**Every one of these channels receives the same real content, not a bare title.** A finding delivered to Slack, a Jira ticket, and a Notion page all carry: what was found, which category it falls under, which compliance controls it maps to (NIST AI RMF, EU AI Act, CMMC, etc. — whichever the customer's active profile covers), and the specific recommended fix — the same "canned response" content, reformatted per destination (plain text for chat, a structured ticket description for PSA/Jira, formatted blocks for Notion).
+
+**What it takes to add a tool that isn't on this list yet.** Every one of the integrations above shares one small, consistent shape: a "create a ticket/page/message for this finding" function and a "test the connection" function, registered in a small provider array the settings page already knows how to render a config card, Save button, and Test button for. Notion itself was added this way, end to end (provider module, auto-fire wiring, settings UI, tests) — because the delivery pipeline, the canned-response content, and the config-card UI pattern already existed, only the tool-specific piece needed writing.
+
+That's the real basis for saying **the platform is roughly 98% built for any new tool a customer names — the remaining ~2% is that one tool-specific piece**, the same kind of scoped, bounded implementation commitment any SaaS vendor gives when a customer asks "can you plug into X?" It's not a number pulled from nowhere — it's what actually happened building Notion, the newest one on the list.
+
 ---
 
 ## PART 3: HOW ARCKON IS DEPLOYED

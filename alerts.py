@@ -201,6 +201,96 @@ def save_alert_config(path: Path, new_data: dict, existing_path: Path) -> None:
 
 # ── Alert firing ──────────────────────────────────────────────────────────────
 
+def _finding_payload(event: str, severity: str, hostname: str, finding: dict) -> dict:
+    """Builds the alert payload for one finding — carries remediation/
+    details/category/frameworks through from the raw finding dict (same
+    field names ArckonFinding.from_result() reads in siem_connector.py)
+    so every downstream channel (chat, PSA tickets, Notion) can render a
+    real canned response instead of a bare title. Previously these fields
+    were dropped here, which is why every auto-fired notification just
+    said "log in to see details" even though the finding data was right
+    there the whole time."""
+    return {
+        'event':       event,
+        'severity':    severity,
+        'device':      hostname,
+        'check_id':    finding.get('check_id', ''),
+        'title':       finding.get('title', ''),
+        'category':    finding.get('category', ''),
+        'details':     finding.get('details', ''),
+        'remediation': finding.get('remediation', ''),
+        'frameworks':  finding.get('frameworks') or {},
+    }
+
+
+def _build_canned_response(payload: dict) -> dict:
+    """Turns an alert payload into structured, actionable content shared
+    by every notification channel (chat, PSA tickets, Notion) — so a
+    customer receiving a Slack ping or a Jira ticket sees real "what /
+    why / how to fix" content instead of a bare title and a "log in to
+    see details" punt.
+
+    Returns {summary, body_text, body_markdown}: callers pick whichever
+    shape their target API wants — Slack/Teams/email want plain text
+    with light structure, Notion wants markdown-ish block content, PSA
+    tickets want a plain description field. All three are built from the
+    same underlying facts so the content never diverges between channels.
+    """
+    severity    = payload.get('severity', 'HIGH')
+    device      = payload.get('device', 'unknown')
+    check_id    = payload.get('check_id', '')
+    title       = payload.get('title', '')
+    category    = payload.get('category', '')
+    details     = payload.get('details', '')
+    remediation = payload.get('remediation', '')
+    frameworks  = payload.get('frameworks') or {}
+
+    summary = f'{severity} Finding' + (f' — {check_id}' if check_id else '') + (f': {title}' if title else '')
+
+    framework_line = ''
+    if frameworks:
+        mapped = ', '.join(
+            f'{k}: {v}' if isinstance(v, str) and v else str(k)
+            for k, v in frameworks.items()
+        )
+        framework_line = f'Mapped controls: {mapped}'
+
+    fix_line = f'Recommended fix: {remediation}' if remediation \
+        else 'Log in to RiskRaven: Arckon to view full details and remediation steps.'
+
+    # detail_lines omits the summary/device line — for callers (like
+    # _format_text) that already render their own branded header and
+    # just need the enriched tail appended to it. body_text/body_markdown
+    # below are the full self-contained versions, for callers with no
+    # header of their own (PSA ticket descriptions, the Notion page body).
+    detail_lines = []
+    if category:
+        detail_lines.append(f'Category: {category}')
+    if details:
+        detail_lines.append(f'What we found: {details}')
+    if framework_line:
+        detail_lines.append(framework_line)
+    detail_lines.append(fix_line)
+
+    text_lines = [f'{summary} on {device}.'] + detail_lines
+
+    md_lines = [f'**{summary}** on `{device}`']
+    if category:
+        md_lines.append(f'**Category:** {category}')
+    if details:
+        md_lines.append(f'**What we found:** {details}')
+    if frameworks:
+        md_lines.append(f'**Mapped controls:** {mapped}')
+    md_lines.append(f'**Recommended fix:** {remediation}' if remediation else fix_line)
+
+    return {
+        'summary':       summary,
+        'detail_text':   '\n'.join(detail_lines),
+        'body_text':     '\n'.join(text_lines),
+        'body_markdown': '\n\n'.join(md_lines),
+    }
+
+
 def fire_alerts(report: dict, device_id: str, hostname: str,
                 alert_cfg: dict, store=None) -> None:
     """Called after each new scan report is stored. Fires for new CRITICAL/HIGH findings."""
@@ -223,25 +313,13 @@ def fire_alerts(report: dict, device_id: str, hostname: str,
             if (f.get('status') == 'FAIL'
                     and f.get('severity', '').upper() == 'CRITICAL'
                     and f.get('check_id', '') not in prev_fail_ids):
-                messages.append({
-                    'event':    'new_critical_finding',
-                    'severity': 'CRITICAL',
-                    'device':   hostname,
-                    'check_id': f.get('check_id', ''),
-                    'title':    f.get('title', ''),
-                })
+                messages.append(_finding_payload('new_critical_finding', 'CRITICAL', hostname, f))
     if triggers.get('new_high'):
         for f in findings:
             if (f.get('status') == 'FAIL'
                     and f.get('severity', '').upper() == 'HIGH'
                     and f.get('check_id', '') not in prev_fail_ids):
-                messages.append({
-                    'event':    'new_high_finding',
-                    'severity': 'HIGH',
-                    'device':   hostname,
-                    'check_id': f.get('check_id', ''),
-                    'title':    f.get('title', ''),
-                })
+                messages.append(_finding_payload('new_high_finding', 'HIGH', hostname, f))
 
     for msg in messages:
         if store is not None:
@@ -364,6 +442,18 @@ def send_test_psa(alert_cfg: dict) -> tuple[bool, str]:
         return False, f'PSA test failed: {e}'
 
 
+def send_test_notion(alert_cfg: dict) -> tuple[bool, str]:
+    """Test Notion connectivity. Returns (ok, message)."""
+    notion_cfg = alert_cfg.get('notion', {})
+    if not notion_cfg.get('token'):
+        return False, 'No Notion token configured'
+    try:
+        from connectors.notion_connector import test_connection
+        return test_connection(notion_cfg)
+    except Exception as e:
+        return False, f'Notion test failed: {e}'
+
+
 def _dispatch(alert_cfg: dict, payload: dict) -> list[str]:
     """Deliver alert to all configured channels. Returns list of channel names fired."""
     slack_url   = alert_cfg.get('slack_webhook', '').strip()
@@ -394,17 +484,49 @@ def _dispatch(alert_cfg: dict, payload: dict) -> list[str]:
     if psa_cfg.get('provider') and payload.get('event', '').startswith('new_'):
         _create_psa_ticket(psa_cfg, payload)
         fired.append(f'psa_{psa_cfg["provider"]}')
+    notion_cfg = alert_cfg.get('notion', {})
+    if notion_cfg.get('enabled') and notion_cfg.get('token') and payload.get('event', '').startswith('new_'):
+        _create_notion_page(notion_cfg, payload)
+        fired.append('notion')
     return fired
+
+
+def _create_notion_page(notion_cfg: dict, payload: dict) -> None:
+    try:
+        from connectors.notion_connector import create_page
+        finding = {
+            'check_id':    payload.get('check_id', ''),
+            'title':       payload.get('title', ''),
+            'severity':    payload.get('severity', 'HIGH'),
+            'description': _build_canned_response(payload)['detail_text'],
+            'remediation': payload.get('remediation', ''),
+        }
+        hostname = payload.get('device', 'Unknown')
+        ok, msg = create_page(notion_cfg, finding, hostname)
+        if ok:
+            log.info('Notion page created: %s', msg)
+        else:
+            log.error('Notion page creation failed: %s', msg)
+    except Exception as e:
+        log.error('Notion dispatch error: %s', e)
 
 
 def _create_psa_ticket(psa_cfg: dict, payload: dict) -> None:
     try:
         from connectors.psa_connector import create_ticket
+        # description now carries the full canned response (what was
+        # found, mapped controls, recommended fix) instead of just
+        # repeating the title — every PSA provider's ticket body function
+        # already has fallback logic reading this field (e.g. Jira's
+        # `finding.get('description', finding.get('remediation', ''))`,
+        # psa_connector.py:307), it just never received anything richer
+        # than the title before now.
         finding = {
             'check_id':    payload.get('check_id', ''),
             'title':       payload.get('title', ''),
             'severity':    payload.get('severity', 'HIGH'),
-            'description': payload.get('title', ''),
+            'description': _build_canned_response(payload)['detail_text'],
+            'remediation': payload.get('remediation', ''),
         }
         hostname = payload.get('device', 'Unknown')
         ok, msg = create_ticket(psa_cfg, finding, hostname)
@@ -605,7 +727,7 @@ def _format_text(payload: dict) -> str:
     return (f"RiskRaven: Arckon — {prefix}\n"
             f"Device: {device}\n"
             + (f"Check: {check}" + (f" — {title}" if title else '') + "\n" if check else (f"{title}\n" if title else ''))
-            + "Log in to RiskRaven: Arckon to view full details and remediation steps.")
+            + _build_canned_response(payload)['detail_text'])
 
 
 def _alert_subject(payload: dict) -> str:
