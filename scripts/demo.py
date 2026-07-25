@@ -339,9 +339,9 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__,
     )
-    _default_target = str(PROJECT_DIR / 'demo_target')
+    _default_target = str(PROJECT_DIR / 'test' / 'fixtures' / 'deploy-baseline')
     parser.add_argument('--target', default=_default_target, metavar='PATH',
-                        help='Directory to scan (default: demo_target/ — fictional vulnerable deployment)')
+                        help='Directory to scan (default: test/fixtures/deploy-baseline — vulnerable fixture)')
     parser.add_argument('--profile', default='default',
                         help='Audit profile: default, fedramp, cmmc, financial, healthcare, biotech, owasp_agentic, eu_ai_act (default: default)')
     parser.add_argument('--openai-model', default='gpt-4o', metavar='MODEL',
