@@ -35,7 +35,7 @@ if ($confirm -notmatch '^[Yy]$') {
 
 # ── Stop and remove service ───────────────────────────────────────────────────
 
-$nssmPath = (Get-Command "nssm" -ErrorAction SilentlyContinue)?.Source
+$nssmCmd = Get-Command "nssm" -ErrorAction SilentlyContinue; $nssmPath = if ($nssmCmd) { $nssmCmd.Source } else { $null }
 $existingSvc = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
 
 if ($existingSvc) {
