@@ -55,6 +55,13 @@ _SMB_DETAILS = {
     "AI-GOV-005": "No list of all the AI tools and models your business uses.",
 }
 
+# Titles a check can take on when it reclassifies a finding. When a result
+# carries one of these, its own details describe the narrower situation, so the
+# generic SMB text for that check_id would be misleading.
+_SPECIAL_TITLES = {
+    "AI-DEPLOY-002": "CI Test Credential Hygiene",
+}
+
 _MODE_LABELS = {
     'config':    'Static config scan',
     'api':       'Live probes — OpenAI-compatible API',
@@ -225,7 +232,9 @@ def _format_result(r: CheckResult, is_smb: bool, show_fix: bool = True,
     sev_tag = f" [{r.severity}]" if r.status in (FAIL, WARN) else ""
     lines.append(f"  {icon} [{label}]{sev_tag} {r.check_id}: {r.title}")
 
-    details = _SMB_DETAILS.get(r.check_id) if (is_smb and r.check_id in _SMB_DETAILS) else (r.details or "")
+    use_smb = (is_smb and r.check_id in _SMB_DETAILS
+               and _SPECIAL_TITLES.get(r.check_id) != r.title)
+    details = _SMB_DETAILS[r.check_id] if use_smb else (r.details or "")
     lines += _wrap(details, indent="     ")
 
     if r.evidence:
