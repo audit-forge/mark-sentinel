@@ -1316,6 +1316,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             '/api/fleet/aibom.json':       self._api_fleet_aibom_json,
             '/api/branding':               self._api_get_branding,
             '/api/psa/config':             self._api_get_psa_config,
+            '/api/wiki/config':            self._api_get_wiki_config,
             '/download/shortcut': self._serve_shortcut,
         }
         if path in static:
@@ -1448,6 +1449,12 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self._api_test_psa_ticket(path[len('/api/psa/test-ticket/'):].strip('/'))
         elif path.startswith('/api/psa/test/'):
             self._api_test_psa_provider(path[len('/api/psa/test/'):].strip('/'))
+        elif path == '/api/wiki/config':
+            self._api_set_wiki_config()
+        elif path.startswith('/api/wiki/test-page/'):
+            self._api_test_wiki_page(path[len('/api/wiki/test-page/'):].strip('/'))
+        elif path.startswith('/api/wiki/test/'):
+            self._api_test_wiki_provider(path[len('/api/wiki/test/'):].strip('/'))
         elif path == '/api/alerts/events/review-all':
             self._api_review_all_alerts()
         elif path.startswith('/api/alerts/events/') and path.endswith('/review'):
@@ -4260,6 +4267,109 @@ load();
         except Exception as e:
             self._json({'ok': False, 'message': str(e)}, 500)
 
+    # ── Wiki/docs integrations (Notion today; same array-of-providers
+    #    shape as PSA_DEFS/SIEM_DEFS so a second wiki provider is a new
+    #    array entry + one provider function, not a new subsystem) ──────────
+
+    def _api_get_wiki_config(self):
+        try:
+            from alerts import load_alert_config
+            cfg = load_alert_config(ROOT / 'data' / 'alerts_config.json') or {}
+            notion = cfg.get('notion', {})
+            _M = '__set__'
+            self._json({
+                'notion': {
+                    'enabled':        bool(notion.get('enabled')),
+                    'token':          _M if notion.get('token') else '',
+                    'parent_type':    notion.get('parent_type', 'page'),
+                    'page_id':        notion.get('page_id', ''),
+                    'database_id':    notion.get('database_id', ''),
+                    'title_property': notion.get('title_property', 'Name'),
+                },
+            })
+        except Exception as e:
+            self._json({'error': str(e)}, 500)
+
+    def _api_set_wiki_config(self):
+        length = _content_length(self.headers)
+        if not length:
+            self._send(400, b'Empty body', 'text/plain')
+            return
+        try:
+            body = json.loads(self.rfile.read(length))
+        except json.JSONDecodeError:
+            self._send(400, b'Invalid JSON', 'text/plain')
+            return
+        try:
+            from alerts import load_alert_config
+            cfg = load_alert_config(ROOT / 'data' / 'alerts_config.json') or {}
+            _M = '__set__'
+
+            wiki_id = body.get('id', '')
+            fields  = body.get('fields', {})
+            enabled = body.get('enabled', False)
+
+            def _restore(incoming, saved):
+                return saved if incoming == _M else (incoming or '')
+
+            if wiki_id == 'notion':
+                existing = cfg.get('notion', {})
+                # Credentials are preserved even when disabled (same as
+                # PSA's pattern — unchecking "Enable" shouldn't force
+                # re-entering the token later). alerts.py's _dispatch()
+                # checks BOTH `enabled` and `token`, so disabling here is
+                # what actually stops it from firing, not clearing the secret.
+                cfg['notion'] = {
+                    'enabled':        bool(enabled),
+                    'token':          _restore(fields.get('token', ''), existing.get('token', '')),
+                    'parent_type':    str(fields.get('parent_type', 'page')).strip() or 'page',
+                    'page_id':        str(fields.get('page_id', '')).strip(),
+                    'database_id':    str(fields.get('database_id', '')).strip(),
+                    'title_property': str(fields.get('title_property', 'Name')).strip() or 'Name',
+                }
+            else:
+                self._json({'ok': False, 'error': f'unknown wiki provider: {wiki_id!r}'}, 400)
+                return
+
+            path = ROOT / 'data' / 'alerts_config.json'
+            path.write_text(json.dumps(cfg, indent=2), encoding='utf-8')
+            self._json({'ok': True})
+        except Exception as e:
+            self._json({'ok': False, 'error': str(e)}, 500)
+
+    def _api_test_wiki_provider(self, wiki_id: str):
+        try:
+            from alerts import load_alert_config
+            cfg = load_alert_config(ROOT / 'data' / 'alerts_config.json') or {}
+            if wiki_id == 'notion':
+                from connectors.notion_connector import test_connection
+                ok, msg = test_connection(cfg.get('notion', {}))
+            else:
+                ok, msg = False, f'unknown wiki provider: {wiki_id!r}'
+            self._json({'ok': ok, 'message': msg})
+        except Exception as e:
+            self._json({'ok': False, 'message': str(e)}, 500)
+
+    def _api_test_wiki_page(self, wiki_id: str):
+        try:
+            from alerts import load_alert_config
+            cfg = load_alert_config(ROOT / 'data' / 'alerts_config.json') or {}
+            dummy_finding = {
+                'check_id':    'AI-DEPLOY-001',
+                'severity':    'HIGH',
+                'title':       'Test finding from Arckon',
+                'description': 'This is a test page created from the Arckon dashboard to verify the wiki integration.',
+                'status':      'FAIL',
+            }
+            if wiki_id == 'notion':
+                from connectors.notion_connector import create_page
+                ok, msg = create_page(cfg.get('notion', {}), dummy_finding, 'arckon-test')
+            else:
+                ok, msg = False, f'unknown wiki provider: {wiki_id!r}'
+            self._json({'ok': ok, 'message': msg})
+        except Exception as e:
+            self._json({'ok': False, 'message': str(e)}, 500)
+
     def _api_get_branding(self):
         path = ROOT / 'data' / 'branding.json'
         try:
@@ -6401,6 +6511,11 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
   </div>
   <div id="psa-save-banner" style="display:none;background:#D1FAE5;color:#065F46;border:1px solid #6EE7B7;border-radius:6px;padding:10px 16px;margin-bottom:16px;font-size:13px">&#10003; PSA settings saved</div>
   <div id="psa-cards" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(480px,1fr));gap:20px;margin-bottom:32px"></div>
+
+  <div style="font-size:11px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:#6B7280;margin-bottom:12px">Wiki &amp; Docs</div>
+  <p style="color:#6B7280;font-size:13px;margin-top:-8px;margin-bottom:16px">Create a page for every new CRITICAL or HIGH finding in your team's wiki or notes system, with the same details and remediation steps sent to chat and ticketing.</p>
+  <div id="wiki-save-banner" style="display:none;background:#D1FAE5;color:#065F46;border:1px solid #6EE7B7;border-radius:6px;padding:10px 16px;margin-bottom:16px;font-size:13px">&#10003; Wiki settings saved</div>
+  <div id="wiki-cards" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(480px,1fr));gap:20px;margin-bottom:32px"></div>
 
   <div style="font-size:11px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:#6B7280;margin-bottom:12px">SIEM &amp; Log Management</div>
   <div id="siem-save-banner" style="display:none;background:#D1FAE5;color:#065F46;border:1px solid #6EE7B7;border-radius:6px;padding:10px 16px;margin-bottom:16px;font-size:13px">&#10003; Settings saved</div>
@@ -8823,6 +8938,153 @@ async function testPsaTicket(psaId, btn) {{
 
 loadPsaClientOrgs();
 loadPsaConfig();
+
+// ── Wiki/docs integrations ───────────────────────────────────────────────────
+// Same array-of-providers shape as PSA_DEFS above — a second wiki/notes
+// tool (Confluence, OneNote, etc.) is a new entry here plus one small
+// provider function in connectors/, not a new subsystem.
+
+const NOTION_DEFS = [
+  {{id:'notion', name:'Notion', icon:'&#128214;', color:'#000000',
+    desc:'Create a page for every new CRITICAL/HIGH finding, with the same remediation content sent to chat and tickets.',
+    howto:'notion.so/my-integrations → New integration → copy the "Internal Integration Secret" as the token below. Then share your target page or database with that integration (••• menu → Connections) — a valid token alone is not enough, Notion requires this second step.',
+    fields:[
+      {{key:'token',          label:'Integration Token', type:'password', ph:'secret_...'}},
+      {{key:'parent_type',    label:'Parent Type',       type:'select',   ph:'', opts:[['page','Page'],['database','Database']]}},
+      {{key:'page_id',        label:'Page ID',           type:'text',     ph:'Parent page ID (if Parent Type = Page)'}},
+      {{key:'database_id',    label:'Database ID',       type:'text',     ph:'Parent database ID (if Parent Type = Database)'}},
+      {{key:'title_property', label:'Title Property',    type:'text',     ph:'Name  (the title column name in that database)'}},
+    ]}},
+];
+
+var _wikiCfg = {{}};
+
+async function loadWikiConfig() {{
+  try {{
+    const r = await fetch('/api/wiki/config');
+    if (!r.ok) return;
+    _wikiCfg = await r.json();
+    renderWikiCards();
+  }} catch (_) {{}}
+}}
+
+function renderWikiCards() {{
+  const container = document.getElementById('wiki-cards');
+  if (!container) return;
+  container.innerHTML = NOTION_DEFS.map(def => {{
+    const cfg     = _wikiCfg[def.id] || {{}};
+    const enabled = !!cfg.enabled;
+
+    const fieldsHtml = def.fields.map(f => {{
+      const val = f.type === 'password' && cfg[f.key] ? '__set__' : (cfg[f.key] || '');
+      if (f.type === 'select') {{
+        const optsHtml = (f.opts || []).map(([v, label]) =>
+          `<option value="${{v}}" ${{val === v ? 'selected' : ''}}>${{label}}</option>`).join('');
+        return `<div style="display:flex;align-items:center;gap:10px;padding:5px 0">
+          <label style="font-size:13px;color:#374151;min-width:140px;flex-shrink:0">${{f.label}}</label>
+          <select class="form-input wiki-field" data-wiki="${{def.id}}" data-key="${{f.key}}" style="flex:1;font-size:13px">${{optsHtml}}</select>
+        </div>`;
+      }}
+      return `<div style="display:flex;align-items:center;gap:10px;padding:5px 0">
+        <label style="font-size:13px;color:#374151;min-width:140px;flex-shrink:0">${{f.label}}</label>
+        <input type="${{f.type === 'password' ? 'password' : 'text'}}" class="form-input wiki-field"
+          data-wiki="${{def.id}}" data-key="${{f.key}}" value="${{esc(String(val))}}" placeholder="${{f.ph || ''}}"
+          style="flex:1;font-size:13px;font-family:${{f.type === 'password' ? 'monospace' : 'inherit'}}">
+      </div>`;
+    }}).join('');
+
+    return `
+    <div style="background:#fff;border:1px solid #E5E7EB;border-radius:8px;overflow:hidden">
+      <div style="display:flex;align-items:center;gap:12px;padding:14px 18px;background:#F9FAFB;border-bottom:1px solid #E5E7EB">
+        <span style="font-size:22px">${{def.icon}}</span>
+        <div style="flex:1">
+          <div style="font-weight:700;font-size:15px;color:#111827">${{def.name}}</div>
+          <div style="font-size:12px;color:#6B7280;margin-top:2px">${{def.desc}}</div>
+        </div>
+        <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:12px;color:#374151;font-weight:600;white-space:nowrap">
+          <input type="checkbox" id="wiki-enable-${{def.id}}" ${{enabled ? 'checked' : ''}}
+            onchange="saveWikiConfig('${{def.id}}')">
+          Enable
+        </label>
+      </div>
+      <div style="padding:14px 18px">
+        ${{fieldsHtml}}
+        <div style="font-size:11px;color:#9CA3AF;margin-top:10px;line-height:1.5">${{def.howto}}</div>
+        <div style="display:flex;gap:10px;margin-top:14px;align-items:center">
+          <button class="scan-btn" onclick="saveWikiConfig('${{def.id}}')" style="color:#16A34A;border-color:#238636">&#10003; Save</button>
+          <button class="scan-btn" onclick="testWikiConnection('${{def.id}}',this)" style="color:#4F46E5;border-color:#C7D2FE">&#9654; Test</button>
+          <button class="scan-btn" onclick="testWikiPage('${{def.id}}',this)" style="color:#CA8A04;border-color:#FDE68A">&#128214; Test Page</button>
+          <span id="wiki-test-${{def.id}}" style="font-size:13px;color:#6B7280"></span>
+        </div>
+      </div>
+    </div>`;
+  }}).join('');
+  // Selects render blank via innerHTML value attributes above; set them
+  // explicitly after insertion so the previously-saved parent_type sticks.
+  NOTION_DEFS.forEach(def => {{
+    const cfg = _wikiCfg[def.id] || {{}};
+    def.fields.filter(f => f.type === 'select').forEach(f => {{
+      const el = document.querySelector(`select.wiki-field[data-wiki="${{def.id}}"][data-key="${{f.key}}"]`);
+      if (el && cfg[f.key]) el.value = cfg[f.key];
+    }});
+  }});
+}}
+
+async function saveWikiConfig(wikiId) {{
+  const fields = {{}};
+  document.querySelectorAll(`.wiki-field[data-wiki="${{wikiId}}"]`).forEach(el => {{
+    fields[el.dataset.key] = el.value;
+  }});
+  const enabled = document.getElementById('wiki-enable-' + wikiId)?.checked ?? false;
+  try {{
+    const r = await fetch('/api/wiki/config', {{
+      method: 'POST',
+      headers: {{'Content-Type': 'application/json'}},
+      body: JSON.stringify({{id: wikiId, enabled, fields}}),
+    }});
+    if (r.ok) {{
+      _wikiCfg[wikiId] = {{...(_wikiCfg[wikiId] || {{}}), ...fields, enabled}};
+      const banner = document.getElementById('wiki-save-banner');
+      if (banner) {{ banner.style.display = ''; setTimeout(() => banner.style.display = 'none', 3000); }}
+    }} else {{ alert('Save failed'); }}
+  }} catch (e) {{ alert('Save failed: ' + e); }}
+}}
+
+async function testWikiConnection(wikiId, btn) {{
+  const el = document.getElementById('wiki-test-' + wikiId);
+  if (el) el.textContent = 'Testing…';
+  btn.disabled = true;
+  try {{
+    const r = await fetch('/api/wiki/test/' + wikiId, {{method: 'POST'}});
+    const d = await r.json();
+    if (el) {{
+      el.textContent = (d.ok ? '&#10003; ' : '&#10007; ') + d.message;
+      el.style.color = d.ok ? '#16A34A' : '#DC2626';
+    }}
+  }} catch (e) {{
+    if (el) {{ el.textContent = 'Error: ' + e; el.style.color = '#DC2626'; }}
+  }}
+  btn.disabled = false;
+}}
+
+async function testWikiPage(wikiId, btn) {{
+  const el = document.getElementById('wiki-test-' + wikiId);
+  if (el) el.textContent = 'Creating test page…';
+  btn.disabled = true;
+  try {{
+    const r = await fetch('/api/wiki/test-page/' + wikiId, {{method: 'POST'}});
+    const d = await r.json();
+    if (el) {{
+      el.innerHTML = (d.ok ? '&#10003; ' : '&#10007; ') + d.message;
+      el.style.color = d.ok ? '#16A34A' : '#DC2626';
+    }}
+  }} catch (e) {{
+    if (el) {{ el.textContent = 'Error: ' + e; el.style.color = '#DC2626'; }}
+  }}
+  btn.disabled = false;
+}}
+
+loadWikiConfig();
 
 // ── SIEM integrations ────────────────────────────────────────────────────────
 

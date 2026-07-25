@@ -105,8 +105,8 @@ def _cw_create_ticket(cfg: dict, finding: dict, hostname: str) -> tuple[bool, st
         'initialDescription': (
             f'Arckon AI Security scan detected a {sev} finding on {hostname}.\n\n'
             f'Check ID: {check_id}\nTitle: {title}\n\n'
-            + (f'Details:\n{desc}\n\n' if desc else '')
-            + 'Log in to Arckon to view full details and remediation steps.'
+            + (f'Details:\n{desc}' if desc
+               else 'Log in to Arckon to view full details and remediation steps.')
         ),
         'board':    {'name': cfg['service_board']},
         'company':  {'identifier': cfg['company_name']},
@@ -158,8 +158,8 @@ def _at_create_ticket(cfg: dict, finding: dict, hostname: str) -> tuple[bool, st
         'description': (
             f'Arckon AI Security scan detected a {sev} finding on {hostname}.\n\n'
             f'Check ID: {check_id}\nTitle: {title}\n\n'
-            + (f'Details:\n{desc}\n\n' if desc else '')
-            + 'Log in to Arckon to view full details and remediation steps.'
+            + (f'Details:\n{desc}' if desc
+               else 'Log in to Arckon to view full details and remediation steps.')
         ),
         'accountID': int(cfg['account_id']),
         'queueID':   int(cfg['queue_id']),
@@ -244,8 +244,8 @@ def _halo_create_ticket(cfg: dict, finding: dict, hostname: str) -> tuple[bool, 
         'details':        (
             f'Arckon AI Security scan detected a {sev} finding on {hostname}.\n\n'
             f'Check ID: {check_id}\nTitle: {title}\n\n'
-            + (f'Details:\n{desc}\n\n' if desc else '')
-            + 'Log in to Arckon to view full details and remediation steps.'
+            + (f'Details:\n{desc}' if desc
+               else 'Log in to Arckon to view full details and remediation steps.')
         ),
         'tickettype_id': int(cfg.get('ticket_type_id', 1)),
         'priority_id':   int(cfg.get('priority_id', 1)),
@@ -312,8 +312,8 @@ def _jira_create_ticket(cfg: dict, finding: dict, hostname: str) -> tuple[bool, 
     detail  = (
         f'Arckon AI Security scan detected a {sev} finding on {hostname}.\n\n'
         f'Check ID: {check_id}\nTitle: {title}\n\n'
-        + (f'Details:\n{desc}\n\n' if desc else '')
-        + 'Log in to Arckon to view full details and remediation steps.'
+        + (f'Details:\n{desc}' if desc
+           else 'Log in to Arckon to view full details and remediation steps.')
     )
 
     body = {
