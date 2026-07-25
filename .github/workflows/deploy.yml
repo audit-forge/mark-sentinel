@@ -4,15 +4,14 @@ on:
   push:
     branches: [feat/user-manager, main]
     paths:
-      - 'agent.py'
-      - 'discovery.py'
-      - 'server.py'
-      - 'audit.py'
+      - '*.py'
       - 'checks/**'
       - 'connectors/**'
       - 'profiles/**'
       - 'scripts/Dockerfile.build'
+      - 'scripts/arckon-deploy.sh'
       - 'requirements.txt'
+  workflow_dispatch:
 
 jobs:
   build-and-deploy:
@@ -45,11 +44,25 @@ jobs:
       - name: Set up gcloud CLI
         uses: google-github-actions/setup-gcloud@v2
 
+      - name: Package application source
+        run: |
+          # Full app source as one unit — a hand-picked file list here
+          # previously missed alerts.py, storage.py, connectors/, and
+          # several other lazily-imported modules, so changes to those
+          # files silently never reached production.
+          tar czf app.tar.gz \
+            *.py \
+            connectors/ \
+            checks/ \
+            profiles/ \
+            requirements.txt
+          echo "=== Packaged app.tar.gz ==="
+          tar tzf app.tar.gz | head -30
+
       - name: Upload to GCS deploy bucket
         run: |
           # Upload all deployment artifacts to GCS
-          gsutil cp dist/agent dist/audit \
-            server.py discovery.py agent.py \
+          gsutil cp dist/agent dist/audit app.tar.gz \
             gs://arckon-deploy-artifacts/latest/
 
           # Write a deploy manifest so the GCP instance knows a new deploy is ready
