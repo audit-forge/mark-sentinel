@@ -365,13 +365,20 @@ class AgentStore:
             ).fetchall()
         return {r[0] for r in rows}
 
-    def list_devices_by_profile(self, profiles: list[str]) -> list[dict]:
+    def list_devices_by_profile(self, profiles: list[str],
+                                client_org_id: str | None = None) -> list[dict]:
         """Return devices with their latest scan matching any of the given profile slugs.
 
         Each device row includes '_report' (full parsed report JSON) keyed to
         the most recent scan that matched the requested profiles — not the
         overall latest scan, which may be a different profile.
-        """
+
+        client_org_id: same semantics as list_devices(client_org_id=...) —
+        pass a specific org id to filter to just that org's devices, pass ''
+        (empty string, not None) to filter to unassigned devices only, leave
+        as None (default) for no filtering (MSP admin view). Callers serving
+        a client_viewer must pass a resolved org id here; None means "every
+        org", which is exactly the cross-tenant read this scoping prevents."""
         _SLUG_TO_DISPLAY = {
             'default':   'default (full suite)',
             'fedramp':   'fedramp moderate',
@@ -386,11 +393,22 @@ class AgentStore:
                 terms.add(_SLUG_TO_DISPLAY[p])
         term_list = list(terms)
         ph = ','.join('?' * len(term_list))
+
+        # Org filter is bound, never interpolated — the profile placeholders
+        # above are the only thing built into the SQL text.
+        org_clause = ''
+        org_params: list = []
+        if client_org_id == '':
+            org_clause = ' AND d.client_org_id IS NULL'
+        elif client_org_id is not None:
+            org_clause = ' AND d.client_org_id = ?'
+            org_params = [client_org_id]
+
         with self._lock, self._conn() as conn:
             rows = conn.execute(f"""
                 SELECT
                     d.device_id, d.hostname, d.platform, d.agent_version,
-                    d.first_seen, d.last_seen,
+                    d.first_seen, d.last_seen, d.client_org_id,
                     r.scan_date, r.profile, r.mode, r.target,
                     r.fail_count, r.warn_count, r.pass_count,
                     r.received_at AS report_time,
@@ -403,9 +421,9 @@ class AgentStore:
                         WHERE r2.device_id = d.device_id
                         AND LOWER(r2.profile) IN ({ph})
                     )
-                WHERE LOWER(r.profile) IN ({ph})
+                WHERE LOWER(r.profile) IN ({ph}){org_clause}
                 ORDER BY d.last_seen DESC
-            """, term_list + term_list).fetchall()
+            """, term_list + term_list + org_params).fetchall()
         result = []
         for row in rows:
             d = dict(row)
@@ -949,7 +967,6 @@ class AgentStore:
             if row is None:
                 return False
             from_status = row['approval_status'] or 'unapproved'
-            to_status = 'false_positive' if is_fp else from_status
             conn.execute(
                 """UPDATE shadow_devices
                    SET false_positive = ?, notes = ?, approved_by = ?, approved_at = ?

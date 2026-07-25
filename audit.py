@@ -22,6 +22,7 @@ if hasattr(sys.stderr, 'reconfigure'):
     sys.stderr.reconfigure(encoding='utf-8', errors='replace')
 import argparse
 import json
+import logging
 import os
 import socket
 from pathlib import Path
@@ -41,6 +42,7 @@ from output.plain_english import format_report
 from output.json_report import format_json
 from output.sarif import format_sarif
 
+log = logging.getLogger(__name__)
 
 BANNER = """
 ╔══════════════════════════════════════════════════╗
@@ -66,7 +68,7 @@ def load_profile(name: str) -> dict:
             break
 
     if not profiles_dir:
-        print(f"[ERROR] profiles directory not found.", file=sys.stderr)
+        print("[ERROR] profiles directory not found.", file=sys.stderr)
         sys.exit(1)
 
     profile_path = profiles_dir / f'{name}.json'

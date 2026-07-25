@@ -424,7 +424,6 @@ def generate_aibom_report(
                 if m['pinned'] else
                 '<span style="color:#DC2626;font-size:10px;font-weight:700">&#9888; FLOATING</span>'
             )
-            risk_text = ', '.join(m['risks']) if m['risks'] else '—'
             rows += f'''
             <tr>
               <td style="{_td}">{esc(m["name"])}</td>
@@ -475,7 +474,6 @@ def generate_aibom_report(
             return '<tr><td colspan="3" style="padding:12px;color:#6B7280;text-align:center;font-size:12px">No active SaaS AI connections detected.</td></tr>'
         rows = ''
         for s in services_list:
-            src_label = 'Active session' if s['source'] == 'saas_ai' else esc(s['source'])
             rows += f'''
             <tr>
               <td style="{_td}">{esc(s["name"])}</td>
@@ -492,9 +490,6 @@ def generate_aibom_report(
         for r in risks_list:
             sev = r['severity']
             sc, sbg = _RISK_COLORS.get(sev, ('#6B7280', '#F9FAFB'))
-            sev_badge = (f'<span style="display:inline-block;padding:2px 7px;border-radius:4px;'
-                         f'font-size:10px;font-weight:700;color:{sc};background:{sbg}">'
-                         f'{esc(sev)}</span>')
             rows += f'''
             <tr>
               <td style="{_td}">{_risk_badge(r["severity"], r["status"])}</td>
