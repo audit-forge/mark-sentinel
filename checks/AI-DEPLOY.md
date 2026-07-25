@@ -78,6 +78,21 @@ Your AI tool probably connects to other systems — maybe your customer database
 - Basic auth credentials in a docker-compose `environment:` block
 - Kubernetes ConfigMap containing a password
 
+### WARN Criteria — CI Test Credential Hygiene
+A PostgreSQL URL is reclassified as a CI test fixture (status `WARN`, severity `LOW`, title `CI Test Credential Hygiene`) only when **all four** conditions hold:
+
+1. The file path is a GitHub Actions workflow — `.github/workflows/*.yml` or `.github/workflows/*.yaml`
+2. The URL host is loopback — `localhost` or `127.0.0.1`
+3. The **same workflow file** declares a `postgres` service container (a `services:` block with a `postgres` image or service key)
+4. The **same workflow file** sets a test-named `POSTGRES_DB` (the database name contains `test`)
+
+Such a credential reaches nothing but a throwaway service container inside the CI runner, so it is not a production exposure and does not warrant a HIGH finding.
+
+Scope rules:
+- The reclassified result is returned **only when every credential found in the scan qualifies**. A single external, unknown, or otherwise non-qualifying credential — including a loopback PostgreSQL URL in a workflow that fails any of the four conditions — returns the standard `FAIL` / `HIGH` / `No Hardcoded Credentials in Model Config` result. Mixed scans are reported as `FAIL` / `HIGH`; the qualifying fixtures are noted in a single summary evidence line.
+- Evidence for a qualifying fixture is limited to file, line, credential type, and host. The fixture password is never captured, masked, displayed, or stored — classification runs before any capture-group handling, so the value is never read out of the line at all.
+- Reporting surfaces (plain-English output, dashboard executive report) use the result's own details for this title rather than the generic "database takeover" risk text.
+
 ### Remediation
 1. Audit all config files for credential patterns: `grep -rn "password\|token\|secret\|bearer\|auth" ./config/`
 2. Replace hardcoded values with environment variable references

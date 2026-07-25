@@ -798,6 +798,14 @@ const BIZ_RISK={
   'AI-SUPPLY-005':'Your AI model version is not pinned — the model could change behavior overnight without your knowledge.',
 };
 
+// A check that reclassifies a finding carries a different title; its own
+// details describe that narrower case, so the generic risk text does not apply.
+const SPECIAL_TITLES={'AI-DEPLOY-002':'CI Test Credential Hygiene'};
+function bizRisk(f){
+  if(SPECIAL_TITLES[f.check_id]===f.title)return f.details||'';
+  return BIZ_RISK[f.check_id]||f.details;
+}
+
 function rptCSS(){return `<style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;color:#1a1a1a;background:#fff;font-size:14px;line-height:1.6}
@@ -867,7 +875,7 @@ function buildExecReport(p){
   const highs=p.findings.filter(f=>f.status==='FAIL'&&f.severity==='HIGH');
   const fails=p.findings.filter(f=>f.status==='FAIL');
   const rows=fails.slice(0,7).map(f=>{
-    const biz=BIZ_RISK[f.check_id]||f.details;
+    const biz=bizRisk(f);
     const step=(f.remediation||'').split('\n').filter(Boolean)[0]||'See detailed report';
     return`<tr><td><strong>${esc(f.title)}</strong><br><span style="color:#6b7280;font-size:12px">${esc(biz)}</span></td><td style="text-align:center"><span class="badge ${f.severity.toLowerCase()}">${esc(f.severity)}</span></td><td style="font-size:12px">${esc(step)}</td></tr>`;
   }).join('');
