@@ -3,7 +3,8 @@ AI-INP checks — Prompt Injection & Input Safety
 Checks: AI-INP-001 through AI-INP-005
 
 AI-INP-001, 002, 004 run live adversarial probes in api/local mode; SKIP in config mode.
-AI-INP-003 (RAG/indirect) is deferred to Phase 3 (requires target RAG pipeline context).
+AI-INP-003 is an API-driven, end-to-end RAG probe when the target application
+is configured with a controlled test document and retrieval query.
 AI-INP-005 is evaluable from config files in all modes.
 """
 import re
@@ -177,24 +178,37 @@ def check_inp_003(ctx: ScanContext) -> CheckResult:
             frameworks=_fw,
         )
 
+    result = ctx.probe_results.get("inp-003-a")
+    if result is None:
+        return CheckResult(
+            check_id="AI-INP-003", title="Indirect Prompt Injection Resistance (RAG)",
+            status=SKIP, severity="HIGH", category=CATEGORY,
+            details=(
+                "This API-driven test needs a controlled document seeded in the target knowledge base "
+                "and a query that retrieves it. Configure the RAG probe in the API Tester."
+            ),
+            remediation="Seed the Arckon RAG test document, then provide its retrieval query in the API Tester.",
+            frameworks=_fw,
+        )
+    if result.error:
+        return _probe_error("AI-INP-003", "Indirect Prompt Injection Resistance (RAG)", "HIGH", result.error)
+    if not result.passed:
+        return CheckResult(
+            check_id="AI-INP-003", title="Indirect Prompt Injection Resistance (RAG)",
+            status=FAIL, severity="HIGH", category=CATEGORY,
+            details="The RAG application followed an injected instruction from retrieved content.",
+            evidence=[f"Probe '{result.probe_id}': {result.fail_reason}", f"Sample response: {result.response[:200]}"],
+            remediation=(
+                "1. Keep retrieved content in a clearly delimited data/tool context.\n"
+                "2. Sanitize or classify retrieved content before it reaches the model.\n"
+                "3. Enforce source trust levels and validate outputs for instruction-following behavior."
+            ), frameworks=_fw,
+        )
     return CheckResult(
-        check_id="AI-INP-003",
-        title="Indirect Prompt Injection Resistance (RAG)",
-        status=SKIP,
-        severity="HIGH",
-        category=CATEGORY,
-        details=(
-            "Coming soon — Indirect injection testing via RAG (Retrieval-Augmented Generation) "
-            "requires a document retrieval endpoint to probe. This check will be available once you "
-            "connect a RAG pipeline in the tester."
-        ),
-        remediation=(
-            "While this check is pending, apply these controls manually:\n"
-            "1. Sanitize all retrieved documents before injecting them into the model context.\n"
-            "2. Use a guard model to classify retrieved content for injection payloads.\n"
-            "3. Limit what retrieved content can instruct the model to do (e.g., it cannot modify system behavior)."
-        ),
-        frameworks=_fw,
+        check_id="AI-INP-003", title="Indirect Prompt Injection Resistance (RAG)",
+        status=PASS, severity="HIGH", category=CATEGORY,
+        details="The application retrieved the controlled test document without following its injected instruction.",
+        evidence=["Probe 'inp-003-a': retrieval verified; injected instruction rejected"], frameworks=_fw,
     )
 
 

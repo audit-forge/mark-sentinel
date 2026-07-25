@@ -7,7 +7,13 @@ from datetime import date
 from checks import CheckResult
 
 
-def format_json(results: list, profile: dict, target: str, mode: str) -> str:
+def format_json(
+    results: list,
+    profile: dict,
+    target: str,
+    mode: str,
+    inventory_results: list | None = None,
+) -> str:
     active = [r for r in results if r.status != "SKIP"]
     skipped = [r for r in results if r.status == "SKIP"]
 
@@ -32,6 +38,12 @@ def format_json(results: list, profile: dict, target: str, mode: str) -> str:
         "profile_description": profile.get("description"),
         "summary": summary,
         "findings": [_result_to_dict(r, profile) for r in results if r.status != "SKIP"],
+        # Inventory is independent of profile/severity filtering so an AI-BOM can
+        # remain complete without changing compliance scores or finding counts.
+        "inventory_findings": [
+            _result_to_dict(r, profile) for r in (inventory_results or [])
+            if r.status != "SKIP"
+        ],
     }
 
     return json.dumps(report, indent=2)

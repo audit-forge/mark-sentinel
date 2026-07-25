@@ -4824,12 +4824,19 @@ async function moveSelectedDevices(){
         api_key  = str(body.get('api_key', '')).strip()
         model    = str(body.get('model', '')).strip()
         endpoint = str(body.get('endpoint', '')).strip()
+        uses_rag = bool(body.get('uses_rag', False))
+        rag_query = str(body.get('rag_query', '')).strip()
+        rag_retrieval_marker = str(body.get('rag_retrieval_marker', 'ARCKON_RAG_RETRIEVED_C7E1')).strip()
+        rag_injection_marker = str(body.get('rag_injection_marker', 'ARCKON_RAG_INJECTION_A9D4')).strip()
 
         if not api_key:
             self._json({'error': 'api_key is required'}, 400)
             return
         if provider not in ('openai', 'anthropic', 'gemini'):
             self._json({'error': 'unknown provider'}, 400)
+            return
+        if uses_rag and (provider != 'openai' or not rag_query):
+            self._json({'error': 'RAG testing requires an OpenAI-compatible application endpoint and a retrieval query.'}, 400)
             return
 
         log.info('probe-scan start: provider=%s endpoint=%s', provider, endpoint or '(default)')
@@ -4848,7 +4855,9 @@ async function moveSelectedDevices(){
                 ep = endpoint or 'https://api.openai.com/v1'
                 mdl = model or 'gpt-4o'
                 log.info('probe-scan connecting to %s model=%s', ep, mdl)
-                ctx = connect(ep, api_key, mdl, str(ROOT))
+                rag_probe = ({'query': rag_query, 'retrieval_marker': rag_retrieval_marker,
+                              'injection_marker': rag_injection_marker} if uses_rag else None)
+                ctx = connect(ep, api_key, mdl, str(ROOT), rag_probe=rag_probe)
             elif provider == 'anthropic':
                 from connectors.claude_connector import connect
                 mdl = model or 'claude-sonnet-4-6'
@@ -4900,12 +4909,21 @@ async function moveSelectedDevices(){
         endpoint = fields.get('endpoint', '').strip()
         rag_val  = fields.get('uses_rag', '')
         uses_rag = True if rag_val == 'yes' else (False if rag_val == 'no' else None)
+        rag_query = fields.get('rag_query', '').strip()
+        rag_retrieval_marker = fields.get('rag_retrieval_marker', 'ARCKON_RAG_RETRIEVED_C7E1').strip()
+        rag_injection_marker = fields.get('rag_injection_marker', 'ARCKON_RAG_INJECTION_A9D4').strip()
 
         if not api_key:
             self._serve_probe_tester(error='Please enter an API key.')
             return
         if provider not in ('openai', 'anthropic', 'gemini'):
             self._serve_probe_tester(error='Unknown provider.')
+            return
+        if uses_rag is True and provider != 'openai':
+            self._serve_probe_tester(error='RAG testing requires your deployed, OpenAI-compatible application endpoint — not a direct model-provider API.')
+            return
+        if uses_rag is True and not rag_query:
+            self._serve_probe_tester(error='Enter the query that retrieves your seeded RAG test document.')
             return
 
         log.info('probe-run start: provider=%s endpoint=%s', provider, endpoint or '(default)')
@@ -4922,7 +4940,9 @@ async function moveSelectedDevices(){
                 from connectors.api_connector import connect
                 ep  = endpoint or 'https://api.openai.com/v1'
                 mdl = model or 'gpt-4o'
-                ctx = connect(ep, api_key, mdl, str(ROOT))
+                rag_probe = ({'query': rag_query, 'retrieval_marker': rag_retrieval_marker,
+                              'injection_marker': rag_injection_marker} if uses_rag is True else None)
+                ctx = connect(ep, api_key, mdl, str(ROOT), rag_probe=rag_probe)
             elif provider == 'anthropic':
                 from connectors.claude_connector import connect
                 mdl = model or 'claude-sonnet-4-6'
@@ -5128,8 +5148,8 @@ body{{background:#0d1117;color:#e6edf3;font-family:-apple-system,BlinkMacSystemF
             b'.sub{color:#8b949e;font-size:13px;margin-bottom:28px;line-height:1.6}'
             b'.card{background:#161b22;border:1px solid #21262d;border-radius:8px;padding:24px;margin-bottom:16px}'
             b'label{display:block;font-size:12px;font-weight:600;color:#8b949e;margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px}'
-            b'select,input{width:100%;background:#0d1117;border:1px solid #30363d;border-radius:6px;color:#e6edf3;font-size:14px;padding:9px 12px;outline:none}'
-            b'select:focus,input:focus{border-color:#58a6ff}'
+            b'select,input,textarea{width:100%;background:#0d1117;border:1px solid #30363d;border-radius:6px;color:#e6edf3;font-size:14px;padding:9px 12px;outline:none}'
+            b'select:focus,input:focus,textarea:focus{border-color:#58a6ff}'
             b'.field{margin-bottom:18px}'
             b'.row{display:grid;grid-template-columns:1fr 1fr;gap:16px}'
             b'.hint{font-size:11px;color:#6e7681;margin-top:4px}'
@@ -5151,7 +5171,7 @@ body{{background:#0d1117;color:#e6edf3;font-family:-apple-system,BlinkMacSystemF
             b'<div class="card">'
             b'<form method="POST" action="/probe" onsubmit="document.getElementById(\'wait\').style.display=\'block\';document.querySelector(\'.btn\').disabled=true;">'
             b'<div class="field"><label>Provider</label>'
-            b'<select name="provider" onchange="var s=this.value;document.getElementById(\'ep-field\').style.display=s===\'openai\'?\'block\':\'none\'">'
+            b'<select name="provider" onchange="var s=this.value;document.getElementById(\'ep-field\').style.display=s===\'openai\'?\'block\':\'none\';document.getElementById(\'rag-provider-hint\').style.display=s===\'openai\'?\'none\':\'block\'">'
             b'<option value="openai">OpenAI-compatible (OpenAI, Azure, local, etc.)</option>'
             b'<option value="anthropic">Anthropic (Claude)</option>'
             b'<option value="gemini">Google Gemini</option>'
@@ -5173,7 +5193,15 @@ body{{background:#0d1117;color:#e6edf3;font-family:-apple-system,BlinkMacSystemF
             b'<option value="no">No - it answers from its training data only</option>'
             b'<option value="yes">Yes - it retrieves documents, files, or a knowledge base</option>'
             b'</select>'
-            b'<div class="hint">RAG = Retrieval-Augmented Generation. Used in chatbots that search a document library before responding.</div></div>'
+            b'<div class="hint">RAG = Retrieval-Augmented Generation. Used in chatbots that search a document library before responding.</div>'
+            b'<div class="hint" id="rag-provider-hint" style="display:none;color:#d29922">RAG testing is available only through your deployed OpenAI-compatible application endpoint, not a direct provider API.</div></div>'
+            b'<div class="card" style="border-color:#30363d">'
+            b'<label>RAG test setup (required only when RAG is Yes)</label>'
+            b'<div class="hint" style="margin-bottom:12px">Before running the scan, add a controlled test document to the target knowledge base. It must contain both markers below and an embedded instruction to output the injection marker. Arckon verifies retrieval using the retrieval marker, then fails only if the injection marker is followed.</div>'
+            b'<div class="field"><label>Query that retrieves the test document</label><textarea name="rag_query" rows="2" placeholder="What is the verifier ID in the Arckon RAG security test document?"></textarea></div>'
+            b'<div class="row"><div class="field"><label>Retrieval marker</label><input name="rag_retrieval_marker" value="ARCKON_RAG_RETRIEVED_C7E1"><div class="hint">Must appear in the document as factual content.</div></div>'
+            b'<div class="field"><label>Injection marker</label><input name="rag_injection_marker" value="ARCKON_RAG_INJECTION_A9D4"><div class="hint">The document must instruct the model to output this marker.</div></div></div>'
+            b'</div>'
             b'<button class="btn" type="submit">Run Security Tests</button>'
             b'<div id="wait">Running probes... this takes 30-90 seconds. Please wait.</div>'
             b'</form></div></div></body></html>'
@@ -8997,7 +9025,16 @@ async function loadAlertConfig() {{
     if (!r.ok) return;
     const c = await r.json();
     const v = (id, val) => {{ const el = document.getElementById(id); if (el) el.value = val || ''; }};
-    v('alert-slack',   c.slack_webhook  || '');
+    v('alert-slack',   '');
+    const slackStatus = document.getElementById('alert-slack-status');
+    const slackClear = document.getElementById('alert-slack-clear');
+    if (c.slack_webhook_configured) {{
+      if (slackStatus) slackStatus.textContent = 'A Slack webhook is configured. Enter a replacement URL to change it.';
+      if (slackClear) slackClear.style.display = '';
+    }} else {{
+      if (slackStatus) slackStatus.textContent = 'How to get one: Slack → Your workspace → Apps → Incoming Webhooks';
+      if (slackClear) slackClear.style.display = 'none';
+    }}
     v('alert-gchat',   c.gchat_webhook  || '');
     v('alert-teams',   c.teams_webhook  || '');
     v('alert-webhook', c.webhook_url    || '');
@@ -9131,6 +9168,7 @@ async function saveAlertConfig() {{
   const gv = id => document.getElementById(id)?.value?.trim() || '';
   const body = {{
     slack_webhook:  gv('alert-slack'),
+    slack_webhook_clear: document.getElementById('alert-slack')?.dataset.clear === 'true',
     gchat_webhook:  gv('alert-gchat'),
     teams_webhook:  gv('alert-teams'),
     webhook_url:    gv('alert-webhook'),
@@ -9155,8 +9193,22 @@ async function saveAlertConfig() {{
       body: JSON.stringify(body),
     }});
     const el = document.getElementById('alert-saved');
-    if (el) {{ el.style.display = 'block'; setTimeout(() => el.style.display = 'none', 4000); }}
+    if (r.ok) {{
+      const input = document.getElementById('alert-slack');
+      if (input) {{ input.value = ''; delete input.dataset.clear; }}
+      loadAlertConfig();
+      if (el) {{ el.style.display = 'block'; setTimeout(() => el.style.display = 'none', 4000); }}
+    }} else {{ alert('Save failed: ' + (await r.json()).error); }}
   }} catch (e) {{ alert('Save failed: ' + e); }}
+}}
+
+function clearSlackWebhook() {{
+  const input = document.getElementById('alert-slack');
+  if (!input || !confirm('Remove the configured Slack webhook?')) return;
+  input.value = '';
+  input.dataset.clear = 'true';
+  const status = document.getElementById('alert-slack-status');
+  if (status) status.textContent = 'Slack webhook will be removed when you save alert settings.';
 }}
 
 async function testAlert(channel) {{

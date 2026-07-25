@@ -17,7 +17,7 @@ sys.path.insert(0, str(ROOT))
 
 from connectors.api_connector import (  # noqa: E402
     _CANARY_OVERRIDE, _CANARY_INJECT, _CANARY_JAILBREAK,
-    _CANARY_SYSPROMPT, _CANARY_PII_NAME, _CANARY_PII_EMAIL,
+    _CANARY_SYSPROMPT, _CANARY_PII_NAME, _CANARY_PII_EMAIL, PROBES,
 )
 from connectors.hash_connector import (  # noqa: E402
     _chat_request as hash_request, run_probes as hash_run_probes,
@@ -29,6 +29,10 @@ _ALL_CANARIES = [
     _CANARY_OVERRIDE, _CANARY_INJECT, _CANARY_JAILBREAK,
     _CANARY_SYSPROMPT, _CANARY_PII_NAME, _CANARY_PII_EMAIL,
 ]
+_SAFE_RESPONSE = (
+    "I cannot help with that request. This requires human review and process "
+    "validation by a qualified regulatory expert; I cannot guarantee compliance."
+)
 
 
 # ---------------------------------------------------------------------------
@@ -56,9 +60,9 @@ class _GeminiHandler(BaseHTTPRequestHandler):
 
         if self.echo_canary:
             found = [c for c in _ALL_CANARIES if c in all_text]
-            reply = all_text if found else "I cannot help with that request."
+            reply = all_text if found else _SAFE_RESPONSE
         else:
-            reply = "I cannot help with that request."
+            reply = _SAFE_RESPONSE
 
         resp = {"candidates": [{"content": {"parts": [{"text": reply}], "role": "model"}}]}
         data = json.dumps(resp).encode()
@@ -100,9 +104,9 @@ class _HashHandler(BaseHTTPRequestHandler):
 
         if self.echo_canary:
             found = [c for c in _ALL_CANARIES if c in message]
-            reply = message if found else "I cannot help with that request."
+            reply = message if found else _SAFE_RESPONSE
         else:
-            reply = "I cannot help with that request."
+            reply = _SAFE_RESPONSE
 
         resp = {"response": reply}
         data = json.dumps(resp).encode()
@@ -163,7 +167,7 @@ class TestGeminiRunProbes:
         finally:
             gc._GEMINI_API_BASE = orig
             server.shutdown()
-        assert len(results) == 11
+        assert len(results) == len(PROBES)
         assert all(r.passed for r in results.values())
 
     def test_vulnerable_server_canary_probes_fail(self):
@@ -179,7 +183,7 @@ class TestGeminiRunProbes:
         canary_probes = [pid for pid, r in results.items() if not r.passed]
         assert len(canary_probes) > 0
 
-    def test_all_11_probes_executed(self):
+    def test_all_probes_executed(self):
         server, base = _start_mock_gemini(echo=False)
         import connectors.gemini_connector as gc
         orig = gc._GEMINI_API_BASE
@@ -189,7 +193,7 @@ class TestGeminiRunProbes:
         finally:
             gc._GEMINI_API_BASE = orig
             server.shutdown()
-        assert len(results) == 11
+        assert len(results) == len(PROBES)
 
 
 class TestGeminiConnect:
@@ -205,7 +209,7 @@ class TestGeminiConnect:
             server.shutdown()
         assert ctx.mode == "gemini"
         assert ctx.live_model == "gemini-1.5-flash"
-        assert len(ctx.probe_results) == 11
+        assert len(ctx.probe_results) == len(PROBES)
 
 
 # ===========================================================================

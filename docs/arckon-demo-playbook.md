@@ -257,7 +257,9 @@ Show the compliance section:
 
 Navigate to API Tester.
 
-> "If you're running your own AI API — a custom model, an internal assistant, an AI-powered product — we can test it live right now. Enter the endpoint and key, and we'll run 8 adversarial probes against it in under 5 minutes."
+> "If you're running your own AI API — a custom model, an internal assistant, an AI-powered product — we can test it live right now. Enter the endpoint and key, and we'll run adversarial probes against it in under 5 minutes."
+
+For a RAG application, seed the controlled Arckon test document in the knowledge base first, select **Yes** for RAG, and enter the query that retrieves it. The API Tester verifies the document was actually retrieved before it evaluates whether the embedded malicious instruction was followed. This is API-driven end-to-end testing of the deployed application; it is not native vector-store inspection.
 
 Walk through what the 8 checks cover.
 

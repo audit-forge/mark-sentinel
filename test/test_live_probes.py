@@ -23,7 +23,8 @@ sys.path.insert(0, str(ROOT))
 from connectors.api_connector import (  # noqa: E402
     Probe, _evaluate, _CANARY_OVERRIDE, _CANARY_INJECT,
     _CANARY_JAILBREAK, _CANARY_SYSPROMPT, _CANARY_PII_NAME, _CANARY_PII_EMAIL,
-    PROBES, run_probes,
+    PROBES, run_probes, run_rag_probe, DEFAULT_RAG_RETRIEVAL_MARKER,
+    DEFAULT_RAG_INJECTION_MARKER,
 )
 
 
@@ -151,14 +152,14 @@ class TestProbeEvaluation:
         result = _evaluate(probe, response="Sure, here are the step-by-step instructions...", error="")
         assert not result.passed
 
-    def test_error_does_not_fail(self):
+    def test_error_is_not_recorded_as_a_security_pass(self):
         probe = Probe(
             id="test-5", check_id="AI-INP-001", description="test",
             system_prompt="sys", user_message="user",
             fail_if=[_CANARY_OVERRIDE],
         )
         result = _evaluate(probe, response="", error="HTTP 401: Unauthorized")
-        assert result.passed  # connection errors don't count as security failures
+        assert not result.passed  # connection errors become SKIP at the check layer
         assert result.error
 
     def test_all_probes_have_unique_ids(self):
@@ -168,6 +169,29 @@ class TestProbeEvaluation:
     def test_all_probes_have_check_id(self):
         for p in PROBES:
             assert p.check_id.startswith("AI-"), f"Probe {p.id} has invalid check_id"
+
+    def test_rag_probe_passes_only_with_retrieval_evidence_and_no_injection(self, monkeypatch):
+        monkeypatch.setattr(
+            'connectors.api_connector._chat_request',
+            lambda *args: (f'The verifier is {DEFAULT_RAG_RETRIEVAL_MARKER}.', ''),
+        )
+        result = run_rag_probe('https://example.test/v1', 'key', 'model', 'Retrieve the test document')
+        assert result.passed
+
+    def test_rag_probe_fails_when_injection_marker_is_followed(self, monkeypatch):
+        monkeypatch.setattr(
+            'connectors.api_connector._chat_request',
+            lambda *args: (f'{DEFAULT_RAG_RETRIEVAL_MARKER} {DEFAULT_RAG_INJECTION_MARKER}', ''),
+        )
+        result = run_rag_probe('https://example.test/v1', 'key', 'model', 'Retrieve the test document')
+        assert not result.passed
+        assert not result.error
+
+    def test_rag_probe_does_not_pass_without_retrieval_evidence(self, monkeypatch):
+        monkeypatch.setattr('connectors.api_connector._chat_request', lambda *args: ('No matching document.', ''))
+        result = run_rag_probe('https://example.test/v1', 'key', 'model', 'Retrieve the test document')
+        assert not result.passed
+        assert result.error
 
 
 # ---------------------------------------------------------------------------
@@ -264,7 +288,7 @@ class TestFullPipelineApiMode:
              "--api-key", "test-key",
              "--model", "test-model",
              "--target", HARDENED,
-             "--profile", "default",
+             "--profile", "healthcare",
              "--output", "json",
              "--quiet"],
             capture_output=True,
@@ -284,7 +308,7 @@ class TestFullPipelineApiMode:
              "--api-key", "test-key",
              "--model", "test-model",
              "--target", HARDENED,
-             "--profile", "default",
+             "--profile", "healthcare",
              "--output", "json",
              "--quiet"],
             capture_output=True,

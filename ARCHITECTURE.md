@@ -18,7 +18,7 @@ Arckon finds the unlocked door. CNAPP is the alarm system.
 
 | Category | File | Checks | Status |
 |---|---|---|---|
-| AI-INP (Input Safety) | `checks/input_safety.py` | INP-001 to INP-005 | INP-003 (indirect/RAG) = SKIP — not built |
+| AI-INP (Input Safety) | `checks/input_safety.py` | INP-001 to INP-005 | All implemented; INP-003 requires a seeded RAG test document and API retrieval query |
 | AI-OUT (Output Safety) | `checks/output_safety.py` | OUT-001 to OUT-005 | All implemented |
 | AI-AGENT (Agentic Safety) | `checks/agentic.py` | AGENT-001 to AGENT-006 | AGENT-003 (memory poisoning) = SKIP — not built |
 | AI-SUPPLY (Supply Chain) | `checks/supply_chain.py` | SUPPLY-001 to SUPPLY-006 | All implemented |
@@ -27,7 +27,6 @@ Arckon finds the unlocked door. CNAPP is the alarm system.
 | AI-DEPLOY (Deployment) | `checks/deploy.py` | DEPLOY-001 to DEPLOY-006 | All implemented |
 
 ## Known gaps (not implemented)
-- **AI-INP-003** — Indirect prompt injection via RAG/external content (the Gemini attack class)
 - **AI-AGENT-003** — Agent memory/context poisoning via adversarial input
 - No proxy/interception mode — can't block, only report
 - No connectors for hosted AI services (Gemini Workspace, Copilot, etc.)
@@ -52,6 +51,5 @@ Phase 4 — SMB polish and packaging (one-command installer, PDF reports, Docker
 See CHANGELOG.md for what's been added.
 
 ## What's next (planned)
-- Implement AI-INP-003 (indirect injection via RAG)
 - Implement AI-AGENT-003 (memory poisoning)
-- These are the gaps that would catch the Google Gemini-class attacks
+- Expand RAG coverage with native retrieval-stack inspection; current RAG testing is API-driven and end-to-end

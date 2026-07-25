@@ -3,9 +3,9 @@ requires = ["hatchling>=1.13,<2.0"]
 build-backend = "hatchling.build"
 
 [project]
-name = "mark-sentinel"
-version = "0.1.0"
-description = "M.A.R.K. Sentinel — AI Security Audit Tool (packaged entry)"
+name = "arckon"
+version = "1.0.0"
+description = "Arckon AI Security Platform"
 readme = "README.md"
 requires-python = ">=3.11"
 authors = [ { name = "Keith Ferguson", email = "keithferg2018@gmail.com" } ]
@@ -24,7 +24,7 @@ dependencies = [
 ]
 
 [project.scripts]
-mark-sentinel = "server:main"
+arckon = "server:main"
 
 [tool.hatch.build.targets.wheel]
 include = ["**/*"]

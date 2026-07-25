@@ -22,6 +22,7 @@ if hasattr(sys.stderr, 'reconfigure'):
     sys.stderr.reconfigure(encoding='utf-8', errors='replace')
 import argparse
 import json
+import logging
 import os
 import socket
 from pathlib import Path
@@ -41,6 +42,7 @@ from output.plain_english import format_report
 from output.json_report import format_json
 from output.sarif import format_sarif
 
+log = logging.getLogger(__name__)
 
 BANNER = """
 ╔══════════════════════════════════════════════════╗
@@ -66,7 +68,7 @@ def load_profile(name: str) -> dict:
             break
 
     if not profiles_dir:
-        print(f"[ERROR] profiles directory not found.", file=sys.stderr)
+        print("[ERROR] profiles directory not found.", file=sys.stderr)
         sys.exit(1)
 
     profile_path = profiles_dir / f'{name}.json'
@@ -98,6 +100,24 @@ def filter_results(results: list, profile: dict) -> list:
     return results
 
 
+def inventory_results(results: list) -> list:
+    """Return positive inventory signals regardless of the selected profile."""
+    inventory = []
+    for result in results:
+        if result.status == 'SKIP':
+            continue
+        if result.check_id in {
+            'AI-TOOL-001', 'AI-TOOL-002', 'AI-TOOL-003',
+            'AI-TOOL-004', 'AI-TOOL-005', 'AI-TOOL-006',
+        }:
+            inventory.append(result)
+        elif result.check_id in {'AI-SUPPLY-003', 'AI-SUPPLY-005'}:
+            inventory.append(result)
+        elif result.check_id == 'AI-SUPPLY-006' and result.evidence:
+            inventory.append(result)
+    return inventory
+
+
 def build_scan_context(args):
     mode = args.mode
     target = Path(args.target).resolve()
@@ -119,6 +139,14 @@ def build_scan_context(args):
             api_key=api_key,
             model=args.model,
             target_dir=str(target),
+            rag_probe=(
+                {
+                    'query': args.rag_query,
+                    'retrieval_marker': args.rag_retrieval_marker,
+                    'injection_marker': args.rag_injection_marker,
+                }
+                if args.rag_query else None
+            ),
         )
 
     if mode == "local":
@@ -247,6 +275,24 @@ examples:
         '--model',
         default='gemini-1.5-flash',
         help='Model name to probe (default: gemini-1.5-flash)',
+    )
+    parser.add_argument(
+        '--rag-query',
+        default=None,
+        metavar='QUERY',
+        help='Query that retrieves a controlled RAG test document (for --mode api)',
+    )
+    parser.add_argument(
+        '--rag-retrieval-marker',
+        default='ARCKON_RAG_RETRIEVED_C7E1',
+        metavar='MARKER',
+        help='Marker in the seeded RAG document that proves retrieval (for --rag-query)',
+    )
+    parser.add_argument(
+        '--rag-injection-marker',
+        default='ARCKON_RAG_INJECTION_A9D4',
+        metavar='MARKER',
+        help='Marker the seeded RAG document tries to make the model output (for --rag-query)',
     )
     # Local/Ollama args
     parser.add_argument(
@@ -565,6 +611,9 @@ examples:
         if _iso_map.get(_r.check_id):
             _r.frameworks['ISO/IEC 42001'] = _iso_map[_r.check_id]
 
+    # Preserve inventory detections before applying profile/severity filters.
+    inventory = inventory_results(results)
+
     # Apply profile filter
     results = filter_results(results, profile)
 
@@ -578,7 +627,10 @@ examples:
         print(output_text)
 
     if 'json' in output_formats:
-        json_text = format_json(results, profile, str(target), args.mode)
+        json_text = format_json(
+            results, profile, str(target), args.mode,
+            inventory_results=inventory,
+        )
         if 'plain' not in output_formats:
             print(json_text)
         if args.out_file:

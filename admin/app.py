@@ -1515,6 +1515,7 @@ async def dns_inventory_analyze(request: Request):
     if upload and hasattr(upload, "read"):
         raw = await upload.read()
         log_content = raw.decode("utf-8", errors="replace")
+        del raw
     else:
         log_content = form.get("log_text", "")
     if not log_content or not log_content.strip():

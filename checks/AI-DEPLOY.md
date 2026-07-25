@@ -78,6 +78,29 @@ Your AI tool probably connects to other systems — maybe your customer database
 - Basic auth credentials in a docker-compose `environment:` block
 - Kubernetes ConfigMap containing a password
 
+### WARN Criteria — CI Test Credential Hygiene
+When **every** credential hit in the scan is a GitHub Actions CI fixture, the finding is
+reported as **WARN / LOW** under the title **`CI Test Credential Hygiene`** instead of
+FAIL / HIGH. A hit qualifies as a CI fixture only when **all** of the following hold:
+
+1. The file path is under `.github/workflows/` (`.yml` / `.yaml`)
+2. The hit is a PostgreSQL connection string whose host is `localhost` or `127.0.0.1`
+3. The same workflow file declares a `postgres` service container (`services:` + `image: postgres`)
+4. The same workflow file sets a test-named `POSTGRES_DB` (value containing `test`)
+
+Such a credential is scoped to the ephemeral CI runner and grants no access to any external
+system. It is still reported — never suppressed — and evidence records only the file, line,
+credential type, and local host. Credential values are never extracted, displayed, or persisted.
+
+If **any** hit does not meet all four conditions — an external or unknown host, a
+non-workflow path, a workflow with no postgres service, a non-test database name, or any
+other credential type — the check stays **FAIL / HIGH** with the standard remediation.
+Mixed input (CI fixture plus a real credential) is always FAIL / HIGH.
+
+Reporting note: because this title describes a narrower situation than AI-DEPLOY-002's
+generic "database takeover" business-risk copy, the plain-English and dashboard outputs
+render the finding's own details rather than that generic text.
+
 ### Remediation
 1. Audit all config files for credential patterns: `grep -rn "password\|token\|secret\|bearer\|auth" ./config/`
 2. Replace hardcoded values with environment variable references

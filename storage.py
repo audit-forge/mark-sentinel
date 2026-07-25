@@ -949,7 +949,6 @@ class AgentStore:
             if row is None:
                 return False
             from_status = row['approval_status'] or 'unapproved'
-            to_status = 'false_positive' if is_fp else from_status
             conn.execute(
                 """UPDATE shadow_devices
                    SET false_positive = ?, notes = ?, approved_by = ?, approved_at = ?

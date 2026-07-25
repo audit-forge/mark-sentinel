@@ -37,7 +37,7 @@ def format_sarif(results: list, profile: dict, target: str, mode: str) -> str:
     run = {
         "tool": {
             "driver": {
-                "name": "M.A.R.K. Sentinel",
+                "name": "Arckon by RiskRaven",
                 "version": "1.0.0-phase1",
                 "informationUri": "https://github.com/audit-forge/mark-sentinel",
                 "rules": rules,

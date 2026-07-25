@@ -19,7 +19,7 @@ Phase 4 (SMB polish + packaging) in progress. Core scan engine is complete.
 - One-command installer script scaffolded
 
 ## Known gaps
-- AI-INP-003 (indirect injection via RAG) — not implemented, returns SKIP
+- AI-INP-003 (indirect injection via RAG) — API-driven end-to-end test; requires a controlled document seeded in the target knowledge base and a retrieval query. Native retrieval-stack inspection is not implemented.
 - AI-AGENT-003 (memory/context poisoning) — not implemented, returns SKIP
 - These two gaps mean Arckon cannot test for the Google Gemini-class indirect injection attacks
 - No runtime interception — point-in-time scanner only

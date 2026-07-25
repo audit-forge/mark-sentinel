@@ -22,8 +22,9 @@ import json
 import re
 from collections import defaultdict
 from dataclasses import dataclass, field
+from itertools import islice
 from pathlib import Path
-from typing import Iterator
+from typing import Iterable, Iterator
 
 
 # ---------------------------------------------------------------------------
@@ -261,7 +262,7 @@ def _detect_format(lines: list[str]) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Parsers — each yields (timestamp_str, domain, source_ip)
+# Parsers — each yields timestamp, domain, source address, and optional hostname
 # ---------------------------------------------------------------------------
 
 @dataclass
@@ -269,9 +270,10 @@ class _Entry:
     ts: str
     domain: str
     src: str
+    hostname: str = ""
 
 
-def _parse_pihole(lines: list[str]) -> Iterator[_Entry]:
+def _parse_pihole(lines: Iterable[str]) -> Iterator[_Entry]:
     # Jun 15 10:23:45 dnsmasq[1234]: query[A] api.openai.com from 192.168.1.5
     pat = re.compile(
         r'^(\w+\s+\d+\s+[\d:]+)\s+(?:\S+\s+)?dnsmasq\[\d+\]:\s+query\[\w+\]\s+([\w.\-]+)\s+from\s+([\d.:a-fA-F]+)'
@@ -282,7 +284,7 @@ def _parse_pihole(lines: list[str]) -> Iterator[_Entry]:
             yield _Entry(ts=m.group(1), domain=m.group(2).rstrip('.'), src=m.group(3))
 
 
-def _parse_bind(lines: list[str]) -> Iterator[_Entry]:
+def _parse_bind(lines: Iterable[str]) -> Iterator[_Entry]:
     # client @0x7f 192.168.1.5#54321 (api.openai.com): query: api.openai.com IN A
     pat = re.compile(
         r'^([\d\-\w\s:.]+?)\s+(?:queries:\s+\w+:\s+)?client\s+(?:@\S+\s+)?([\d.]+)#\d+.*?query:\s+([\w.\-]+)\s+IN'
@@ -293,7 +295,7 @@ def _parse_bind(lines: list[str]) -> Iterator[_Entry]:
             yield _Entry(ts=m.group(1).strip(), domain=m.group(3).rstrip('.'), src=m.group(2))
 
 
-def _parse_unbound(lines: list[str]) -> Iterator[_Entry]:
+def _parse_unbound(lines: Iterable[str]) -> Iterator[_Entry]:
     # [1718444625] unbound[1234:0] info: 192.168.1.5 api.openai.com. A IN
     pat = re.compile(
         r'\[(\d+)\]\s+unbound\[\S+\]\s+info:\s+([\d.:a-fA-F]+)\s+([\w.\-]+)\.\s+\w+\s+IN'
@@ -304,9 +306,9 @@ def _parse_unbound(lines: list[str]) -> Iterator[_Entry]:
             yield _Entry(ts=m.group(1), domain=m.group(3).rstrip('.'), src=m.group(2))
 
 
-def _parse_umbrella(lines: list[str]) -> Iterator[_Entry]:
+def _parse_umbrella(lines: Iterable[str]) -> Iterator[_Entry]:
     # "2026-06-15 10:23:45","identity","","Allowed","1.2.3.4","api.openai.com","A"
-    reader = csv.reader(io.StringIO("\n".join(lines)))
+    reader = csv.reader(lines)
     for row in reader:
         if not row or row[0].startswith('#') or 'timestamp' in row[0].lower():
             continue
@@ -321,11 +323,11 @@ def _parse_umbrella(lines: list[str]) -> Iterator[_Entry]:
             continue
 
 
-def _parse_nextdns(lines: list[str]) -> Iterator[_Entry]:
+def _parse_nextdns(lines: Iterable[str]) -> Iterator[_Entry]:
     # NextDNS CSV export (two known column layouts — camelCase and snake_case):
     # timestamp,domain,query_type,...,client_ip,...,device_name,device_model,device_local_ip,...
     # Normalise header by lowercasing and stripping underscores for flexible matching.
-    reader = csv.reader(io.StringIO("\n".join(lines)))
+    reader = csv.reader(lines)
     header: list[str] = []
     for row in reader:
         if not row:
@@ -340,16 +342,18 @@ def _parse_nextdns(lines: list[str]) -> Iterator[_Entry]:
                 return row[idx].strip() if 0 <= idx < len(row) else ""
             ts     = col("timestamp", 0)
             domain = col("domain", 1).rstrip(".")
-            # prefer internal/local IP → device name → public client IP
-            src = (col("devicelocalip") or col("devicename") or
-                   col("clientname") or col("clientip", 5))
+            # Keep the address and reported device name separate. A device
+            # name is useful context, but it is not an IP address and should
+            # not silently replace one in source-based aggregation.
+            hostname = col("devicename") or col("clientname")
+            src = col("devicelocalip") or col("clientip", 5)
             if domain:
-                yield _Entry(ts=ts, domain=domain, src=src)
+                yield _Entry(ts=ts, domain=domain, src=src, hostname=hostname)
         except (IndexError, ValueError):
             continue
 
 
-def _parse_windows_dns(lines: list[str]) -> Iterator[_Entry]:
+def _parse_windows_dns(lines: Iterable[str]) -> Iterator[_Entry]:
     # 6/15/2026 10:23:45 AM ... api.openai.com
     ts_pat  = re.compile(r'(\d+/\d+/\d{4}\s+\d+:\d+:\d+\s+[AP]M)')
     ip_pat  = re.compile(r'\b(\d{1,3}(?:\.\d{1,3}){3})\b')
@@ -365,14 +369,14 @@ def _parse_windows_dns(lines: list[str]) -> Iterator[_Entry]:
                 yield _Entry(ts=ts_m.group(1), domain=dom.rstrip('.'), src=ip_m.group(1) if ip_m else "")
 
 
-def _parse_plain(lines: list[str]) -> Iterator[_Entry]:
+def _parse_plain(lines: Iterable[str]) -> Iterator[_Entry]:
     for line in lines:
         dom = line.strip().rstrip('.')
         if dom and not dom.startswith('#'):
             yield _Entry(ts="", domain=dom, src="")
 
 
-def _parse_generic(lines: list[str]) -> Iterator[_Entry]:
+def _parse_generic(lines: Iterable[str]) -> Iterator[_Entry]:
     ip_pat  = re.compile(r'\b(\d{1,3}(?:\.\d{1,3}){3})\b')
     dom_pat = re.compile(r'\b((?:[a-zA-Z0-9](?:[a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,})\b')
     # Exclude common non-DNS domain-looking strings
@@ -397,12 +401,12 @@ _PARSERS: dict = {
 }
 
 
-def parse_log(content: str, fmt: str | None = None) -> tuple[str, list[_Entry]]:
-    """Parse DNS log content. Returns (detected_format, entries)."""
-    lines = content.splitlines()
-    detected = fmt or _detect_format(lines)
+def parse_log(content: str, fmt: str | None = None) -> tuple[str, Iterator[_Entry]]:
+    """Parse DNS log content. Returns the format and a streaming row iterator."""
+    sample = list(islice(io.StringIO(content), 20))
+    detected = fmt or _detect_format(sample)
     parser   = _PARSERS.get(detected, _parse_generic)
-    entries  = list(parser(lines))
+    entries  = parser(io.StringIO(content))
     return detected, entries
 
 
@@ -442,6 +446,7 @@ class DnsInventoryResult:
     services: list = field(default_factory=list)
     shadow_ai: list = field(default_factory=list)
     by_source: dict = field(default_factory=dict)
+    source_hostnames: dict = field(default_factory=dict)
     policy_gaps: list = field(default_factory=list)
     errors: list = field(default_factory=list)
 
@@ -455,13 +460,14 @@ class DnsInventoryResult:
             "services":       self.services,
             "shadow_ai":      self.shadow_ai,
             "by_source":      self.by_source,
+            "source_hostnames": self.source_hostnames,
             "policy_gaps":    self.policy_gaps,
             "errors":         self.errors,
         }
 
 
 def analyze(
-    entries: list[_Entry],
+    entries: Iterable[_Entry],
     approved_domains: list[str] | None = None,
 ) -> DnsInventoryResult:
     """
@@ -477,6 +483,7 @@ def analyze(
     service_agg: dict[str, dict] = {}
     # Per-source-IP aggregation
     source_agg:  dict[str, set] = defaultdict(set)
+    source_hostnames: dict[str, set] = defaultdict(set)
     total = 0
 
     for entry in entries:
@@ -503,9 +510,12 @@ def analyze(
         svc = service_agg[key]
         svc["queried_as"].add(entry.domain)
         svc["query_count"] += 1
-        if entry.src:
-            svc["unique_sources"].add(entry.src)
-            source_agg[entry.src].add(key)
+        source_key = entry.src or entry.hostname
+        if source_key:
+            svc["unique_sources"].add(source_key)
+            source_agg[source_key].add(key)
+            if entry.hostname:
+                source_hostnames[source_key].add(entry.hostname)
         if entry.ts and svc["first_seen"] and entry.ts < svc["first_seen"]:
             svc["first_seen"] = entry.ts
         if entry.ts and entry.ts > svc["last_seen"]:
@@ -580,6 +590,10 @@ def analyze(
         services       = services,
         shadow_ai      = shadow,
         by_source      = by_source,
+        source_hostnames = {
+            source: sorted(hostnames)
+            for source, hostnames in sorted(source_hostnames.items())
+        },
         policy_gaps    = gaps,
     )
 
@@ -607,7 +621,7 @@ def connect(
 
     Returns a dict (call .to_dict() compatible shape) with:
       format, total_queries, ai_queries, unique_sources,
-      services, shadow_ai, by_source, policy_gaps, errors
+      services, shadow_ai, by_source, source_hostnames, policy_gaps, errors
     """
     result = DnsInventoryResult(source=log_path or "<inline>", fmt="")
     content = ""

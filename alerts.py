@@ -36,6 +36,7 @@ import logging
 import smtplib
 import time
 import urllib.request
+from urllib.parse import urlparse
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from email.mime.application import MIMEApplication
@@ -67,14 +68,16 @@ def load_alert_config(path: Path) -> Optional[dict]:
 
 
 def load_alert_config_for_ui(path: Path) -> dict:
-    """Load config with password/secret masked for safe return to the browser."""
+    """Load config with secrets masked for safe return to the browser."""
     cfg = load_alert_config(path) or {}
     psa_raw = cfg.get('psa', {})
     cw  = psa_raw.get('connectwise', {})
     at  = psa_raw.get('autotask', {})
     hp  = psa_raw.get('halopsa', {})
     result = {
-        'slack_webhook':  cfg.get('slack_webhook', ''),
+        # Incoming webhook URLs are bearer secrets; never return them to a browser.
+        'slack_webhook':  '',
+        'slack_webhook_configured': bool(cfg.get('slack_webhook')),
         'gchat_webhook':  cfg.get('gchat_webhook', ''),
         'teams_webhook':  cfg.get('teams_webhook', ''),
         'webhook_url':    cfg.get('webhook_url', ''),
@@ -119,7 +122,7 @@ def load_alert_config_for_ui(path: Path) -> dict:
 
 
 def save_alert_config(path: Path, new_data: dict, existing_path: Path) -> None:
-    """Save alert config, preserving masked secrets (SMTP password, PSA keys)."""
+    """Save alert config, preserving masked secrets (SMTP password, PSA keys, Slack)."""
     existing   = load_alert_config(existing_path) or {}
     email_new  = new_data.get('email', {})
     email_old  = existing.get('email', {})
@@ -135,9 +138,19 @@ def save_alert_config(path: Path, new_data: dict, existing_path: Path) -> None:
     def _restore(incoming, saved):
         return saved if incoming == _PASS_MASK else (incoming or '')
 
+    slack_incoming = str(new_data.get('slack_webhook', '')).strip()
+    if new_data.get('slack_webhook_clear'):
+        slack_webhook = ''
+    elif slack_incoming:
+        if not is_valid_slack_webhook(slack_incoming):
+            raise ValueError('Slack webhook must be an HTTPS hooks.slack.com/services URL')
+        slack_webhook = slack_incoming
+    else:
+        slack_webhook = existing.get('slack_webhook', '')
+
     triggers_raw = new_data.get('triggers', {})
     clean = {
-        'slack_webhook':  str(new_data.get('slack_webhook', '')).strip(),
+        'slack_webhook':  slack_webhook,
         'gchat_webhook':  str(new_data.get('gchat_webhook', '')).strip(),
         'teams_webhook':  str(new_data.get('teams_webhook', '')).strip(),
         'webhook_url':    str(new_data.get('webhook_url', '')).strip(),
@@ -306,6 +319,8 @@ def send_test_alert(alert_cfg: dict, channel: str) -> tuple[bool, str]:
         url = alert_cfg.get('slack_webhook', '').strip()
         if not url:
             return False, 'No Slack webhook URL configured'
+        if not is_valid_slack_webhook(url):
+            return False, 'Slack webhook must be an HTTPS hooks.slack.com/services URL'
         ok = _post_slack(url, _format_text(payload), payload)
         return ok, 'Test sent to Slack' if ok else 'Slack delivery failed — check the webhook URL'
     if channel == 'email':
@@ -360,8 +375,10 @@ def _dispatch(alert_cfg: dict, payload: dict) -> list[str]:
     text        = _format_text(payload)
     fired: list[str] = []
     if slack_url:
-        _post_slack(slack_url, text, payload)
-        fired.append('slack')
+        if is_valid_slack_webhook(slack_url) and _post_slack(slack_url, text, payload):
+            fired.append('slack')
+        elif not is_valid_slack_webhook(slack_url):
+            log.error('Skipping invalid Slack webhook URL')
     if gchat_url:
         _post_gchat(gchat_url, text)
         fired.append('google_chat')
@@ -400,6 +417,9 @@ def _create_psa_ticket(psa_cfg: dict, payload: dict) -> None:
 
 
 def _post_slack(webhook_url: str, text: str, payload: dict) -> bool:
+    if not is_valid_slack_webhook(webhook_url):
+        log.error('Refusing to post to an invalid Slack webhook URL')
+        return False
     color = '#d73a49' if payload.get('severity') == 'CRITICAL' else '#e3b341'
     lines = text.split('\n', 1)
     title = lines[0]
@@ -423,6 +443,18 @@ def _post_slack(webhook_url: str, text: str, payload: dict) -> bool:
             return 200 <= r.status < 300
     except Exception as e:
         log.error('Slack POST failed: %s', e)
+        return False
+
+
+def is_valid_slack_webhook(webhook_url: str) -> bool:
+    """Accept only Slack's official HTTPS incoming-webhook endpoint."""
+    try:
+        parsed = urlparse(webhook_url)
+        return (parsed.scheme == 'https'
+                and parsed.hostname == 'hooks.slack.com'
+                and parsed.path.startswith('/services/')
+                and len(parsed.path.split('/')) >= 5)
+    except (TypeError, ValueError):
         return False
 
 

@@ -781,6 +781,11 @@ function openReport(type){
   w.document.close();
 }
 
+// Titles whose findings are narrower than the generic per-check business-risk
+// copy below — show the finding's own details instead.
+// Keep in sync with CI_TEST_CREDENTIAL_TITLE in checks/deploy.py.
+const DETAIL_OVER_BIZ_TITLES={'CI Test Credential Hygiene':1};
+
 const BIZ_RISK={
   'AI-DEPLOY-001':'Your AI credentials are exposed in code — anyone who finds them can use your AI services at your expense and access your data.',
   'AI-DEPLOY-002':'Database passwords are stored in plain text — an attacker who reads your config files can take over your database.',
@@ -867,7 +872,7 @@ function buildExecReport(p){
   const highs=p.findings.filter(f=>f.status==='FAIL'&&f.severity==='HIGH');
   const fails=p.findings.filter(f=>f.status==='FAIL');
   const rows=fails.slice(0,7).map(f=>{
-    const biz=BIZ_RISK[f.check_id]||f.details;
+    const biz=(DETAIL_OVER_BIZ_TITLES[f.title]?f.details:BIZ_RISK[f.check_id])||f.details;
     const step=(f.remediation||'').split('\n').filter(Boolean)[0]||'See detailed report';
     return`<tr><td><strong>${esc(f.title)}</strong><br><span style="color:#6b7280;font-size:12px">${esc(biz)}</span></td><td style="text-align:center"><span class="badge ${f.severity.toLowerCase()}">${esc(f.severity)}</span></td><td style="font-size:12px">${esc(step)}</td></tr>`;
   }).join('');

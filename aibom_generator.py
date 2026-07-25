@@ -14,7 +14,7 @@ import uuid
 _TOOL_SUMMARY_RE = re.compile(r'^(.+?):\s+(.+)$')
 
 # Matches AI-SUPPLY-003 unpinned AI package lists:  "Unpinned AI packages: openai, langchain"
-_UNPINNED_PKGS_RE = re.compile(r'(?i)unpinned (?:ai )?packages?:\s*(.+)')
+_UNPINNED_PKGS_RE = re.compile(r'(?i)unpinned ai packages?:\s*(.+)')
 # Matches the PASS evidence:  "AI packages detected: openai, langchain"
 _PINNED_PKGS_RE   = re.compile(r'(?i)ai packages detected:\s*(.+)')
 # Total pinned count:  "42 pinned packages found"
@@ -25,6 +25,15 @@ _MODEL_VER_RE = re.compile(r'"model"\s*:\s*"([^"]+)"')
 
 # Matches AI-TOOL evidence:  "openai pip package installed"  /  "@org/pkg npm package installed"
 _TOOL_PKG_RE = re.compile(r'^([^\s]+)\s+(pip|npm)\s+package\s+installed', re.IGNORECASE)
+
+_AI_TOOL_NAMES = {
+    'AI-TOOL-001': 'Gemini CLI / Google GenAI SDK',
+    'AI-TOOL-002': 'Claude / Claude Code (Anthropic)',
+    'AI-TOOL-003': 'OpenAI CLI / SDK',
+    'AI-TOOL-004': 'Aider',
+    'AI-TOOL-005': 'GitHub Copilot CLI',
+    'AI-TOOL-006': 'Cursor IDE',
+}
 
 # Shadow AI service names that map to known providers (for dedup/normalisation)
 _SAAS_PROVIDER_MAP: dict[str, str] = {
@@ -66,6 +75,30 @@ def _split_csv(s: str) -> list[str]:
     return [x.strip() for x in s.split(',') if x.strip() and x.strip().lower() != 'none']
 
 
+def _is_pip_directive(value: str) -> bool:
+    """Never render pip options such as -e or -r as software components."""
+    return value.lstrip().startswith('-')
+
+
+def _report_findings(report: dict) -> list[dict]:
+    """Combine posture and profile-independent inventory findings once."""
+    combined = list(report.get('findings', report.get('results', [])) or [])
+    combined.extend(report.get('inventory_findings', []) or [])
+    unique = []
+    seen = set()
+    for finding in combined:
+        key = (
+            finding.get('check_id', ''),
+            finding.get('status', ''),
+            finding.get('details', ''),
+            tuple(finding.get('evidence') or []),
+        )
+        if key not in seen:
+            seen.add(key)
+            unique.append(finding)
+    return unique
+
+
 # ── Component extraction ──────────────────────────────────────────────────────
 
 def _extract_components(
@@ -102,6 +135,8 @@ def _extract_components(
             m['risks'].append('floating version')
 
     def _add_package(name: str, pinned: bool, hostname: str):
+        if _is_pip_directive(name):
+            return
         key = name.lower()
         if key not in packages:
             packages[key] = {'name': name, 'pinned': pinned, 'devices': []}
@@ -134,7 +169,7 @@ def _extract_components(
     for dev in devices:
         hostname = dev.get('hostname', 'Unknown')
         report   = dev.get('_report') or {}
-        findings = report.get('findings', [])
+        findings = _report_findings(report)
 
         for f in findings:
             cid      = f.get('check_id', '')
@@ -222,22 +257,14 @@ def _extract_components(
 
             # ── AI-TOOL-00X: installed AI tools ──────────────────────────────
             elif cid.startswith('AI-TOOL-'):
-                for ev in evidence:
-                    m = _TOOL_PKG_RE.match(ev)
-                    if m:
-                        pkg_name = m.group(1)
-                        # Map package name to friendly display name
-                        display_map = {
-                            'google-generativeai': 'Google Generative AI (Gemini)',
-                            '@anthropic-ai/claude-code': 'Claude Code (Anthropic)',
-                            'anthropic': 'Anthropic Python SDK',
-                            'openai': 'OpenAI Python SDK',
-                            'aider-chat': 'Aider',
-                            'copilot': 'GitHub Copilot',
-                            '@github-copilot/cli': 'GitHub Copilot CLI',
-                        }
-                        display = display_map.get(pkg_name, pkg_name)
-                        _add_tool(display, [], hostname)
+                tool_name = _AI_TOOL_NAMES.get(cid)
+                if tool_name and status != 'SKIP':
+                    _add_tool(tool_name, [], hostname)
+                if not tool_name:
+                    for ev in evidence + ([details] if details else []):
+                        m = _TOOL_PKG_RE.match(ev)
+                        if m:
+                            _add_tool(m.group(1), [], hostname)
 
     # ── Shadow devices → services ─────────────────────────────────────────────
     for sd in (shadow_devices or []):
@@ -424,7 +451,6 @@ def generate_aibom_report(
                 if m['pinned'] else
                 '<span style="color:#DC2626;font-size:10px;font-weight:700">&#9888; FLOATING</span>'
             )
-            risk_text = ', '.join(m['risks']) if m['risks'] else '—'
             rows += f'''
             <tr>
               <td style="{_td}">{esc(m["name"])}</td>
@@ -475,7 +501,6 @@ def generate_aibom_report(
             return '<tr><td colspan="3" style="padding:12px;color:#6B7280;text-align:center;font-size:12px">No active SaaS AI connections detected.</td></tr>'
         rows = ''
         for s in services_list:
-            src_label = 'Active session' if s['source'] == 'saas_ai' else esc(s['source'])
             rows += f'''
             <tr>
               <td style="{_td}">{esc(s["name"])}</td>
@@ -492,9 +517,6 @@ def generate_aibom_report(
         for r in risks_list:
             sev = r['severity']
             sc, sbg = _RISK_COLORS.get(sev, ('#6B7280', '#F9FAFB'))
-            sev_badge = (f'<span style="display:inline-block;padding:2px 7px;border-radius:4px;'
-                         f'font-size:10px;font-weight:700;color:{sc};background:{sbg}">'
-                         f'{esc(sev)}</span>')
             rows += f'''
             <tr>
               <td style="{_td}">{_risk_badge(r["severity"], r["status"])}</td>

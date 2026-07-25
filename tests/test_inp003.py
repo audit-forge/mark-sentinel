@@ -7,7 +7,8 @@ from unittest.mock import MagicMock
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from checks.input_safety import check_inp_003
-from checks import PASS, FAIL, WARN, NA, SKIP
+from checks import PASS, FAIL, NA, SKIP
+from connectors.api_connector import ProbeResult
 
 
 def _ctx(uses_rag=None, files=None):
@@ -25,49 +26,30 @@ class TestInp003Static(unittest.TestCase):
         self.assertEqual(r.status, NA)
         self.assertEqual(r.check_id, 'AI-INP-003')
 
-    def test_fail_when_rag_used_no_guards(self):
-        r = check_inp_003(_ctx(uses_rag=True, files={'app.py': 'from openai import OpenAI\nretrieve(query)'}))
-        self.assertIn(r.status, (FAIL, WARN))
+    def test_skip_without_a_configured_live_rag_probe(self):
+        self.assertEqual(check_inp_003(_ctx(uses_rag=True)).status, SKIP)
 
-    def test_pass_when_guard_and_sanitize_present(self):
-        code = 'import lakera_guard\nsanitize_retrieved_content(docs)\nllm.call()'
-        r = check_inp_003(_ctx(uses_rag=True, files={'app.py': code}))
-        self.assertEqual(r.status, PASS)
+    def test_pass_when_retrieval_is_verified_and_injection_rejected(self):
+        ctx = _ctx(uses_rag=True)
+        ctx.probe_results['inp-003-a'] = ProbeResult(
+            'inp-003-a', 'AI-INP-003', 'RAG test', response='ARCKON_RAG_RETRIEVED_C7E1', passed=True,
+        )
+        self.assertEqual(check_inp_003(ctx).status, PASS)
 
-    def test_warn_when_only_guard_present(self):
-        code = 'import lakera_guard\nllm.call(retrieved_docs)'
-        r = check_inp_003(_ctx(uses_rag=True, files={'app.py': code}))
-        self.assertIn(r.status, (WARN, PASS))
+    def test_fail_when_retrieved_instruction_is_followed(self):
+        ctx = _ctx(uses_rag=True)
+        ctx.probe_results['inp-003-a'] = ProbeResult(
+            'inp-003-a', 'AI-INP-003', 'RAG test', response='ARCKON_RAG_INJECTION_A9D4',
+            passed=False, fail_reason='Model followed the injected instruction.',
+        )
+        self.assertEqual(check_inp_003(ctx).status, FAIL)
 
-    def test_warn_when_only_sanitize_present(self):
-        code = 'docs = sanitize_retrieved_content(raw)\nllm.call(docs)'
-        r = check_inp_003(_ctx(uses_rag=True, files={'app.py': code}))
-        self.assertIn(r.status, (WARN, PASS))
-
-    def test_fail_when_rag_unknown_no_guards(self):
-        r = check_inp_003(_ctx(uses_rag=None, files={'config.json': '{"model": "gpt-4"}'}))
-        self.assertIn(r.status, (FAIL, WARN))
-
-    def test_remediation_present_on_fail(self):
-        r = check_inp_003(_ctx(uses_rag=True))
-        if r.status in (FAIL, WARN):
-            self.assertIsNotNone(r.remediation)
-            self.assertIn('guard', r.remediation.lower())
-
-    def test_presidio_counts_as_guard(self):
-        code = 'from presidio_analyzer import AnalyzerEngine\nsanitize_retrieved_content(docs)'
-        r = check_inp_003(_ctx(uses_rag=True, files={'app.py': code}))
-        self.assertEqual(r.status, PASS)
-
-    def test_llama_guard_counts(self):
-        code = 'GUARD_MODEL = "meta-llama/LlamaGuard-7b"\nsanitize_retrieved_content(docs)'
-        r = check_inp_003(_ctx(uses_rag=True, files={'app.py': code}))
-        self.assertEqual(r.status, PASS)
-
-    def test_gemini_attack_vector_mentioned_in_details(self):
-        r = check_inp_003(_ctx(uses_rag=True))
-        if r.status in (FAIL, WARN):
-            self.assertIn('Gemini', r.details)
+    def test_skip_when_retrieval_cannot_be_verified(self):
+        ctx = _ctx(uses_rag=True)
+        ctx.probe_results['inp-003-a'] = ProbeResult(
+            'inp-003-a', 'AI-INP-003', 'RAG test', error='RAG retrieval could not be verified', passed=False,
+        )
+        self.assertEqual(check_inp_003(ctx).status, SKIP)
 
 
 class TestStoragePruneFix(unittest.TestCase):

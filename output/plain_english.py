@@ -4,6 +4,11 @@ Produces human-readable terminal output with SMB-friendly language option.
 """
 from datetime import date
 from checks import CheckResult, PASS, FAIL, WARN, SKIP
+from checks.deploy import CI_TEST_CREDENTIAL_TITLE
+
+# Results carrying one of these titles describe a narrower situation than the
+# generic per-check SMB copy — use the result's own details instead.
+_DETAILS_OVER_SMB_TITLES = frozenset({CI_TEST_CREDENTIAL_TITLE})
 
 _STATUS_ICON = {PASS: "✅", FAIL: "🔴", WARN: "⚠️ ", SKIP: "⏭ "}
 _STATUS_LABEL = {PASS: "PASS", FAIL: "FAIL", WARN: "WARN", SKIP: "SKIP"}
@@ -225,7 +230,8 @@ def _format_result(r: CheckResult, is_smb: bool, show_fix: bool = True,
     sev_tag = f" [{r.severity}]" if r.status in (FAIL, WARN) else ""
     lines.append(f"  {icon} [{label}]{sev_tag} {r.check_id}: {r.title}")
 
-    details = _SMB_DETAILS.get(r.check_id) if (is_smb and r.check_id in _SMB_DETAILS) else (r.details or "")
+    use_smb = is_smb and r.check_id in _SMB_DETAILS and r.title not in _DETAILS_OVER_SMB_TITLES
+    details = _SMB_DETAILS.get(r.check_id) if use_smb else (r.details or "")
     lines += _wrap(details, indent="     ")
 
     if r.evidence:

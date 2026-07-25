@@ -135,11 +135,12 @@ Increasingly required for FedRAMP and DoD procurements following CISA SBOM
 guidance.
 
 ### RAG / Retrieval Pipeline Checks
-When a customer indicates their AI deployment uses document retrieval
-(RAG — Retrieval-Augmented Generation), additional checks become active that
-test for data leakage from the retrieval store, context poisoning
-vulnerabilities, and access control on indexed documents. Currently surfaced
-as "Coming Soon" in the probe tester; check infrastructure and UI are in place.
+Arckon already performs an API-driven, end-to-end indirect-prompt-injection
+test when the customer seeds a controlled document in the target knowledge base
+and supplies a query that retrieves it. The next phase adds deeper inspection
+of the retrieval stack itself: data leakage from the store, context poisoning,
+and access control on indexed documents. This is intentionally stack-agnostic
+today; it does not natively connect to a vector database or RAG framework.
 
 ### Vendor AI Assessment Questionnaire
 A structured assessment workflow for evaluating the AI security posture of
