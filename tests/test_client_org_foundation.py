@@ -237,7 +237,7 @@ class _FakeRegistry:
 
 @pytest.fixture
 def wired(srv, store, monkeypatch):
-    monkeypatch.setenv("SENTINEL_TRUSTED_PROXY", "1")
+    monkeypatch.setenv("SENTINEL_TRUSTED_PROXY_TOKEN", "test-proxy-token")
     monkeypatch.setattr(srv, "_registry", _FakeRegistry())
     monkeypatch.setattr(srv, "_get_store", lambda customer_id="default": store)
     return srv
@@ -245,6 +245,7 @@ def wired(srv, store, monkeypatch):
 
 def _viewer(org_id=None, email="viewer@acme.test", customer="acme"):
     headers = {
+        "X-Sentinel-Proxy-Token": "test-proxy-token",
         "X-Sentinel-User-Email": email,
         "X-Sentinel-User-Role": "client_viewer",
         "X-Sentinel-Customer-ID": customer,
@@ -256,6 +257,7 @@ def _viewer(org_id=None, email="viewer@acme.test", customer="acme"):
 
 def _admin(org_id=None):
     headers = {
+        "X-Sentinel-Proxy-Token": "test-proxy-token",
         "X-Sentinel-User-Email": "msp@acme.test",
         "X-Sentinel-User-Role": "admin",
         "X-Sentinel-Customer-ID": "acme",
@@ -394,7 +396,8 @@ def test_missing_proxy_role_header_does_not_grant_admin(wired):
     """A vhost that forwards the email but drops the role header must not
     mint an MSP admin. Least privilege: no role -> client_viewer, which then
     fails closed on the missing org."""
-    headers = {"X-Sentinel-User-Email": "ghost@acme.test",
+    headers = {"X-Sentinel-Proxy-Token": "test-proxy-token",
+               "X-Sentinel-User-Email": "ghost@acme.test",
                "X-Sentinel-Customer-ID": "acme"}
     h = wired._Handler.__new__(wired._Handler)
     h.headers = headers
@@ -408,7 +411,8 @@ def test_missing_proxy_role_header_does_not_grant_admin(wired):
 def test_legacy_arckon_headers_still_carry_the_client_org_pin(wired):
     """The proxy emits X-Arckon-* on this branch; both spellings have to
     reach the same scope or the pin is silently dropped."""
-    headers = {"X-Arckon-User-Email": "a@acme.test",
+    headers = {"X-Sentinel-Proxy-Token": "test-proxy-token",
+               "X-Arckon-User-Email": "a@acme.test",
                "X-Arckon-User-Role": "client_viewer",
                "X-Arckon-Customer-ID": "acme",
                "X-Arckon-Client-Org-ID": "org-a"}

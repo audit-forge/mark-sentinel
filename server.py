@@ -60,15 +60,16 @@ import io
 import json
 import logging
 import os
+import hmac
+import mimetypes
 import subprocess
-import tarfile
 import threading
 import time
 import webbrowser
 from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import unquote, urlparse
 
 PORT = 7001
 
@@ -80,7 +81,23 @@ def _compiled_cmd(script: Path) -> list:
         return [str(binary)]
     return [sys.executable, str(script)]
 ROOT = Path(__file__).parent
+RELEASE_DIR = ROOT / 'releases' / 'current'
 _serve_port = PORT   # updated at startup so handlers can reference it
+
+
+def _release_file(request_path: str) -> Path | None:
+    """Resolve a release path under the static directory without traversal."""
+    prefix = '/releases/current/'
+    if not request_path.startswith(prefix):
+        return None
+    relative = unquote(request_path[len(prefix):])
+    if not relative:
+        return None
+    root = RELEASE_DIR.resolve()
+    candidate = (root / relative).resolve()
+    if not candidate.is_relative_to(root) or not candidate.is_file():
+        return None
+    return candidate
 
 log = logging.getLogger('sentinel.server')
 
@@ -1031,7 +1048,11 @@ class _Handler(http.server.BaseHTTPRequestHandler):
     # ── auth helpers ──────────────────────────────────────────────────────────
 
     def _proxy_session_user(self) -> dict | None:
-        if not os.environ.get('SENTINEL_TRUSTED_PROXY'):
+        proxy_token = os.environ.get('SENTINEL_TRUSTED_PROXY_TOKEN', '')
+        supplied_token = self.headers.get('X-Sentinel-Proxy-Token', '')
+        # A marker alone is not proof that nginx authenticated this request:
+        # callers could reach the backend directly if ingress is misconfigured.
+        if not proxy_token or not hmac.compare_digest(supplied_token, proxy_token):
             return None
         email = (self.headers.get('X-Sentinel-User-Email')
                  or self.headers.get('X-Arckon-User-Email', '')).strip()
@@ -1245,15 +1266,13 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self._api_auth_me()
             return
 
-        # Agent-token-gated: agents download these during self-update
-        if path in ('/agent.py', '/bundle.tar.gz'):
-            if not self._check_agent_bearer():
+        # Agent-token-gated, pre-published signed release files only.
+        if path.startswith('/releases/current/'):
+            # Releases must never inherit the first-run authentication bypass.
+            if self._get_agent_customer() is None:
                 self._send(401, b'Unauthorized', 'text/plain')
                 return
-            if path == '/agent.py':
-                self._serve_agent_script()
-            else:
-                self._serve_bundle()
+            self._serve_release_file(path)
             return
 
         # Agent-token-gated: command polling (has its own internal check too)
@@ -2278,88 +2297,13 @@ load();
             'dashboard': dash,
         })
 
-    def _serve_agent_script(self):
-        """GET /agent.py — serve the fleet agent script for easy remote installation."""
-        agent_file = ROOT / 'agent.py'
-        if not agent_file.exists():
+    def _serve_release_file(self, path: str):
+        file_path = _release_file(path)
+        if file_path is None:
             self._not_found()
             return
-        self._send(200, agent_file.read_bytes(), 'text/x-python; charset=utf-8')
-
-    def _serve_bundle(self):
-        """GET /bundle.tar.gz — serve a minimal Sentinel bundle for remote agents.
-
-        If compiled binaries exist (agent, audit), the bundle contains those and
-        excludes the corresponding Python source files — customers receive binaries only.
-        Falls back to shipping Python source when binaries are not present (dev mode).
-
-        Always excludes: output/, benchmarks/, docs/, test/, .git, __pycache__,
-        *.db, *.log, agent_token.txt.
-        """
-        _SKIP_DIRS  = {'benchmarks', 'docs', 'test', '.git', '__pycache__',
-                       '.sentinel_db', 'node_modules'}
-        _SKIP_EXTS  = {'.db', '.log', '.pyc', '.egg-info'}
-        _SKIP_FILES = {'agent_token.txt'}
-
-        agent_bin = ROOT / 'agent'
-        audit_bin = ROOT / 'audit'
-        has_agent_bin = agent_bin.exists() and os.access(agent_bin, os.X_OK)
-        has_audit_bin = audit_bin.exists() and os.access(audit_bin, os.X_OK)
-
-        # Python source files replaced by compiled binaries — exclude from bundle
-        # when the corresponding binary is present.
-        _COMPILED_SOURCE: set[str] = set()
-        if has_agent_bin:
-            _COMPILED_SOURCE.update({
-                'agent.py', 'discovery.py',
-            })
-            # Exclude connectors/ source — embedded in agent binary
-            _SKIP_DIRS = _SKIP_DIRS | {'connectors'}
-        if has_audit_bin:
-            _COMPILED_SOURCE.update({'audit.py'})
-            # Note: checks/ and output/ are NOT embedded in the binary
-            # They're shipped in the bundle alongside the compiled audit binary
-
-        buf = io.BytesIO()
-        with tarfile.open(fileobj=buf, mode='w:gz') as tar:
-            # Add compiled binaries first if present
-            if has_agent_bin:
-                tar.add(agent_bin, arcname='sentinel/agent')
-            if has_audit_bin:
-                tar.add(audit_bin, arcname='sentinel/audit')
-
-            for path in sorted(ROOT.rglob('*')):
-                if not path.is_file():
-                    continue
-                rel = path.relative_to(ROOT)
-                parts = rel.parts
-                if any(p in _SKIP_DIRS for p in parts):
-                    continue
-                if path.suffix in _SKIP_EXTS:
-                    continue
-                if path.name in _SKIP_FILES:
-                    continue
-                if path.name in _COMPILED_SOURCE:
-                    continue
-                # Skip the binaries themselves — already added above
-                if path.name in ('agent', 'audit') and len(parts) == 1:
-                    continue
-                # From output/ only ship the Python modules, not scan result dirs
-                if parts[0] == 'output' and (len(parts) > 2 or path.suffix != '.py'):
-                    continue
-                tar.add(path, arcname=str(Path('sentinel') / rel))
-
-        data = buf.getvalue()
-        import hashlib as _hashlib
-        bundle_sha256 = _hashlib.sha256(data).hexdigest()
-        self.send_response(200)
-        self.send_header('Content-Type', 'application/gzip')
-        self.send_header('Content-Disposition', 'attachment; filename="sentinel.tar.gz"')
-        self.send_header('Content-Length', str(len(data)))
-        self.send_header('X-Bundle-SHA256', bundle_sha256)
-        self.send_header('X-Agent-Binary', '1' if has_agent_bin else '0')
-        self.end_headers()
-        self.wfile.write(data)
+        content_type = mimetypes.guess_type(file_path.name)[0] or 'application/octet-stream'
+        self._send(200, file_path.read_bytes(), content_type)
 
     def _serve_device_dashboard(self, device_id: str):
         """GET /fleet/device/<id>/dashboard — full single-device dashboard with all views."""

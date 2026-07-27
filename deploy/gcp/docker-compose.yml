@@ -4,6 +4,9 @@ services:
     container_name: sentinel-nginx
     ports:
       - "80:80"
+      # Existing customer vhosts use dedicated ports. The backend capability
+      # check prevents direct callers from forging proxy-authenticated identity
+      # while hostname/TLS ingress is introduced in a separate migration.
       - "7001-7100:7001-7100"
     volumes:
       - ./nginx:/etc/nginx/conf.d:ro
@@ -37,24 +40,6 @@ services:
       - /opt/sentinel-secrets/admin-secret-key:/run/secrets/secret_key:ro
       - /opt/sentinel-secrets/admin-password:/run/secrets/admin_password:ro
       - /opt/licenses:/licenses
-      - /var/run/docker.sock:/var/run/docker.sock
-      - ./provision_customer.sh:/app/provision_customer.sh:ro
-      - ./remove_customer.sh:/app/remove_customer.sh:ro
-      - ./restart_customer.sh:/app/restart_customer.sh:ro
-      - ./nginx:/app/nginx
-    networks:
-      - sentinel-net
-    restart: always
-
-  deployer:
-    build:
-      context: ./deployer
-    container_name: sentinel-deployer
-    environment:
-      - REPO_DIR=${REPO_DIR:-/opt/sentinel}
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-      - ${REPO_DIR:-/opt/sentinel}:${REPO_DIR:-/opt/sentinel}
     networks:
       - sentinel-net
     restart: always

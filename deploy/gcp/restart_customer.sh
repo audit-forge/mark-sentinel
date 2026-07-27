@@ -21,6 +21,33 @@ if [ -z "$AGENT_TOKEN" ]; then
   exit 1
 fi
 
+PROXY_TOKEN_FILE="${DATA_DIR}/proxy_token.txt"
+PROXY_TOKEN=$(cat "$PROXY_TOKEN_FILE" 2>/dev/null || true)
+if [ -z "$PROXY_TOKEN" ]; then
+  PROXY_TOKEN=$(python3 -c "import secrets; print(secrets.token_urlsafe(32))")
+  umask 077
+  printf '%s\n' "$PROXY_TOKEN" > "$PROXY_TOKEN_FILE"
+fi
+
+# Migrate existing generated vhosts before replacing their backend. nginx
+# overwrites this header, so direct callers never learn the capability.
+NGINX_CONF_DIR="${NGINX_CONF_DIR:-/opt/sentinel/deploy/gcp/nginx}"
+NGINX_CONF="${NGINX_CONF_DIR}/${CUSTOMER_ID}.conf"
+if [ -f "$NGINX_CONF" ] && ! grep -q 'X-Sentinel-Proxy-Token' "$NGINX_CONF"; then
+  python3 - "$NGINX_CONF" "$CONTAINER_NAME" "$PROXY_TOKEN" <<'PY'
+import sys
+
+path, container, token = sys.argv[1:]
+content = open(path, encoding="utf-8").read()
+needle = f"proxy_pass http://{container}:7331;"
+replacement = needle + f"\n        proxy_set_header X-Sentinel-Proxy-Token {token};"
+if needle not in content:
+    raise SystemExit(f"expected upstream {container!r} not found in {path}")
+with open(path, "w", encoding="utf-8") as output:
+    output.write(content.replace(needle, replacement))
+PY
+fi
+
 LICENSE_MOUNT=""
 if [ -f "$LICENSE_FILE" ]; then
   LICENSE_MOUNT="-v ${LICENSE_FILE}:/app/license.json:ro"
@@ -37,7 +64,7 @@ docker run -d \
   --restart always \
   --label "sentinel.customer=${CUSTOMER_ID}" \
   -e "SENTINEL_AGENT_TOKEN_FILE=/app/data/agent_token.txt" \
-  -e "SENTINEL_TRUSTED_PROXY=1" \
+  -e "SENTINEL_TRUSTED_PROXY_TOKEN=${PROXY_TOKEN}" \
   ${LICENSE_MOUNT} \
   -v "${DATA_DIR}:/app/data" \
   mark-sentinel:latest \
