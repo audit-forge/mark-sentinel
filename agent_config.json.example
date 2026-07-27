@@ -1,5 +1,5 @@
 {
-  "server":   "http://10.0.1.50:7331",
+  "server":   "https://sentinel.example.com",
   "token":    "replace-with-your-secret-token",
   "target":   "~",
   "profile":  "default,iso42001",

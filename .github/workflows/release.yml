@@ -1,0 +1,69 @@
+name: Signed Agent Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    if: github.ref_type == 'tag' && github.ref_protected
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout tagged source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Linux release binaries
+        run: |
+          docker buildx build \
+            --platform linux/amd64 \
+            --file scripts/Dockerfile.build \
+            --output type=local,dest=dist \
+            .
+
+      - name: Package immutable release artifact
+        id: package
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          [[ "$TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
+          VERSION="${TAG#v}"
+          test "$VERSION" = "$(python -c 'from arckon_version import VERSION; print(VERSION)')"
+          ARTIFACT="sentinel-agent-${VERSION}-linux-amd64.tar.gz"
+          python scripts/package_release.py --output "$ARTIFACT"
+          echo "artifact=$ARTIFACT" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Sign release files
+        env:
+          ARCKON_RELEASE_SIGNING_KEY: ${{ secrets.ARCKON_RELEASE_SIGNING_KEY }}
+        run: |
+          python scripts/create_release.py "${{ steps.package.outputs.artifact }}" \
+            --version "${{ steps.package.outputs.version }}" \
+            --output releases/current
+
+      - name: Verify signed artifact with pinned agent verifier
+        env:
+          ARTIFACT: ${{ steps.package.outputs.artifact }}
+        run: |
+          python -c "from pathlib import Path; import hashlib; import agent; release = Path('releases/current'); manifest = agent._validate_update_manifest((release / 'manifest.json').read_bytes(), (release / 'manifest.sig').read_bytes()); artifact = release / manifest['artifact']; assert manifest['artifact'] == Path('$ARTIFACT').name; assert manifest['size'] == artifact.stat().st_size; assert manifest['sha256'] == hashlib.sha256(artifact.read_bytes()).hexdigest()"
+
+      - name: Upload release files for workflow retention
+        uses: actions/upload-artifact@v4
+        with:
+          name: sentinel-release-${{ github.ref_name }}
+          path: releases/current/
+          if-no-files-found: error
+
+      - name: Publish GitHub release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "${{ github.ref_name }}" releases/current/* --title "Sentinel ${{ steps.package.outputs.version }}" --generate-notes

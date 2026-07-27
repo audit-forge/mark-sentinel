@@ -40,19 +40,25 @@ if hasattr(sys.stderr, 'reconfigure'):
     sys.stderr.reconfigure(encoding='utf-8', errors='replace')
 
 import argparse
+import base64
 import hashlib
 import io
 import json
 import logging
 import os
 import platform
+import re
 import socket
 import subprocess
 import tarfile
 import time
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from urllib import error as _urlerr
 from urllib import request as _urlreq
+from urllib.parse import quote, urlparse
+from cryptography.exceptions import InvalidSignature
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 from arckon_version import VERSION
 
 # When running as a Nuitka onefile compiled binary, __file__ points to a temp
@@ -62,6 +68,10 @@ _exec_path = Path(sys.argv[0]).resolve()
 ROOT = _exec_path.parent if _exec_path.is_file() else Path(__file__).parent
 DEFAULT_CONFIG = ROOT / 'agent_config.json'
 _PROCESS_NAME = 'sentinel-agent'
+UPDATE_PRODUCT = 'sentinel-agent'
+PINNED_UPDATE_PUBLIC_KEY_DER_B64 = 'MCowBQYDK2VwAyEAxQSQJT9gaFKKcPEy7nPM7Bdk0fT8LXNDIsQkw1qfLyw='
+_UPDATE_MANIFEST_KEYS = frozenset({'product', 'version', 'artifact', 'sha256', 'size'})
+_VERSION_RE = re.compile(r'^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$')
 
 
 def _set_process_name() -> None:
@@ -457,26 +467,95 @@ def poll_for_command(config: dict, device_id: str) -> str | None:
 
 # ── Self-update ────────────────────────────────────────────────────────────────
 
+class _NoRedirect(_urlreq.HTTPRedirectHandler):
+    """Fail rather than allowing a release request to change its destination."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+def _read_update_url(url: str, headers: dict[str, str], timeout: int = 60) -> bytes:
+    opener = _urlreq.build_opener(_NoRedirect())
+    req = _urlreq.Request(url, headers=headers)
+    with opener.open(req, timeout=timeout) as resp:
+        if not 200 <= resp.status < 300:
+            raise ValueError(f'unexpected HTTP status {resp.status}')
+        return resp.read()
+
+
+def _version_tuple(version: str) -> tuple[int, int, int] | None:
+    match = _VERSION_RE.fullmatch(version)
+    return tuple(int(part) for part in match.groups()) if match else None
+
+
+def _validate_update_manifest(manifest_bytes: bytes, signature: bytes) -> dict:
+    """Verify the signed, exact release manifest before using any of its fields."""
+    try:
+        public_key = serialization.load_der_public_key(
+            base64.b64decode(PINNED_UPDATE_PUBLIC_KEY_DER_B64, validate=True))
+        if not isinstance(public_key, Ed25519PublicKey):
+            raise ValueError('pinned key is not Ed25519')
+        public_key.verify(signature, manifest_bytes)
+    except (ValueError, TypeError, InvalidSignature) as e:
+        raise ValueError('invalid manifest signature') from e
+
+    try:
+        manifest = json.loads(manifest_bytes)
+    except (UnicodeDecodeError, json.JSONDecodeError) as e:
+        raise ValueError('manifest is not valid JSON') from e
+    if not isinstance(manifest, dict) or set(manifest) != _UPDATE_MANIFEST_KEYS:
+        raise ValueError('manifest has an invalid schema')
+    if manifest_bytes != json.dumps(manifest, sort_keys=True, separators=(',', ':')).encode('utf-8'):
+        raise ValueError('manifest is not canonical JSON')
+    if manifest['product'] != UPDATE_PRODUCT:
+        raise ValueError('manifest product does not match this agent')
+    if not isinstance(manifest['version'], str) or _version_tuple(manifest['version']) is None:
+        raise ValueError('manifest version is invalid')
+    if not isinstance(manifest['artifact'], str) or not manifest['artifact']:
+        raise ValueError('manifest artifact is invalid')
+    artifact = PurePosixPath(manifest['artifact'])
+    if ('\\' in manifest['artifact'] or artifact.is_absolute()
+            or any(part in ('', '.', '..') for part in artifact.parts)):
+        raise ValueError('manifest artifact path is unsafe')
+    if not isinstance(manifest['sha256'], str) or not re.fullmatch(r'[0-9a-f]{64}', manifest['sha256']):
+        raise ValueError('manifest sha256 is invalid')
+    if isinstance(manifest['size'], bool) or not isinstance(manifest['size'], int) or manifest['size'] < 0:
+        raise ValueError('manifest size is invalid')
+    return manifest
+
+
 def self_update(config: dict) -> bool:
-    """Download bundle.tar.gz from the server and overwrite local files, then restart."""
+    """Install only a newer, signed release whose artifact verifies exactly."""
     server = config.get('server', '').rstrip('/')
     if not server:
         log.error('self_update: no server configured')
         return False
+    parsed_server = urlparse(server)
+    if (parsed_server.scheme != 'https' or not parsed_server.hostname
+            or parsed_server.username or parsed_server.password
+            or parsed_server.query or parsed_server.fragment):
+        log.error('self_update: refusing non-HTTPS or malformed update server')
+        return False
     token = config.get('token', '')
-    url = f'{server}/bundle.tar.gz'
     headers: dict[str, str] = {'User-Agent': f'sentinel-agent/{VERSION}'}
     if token:
         headers['Authorization'] = f'Bearer {token}'
     try:
-        log.info('self_update: downloading bundle from %s', url)
-        req = _urlreq.Request(url, headers=headers)
-        with _urlreq.urlopen(req, timeout=60) as resp:
-            expected_hash = resp.headers.get('X-Bundle-SHA256', '')
-            data = resp.read()
-        actual_hash = hashlib.sha256(data).hexdigest()
-        if expected_hash and actual_hash != expected_hash:
-            log.error('self_update: bundle hash mismatch (expected %s got %s)', expected_hash, actual_hash)
+        release_url = f'{server}/releases/current'
+        manifest_bytes = _read_update_url(f'{release_url}/manifest.json', headers)
+        signature = _read_update_url(f'{release_url}/manifest.sig', headers)
+        manifest = _validate_update_manifest(manifest_bytes, signature)
+        if _version_tuple(manifest['version']) <= _version_tuple(VERSION):
+            log.info('self_update: release %s is not newer than %s', manifest['version'], VERSION)
+            return False
+        artifact_url = f"{release_url}/{quote(manifest['artifact'], safe='/')}"
+        log.info('self_update: downloading verified release %s', manifest['version'])
+        data = _read_update_url(artifact_url, headers)
+        if len(data) != manifest['size']:
+            log.error('self_update: artifact size mismatch')
+            return False
+        if hashlib.sha256(data).hexdigest() != manifest['sha256']:
+            log.error('self_update: artifact hash mismatch')
             return False
         agent_binary_updated = False
         with tarfile.open(fileobj=io.BytesIO(data), mode='r:gz') as tar:

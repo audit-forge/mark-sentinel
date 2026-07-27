@@ -154,9 +154,6 @@ spec:
             - name: agent-config
               mountPath: /etc/arckon
               readOnly: true
-            - name: docker-sock
-              mountPath: /var/run/docker.sock
-              readOnly: true
 
           livenessProbe:
             exec:
@@ -185,9 +182,5 @@ spec:
             items:
               - key: agent_config.json
                 path: agent_config.json
-        - name: docker-sock
-          hostPath:
-            path: /var/run/docker.sock
-            type: FileOrCreate
 
       terminationGracePeriodSeconds: 30

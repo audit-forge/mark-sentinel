@@ -425,6 +425,7 @@ async def add_customer(
         require_super_admin(request)
     except HTTPException:
         return RedirectResponse("/login")
+    _require_host_operations()
     cid = customer_id.lower().strip().replace(" ", "-")
     if tier not in ("standard", "plus"):
         tier = "standard"
@@ -451,6 +452,8 @@ async def add_customer(
                 return RedirectResponse("/customers?error=badparent", status_code=303)
         max_port = conn.execute("SELECT MAX(port) FROM customers").fetchone()[0]
         port = (max_port or 7000) + 1
+        if port > 7100:
+            return RedirectResponse("/customers?error=port_capacity", status_code=303)
         conn.execute(
             "INSERT INTO customers (id, name, created_at, active, tier, license_expires_at, max_seats, port, agent_token, parent_customer_id) "
             "VALUES (?,?,?,1,?,?,?,?,?,?)",
@@ -516,6 +519,7 @@ async def renew_customer(request: Request, customer_id: str = Form(...)):
         require_super_admin(request)
     except HTTPException:
         return RedirectResponse("/login")
+    _require_host_operations()
     with get_conn() as conn:
         row = conn.execute("SELECT * FROM customers WHERE id=?", (customer_id,)).fetchone()
         if not row:
@@ -544,6 +548,7 @@ async def update_seats(request: Request, customer_id: str = Form(...), max_seats
         require_super_admin(request)
     except HTTPException:
         return RedirectResponse("/login")
+    _require_host_operations()
     if max_seats < 1:
         return RedirectResponse("/customers?error=invalid_seats", status_code=303)
     with get_conn() as conn:
@@ -565,6 +570,7 @@ async def upgrade_customer(request: Request, customer_id: str = Form(...), tier:
         require_super_admin(request)
     except HTTPException:
         return RedirectResponse("/login")
+    _require_host_operations()
     if tier not in ("standard", "plus"):
         return RedirectResponse("/customers?error=invalid_tier", status_code=303)
     with get_conn() as conn:
@@ -586,6 +592,7 @@ async def remove_customer(request: Request, customer_id: str = Form(...)):
         require_super_admin(request)
     except HTTPException:
         return RedirectResponse("/login")
+    _require_host_operations()
     with get_conn() as conn:
         conn.execute("UPDATE customers SET active=0 WHERE id=?", (customer_id,))
         conn.execute("UPDATE users SET active=0 WHERE customer_id=?", (customer_id,))
@@ -599,9 +606,23 @@ async def restore_customer(request: Request, customer_id: str = Form(...)):
         require_super_admin(request)
     except HTTPException:
         return RedirectResponse("/login")
+    _require_host_operations()
     with get_conn() as conn:
+        row = conn.execute("SELECT * FROM customers WHERE id=?", (customer_id,)).fetchone()
+        if not row:
+            return RedirectResponse("/customers?error=notfound", status_code=303)
         conn.execute("UPDATE customers SET active=1 WHERE id=?", (customer_id,))
-    _run_script("provision_customer.sh", customer_id, PUBLIC_IP)
+    _run_script(
+        "provision_customer.sh",
+        customer_id,
+        PUBLIC_IP,
+        row["tier"],
+        row["license_expires_at"],
+        str(row["max_seats"]),
+        row["name"],
+        str(row["port"]),
+        row["agent_token"],
+    )
     return RedirectResponse("/customers", status_code=303)
 
 
@@ -611,6 +632,7 @@ async def delete_customer(request: Request, customer_id: str = Form(...)):
         require_super_admin(request)
     except HTTPException:
         return RedirectResponse("/login")
+    _require_host_operations()
     with get_conn() as conn:
         conn.execute("DELETE FROM customers WHERE id=? AND active=0", (customer_id,))
         conn.execute("DELETE FROM users WHERE customer_id=?", (customer_id,))
@@ -1549,8 +1571,21 @@ def _generate_temp_password(length: int = 14) -> str:
 
 def _run_script(name: str, *args: str):
     script = f"/app/{name}"
-    if os.path.exists(script):
-        subprocess.Popen(["bash", script, *args])
+    if not os.path.exists(script):
+        raise RuntimeError(
+            "Customer lifecycle operations require the host-only sentinelctl "
+            "boundary and are disabled in the web admin service."
+        )
+    subprocess.Popen(["bash", script, *args])
+
+
+def _require_host_operations() -> None:
+    """Reject lifecycle writes until a host-only operator boundary exists."""
+    if not os.path.exists("/app/provision_customer.sh"):
+        raise HTTPException(
+            status_code=503,
+            detail="Customer lifecycle operations require the host-only sentinelctl boundary.",
+        )
 
 
 def _write_license_file(customer_id: str, name: str, tier: str, expires: str, max_seats: int):

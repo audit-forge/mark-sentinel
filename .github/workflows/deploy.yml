@@ -1,21 +1,16 @@
 name: Build & Deploy
 
 on:
-  push:
-    branches: [feat/user-manager, main]
-    paths:
-      - 'agent.py'
-      - 'discovery.py'
-      - 'server.py'
-      - 'audit.py'
-      - 'checks/**'
-      - 'connectors/**'
-      - 'profiles/**'
-      - 'scripts/Dockerfile.build'
-      - 'requirements.txt'
+  workflow_dispatch:
+    inputs:
+      confirm_gcp_upload:
+        description: Type UPLOAD_LEGACY_ARTIFACTS to upload to the legacy GCS path.
+        required: true
+        type: string
 
 jobs:
   build-and-deploy:
+    if: inputs.confirm_gcp_upload == 'UPLOAD_LEGACY_ARTIFACTS'
     runs-on: ubuntu-latest
     permissions:
       contents: read
