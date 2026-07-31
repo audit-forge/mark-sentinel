@@ -23,6 +23,17 @@ AGENT_TOKEN="${8:-}"
 if [ -z "$AGENT_TOKEN" ] && [ -f "${DATA_DIR}/agent_token.txt" ]; then
   AGENT_TOKEN=$(cat "${DATA_DIR}/agent_token.txt")
 fi
+
+# This capability is known only to nginx and its backend. The backend must not
+# accept caller-supplied identity headers merely because a proxy marker exists.
+PROXY_TOKEN_FILE="${DATA_DIR}/proxy_token.txt"
+if [ -f "$PROXY_TOKEN_FILE" ]; then
+  PROXY_TOKEN=$(cat "$PROXY_TOKEN_FILE")
+else
+  PROXY_TOKEN=$(python3 -c "import secrets; print(secrets.token_urlsafe(32))")
+  umask 077
+  printf '%s\n' "$PROXY_TOKEN" > "$PROXY_TOKEN_FILE"
+fi
 if [ -z "$AGENT_TOKEN" ]; then
   AGENT_TOKEN=$(python3 -c "import secrets; print(secrets.token_urlsafe(32))")
   echo "$AGENT_TOKEN" > "${DATA_DIR}/agent_token.txt"
@@ -41,7 +52,7 @@ docker run -d \
   --label "sentinel.customer=${CUSTOMER_ID}" \
   --label "sentinel.tier=${TIER}" \
   -e "SENTINEL_AGENT_TOKEN_FILE=/app/data/agent_token.txt" \
-  -e "SENTINEL_TRUSTED_PROXY=1" \
+  -e "SENTINEL_TRUSTED_PROXY_TOKEN=${PROXY_TOKEN}" \
   ${LICENSE_MOUNT} \
   -v "${DATA_DIR}:/app/data" \
   mark-sentinel:latest \
@@ -83,6 +94,7 @@ server {
         proxy_set_header Host \$host;
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Sentinel-Proxy-Token "";
         proxy_set_header X-Arckon-User-Email "";
         proxy_set_header X-Arckon-User-Role "";
         proxy_set_header X-Arckon-Customer-ID "";
@@ -105,6 +117,7 @@ server {
         proxy_set_header Host \$host;
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header Authorization \$http_authorization;
+        proxy_set_header X-Sentinel-Proxy-Token "";
         proxy_set_header X-Arckon-User-Email "";
         proxy_set_header X-Arckon-User-Role "";
         proxy_set_header X-Arckon-Customer-ID "";
@@ -125,6 +138,7 @@ server {
         proxy_pass http://sentinel-admin:8000;
         proxy_set_header Host \$host;
         proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Sentinel-Proxy-Token "";
         proxy_set_header X-Arckon-User-Email "";
         proxy_set_header X-Arckon-User-Role "";
         proxy_set_header X-Arckon-Customer-ID "";
@@ -164,6 +178,7 @@ server {
         proxy_set_header Host \$host;
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Sentinel-Proxy-Token ${PROXY_TOKEN};
         proxy_set_header X-Arckon-User-Email      \$sentinel_user_email;
         proxy_set_header X-Arckon-User-Role       \$sentinel_user_role;
         proxy_set_header X-Arckon-Customer-ID     ${CUSTOMER_ID};
@@ -186,6 +201,7 @@ server {
     }
 }
 EOF
+chmod 600 "${NGINX_CONF_DIR}/${CUSTOMER_ID}.conf"
 
 docker exec sentinel-nginx nginx -s reload
 echo "Provisioned: ${CUSTOMER_ID} at http://${PUBLIC_IP}:${PORT} (${TIER})"

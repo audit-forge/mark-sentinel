@@ -5,8 +5,7 @@ Short summary
 - Arckon Edge DNS Sensor is an opt-in, customer-managed add-on scaffold for authorized DNS-log telemetry. See `docs/EDGE_DNS_SENSOR.md`.
 
 Quick links
-- Phase 4 (SMB polish & packaging branch): phase4/smb-packaging — https://github.com/audit-forge/mark-sentinel/pull/2
-- Release (v0.1.0-phase3): https://github.com/audit-forge/mark-sentinel/releases/tag/v0.1.0-phase3
+- Release (v1.0.0): https://github.com/audit-forge/mark-sentinel/releases/tag/v1.0.0
 
 1) SMB Quickstart (Plain English)
 
@@ -14,7 +13,7 @@ This section gets a non-technical user from zero to a readable security report i
 
 Requirements
 - Windows 10/11, Linux, or macOS
-- Python 3.9+ installed (https://www.python.org/downloads/)
+- Python 3.11+ installed (https://www.python.org/downloads/)
   - Windows: check "Add Python to PATH" during installation
 - Optional: pandoc + wkhtmltopdf (for PDF report generation)
 
@@ -27,9 +26,6 @@ cd mark-sentinel
 
 # One-command installer (PowerShell — recommended)
 powershell -ExecutionPolicy Bypass -File scripts\install.ps1
-
-# OR: plain batch installer (no PowerShell required)
-scripts\install.bat
 
 # Run a sample config-mode scan
 .venv\Scripts\python.exe audit.py --mode config --profile smb --target test\fixtures\deploy-hardened --output plain

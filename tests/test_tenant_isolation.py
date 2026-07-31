@@ -92,9 +92,8 @@ def _assert_identity_propagated(conf: str, label: str):
 
 def _assert_unauthenticated_locations_strip_identity(conf: str, label: str):
     """Locations that bypass auth_request must blank every X-Sentinel-*
-    header. The upstream runs with SENTINEL_TRUSTED_PROXY=1 and believes
-    whatever it is handed, so anything reachable without /auth/verify is an
-    identity-spoofing route unless the headers are cleared."""
+    header. The upstream requires a proxy capability in addition to authenticated
+    identity, so unauthenticated routes must not receive either value."""
     headers = _auth_verify_headers()
     for spec, body in _location_blocks(conf).items():
         if "proxy_pass" not in body or "auth_request" in body or "internal;" in body:
@@ -127,6 +126,7 @@ def _render_provisioned_conf(tmp_path: Path) -> str:
         'CONTAINER_NAME="sentinel-acme"\n'
         'PORT="7002"\n'
         'PUBLIC_IP="203.0.113.9"\n'
+        'PROXY_TOKEN="test-proxy-token"\n'
         "cat <<EOF\n" + m.group(1) + "\nEOF\n"
     )
     return subprocess.run(["bash", str(script)], capture_output=True,
@@ -202,7 +202,7 @@ def store(tmp_path):
 
 @pytest.fixture
 def wired(srv, store, monkeypatch):
-    monkeypatch.setenv("SENTINEL_TRUSTED_PROXY", "1")
+    monkeypatch.setenv("SENTINEL_TRUSTED_PROXY_TOKEN", "test-proxy-token")
     monkeypatch.setattr(srv, "_registry", _FakeRegistry())
     monkeypatch.setattr(srv, "_get_store", lambda customer_id="default": store)
     return srv
@@ -210,6 +210,7 @@ def wired(srv, store, monkeypatch):
 
 def _viewer(org_id=None, email="viewer@acme.test", customer="acme"):
     headers = {
+        "X-Sentinel-Proxy-Token": "test-proxy-token",
         "X-Sentinel-User-Email": email,
         "X-Sentinel-User-Role": "client_viewer",
         "X-Sentinel-Customer-ID": customer,
@@ -221,6 +222,7 @@ def _viewer(org_id=None, email="viewer@acme.test", customer="acme"):
 
 def _admin(org_id=None):
     headers = {
+        "X-Sentinel-Proxy-Token": "test-proxy-token",
         "X-Sentinel-User-Email": "msp@acme.test",
         "X-Sentinel-User-Role": "admin",
         "X-Sentinel-Customer-ID": "acme",
@@ -395,7 +397,8 @@ def test_missing_proxy_role_header_does_not_grant_admin(wired, monkeypatch):
     """A vhost that forwards the email but drops the role header must not
     mint an MSP admin. Least privilege: no role -> client_viewer, which then
     fails closed on the missing org."""
-    headers = {"X-Sentinel-User-Email": "ghost@acme.test",
+    headers = {"X-Sentinel-Proxy-Token": "test-proxy-token",
+               "X-Sentinel-User-Email": "ghost@acme.test",
                "X-Sentinel-Customer-ID": "acme"}
     h = wired._Handler.__new__(wired._Handler)
     h.headers = headers
@@ -404,6 +407,27 @@ def test_missing_proxy_role_header_does_not_grant_admin(wired, monkeypatch):
     status, body = _request(wired, "/api/devices", headers)
     assert status == 403, "roleless proxy identity was served device data"
     assert b"dev-" not in body
+
+
+def test_identity_headers_without_proxy_capability_are_ignored(wired):
+    h = wired._Handler.__new__(wired._Handler)
+    h.headers = {
+        "X-Sentinel-User-Email": "forged@acme.test",
+        "X-Sentinel-User-Role": "admin",
+        "X-Sentinel-Customer-ID": "acme",
+    }
+    assert h._proxy_session_user() is None
+
+
+def test_identity_headers_with_wrong_proxy_capability_are_ignored(wired):
+    h = wired._Handler.__new__(wired._Handler)
+    h.headers = {
+        "X-Sentinel-Proxy-Token": "attacker-token",
+        "X-Sentinel-User-Email": "forged@acme.test",
+        "X-Sentinel-User-Role": "admin",
+        "X-Sentinel-Customer-ID": "acme",
+    }
+    assert h._proxy_session_user() is None
 
 
 def test_client_viewer_is_still_denied_write_and_rollup_routes(wired):

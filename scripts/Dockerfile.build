@@ -23,7 +23,7 @@ RUN python -m nuitka --onefile --assume-yes-for-downloads \
     audit.py
 
 # Copy agent source files
-COPY agent.py discovery.py ./
+COPY agent.py arckon_version.py discovery.py ./
 
 # Compile agent binary (agent.py + discovery.py + connectors/)
 RUN python -m nuitka --onefile --assume-yes-for-downloads \

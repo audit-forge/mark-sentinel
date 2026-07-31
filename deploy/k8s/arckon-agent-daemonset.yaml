@@ -20,7 +20,7 @@ data:
   agent_config.json: |
     {
       "server":   "http://arckon-server.arckon.svc.cluster.local:7331",
-      "token":    "replace-with-your-secret-token",
+      "token":    "configure-with-arckon-agent-secret",
       "target":   ".",
       "profile":  "default",
       "interval": 3600
@@ -104,7 +104,7 @@ spec:
 
       containers:
         - name: arckon-agent
-          image: ghcr.io/hash-ai/arckon-agent:1.0.0
+          image: ghcr.io/hash-ai/arckon-agent:1.0.0 # Replace with an immutable digest before deployment.
           imagePullPolicy: Always
 
           command:
@@ -115,13 +115,13 @@ spec:
             - /etc/arckon/agent_config.json
 
           env:
-            - name: ARCKON_SERVER
+            - name: SENTINEL_SERVER
               valueFrom:
                 secretKeyRef:
                   name: arckon-agent-secret
                   key: server
                   optional: true
-            - name: ARCKON_AGENT_TOKEN
+            - name: SENTINEL_AGENT_TOKEN
               valueFrom:
                 secretKeyRef:
                   name: arckon-agent-secret
@@ -130,14 +130,14 @@ spec:
             - name: PYTHONUNBUFFERED
               value: "1"
             # NODE_NAME is injected by the downward API — stable across pod restarts.
-            # ARCKON_HOSTNAME uses it so the device ID is derived from the node
+            # SENTINEL_HOSTNAME uses it so the device ID is derived from the node
             # name rather than the ephemeral pod hostname, preventing duplicates when
             # the DaemonSet pod is rescheduled.
             - name: NODE_NAME
               valueFrom:
                 fieldRef:
                   fieldPath: spec.nodeName
-            - name: ARCKON_HOSTNAME
+            - name: SENTINEL_HOSTNAME
               valueFrom:
                 fieldRef:
                   fieldPath: spec.nodeName
@@ -153,9 +153,6 @@ spec:
           volumeMounts:
             - name: agent-config
               mountPath: /etc/arckon
-              readOnly: true
-            - name: docker-sock
-              mountPath: /var/run/docker.sock
               readOnly: true
 
           livenessProbe:
@@ -185,9 +182,5 @@ spec:
             items:
               - key: agent_config.json
                 path: agent_config.json
-        - name: docker-sock
-          hostPath:
-            path: /var/run/docker.sock
-            type: FileOrCreate
 
       terminationGracePeriodSeconds: 30

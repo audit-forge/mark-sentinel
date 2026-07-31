@@ -1,20 +1,16 @@
 name: Build & Deploy
 
 on:
-  push:
-    branches: [feat/user-manager, main]
-    paths:
-      - '*.py'
-      - 'checks/**'
-      - 'connectors/**'
-      - 'profiles/**'
-      - 'scripts/Dockerfile.build'
-      - 'scripts/arckon-deploy.sh'
-      - 'requirements.txt'
   workflow_dispatch:
+    inputs:
+      confirm_gcp_upload:
+        description: Type UPLOAD_LEGACY_ARTIFACTS to upload to the legacy GCS path.
+        required: true
+        type: string
 
 jobs:
   build-and-deploy:
+    if: inputs.confirm_gcp_upload == 'UPLOAD_LEGACY_ARTIFACTS'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -44,25 +40,11 @@ jobs:
       - name: Set up gcloud CLI
         uses: google-github-actions/setup-gcloud@v2
 
-      - name: Package application source
-        run: |
-          # Full app source as one unit — a hand-picked file list here
-          # previously missed alerts.py, storage.py, connectors/, and
-          # several other lazily-imported modules, so changes to those
-          # files silently never reached production.
-          tar czf app.tar.gz \
-            *.py \
-            connectors/ \
-            checks/ \
-            profiles/ \
-            requirements.txt
-          echo "=== Packaged app.tar.gz ==="
-          tar tzf app.tar.gz | head -30
-
       - name: Upload to GCS deploy bucket
         run: |
           # Upload all deployment artifacts to GCS
-          gsutil cp dist/agent dist/audit app.tar.gz \
+          gsutil cp dist/agent dist/audit \
+            server.py discovery.py agent.py \
             gs://arckon-deploy-artifacts/latest/
 
           # Write a deploy manifest so the GCP instance knows a new deploy is ready

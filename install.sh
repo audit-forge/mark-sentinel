@@ -99,27 +99,12 @@ fi
 "$PYTHON" -m venv "${VENV_DIR}"
 VENV_PYTHON="${VENV_DIR}/bin/python"
 
-# ── Download agent bundle from server (web install path) ─────────────────────
+# ── Remote bootstrap safety ──────────────────────────────────────────────────
 
 echo "Installing files to ${INSTALL_PREFIX} ..."
 
 if [[ -n "$OPT_SERVER" ]]; then
-    BUNDLE_URL="${OPT_SERVER%/}/bundle.tar.gz"
-    echo "  Downloading agent bundle from ${BUNDLE_URL} ..."
-    BUNDLE_TMP="$(mktemp /tmp/sentinel-bundle.XXXXXX.tar.gz)"
-    HTTP_CODE=$(curl -sL \
-        -H "Authorization: Bearer ${OPT_TOKEN}" \
-        "$BUNDLE_URL" \
-        -o "$BUNDLE_TMP" \
-        -w "%{http_code}" 2>/dev/null)
-    if [[ "$HTTP_CODE" == "200" ]] && [[ -s "$BUNDLE_TMP" ]]; then
-        tar -xzf "$BUNDLE_TMP" --strip-components=1 -C "${INSTALL_PREFIX}" 2>/dev/null || true
-        rm -f "$BUNDLE_TMP"
-        echo "  [OK] Agent bundle downloaded and extracted"
-    else
-        rm -f "$BUNDLE_TMP"
-        echo "  Warning: bundle download failed (HTTP ${HTTP_CODE}) — falling back to local files"
-    fi
+    echo "  Remote bootstrap is disabled: install a signed package through approved device management."
 fi
 
 # ── Copy files (local install / fallback) ────────────────────────────────────
