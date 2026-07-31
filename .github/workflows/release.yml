@@ -9,7 +9,7 @@ permissions:
   contents: write
 
 jobs:
-  release:
+  release-linux:
     if: github.ref_type == 'tag' && github.ref_protected
     runs-on: ubuntu-latest
     steps:
@@ -29,7 +29,7 @@ jobs:
             --output type=local,dest=dist \
             .
 
-      - name: Package immutable release artifact
+      - name: Package Linux release artifact
         id: package
         env:
           TAG: ${{ github.ref_name }}
@@ -38,32 +38,134 @@ jobs:
           VERSION="${TAG#v}"
           test "$VERSION" = "$(python -c 'from arckon_version import VERSION; print(VERSION)')"
           ARTIFACT="sentinel-agent-${VERSION}-linux-amd64.tar.gz"
-          python scripts/package_release.py --output "$ARTIFACT"
+          python scripts/package_release.py --platform linux --output "$ARTIFACT"
           echo "artifact=$ARTIFACT" >> "$GITHUB_OUTPUT"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
-      - name: Sign release files
+      - name: Sign Linux release files
         env:
           ARCKON_RELEASE_SIGNING_KEY: ${{ secrets.ARCKON_RELEASE_SIGNING_KEY }}
         run: |
           python scripts/create_release.py "${{ steps.package.outputs.artifact }}" \
             --version "${{ steps.package.outputs.version }}" \
-            --output releases/current
+            --platform linux \
+            --output releases/linux
 
-      - name: Verify signed artifact with pinned agent verifier
+      - name: Verify signed Linux artifact
         env:
           ARTIFACT: ${{ steps.package.outputs.artifact }}
         run: |
-          python -c "from pathlib import Path; import hashlib; import agent; release = Path('releases/current'); manifest = agent._validate_update_manifest((release / 'manifest.json').read_bytes(), (release / 'manifest.sig').read_bytes()); artifact = release / manifest['artifact']; assert manifest['artifact'] == Path('$ARTIFACT').name; assert manifest['size'] == artifact.stat().st_size; assert manifest['sha256'] == hashlib.sha256(artifact.read_bytes()).hexdigest()"
+          python -c "from pathlib import Path; import hashlib; import agent; release = Path('releases/linux'); manifest = agent._validate_update_manifest((release / 'manifest.json').read_bytes(), (release / 'manifest.sig').read_bytes()); artifact = release / manifest['artifact']; assert manifest['artifact'] == Path('$ARTIFACT').name; assert manifest['size'] == artifact.stat().st_size; assert manifest['sha256'] == hashlib.sha256(artifact.read_bytes()).hexdigest(); assert manifest['platform'] == 'linux'"
 
-      - name: Upload release files for workflow retention
+      - name: Upload Linux release files
         uses: actions/upload-artifact@v4
         with:
-          name: sentinel-release-${{ github.ref_name }}
-          path: releases/current/
+          name: sentinel-release-linux-${{ github.ref_name }}
+          path: releases/linux/
           if-no-files-found: error
+
+  release-macos:
+    if: github.ref_type == 'tag' && github.ref_protected
+    runs-on: macos-latest
+    steps:
+      - name: Checkout tagged source
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.12'
+
+      - name: Package macOS release artifact
+        id: package
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          [[ "$TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
+          VERSION="${TAG#v}"
+          test "$VERSION" = "$(python -c 'from arckon_version import VERSION; print(VERSION)')"
+          ARTIFACT="sentinel-agent-${VERSION}-macos-source.tar.gz"
+          python scripts/package_release.py --platform macos --output "$ARTIFACT"
+          echo "artifact=$ARTIFACT" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Sign macOS release files
+        env:
+          ARCKON_RELEASE_SIGNING_KEY: ${{ secrets.ARCKON_RELEASE_SIGNING_KEY }}
+        run: |
+          python scripts/create_release.py "${{ steps.package.outputs.artifact }}" \
+            --version "${{ steps.package.outputs.version }}" \
+            --platform macos \
+            --output releases/macos
+
+      - name: Upload macOS release files
+        uses: actions/upload-artifact@v4
+        with:
+          name: sentinel-release-macos-${{ github.ref_name }}
+          path: releases/macos/
+          if-no-files-found: error
+
+  release-windows:
+    if: github.ref_type == 'tag' && github.ref_protected
+    runs-on: windows-latest
+    steps:
+      - name: Checkout tagged source
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.12'
+
+      - name: Package Windows release artifact
+        id: package
+        env:
+          TAG: ${{ github.ref_name }}
+        shell: bash
+        run: |
+          [[ "$TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
+          VERSION="${TAG#v}"
+          test "$VERSION" = "$(python -c 'from arckon_version import VERSION; print(VERSION)')"
+          ARTIFACT="sentinel-agent-${VERSION}-windows-source.tar.gz"
+          python scripts/package_release.py --platform windows --output "$ARTIFACT"
+          echo "artifact=$ARTIFACT" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Sign Windows release files
+        env:
+          ARCKON_RELEASE_SIGNING_KEY: ${{ secrets.ARCKON_RELEASE_SIGNING_KEY }}
+        shell: bash
+        run: |
+          python scripts/create_release.py "${{ steps.package.outputs.artifact }}" \
+            --version "${{ steps.package.outputs.version }}" \
+            --platform windows \
+            --output releases/windows
+
+      - name: Upload Windows release files
+        uses: actions/upload-artifact@v4
+        with:
+          name: sentinel-release-windows-${{ github.ref_name }}
+          path: releases/windows/
+          if-no-files-found: error
+
+  publish-github-release:
+    needs: [release-linux, release-macos, release-windows]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all release artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: releases/
+          pattern: sentinel-release-*
 
       - name: Publish GitHub release assets
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "${{ github.ref_name }}" releases/current/* --title "Sentinel ${{ steps.package.outputs.version }}" --generate-notes
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          gh release create "${GITHUB_REF_NAME}" \
+            releases/sentinel-release-linux-*/**/* \
+            releases/sentinel-release-macos-*/**/* \
+            releases/sentinel-release-windows-*/**/* \
+            --title "Sentinel ${VERSION}" \
+            --generate-notes

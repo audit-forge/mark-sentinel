@@ -536,7 +536,7 @@ def check_supply_005(ctx: ScanContext) -> CheckResult:
         inventory_parts = []
         for name, kind in sorted(detected_models.items()):
             inventory_parts.append(f"{name} ({kind})")
-        model_inventory_evidence.append("Models detected: " + ", ".join(inventory_parts[:10]))
+        model_inventory_evidence.append("Models detected: " + ", ".join(inventory_parts[:50]))
 
     if floating_hits or latest_hits:
         evidence = (floating_hits + latest_hits)[:5] + model_inventory_evidence

@@ -70,7 +70,7 @@ DEFAULT_CONFIG = ROOT / 'agent_config.json'
 _PROCESS_NAME = 'sentinel-agent'
 UPDATE_PRODUCT = 'sentinel-agent'
 PINNED_UPDATE_PUBLIC_KEY_DER_B64 = 'MCowBQYDK2VwAyEAxQSQJT9gaFKKcPEy7nPM7Bdk0fT8LXNDIsQkw1qfLyw='
-_UPDATE_MANIFEST_KEYS = frozenset({'product', 'version', 'artifact', 'sha256', 'size'})
+_UPDATE_MANIFEST_KEYS = frozenset({'product', 'version', 'artifact', 'sha256', 'size', 'platform'})
 _VERSION_RE = re.compile(r'^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$')
 
 
@@ -505,6 +505,8 @@ def _validate_update_manifest(manifest_bytes: bytes, signature: bytes) -> dict:
         raise ValueError('manifest is not valid JSON') from e
     if not isinstance(manifest, dict) or set(manifest) != _UPDATE_MANIFEST_KEYS:
         raise ValueError('manifest has an invalid schema')
+    if manifest.get('platform') not in (None, 'linux', 'macos', 'windows'):
+        raise ValueError('manifest platform is invalid')
     if manifest_bytes != json.dumps(manifest, sort_keys=True, separators=(',', ':')).encode('utf-8'):
         raise ValueError('manifest is not canonical JSON')
     if manifest['product'] != UPDATE_PRODUCT:
@@ -545,10 +547,16 @@ def self_update(config: dict) -> bool:
     if token:
         headers['Authorization'] = f'Bearer {token}'
     try:
-        release_url = f'{server}/releases/current'
+        plat = {'Linux': 'linux', 'Darwin': 'macos', 'Windows': 'windows'}.get(platform.system())
+        release_url = f'{server}/releases/{plat}' if plat else f'{server}/releases/current'
         manifest_bytes = _read_update_url(f'{release_url}/manifest.json', headers)
         signature = _read_update_url(f'{release_url}/manifest.sig', headers)
         manifest = _validate_update_manifest(manifest_bytes, signature)
+        expected_platform = plat or 'linux'
+        if manifest.get('platform') != expected_platform:
+            log.error('self_update: platform mismatch (expected %s, got %s)',
+                      expected_platform, manifest.get('platform'))
+            return False
         if _version_tuple(manifest['version']) <= _version_tuple(VERSION):
             log.info('self_update: release %s is not newer than %s', manifest['version'], VERSION)
             return False

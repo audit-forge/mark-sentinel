@@ -16,7 +16,7 @@ _VERSION_RE = re.compile(r'^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$')
 _PINNED_PUBLIC_KEY_DER_B64 = 'MCowBQYDK2VwAyEAxQSQJT9gaFKKcPEy7nPM7Bdk0fT8LXNDIsQkw1qfLyw='
 
 
-def create_release(artifact: Path, version: str, output: Path, key_b64: str) -> None:
+def create_release(artifact: Path, version: str, output: Path, key_b64: str, *, platform: str = '') -> None:
     """Write an artifact and its pinned-key-signed canonical manifest."""
     if not _VERSION_RE.fullmatch(version):
         raise ValueError('version must be a numeric MAJOR.MINOR.PATCH version')
@@ -49,6 +49,8 @@ def create_release(artifact: Path, version: str, output: Path, key_b64: str) -> 
         'size': len(data),
         'version': version,
     }
+    if platform:
+        manifest['platform'] = platform
     manifest_bytes = json.dumps(manifest, sort_keys=True, separators=(',', ':')).encode('utf-8')
     output.mkdir(parents=True, exist_ok=True)
     (output / artifact_name).write_bytes(data)
@@ -61,6 +63,8 @@ def main() -> int:
     parser.add_argument('artifact', type=Path)
     parser.add_argument('--version', required=True)
     parser.add_argument('--output', type=Path, default=Path('releases/current'))
+    parser.add_argument('--platform', type=str, default='',
+                        help='Platform label to embed in the manifest')
     args = parser.parse_args()
     try:
         create_release(
@@ -68,6 +72,7 @@ def main() -> int:
             args.version,
             args.output,
             os.environ.get('ARCKON_RELEASE_SIGNING_KEY', ''),
+            platform=args.platform,
         )
     except ValueError as e:
         parser.error(str(e))

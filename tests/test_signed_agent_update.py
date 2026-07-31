@@ -16,6 +16,7 @@ def _signed_manifest(private_key, **overrides):
         'sha256': hashlib.sha256(b'update').hexdigest(),
         'size': 6,
         'version': '1.0.1',
+        'platform': 'linux',
     }
     manifest.update(overrides)
     data = json.dumps(manifest, sort_keys=True, separators=(',', ':')).encode()
@@ -44,6 +45,7 @@ def test_valid_signed_manifest_is_accepted(release_key):
     {'sha256': 'A' * 64},
     {'size': True},
     {'version': '1.0'},
+    {'platform': 'invalid'},
 ])
 def test_manifest_schema_and_fields_are_strict(release_key, overrides):
     data, signature = _signed_manifest(release_key, **overrides)
@@ -69,6 +71,8 @@ def test_noncanonical_signed_manifest_is_rejected(release_key):
 
 
 def test_self_update_rejects_equal_or_older_release_before_artifact_download(release_key, monkeypatch):
+    import platform as _platform
+    monkeypatch.setattr(_platform, 'system', lambda: 'Linux')
     data, signature = _signed_manifest(release_key, version=agent.VERSION)
     requests = []
 
@@ -80,8 +84,8 @@ def test_self_update_rejects_equal_or_older_release_before_artifact_download(rel
 
     assert agent.self_update({'server': 'https://updates.example.test', 'token': 'test'}) is False
     assert requests == [
-        'https://updates.example.test/releases/current/manifest.json',
-        'https://updates.example.test/releases/current/manifest.sig',
+        'https://updates.example.test/releases/linux/manifest.json',
+        'https://updates.example.test/releases/linux/manifest.sig',
     ]
 
 

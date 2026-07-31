@@ -321,7 +321,7 @@ def _extract_components(
 
             # ── AI-SUPPLY-005: model version pinning ──────────────────────────
             elif cid == 'AI-SUPPLY-005':
-                # First parse the consolidated inventory line if present.
+                # Parse the consolidated inventory line if present.
                 inventory_match = None
                 for ev in evidence:
                     inventory_match = _MODEL_INVENTORY_RE.search(ev)

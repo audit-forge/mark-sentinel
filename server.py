@@ -84,9 +84,24 @@ RELEASE_DIR = ROOT / 'releases' / 'current'
 _serve_port = PORT   # updated at startup so handlers can reference it
 
 
-def _release_file(request_path: str) -> Path | None:
-    """Resolve a release path under the static directory without traversal."""
+def _release_file(request_path: str, platform: str | None = None) -> Path | None:
+    """Resolve a release path under the platform-specific directory without traversal.
+
+    If platform is given (linux/macos/windows), files are served from
+    releases/<platform>/ instead of the legacy releases/current/.
+    """
     prefix = '/releases/current/'
+    platform_prefix = '/releases/'
+    if request_path.startswith(platform_prefix) and not request_path.startswith(prefix):
+        rel = unquote(request_path[len(platform_prefix):]).lstrip('/')
+        parts = rel.split('/', 1)
+        if len(parts) == 2:
+            plat, filename = parts
+            if plat in ('linux', 'macos', 'windows') and filename:
+                root = (ROOT / 'releases' / plat).resolve()
+                candidate = (root / filename).resolve()
+                if candidate.is_relative_to(root) and candidate.is_file():
+                    return candidate
     if not request_path.startswith(prefix):
         return None
     relative = unquote(request_path[len(prefix):])
@@ -1264,7 +1279,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             return
 
         # Agent-token-gated, pre-published signed release files only.
-        if path.startswith('/releases/current/'):
+        if path.startswith('/releases/'):
             # Releases must never inherit the first-run authentication bypass.
             if self._get_agent_customer() is None:
                 self._send(401, b'Unauthorized', 'text/plain')
