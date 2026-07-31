@@ -202,8 +202,9 @@ def scan_directory(target_dir: str, mode: str = "config", max_files: int | None 
                 # Ollama model manifests expose which model tags are present locally
                 'manifest', 'manifests',
             }
+            is_ollama_manifest = 'ollama/models/manifests' in str(filepath).lower().replace('\\', '/')
             if ext not in TEXT_EXTS and not name_lower.startswith('.env') and 'dockerfile' not in name_lower:
-                if name_lower not in _special:
+                if name_lower not in _special and not is_ollama_manifest:
                     continue
 
             try:
@@ -215,6 +216,15 @@ def scan_directory(target_dir: str, mode: str = "config", max_files: int | None 
             ctx.files[rel_path] = content
             count += 1
             _categorize(ctx, rel_path, filename, name_lower, content)
+
+            # Ollama model manifests encode the model family + tag in the path.
+            # Synthesize a "model" line so supply-chain checks pick them up.
+            if 'ollama/models/manifests' in rel_path.replace('\\', '/').lower():
+                family, tag = _parse_ollama_manifest_path(rel_path)
+                if family and tag:
+                    synthetic = f'ollama pull {family}:{tag}'
+                    ctx.files[rel_path + ':ollama-model'] = synthetic
+                    count += 1
 
     ctx.total_files_scanned = count
     return ctx
@@ -381,6 +391,37 @@ def _is_agent_config(name: str) -> bool:
 
 def _is_requirements(name: str) -> bool:
     return name.startswith('requirements') and (name.endswith('.txt') or name.endswith('.in'))
+
+
+def _parse_ollama_manifest_path(rel_path: str) -> tuple[str, str] | None:
+    """Extract model family and tag from an Ollama manifest path.
+
+    Path shape: .../.ollama/models/manifests/registry.ollama.ai/library/<family>/<tag>
+    or:          .../.ollama/models/manifests/registry.ollama.ai/library/<org>/<family>/<tag>
+    """
+    parts = Path(rel_path).parts
+    try:
+        idx = parts.index('manifests')
+    except ValueError:
+        return None
+    library_parts = parts[idx + 1:]
+    if len(library_parts) < 2 or library_parts[0] != 'registry.ollama.ai':
+        # Accept non-registry namespaces too
+        if len(library_parts) < 2:
+            return None
+        family_parts = list(library_parts[:-1])
+        tag = library_parts[-1]
+    else:
+        # registry.ollama.ai/library/<family>/<tag> or .../library/<org>/<family>/<tag>
+        family_parts = list(library_parts[2:-1]) if len(library_parts) > 3 else []
+        tag = library_parts[-1] if family_parts else ''
+        if not family_parts:
+            family_parts = [library_parts[-2]]
+            tag = library_parts[-1]
+    if not family_parts or not tag:
+        return None
+    family = '/'.join(family_parts)
+    return family, tag
 
 
 # --- Parsing helpers ---
