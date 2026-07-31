@@ -881,6 +881,6 @@ def test_the_rendered_vhost_still_does_the_rest_of_its_job(rendered_vhost):
     assert "proxy_pass http://user-manager:8000/auth/verify;" in blocks["= /_auth"]
     assert "proxy_set_header X-Customer-ID acme;" in blocks["= /_auth"]
     assert "proxy_read_timeout 300;" in blocks["/api/agent/"]
-    assert rendered_vhost.count("proxy_read_timeout 300;") == 3
+    assert rendered_vhost.count("proxy_read_timeout 300;") == 4
     assert any("return 302 http://203.0.113.10/login?next=" in line
                for line in blocks["@login_redirect"])

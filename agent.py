@@ -603,7 +603,9 @@ def self_update(config: dict) -> bool:
         if agent_binary_updated and agent_bin.exists() and os.access(agent_bin, os.X_OK):
             os.execv(str(agent_bin), [str(agent_bin)] + sys.argv[1:])
         else:
-            os.execv(sys.executable, [sys.executable] + sys.argv)
+            import subprocess
+            subprocess.Popen([sys.executable, str(Path(__file__).resolve())] + sys.argv[1:])
+            return True
     except Exception as e:
         log.error('self_update failed: %s', e)
         return False
