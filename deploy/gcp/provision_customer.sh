@@ -134,6 +134,28 @@ server {
         proxy_read_timeout 300;
     }
 
+    location /releases/ {
+        proxy_pass http://${CONTAINER_NAME}:7331;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header Authorization \$http_authorization;
+        proxy_set_header X-Sentinel-Proxy-Token "";
+        proxy_set_header X-Arckon-User-Email "";
+        proxy_set_header X-Arckon-User-Role "";
+        proxy_set_header X-Arckon-Customer-ID "";
+        proxy_set_header X-Arckon-Client-Org-ID "";
+        proxy_set_header X-Arckon-Is-Reseller "";
+        proxy_set_header X-Arckon-Is-MSP "";
+        proxy_set_header X-Sentinel-User-Email "";
+        proxy_set_header X-Sentinel-User-Role "";
+        proxy_set_header X-Sentinel-Customer-ID "";
+        proxy_set_header X-Sentinel-Client-Org-ID "";
+        proxy_set_header X-Sentinel-Is-Reseller     "";
+        proxy_set_header X-Sentinel-Is-MSP          "";
+        proxy_set_header X-Sentinel-Impersonated-By "";
+        proxy_read_timeout 300;
+    }
+
     location /install/ {
         proxy_pass http://sentinel-admin:8000;
         proxy_set_header Host \$host;
