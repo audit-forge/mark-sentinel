@@ -7287,14 +7287,14 @@ function openScanModal(id, triggerBtn) {{
   overlay.style.cssText = 'position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center';
 
   const modal = document.createElement('div');
-  modal.style.cssText = 'background:#ffffff;border:1px solid #E5E7EB;border-radius:8px;padding:20px 24px;min-width:280px;max-width:340px;box-shadow:0 8px 32px rgba(0,0,0,.6)';
+  modal.style.cssText = 'background:#ffffff;border:1px solid #E5E7EB;border-radius:8px;padding:20px 24px;min-width:280px;max-width:380px;max-height:85vh;display:flex;flex-direction:column;box-shadow:0 8px 32px rgba(0,0,0,.6)';
 
   const hostname = triggerBtn.closest('tr')?.querySelector('.dev-host')?.textContent || id.slice(0,12);
 
   modal.innerHTML = `
-    <div style="font-size:13px;font-weight:600;color:#111827;margin-bottom:4px">Select Profiles to Scan</div>
-    <div style="font-size:11px;color:#6B7280;margin-bottom:14px">${{esc(hostname)}}</div>
-    <div id="smp-list" style="display:flex;flex-direction:column;gap:8px;margin-bottom:16px">
+    <div style="font-size:13px;font-weight:600;color:#111827;margin-bottom:4px;flex-shrink:0">Select Profiles to Scan</div>
+    <div style="font-size:11px;color:#6B7280;margin-bottom:14px;flex-shrink:0">${{esc(hostname)}}</div>
+    <div id="smp-list" style="display:flex;flex-direction:column;gap:8px;margin-bottom:16px;overflow-y:auto;max-height:55vh;padding-right:4px">
       ${{_SCAN_PROFILES.map(p => `
         <label style="display:flex;align-items:flex-start;gap:10px;cursor:pointer;padding:7px 10px;border:1px solid #F3F4F6;border-radius:5px;transition:border-color .15s"
                onmouseover="this.style.borderColor='#E5E7EB'" onmouseout="this.style.borderColor='#F3F4F6'">
