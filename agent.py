@@ -531,7 +531,11 @@ def self_update(config: dict) -> bool:
         log.error('self_update: no server configured')
         return False
     parsed_server = urlparse(server)
-    if (parsed_server.scheme != 'https' or not parsed_server.hostname
+    # Production deployments MUST use HTTPS. The dev flag below is only for
+    # isolated testbeds and should never be enabled for paying customers.
+    allow_http = os.environ.get('SENTINEL_ALLOW_HTTP_UPDATE', '').lower() in ('1', 'true', 'yes')
+    scheme_ok = parsed_server.scheme == 'https' or (allow_http and parsed_server.scheme == 'http')
+    if (not scheme_ok or not parsed_server.hostname
             or parsed_server.username or parsed_server.password
             or parsed_server.query or parsed_server.fragment):
         log.error('self_update: refusing non-HTTPS or malformed update server')
