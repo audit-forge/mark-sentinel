@@ -10,42 +10,56 @@ from connectors.config_connector import ScanContext
 CATEGORY = "AI-SUPPLY"
 
 # Floating model version patterns (should be pinned)
+# Generic floating model patterns across many file formats (JSON/YAML/Python/env/shell/Modelfile)
 _FLOATING_MODEL_RE = re.compile(
-    r'(?i)"model"\s*:\s*"(?:'
-    r'gpt-4o"'                          # Unpinned gpt-4o
-    r'|gpt-4"'                          # Unpinned gpt-4
-    r'|gpt-3\.5-turbo"'                 # Unpinned gpt-3.5-turbo
-    r'|claude-[a-z0-9-]+-(?:latest|current)"'
-    r'|claude-sonnet"'
-    r'|claude-opus"'
-    r'|claude-haiku"'
-    r'|llama[23]?"'                     # Floating llama
-    r'|mistral"'
-    r'|gemini-pro"'
-    r'|gemini-flash"'
-    r'|command-r"'
-    r'|glm-[a-z0-9-]*"'                 # Floating GLM (Zhipu)
-    r'|kimi[a-z0-9._-]*"'               # Floating Kimi (Moonshot)
-    r'|deepseek[a-z0-9._-]*"'          # Floating DeepSeek
-    r'|qwen[a-z0-9._-]*"'              # Floating Qwen (Alibaba)
-    r'|[a-zA-Z0-9-]+:latest"'          # :latest tag
+    r'(?i)'
+    r'(?:"model"\s*[:=]\s*["\x27]|model\s*=\s*["\x27]|model_name\s*[:=]\s*["\x27]|'
+    r'--model\s+|[\s=]MODEL[\s=]|OLLAMA_MODEL\s*=|from\s+|ollama\s+(?:run|pull)\s+)'
+    r'["\x27]?'
+    r'(?:'
+    r'gpt-4o'                          # Unpinned gpt-4o
+    r'|gpt-4'
+    r'|gpt-3\.5-turbo'
+    r'|claude-[a-z0-9-]+-(?:latest|current)'
+    r'|claude-sonnet'
+    r'|claude-opus'
+    r'|claude-haiku'
+    r'|llama[23]?'
+    r'|mistral'
+    r'|gemini-pro'
+    r'|gemini-flash'
+    r'|command-r'
+    r'|glm-[a-z0-9-]*'                 # Floating GLM (Zhipu)
+    r'|kimi[a-z0-9._-]*'               # Floating Kimi (Moonshot)
+    r'|deepseek[a-z0-9._-]*'           # Floating DeepSeek
+    r'|qwen[a-z0-9._-]*'              # Floating Qwen (Alibaba)
+    r'|[a-zA-Z0-9-]+:latest'           # :latest tag
     r')'
+    r'(?:[:\-][a-zA-Z0-9._:-]+)?'
+    r'["\x27]?'
 )
 
+# Pinned model patterns — still anchored to JSON/YAML "model" key for precision
 _PINNED_MODEL_RE = re.compile(
-    r'(?i)"model"\s*:\s*"(?:'
-    r'gpt-4o-\d{4}-\d{2}-\d{2}"'       # gpt-4o-2024-11-20
-    r'|gpt-4-\d{4}"'                   # gpt-4-turbo with date
-    r'|gpt-3\.5-turbo-\d{4}"'
-    r'|claude-[a-z0-9-]+-\d{8}"'       # claude-3-5-sonnet-20241022
-    r'|claude-[a-z0-9-]+-\d{4}-\d{2}-\d{2}"'
-    r'|llama[23]?(?:\.\d+)?:\w+(?:-\w+)*"'     # llama3.1:8b-instruct-q4
-    r'|glm-[a-z0-9._-]+:\w+(?:-\w+)*"'         # GLM with pinned tag
-    r'|kimi-[a-z0-9._-]+:\w+(?:-\w+)*"'        # Kimi with pinned tag
-    r'|deepseek-[a-z0-9._-]+:\w+(?:-\w+)*"'    # DeepSeek with pinned tag
-    r'|qwen[a-z0-9._-]*:\w+(?:-\w+)*"'         # Qwen with pinned tag
-    r'|[a-zA-Z0-9-]+:[a-zA-Z0-9._-]+(?:sha256:[a-f0-9]+)?"'  # model:version-sha256:abc
+    r'(?i)'
+    r'(?:"model"\s*[:=]\s*["\x27]|model\s*=\s*["\x27]|model_name\s*[:=]\s*["\x27]|'
+    r'--model\s+|OLLAMA_MODEL\s*=|from\s+|ollama\s+(?:run|pull)\s+)'
+    r'["\x27]?'
+    r'(?:'
+    r'gpt-4o-\d{4}-\d{2}-\d{2}'       # gpt-4o-2024-11-20
+    r'|gpt-4-\d{4}'                   # gpt-4-turbo with date
+    r'|gpt-3\.5-turbo-\d{4}'
+    r'|claude-[a-z0-9-]+-\d{8}'       # claude-3-5-sonnet-20241022
+    r'|claude-[a-z0-9-]+-\d{4}-\d{2}-\d{2}'
+    r'|llama[23]?(?:\.\d+)?:\w+(?:-\w+)*'     # llama3.1:8b-instruct-q4
+    r'|glm-[a-z0-9._-]+:\w+(?:-\w+)*'         # GLM with pinned tag
+    r'|kimi-[a-z0-9._-]+:\w+(?:-\w+)*'        # Kimi with pinned tag
+    r'|deepseek-[a-z0-9._-]+:\w+(?:-\w+)*'    # DeepSeek with pinned tag
+    r'|qwen[a-z0-9._-]*:\w+(?:-\w+)*'         # Qwen with pinned tag
+    r'|[a-zA-Z0-9-]+:[a-zA-Z0-9._-]+(?:sha256:[a-f0-9]+)?'  # model:version-sha256:abc
     r')'
+    r'(?:[:\-][a-zA-Z0-9._:-]+)?'
+    r'["\x27]?'
 )
 
 _LATEST_TAG_RE = re.compile(r'(?i):\s*"?latest"?|"model"\s*:\s*"[^"]+:latest"')
@@ -436,23 +450,72 @@ def check_supply_004(ctx: ScanContext) -> CheckResult:
         )
 
 
+def _extract_model_name(text: str) -> str | None:
+    """Extract the bare model identifier from a matched line."""
+    # Strip prefixes and surrounding quotes
+    t = text.strip()
+    for prefix in ('"model"', 'model_name', 'model', '--model', 'OLLAMA_MODEL', 'from', 'ollama run', 'ollama pull'):
+        t = re.sub(rf'(?i)^\s*{re.escape(prefix)}\s*[:=]?\s*["\x27]?', '', t)
+    t = t.strip().strip('"\'')
+    if not t or t in (':', '='):
+        return None
+    return t
+
+
+def _model_hit_kind(text: str) -> str | None:
+    """Return 'floating' if the matched text is a floating model reference,
+    'pinned' if it looks pinned, or None if it is only a container :latest tag."""
+    name = _extract_model_name(text)
+    if not name:
+        return None
+    t = name.lower()
+    # A pinned reference has a version/date/digest after the model family name
+    if re.search(r':\w{4,}|:\d{8}|\d{4}-\d{2}-\d{2}|\d{8}|sha256:[a-f0-9]{8,}', t):
+        return 'pinned'
+    if ':latest' in t:
+        return 'floating'
+    families = (
+        'gpt-4o', 'gpt-4', 'gpt-3.5-turbo', 'claude-', 'llama', 'mistral',
+        'gemini-pro', 'gemini-flash', 'command-r', 'glm-', 'kimi', 'deepseek', 'qwen'
+    )
+    if any(t.startswith(f) for f in families):
+        return 'floating'
+    return None
+
+
 def check_supply_005(ctx: ScanContext) -> CheckResult:
     """AI-SUPPLY-005: Model Version Pinned (Not Floating Latest)"""
     floating_hits = []
     pinned_hits = []
 
-    # Only check actual config files, not docs or source code
-    _config_exts = ('.json', '.yml', '.yaml', '.toml', '.cfg', '.ini', '.env', '.conf')
+    # Scan all text files for AI model references, not just config files.
+    # GLM/Kimi/Ollama usage often appears in Python source, shell scripts, .env, and Modelfiles.
+    seen_hits = set()
     for path, content in ctx.files.items():
-        if not any(path.endswith(ext) for ext in _config_exts):
-            continue
         for m in _FLOATING_MODEL_RE.finditer(content):
-            floating_hits.append(f"{path} — {m.group(0).strip()}")
+            hit = m.group(0).strip()
+            kind = _model_hit_kind(hit)
+            key = (path, hit)
+            if key in seen_hits:
+                continue
+            seen_hits.add(key)
+            if kind == 'floating':
+                floating_hits.append(f"{path} — {hit}")
+            elif kind == 'pinned':
+                pinned_hits.append(f"{path} — {hit}")
         for m in _PINNED_MODEL_RE.finditer(content):
-            pinned_hits.append(f"{path} — {m.group(0).strip()}")
+            hit = m.group(0).strip()
+            kind = _model_hit_kind(hit)
+            key = (path, hit)
+            if key in seen_hits:
+                continue
+            seen_hits.add(key)
+            if kind == 'pinned':
+                pinned_hits.append(f"{path} — {hit}")
 
     # Also check for :latest in actual config files
     latest_hits = []
+    _config_exts = ('.json', '.yml', '.yaml', '.toml', '.cfg', '.ini', '.env', '.conf')
     for path, content in ctx.files.items():
         if not any(path.endswith(ext) for ext in _config_exts):
             continue

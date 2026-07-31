@@ -20,8 +20,18 @@ _PINNED_PKGS_RE   = re.compile(r'(?i)ai packages detected:\s*(.+)')
 # Total pinned count:  "42 pinned packages found"
 _TOTAL_PINNED_RE  = re.compile(r'(\d+) pinned packages')
 
-# Matches AI-SUPPLY-005 / floating model evidence:  "config.json — "model": "gpt-4o""
-_MODEL_VER_RE = re.compile(r'"model"\s*:\s*"([^"]+)"')
+# Matches AI-SUPPLY-005 / floating model evidence.  Handles several forms:
+#   config.json — "model": "gpt-4o"
+#   app.py — model = "glm-4"
+#   .env — MODEL=glm-4
+#   script.sh — ollama run kimi-k2.7-code:cloud
+_MODEL_VER_RE = re.compile(
+    r'(?i)'
+    r'(?:"model"\s*[:=]\s*["\x27]|model\s*=\s*["\x27]|model_name\s*[:=]\s*["\x27]|'
+    r'--model\s+|[\s=]MODEL[\s=]|OLLAMA_MODEL\s*=|from\s+|ollama\s+(?:run|pull)\s+)'
+    r'["\x27]?'
+    r'([a-zA-Z0-9][a-zA-Z0-9._:-]*[a-zA-Z0-9])'
+)
 
 # Matches AI-TOOL evidence:  "openai pip package installed"  /  "@org/pkg npm package installed"
 _TOOL_PKG_RE = re.compile(r'^([^\s]+)\s+(pip|npm)\s+package\s+installed', re.IGNORECASE)
