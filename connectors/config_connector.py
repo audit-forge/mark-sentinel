@@ -74,7 +74,8 @@ SKIP_PATH_FRAGMENTS = (
     # App caches / data dirs
     '.openclaw',
     '.opencode',
-    '.ollama/models',
+    # Ollama model blobs are large binaries; we scan the manifests, not the blobs
+    '.ollama/models/blobs',
     'snap',
     # Separate product deployments — assessed independently, not part of this scan target
     'project-pharaoh',
@@ -198,6 +199,8 @@ def scan_directory(target_dir: str, mode: str = "config", max_files: int | None 
                 'modelfile', '.cursorrules', '.cursorignore', '.windsurfrules',
                 '.aiderignore', '.tabnine_root', '.aiprompt', '.continuerc.json',
                 'claude.md', 'agents.md', 'agent.md', 'gemini.md',
+                # Ollama model manifests expose which model tags are present locally
+                'manifest', 'manifests',
             }
             if ext not in TEXT_EXTS and not name_lower.startswith('.env') and 'dockerfile' not in name_lower:
                 if name_lower not in _special:

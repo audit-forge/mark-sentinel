@@ -20,17 +20,26 @@ _PINNED_PKGS_RE   = re.compile(r'(?i)ai packages detected:\s*(.+)')
 # Total pinned count:  "42 pinned packages found"
 _TOTAL_PINNED_RE  = re.compile(r'(\d+) pinned packages')
 
-# Matches AI-SUPPLY-005 / floating model evidence.  Handles several forms:
+# Matches AI-SUPPLY-005 / model evidence. Handles several forms:
 #   config.json — "model": "gpt-4o"
 #   app.py — model = "glm-4"
 #   .env — MODEL=glm-4
 #   script.sh — ollama run kimi-k2.7-code:cloud
+# Also parses the inventory line: "Models detected: name1 (floating), name2 (pinned)"
 _MODEL_VER_RE = re.compile(
     r'(?i)'
-    r'(?:"model"\s*[:=]\s*["\x27]|model\s*=\s*["\x27]|model_name\s*[:=]\s*["\x27]|'
-    r'--model\s+|[\s=]MODEL[\s=]|OLLAMA_MODEL\s*=|from\s+|ollama\s+(?:run|pull)\s+)'
+    r'(?:'
+    r'"model"\s*[:=]\s*["\x27]|model\s*=\s*["\x27]|model_name\s*[:=]\s*["\x27]|'
+    r'--model\s+|[\s=]MODEL[\s=]|OLLAMA_MODEL\s*=|from\s+|ollama\s+(?:run|pull|list)\s+|'
+    r'Models detected:\s*'
+    r')'
     r'["\x27]?'
     r'([a-zA-Z0-9][a-zA-Z0-9._:-]*[a-zA-Z0-9])'
+)
+
+# Extracts (model_name, kind) from the new inventory evidence line.
+_MODEL_INVENTORY_RE = re.compile(
+    r'(?i)Models detected:\s*(.+)'
 )
 
 # Matches AI-TOOL evidence:  "openai pip package installed"  /  "@org/pkg npm package installed"
@@ -124,6 +133,34 @@ def _provider_country(provider: str) -> str:
 
 def _origin_label(country: str) -> str:
     return 'domestic' if country == _DEFAULT_ORIGIN_COUNTRY else ('foreign' if country and country != 'Unknown' else 'unknown')
+
+
+def _guess_provider(model_name: str) -> str:
+    """Guess provider from a model name or tag."""
+    vl = model_name.lower()
+    if 'glm' in vl or 'zhipu' in vl or 'chatglm' in vl:
+        return 'Zhipu AI'
+    if 'kimi' in vl or 'moonshot' in vl:
+        return 'Moonshot AI'
+    if 'deepseek' in vl or 'deep-seek' in vl:
+        return 'DeepSeek'
+    if 'qwen' in vl:
+        return 'Alibaba'
+    if 'gpt-oss' in vl:
+        return 'OpenAI'
+    if 'gpt' in vl or 'openai' in vl:
+        return 'OpenAI'
+    if 'claude' in vl or 'anthropic' in vl:
+        return 'Anthropic'
+    if 'gemini' in vl:
+        return 'Google'
+    if 'llama' in vl or 'llama-' in vl:
+        return 'Meta'
+    if 'mistral' in vl or 'mixtral' in vl:
+        return 'Mistral'
+    if 'command' in vl:
+        return 'Cohere'
+    return 'Unknown'
 
 
 def _split_csv(s: str) -> list[str]:
@@ -282,38 +319,44 @@ def _extract_components(
                         for pkg in _split_csv(m.group(1)):
                             _add_package(pkg, True, hostname)
 
-            # ── AI-SUPPLY-005: floating model versions ────────────────────────
+            # ── AI-SUPPLY-005: model version pinning ──────────────────────────
             elif cid == 'AI-SUPPLY-005':
+                # First parse the consolidated inventory line if present.
+                inventory_match = None
                 for ev in evidence:
-                    m = _MODEL_VER_RE.search(ev)
-                    if m:
-                        ver = m.group(1)
-                        is_floating = ':latest' in ver or not re.search(r'\d{8}|\d{4}-\d{2}-\d{2}|:\w{4,}', ver)
-                        # Guess provider from model name
-                        provider = 'Unknown'
-                        vl = ver.lower()
-                        if 'glm' in vl or 'zhipu' in vl or 'chatglm' in vl:
-                            provider = 'Zhipu AI'
-                        elif 'kimi' in vl or 'moonshot' in vl:
-                            provider = 'Moonshot AI'
-                        elif 'deepseek' in vl or 'deep-seek' in vl:
-                            provider = 'DeepSeek'
-                        elif 'qwen' in vl:
-                            provider = 'Alibaba'
-                        elif 'gpt' in vl or 'openai' in vl:
-                            provider = 'OpenAI'
-                        elif 'claude' in vl or 'anthropic' in vl:
-                            provider = 'Anthropic'
-                        elif 'gemini' in vl:
-                            provider = 'Google'
-                        elif 'llama' in vl or 'llama-' in vl:
-                            provider = 'Meta'
-                        elif 'mistral' in vl or 'mixtral' in vl:
-                            provider = 'Mistral'
-                        elif 'command' in vl:
-                            provider = 'Cohere'
+                    inventory_match = _MODEL_INVENTORY_RE.search(ev)
+                    if inventory_match:
+                        break
+                if inventory_match:
+                    for part in inventory_match.group(1).split(','):
+                        part = part.strip()
+                        if not part:
+                            continue
+                        # Each part looks like "name (floating)" or "name (pinned)"
+                        name_kind = re.split(r'\s*\(\s*(floating|pinned)\s*\)', part)
+                        if len(name_kind) >= 2:
+                            ver = name_kind[0].strip()
+                            kind = name_kind[1].strip()
+                        else:
+                            ver = part
+                            kind = 'pinned'
+                        if ver.lower() in ('version', 'model', 'latest', 'current'):
+                            continue
+                        is_floating = kind == 'floating'
+                        provider = _guess_provider(ver)
                         _add_model(ver, 'config-detected', not is_floating, provider, hostname,
                                    risk=is_floating)
+                else:
+                    # Legacy: extract individual model strings from evidence snippets
+                    for ev in evidence:
+                        for m in _MODEL_VER_RE.finditer(ev):
+                            ver = m.group(1)
+                            if ver.lower() in ('version', 'model', 'latest', 'current'):
+                                continue
+                            is_floating = ':latest' in ver or not re.search(r'\d{8}|\d{4}-\d{2}-\d{2}|:\w{4,}', ver)
+                            provider = _guess_provider(ver)
+                            _add_model(ver, 'config-detected', not is_floating, provider, hostname,
+                                       risk=is_floating)
 
             # ── AI-SUPPLY-006: agent instruction files ────────────────────────
             elif cid == 'AI-SUPPLY-006':
