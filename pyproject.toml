@@ -20,7 +20,8 @@ classifiers = [
 # Project dependencies (from requirements.txt)
 dependencies = [
     "PyYAML==6.0.2",
-    "google-auth>=2.0.0",
+    "google-auth==2.40.0",
+    "fpdf2==2.8.3",
     "cryptography==46.0.5",
 ]
 

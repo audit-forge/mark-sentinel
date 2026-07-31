@@ -344,6 +344,11 @@ def _is_model_config(name: str) -> bool:
         'litellm_config.yaml', 'litellm.yaml', 'litellm_config.json',
         # Ollama
         'ollama_config.json', 'ollama.json', 'Modelfile',
+        # Chinese AI provider configs
+        'zhipuai_config.json', 'zhipu_config.json', 'glm_config.json',
+        'moonshot_config.json', 'moonshotai_config.json', 'kimi_config.json',
+        'deepseek_config.json', 'dashscope_config.json',
+        'qwen_config.json', 'tongyi_config.json',
     }
 
 
@@ -364,6 +369,10 @@ def _is_agent_config(name: str) -> bool:
         'assistants_config.json', 'functions.json', 'tools_schema.json',
         # Dify / Flowise / n8n AI workflows
         'dify_config.json', 'flowise_config.json',
+        # Chinese AI agent/workflow configs
+        'glm_agent_config.json', 'zhipu_agent_config.json',
+        'kimi_agent_config.json', 'moonshot_agent_config.json',
+        'qwen_agent_config.json', 'deepseek_agent_config.json',
     }
 
 

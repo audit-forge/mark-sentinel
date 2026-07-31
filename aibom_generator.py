@@ -68,7 +68,52 @@ _SAAS_PROVIDER_MAP: dict[str, str] = {
     'Cursor AI':           'Cursor',
     'Vercel v0':           'Vercel',
     'StackBlitz Bolt':     'StackBlitz',
+    'GLM':                 'Zhipu AI',
+    'GLM API':             'Zhipu AI',
+    'Kimi':                'Moonshot AI',
+    'Kimi API':            'Moonshot AI',
+    'Moonshot AI':         'Moonshot AI',
+    'Moonshot API':        'Moonshot AI',
+    'DeepSeek':            'DeepSeek',
+    'DeepSeek API':        'DeepSeek',
+    'Qwen':                'Alibaba',
+    'Qwen API':            'Alibaba',
+    'Alibaba':             'Alibaba',
 }
+
+# Country of origin by provider (ISO 3166-1 alpha-2 code). Defaults to 'Unknown'.
+_PROVIDER_COUNTRY_MAP: dict[str, str] = {
+    'OpenAI':              'US',
+    'Anthropic':           'US',
+    'Google':              'US',
+    'Meta':                'US',
+    'Microsoft':           'US',
+    'GitHub / Microsoft':  'US',
+    'xAI':                 'US',
+    'Groq':                'US',
+    'Cohere':              'US',
+    'Perplexity':          'US',
+    'Replicate':           'US',
+    'Together AI':         'US',
+    'Hugging Face':        'US',
+    'Cursor':              'US',
+    'Vercel':              'US',
+    'StackBlitz':          'US',
+    'Mistral':             'FR',
+    'Zhipu AI':            'CN',
+    'Moonshot AI':         'CN',
+    'DeepSeek':            'CN',
+    'Alibaba':             'CN',
+}
+_DEFAULT_ORIGIN_COUNTRY = 'US'
+
+
+def _provider_country(provider: str) -> str:
+    return _PROVIDER_COUNTRY_MAP.get(provider, 'Unknown')
+
+
+def _origin_label(country: str) -> str:
+    return 'domestic' if country == _DEFAULT_ORIGIN_COUNTRY else ('foreign' if country and country != 'Unknown' else 'unknown')
 
 
 def _split_csv(s: str) -> list[str]:
@@ -126,8 +171,11 @@ def _extract_components(
     def _add_model(name: str, version: str, pinned: bool, provider: str, hostname: str, risk: bool = False):
         key = name.lower()
         if key not in models:
+            country = _provider_country(provider)
             models[key] = {'name': name, 'version': version, 'pinned': pinned,
-                           'provider': provider, 'devices': [], 'risks': []}
+                           'provider': provider, 'country': country,
+                           'origin': _origin_label(country),
+                           'devices': [], 'risks': []}
         m = models[key]
         if hostname not in m['devices']:
             m['devices'].append(hostname)
@@ -160,8 +208,11 @@ def _extract_components(
     def _add_service(name: str, source: str, hostname: str):
         key = name.lower()
         provider = _SAAS_PROVIDER_MAP.get(name, name)
+        country = _provider_country(provider)
         if key not in services:
-            services[key] = {'name': name, 'provider': provider, 'source': source, 'devices': []}
+            services[key] = {'name': name, 'provider': provider,
+                             'country': country, 'origin': _origin_label(country),
+                             'source': source, 'devices': []}
         s = services[key]
         if hostname not in s['devices']:
             s['devices'].append(hostname)
@@ -231,13 +282,21 @@ def _extract_components(
                         # Guess provider from model name
                         provider = 'Unknown'
                         vl = ver.lower()
-                        if 'gpt' in vl or 'openai' in vl:
+                        if 'glm' in vl or 'zhipu' in vl or 'chatglm' in vl:
+                            provider = 'Zhipu AI'
+                        elif 'kimi' in vl or 'moonshot' in vl:
+                            provider = 'Moonshot AI'
+                        elif 'deepseek' in vl or 'deep-seek' in vl:
+                            provider = 'DeepSeek'
+                        elif 'qwen' in vl:
+                            provider = 'Alibaba'
+                        elif 'gpt' in vl or 'openai' in vl:
                             provider = 'OpenAI'
                         elif 'claude' in vl or 'anthropic' in vl:
                             provider = 'Anthropic'
                         elif 'gemini' in vl:
                             provider = 'Google'
-                        elif 'llama' in vl:
+                        elif 'llama' in vl or 'llama-' in vl:
                             provider = 'Meta'
                         elif 'mistral' in vl or 'mixtral' in vl:
                             provider = 'Mistral'
@@ -306,6 +365,8 @@ def generate_aibom_json(
             'properties': [
                 {'name': 'arckon:pinned',  'value': str(m['pinned']).lower()},
                 {'name': 'arckon:devices', 'value': ', '.join(m['devices'])},
+                {'name': 'arckon:country', 'value': m['country']},
+                {'name': 'arckon:origin',  'value': m['origin']},
             ] + [
                 {'name': 'arckon:risk', 'value': r} for r in m['risks']
             ],
@@ -342,6 +403,8 @@ def generate_aibom_json(
             'properties': [
                 {'name': 'arckon:source',  'value': s['source']},
                 {'name': 'arckon:devices', 'value': ', '.join(s['devices'])},
+                {'name': 'arckon:country', 'value': s['country']},
+                {'name': 'arckon:origin',  'value': s['origin']},
             ],
         })
 
@@ -441,9 +504,16 @@ def generate_aibom_report(
     )
 
     # ── models table ──────────────────────────────────────────────────────────
+    def _origin_badge(origin: str) -> str:
+        if origin == 'domestic':
+            return '<span style="color:#16A34A;font-size:10px;font-weight:700">US</span>'
+        if origin == 'foreign':
+            return '<span style="color:#DC2626;font-size:10px;font-weight:700">FOREIGN</span>'
+        return '<span style="color:#6B7280;font-size:10px;font-weight:700">UNKNOWN</span>'
+
     def models_rows() -> str:
         if not models_list:
-            return '<tr><td colspan="5" style="padding:12px;color:#6B7280;text-align:center;font-size:12px">No model version data detected — run a supply chain scan with model config files present.</td></tr>'
+            return '<tr><td colspan="6" style="padding:12px;color:#6B7280;text-align:center;font-size:12px">No model version data detected — run a supply chain scan with model config files present.</td></tr>'
         rows = ''
         for m in models_list:
             pin_badge = (
@@ -456,6 +526,7 @@ def generate_aibom_report(
               <td style="{_td}">{esc(m["name"])}</td>
               <td style="{_td}"><span style="font-family:monospace;font-size:11px">{esc(m["version"])}</span></td>
               <td style="{_td}">{esc(m["provider"])}</td>
+              <td style="{_td}">{_origin_badge(m['origin'])} <span style="color:#6B7280;font-size:11px">({esc(m['country'])})</span></td>
               <td style="{_td}">{pin_badge}</td>
               <td style="{_td};color:#6B7280;font-size:11px">{esc(', '.join(m["devices"][:3]))}</td>
             </tr>'''
@@ -498,13 +569,14 @@ def generate_aibom_report(
     # ── services table ────────────────────────────────────────────────────────
     def services_rows() -> str:
         if not services_list:
-            return '<tr><td colspan="3" style="padding:12px;color:#6B7280;text-align:center;font-size:12px">No active SaaS AI connections detected.</td></tr>'
+            return '<tr><td colspan="4" style="padding:12px;color:#6B7280;text-align:center;font-size:12px">No active SaaS AI connections detected.</td></tr>'
         rows = ''
         for s in services_list:
             rows += f'''
             <tr>
               <td style="{_td}">{esc(s["name"])}</td>
               <td style="{_td};color:#6B7280;font-size:11px">{esc(s["provider"])}</td>
+              <td style="{_td}">{_origin_badge(s['origin'])} <span style="color:#6B7280;font-size:11px">({esc(s['country'])})</span></td>
               <td style="{_td};color:#6B7280;font-size:11px">{esc(', '.join(s["devices"][:3]))}</td>
             </tr>'''
         return rows
@@ -609,6 +681,7 @@ def generate_aibom_report(
     <th style="{_th}">Model Name</th>
     <th style="{_th}">Version / Ref</th>
     <th style="{_th}">Provider</th>
+    <th style="{_th}">Origin</th>
     <th style="{_th}">Version Pinning</th>
     <th style="{_th}">Devices</th>
   </tr></thead>
@@ -643,6 +716,7 @@ def generate_aibom_report(
   <thead><tr>
     <th style="{_th}">Service</th>
     <th style="{_th}">Provider</th>
+    <th style="{_th}">Origin</th>
     <th style="{_th}">Detected On</th>
   </tr></thead>
   <tbody>{services_rows()}</tbody>

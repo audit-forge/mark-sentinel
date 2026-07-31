@@ -24,7 +24,11 @@ _FLOATING_MODEL_RE = re.compile(
     r'|gemini-pro"'
     r'|gemini-flash"'
     r'|command-r"'
-    r'|[a-zA-Z0-9-]+:latest"'           # :latest tag
+    r'|glm-[a-z0-9-]*"'                 # Floating GLM (Zhipu)
+    r'|kimi[a-z0-9._-]*"'               # Floating Kimi (Moonshot)
+    r'|deepseek[a-z0-9._-]*"'          # Floating DeepSeek
+    r'|qwen[a-z0-9._-]*"'              # Floating Qwen (Alibaba)
+    r'|[a-zA-Z0-9-]+:latest"'          # :latest tag
     r')'
 )
 
@@ -35,7 +39,11 @@ _PINNED_MODEL_RE = re.compile(
     r'|gpt-3\.5-turbo-\d{4}"'
     r'|claude-[a-z0-9-]+-\d{8}"'       # claude-3-5-sonnet-20241022
     r'|claude-[a-z0-9-]+-\d{4}-\d{2}-\d{2}"'
-    r'|llama[23]?(?:\.\d+)?:\w+(?:-\w+)*"'  # llama3.1:8b-instruct-q4
+    r'|llama[23]?(?:\.\d+)?:\w+(?:-\w+)*"'     # llama3.1:8b-instruct-q4
+    r'|glm-[a-z0-9._-]+:\w+(?:-\w+)*"'         # GLM with pinned tag
+    r'|kimi-[a-z0-9._-]+:\w+(?:-\w+)*"'        # Kimi with pinned tag
+    r'|deepseek-[a-z0-9._-]+:\w+(?:-\w+)*"'    # DeepSeek with pinned tag
+    r'|qwen[a-z0-9._-]*:\w+(?:-\w+)*"'         # Qwen with pinned tag
     r'|[a-zA-Z0-9-]+:[a-zA-Z0-9._-]+(?:sha256:[a-f0-9]+)?"'  # model:version-sha256:abc
     r')'
 )
@@ -53,6 +61,9 @@ _AI_PACKAGES = {
     'llama-index', 'llama_index', 'llamaindex', 'autogen', 'crewai',
     'chromadb', 'pinecone', 'weaviate', 'qdrant-client', 'faiss-cpu',
     'vllm', 'ollama', 'litellm', 'guidance', 'instructor', 'dspy-ai',
+    # Chinese AI provider SDKs
+    'zhipuai', 'zhipu-ai-sdk', 'moonshotai', 'moonshot-ai',
+    'deepseek', 'deepseek-sdk', 'dashscope', 'qwen-agent',
 }
 
 
@@ -62,10 +73,11 @@ def _is_pip_directive(line: str) -> bool:
 
 # Shadow AI indicators
 _SHADOW_AI_ENV_RE = re.compile(
-    r'(?i)(?:OPENAI|ANTHROPIC|GROQ|COHERE|MISTRAL|TOGETHER|REPLICATE|HUGGINGFACE)[_-]?API[_-]?KEY\s*=\s*[^\s$]{10,}'
+    r'(?i)(?:OPENAI|ANTHROPIC|GROQ|COHERE|MISTRAL|TOGETHER|REPLICATE|HUGGINGFACE|'
+    r'ZHIPU|MOONSHOT|DASHSCOPE|DEEPSEEK)[_-]?API[_-]?KEY\s*=\s*[^\s$]{10,}'
 )
 _SHADOW_AI_PACKAGE_RE = re.compile(
-    r'(?i)^(?:openai|anthropic|langchain|ollama|transformers|litellm)\b',
+    r'(?i)^(?:openai|anthropic|langchain|ollama|transformers|litellm|zhipuai|moonshotai|dashscope|deepseek)\b',
     re.MULTILINE,
 )
 

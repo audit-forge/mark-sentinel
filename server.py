@@ -56,7 +56,6 @@ def _ensure_packages():
 _ensure_packages()
 
 import http.server
-import io
 import json
 import logging
 import os
@@ -1064,8 +1063,6 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                or self.headers.get('X-Arckon-Client-Org-ID', '')).strip()
         return {
             'email':       email,
-            'role':        (self.headers.get('X-Sentinel-User-Role')
-                            or self.headers.get('X-Arckon-User-Role', '')).strip() or 'client_viewer',
             # No role header means the proxy didn't vouch for one. Default to
             # the least-privileged role, never 'admin' — a misconfigured or
             # partially-updated vhost must not hand out MSP-wide access.
@@ -3402,8 +3399,8 @@ load();
 
     def _api_risk_register_csv(self):
         """GET /api/fleet/risk-register/csv — download risk register as CSV."""
-        import io
         import csv
+        import io
         from datetime import datetime as _dt
         try:
             store = self._store()
@@ -4455,7 +4452,7 @@ load();
         store = self._store()
         try:
             self._json({'count': store.count_unreviewed_alerts()})
-        except Exception as e:
+        except Exception:
             self._json({'count': 0})
 
     def _api_review_alert(self, event_id_str: str):
@@ -9713,7 +9710,7 @@ def main():
     _handlers: list[logging.Handler] = [logging.StreamHandler(sys.stderr)]
     try:
         _handlers.insert(0, logging.FileHandler(log_file, encoding='utf-8'))
-    except OSError as _e:
+    except OSError:
         pass  # service account may not have write access; console-only logging
     logging.basicConfig(
         level=logging.INFO,
