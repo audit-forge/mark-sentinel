@@ -342,7 +342,7 @@ def _rebuild_dashboard(out_dir: Path) -> bool:
         from output.dashboard import generate
         label_map = {
             'config_scan':           'Config Scan',
-            'openai':                'ChatGPT (gpt-4o)',
+            'openai':                'ChatGPT (gpt-4o-2024-11-20)',
             'claude':                'Anthropic (claude-sonnet-4-6)',
             'ollama___qwen2.5-7b':   'Ollama (qwen2.5-7b)',
             'hash-ai':               'Hash-AI',
@@ -4958,7 +4958,7 @@ async function moveSelectedDevices(){
             if provider == 'openai':
                 from connectors.api_connector import connect
                 ep = endpoint or 'https://api.openai.com/v1'
-                mdl = model or 'gpt-4o'
+                mdl = model or 'gpt-4o-2024-11-20'
                 log.info('probe-scan connecting to %s model=%s', ep, mdl)
                 rag_probe = ({'query': rag_query, 'retrieval_marker': rag_retrieval_marker,
                               'injection_marker': rag_injection_marker} if uses_rag else None)
@@ -5044,7 +5044,7 @@ async function moveSelectedDevices(){
             if provider == 'openai':
                 from connectors.api_connector import connect
                 ep  = endpoint or 'https://api.openai.com/v1'
-                mdl = model or 'gpt-4o'
+                mdl = model or 'gpt-4o-2024-11-20'
                 rag_probe = ({'query': rag_query, 'retrieval_marker': rag_retrieval_marker,
                               'injection_marker': rag_injection_marker} if uses_rag is True else None)
                 ctx = connect(ep, api_key, mdl, str(ROOT), rag_probe=rag_probe)
@@ -5289,7 +5289,7 @@ body{{background:#0d1117;color:#e6edf3;font-family:-apple-system,BlinkMacSystemF
             b'<input type="password" name="api_key" placeholder="sk-..." autocomplete="off" required>'
             b'<div class="hint">Never stored - used only for this scan.</div></div>'
             b'<div class="field"><label>Model (optional)</label>'
-            b'<input type="text" name="model" placeholder="gpt-4o">'
+            b'<input type="text" name="model" placeholder="gpt-4o-2024-11-20">'
             b'<div class="hint">Leave blank for provider default.</div></div>'
             b'</div>'
             b'<div class="field"><label>Does your AI system use document retrieval (RAG)?</label>'
@@ -9332,7 +9332,7 @@ function liveModeChanged() {{
   }} else {{
     epLabel.textContent = 'Endpoint URL';
     epInput.placeholder = 'https://api.openai.com/v1';
-    modelInput.placeholder = 'gpt-4o';
+    modelInput.placeholder = 'gpt-4o-2024-11-20';
   }}
 }}
 

@@ -343,7 +343,7 @@ def main():
                         help='Directory to scan; specify an authorized live target explicitly')
     parser.add_argument('--profile', default='default',
                         help='Audit profile: default, fedramp, cmmc, financial, healthcare, biotech, owasp_agentic, eu_ai_act (default: default)')
-    parser.add_argument('--openai-model', default='gpt-4o', metavar='MODEL',
+    parser.add_argument('--openai-model', default='gpt-4o-2024-11-20', metavar='MODEL',
                         help='OpenAI model to audit (default: gpt-4o)')
     parser.add_argument('--claude-model', default='claude-opus-4-7', metavar='MODEL',
                         help='Anthropic model to audit (default: claude-opus-4-7)')
