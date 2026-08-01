@@ -28,9 +28,9 @@ Environment overrides:
   SENTINEL_AGENT_TOKEN  — auth token
 """
 import sys
-if sys.version_info < (3, 11):
+if sys.version_info < (3, 10):
     sys.exit(
-        "M.A.R.K. Sentinel requires Python 3.11 or later.\n"
+        "M.A.R.K. Sentinel requires Python 3.10 or later.\n"
         f"Running: Python {sys.version.split()[0]}\n"
         "Install: https://python.org/downloads/"
     )
