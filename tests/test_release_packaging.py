@@ -22,7 +22,7 @@ def test_release_package_is_allowlisted_and_signed_by_the_agent_key(tmp_path, mo
     (root / 'secrets.txt').write_text('must not ship')
 
     artifact = tmp_path / 'sentinel-agent-1.0.1-linux-amd64.tar.gz'
-    package_release.package_release(root, artifact, platform_name='linux')
+    package_release.package_release(root, artifact, platform_name='linux', build=False)
 
     with tarfile.open(artifact, 'r:gz') as archive:
         assert archive.getnames() == [
@@ -65,4 +65,4 @@ def test_release_package_rejects_symlinked_inputs(tmp_path):
     (root / 'profiles' / 'default.json').write_text('{}')
 
     with pytest.raises(ValueError, match='regular file'):
-        package_release.package_release(root, tmp_path / 'release.tar.gz', platform_name='linux')
+        package_release.package_release(root, tmp_path / 'release.tar.gz', platform_name='linux', build=False)
