@@ -293,8 +293,11 @@ if (-not $NoService) {
         $existingSvc = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
         if ($existingSvc) {
             Write-Step "Stopping existing service ..."
+            $ErrorActionPreference = "Continue"
             & $nssmPath stop $ServiceName 2>$null
+            Start-Sleep -Seconds 2
             & $nssmPath remove $ServiceName confirm 2>$null
+            $ErrorActionPreference = "Stop"
         }
 
         & $nssmPath install $ServiceName $PythonExe
