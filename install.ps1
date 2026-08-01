@@ -131,14 +131,16 @@ if ($Server -ne "") {
                 Write-OK "SHA256 verified"
             }
 
-            # Extract to install directory (strip top-level "sentinel/" folder)
+            # Extract to a temp directory, then copy contents (strip sentinel/ prefix)
             $ExtractTmp = Join-Path $env:TEMP "arckon-extract"
             if (Test-Path $ExtractTmp) { Remove-Item $ExtractTmp -Recurse -Force }
-            tar -xzf $ArtifactTmp -C $ExtractTmp 2>$null
-            if (Test-Path (Join-Path $ExtractTmp "sentinel")) {
-                Copy-Item -Path (Join-Path $ExtractTmp "sentinel\*") -Destination $InstallDir -Recurse -Force
+            New-Item -ItemType Directory -Path $ExtractTmp -Force | Out-Null
+            tar -xzf $ArtifactTmp -C $ExtractTmp
+            $SentinelSubdir = Join-Path $ExtractTmp "sentinel"
+            if (Test-Path $SentinelSubdir) {
+                Get-ChildItem -Path $SentinelSubdir | Copy-Item -Destination $InstallDir -Recurse -Force
             } else {
-                Copy-Item -Path (Join-Path $ExtractTmp "*") -Destination $InstallDir -Recurse -Force
+                Get-ChildItem -Path $ExtractTmp | Copy-Item -Destination $InstallDir -Recurse -Force
             }
             Remove-Item $ExtractTmp -Recurse -Force -ErrorAction SilentlyContinue
             Remove-Item $ArtifactTmp -Force -ErrorAction SilentlyContinue
