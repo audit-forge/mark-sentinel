@@ -1077,10 +1077,15 @@ def _install_service(args: argparse.Namespace, cfg: dict) -> None:
     import platform as _platform
     system = _platform.system()
 
-    # Build the daemon command from current invocation args
-    python  = sys.executable
-    script  = str(Path(__file__).resolve())
-    cmd     = [python, script, '--daemon']
+    # Build the daemon command from current invocation args.
+    # When running as a Nuitka-compiled binary, sys.executable IS the agent
+    # and there is no separate script file — use it directly.
+    if os.path.basename(sys.executable).lower().startswith('agent') and not sys.argv[0].endswith('.py'):
+        cmd = [sys.executable, '--daemon']
+    else:
+        python  = sys.executable
+        script  = str(Path(__file__).resolve())
+        cmd     = [python, script, '--daemon']
     if cfg.get('server'):
         cmd += ['--server', cfg['server']]
     if cfg.get('token'):
@@ -1152,7 +1157,7 @@ def _install_windows_task(cmd: list[str]) -> None:
     log.info('  Logs  : %s', log_file)
     log.info('  Watch : Get-Content "%s" -Wait', log_file)
     log.info('  Stop  : schtasks /end /tn %s', task_name)
-    log.info('  Remove: python agent.py --uninstall-service')
+    log.info('  Remove: agent.exe --uninstall-service')
 
 
 def _install_launchd(cmd: list[str]) -> None:

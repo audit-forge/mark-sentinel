@@ -219,7 +219,14 @@ if (-not $NoService) {
         }
 
         & nssm install $ServiceName $PythonExe
-        & nssm set $ServiceName AppParameters "`"$InstallDir\agent.py`" --daemon --config `"$ConfigFile`""
+        # Use compiled agent.exe if present, otherwise fall back to python agent.py
+        $AgentExe = Join-Path $InstallDir "agent.exe"
+        if (Test-Path $AgentExe) {
+            & nssm set $ServiceName Application $AgentExe
+            & nssm set $ServiceName AppParameters "--daemon --config `"$ConfigFile`""
+        } else {
+            & nssm set $ServiceName AppParameters "`"$InstallDir\agent.py`" --daemon --config `"$ConfigFile`""
+        }
         & nssm set $ServiceName AppDirectory $InstallDir
         & nssm set $ServiceName DisplayName "M.A.R.K. Sentinel Agent"
         & nssm set $ServiceName Description "Distributed security audit agent (M.A.R.K. Sentinel)"
@@ -240,8 +247,14 @@ if (-not $NoService) {
 Set-Location '$InstallDir'
 `$env:PYTHONUNBUFFERED = '1'
 `$env:PYTHONUTF8 = '1'
-& '$PythonExe' '$InstallDir\agent.py' --daemon --config '$ConfigFile' 2>&1 |
-    Tee-Object -FilePath '$ConfigDir\sentinel-agent.log' -Append
+$AgentExe = '$InstallDir\agent.exe'
+if (Test-Path `$AgentExe) {
+    & `$AgentExe --daemon --config '$ConfigFile' 2>&1 |
+        Tee-Object -FilePath '$ConfigDir\sentinel-agent.log' -Append
+} else {
+    & '$PythonExe' '$InstallDir\agent.py' --daemon --config '$ConfigFile' 2>&1 |
+        Tee-Object -FilePath '$ConfigDir\sentinel-agent.log' -Append
+}
 "@ | ForEach-Object { Write-FileNoBOM $WrapperScript $_ }
 
         $existingSvc = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
