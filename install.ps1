@@ -259,23 +259,29 @@ if (-not $NoService) {
         Write-Step "NSSM not found -- downloading it for proper Windows Service support ..."
         try {
             $nssmDir = "$env:ProgramData\Arckon\nssm"
-            New-Item -ItemType Directory -Path $nssmDir -Force | Out-Null
-            $nssmZip     = "$env:TEMP\nssm-$([guid]::NewGuid()).zip"
-            $nssmExtract = "$env:TEMP\nssm-extract-$([guid]::NewGuid())"
-            Invoke-WebRequest -Uri "https://nssm.cc/release/nssm-2.24.zip" -OutFile $nssmZip -UseBasicParsing -TimeoutSec 60
-            Expand-Archive -Path $nssmZip -DestinationPath $nssmExtract -Force
-            $arch   = if ([Environment]::Is64BitOperatingSystem) { "win64" } else { "win32" }
-            $nssmSrc = Get-ChildItem -Path $nssmExtract -Recurse -Filter "nssm.exe" |
-                Where-Object { $_.FullName -like "*\$arch\*" } | Select-Object -First 1
-            if ($nssmSrc) {
-                Copy-Item -Path $nssmSrc.FullName -Destination "$nssmDir\nssm.exe" -Force
-                $nssmPath = "$nssmDir\nssm.exe"
-                Write-OK "NSSM downloaded to $nssmPath"
+            $nssmExe = "$nssmDir\nssm.exe"
+            if (-not (Test-Path $nssmExe)) {
+                New-Item -ItemType Directory -Path $nssmDir -Force | Out-Null
+                $nssmZip     = "$env:TEMP\nssm-$([guid]::NewGuid()).zip"
+                $nssmExtract = "$env:TEMP\nssm-extract-$([guid]::NewGuid())"
+                Invoke-WebRequest -Uri "https://nssm.cc/release/nssm-2.24.zip" -OutFile $nssmZip -UseBasicParsing -TimeoutSec 60
+                Expand-Archive -Path $nssmZip -DestinationPath $nssmExtract -Force
+                $arch   = if ([Environment]::Is64BitOperatingSystem) { "win64" } else { "win32" }
+                $nssmSrc = Get-ChildItem -Path $nssmExtract -Recurse -Filter "nssm.exe" |
+                    Where-Object { $_.FullName -like "*\$arch\*" } | Select-Object -First 1
+                if ($nssmSrc) {
+                    Copy-Item -Path $nssmSrc.FullName -Destination $nssmExe -Force
+                    $nssmPath = $nssmExe
+                    Write-OK "NSSM downloaded to $nssmPath"
+                } else {
+                    Write-Warn "Downloaded NSSM archive but couldn't find nssm.exe for $arch inside it."
+                }
+                Remove-Item $nssmZip -Force -ErrorAction SilentlyContinue
+                Remove-Item $nssmExtract -Recurse -Force -ErrorAction SilentlyContinue
             } else {
-                Write-Warn "Downloaded NSSM archive but couldn't find nssm.exe for $arch inside it."
+                $nssmPath = $nssmExe
+                Write-OK "NSSM already present at $nssmPath"
             }
-            Remove-Item $nssmZip -Force -ErrorAction SilentlyContinue
-            Remove-Item $nssmExtract -Recurse -Force -ErrorAction SilentlyContinue
         } catch {
             Write-Warn "Could not download NSSM automatically: $_"
         }
@@ -342,17 +348,26 @@ if (Test-Path `$AgentExe) {
             $pwshExe = (Get-Command "powershell" -ErrorAction SilentlyContinue).Source
         }
 
-        sc.exe create $ServiceName `
+        $scResult = sc.exe create $ServiceName `
             binPath= "`"$pwshExe`" -NonInteractive -NoProfile -File `"$WrapperScript`"" `
             start= auto `
-            DisplayName= "Arckon Agent" | Out-Null
+            DisplayName= "Arckon Agent" 2>&1
+        if ($LASTEXITCODE -ne 0) {
+            Write-Warn "sc.exe create failed: $scResult"
+        }
 
         sc.exe description $ServiceName "Distributed security audit agent (Arckon)" | Out-Null
         sc.exe failure $ServiceName reset= 86400 actions= restart/30000/restart/30000/restart/30000 | Out-Null
 
-        Start-Service -Name $ServiceName
-        Write-OK "Service registered and started via sc.exe"
-        Write-Warn "For production use, install NSSM (https://nssm.cc) for better service management."
+        $svc = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
+        if ($svc) {
+            Start-Service -Name $ServiceName
+            Write-OK "Service registered and started via sc.exe"
+            Write-Warn "For production use, install NSSM (https://nssm.cc) for better service management."
+        } else {
+            Write-Warn "Service creation failed. You can start the agent manually:"
+            Write-Warn "  & '$InstallDir\agent.exe' --daemon --config '$ConfigFile'"
+        }
     }
 
     # -- Verify service is running (retry up to 3x) ---------------------------
