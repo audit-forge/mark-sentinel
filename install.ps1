@@ -1,4 +1,4 @@
-#Requires -RunAsAdministrator
+﻿#Requires -RunAsAdministrator
 <#
 .SYNOPSIS
     M.A.R.K. Sentinel Agent - Windows Installer
@@ -209,7 +209,7 @@ if (-not $NoService) {
     $nssmCmd = Get-Command "nssm" -ErrorAction SilentlyContinue; $nssmPath = if ($nssmCmd) { $nssmCmd.Source } else { $null }
 
     if (-not $nssmPath) {
-        Write-Step "NSSM not found — downloading it for proper Windows Service support ..."
+        Write-Step "NSSM not found -- downloading it for proper Windows Service support ..."
         try {
             $nssmDir = "$env:ProgramData\Sentinel\nssm"
             New-Item -ItemType Directory -Path $nssmDir -Force | Out-Null

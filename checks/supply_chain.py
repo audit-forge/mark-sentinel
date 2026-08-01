@@ -485,7 +485,7 @@ def _model_hit_kind(text: str) -> str | None:
     if not _MODEL_FAMILY_RE.search(t):
         return None
     # A pinned reference has a version/date/digest after the model family name
-    if re.search(r':\w{4,}|:\d{8}|\d{4}-\d{2}-\d{2}|\d{8}|sha256:[a-f0-9]{8,}', t):
+    if re.search(r':\w{2,}|:\d{8}|\d{4}-\d{2}-\d{2}|\d{8}|sha256:[a-f0-9]{8,}', t):
         return 'pinned'
     if ':latest' in t:
         return 'floating'
