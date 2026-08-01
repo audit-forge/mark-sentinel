@@ -77,6 +77,11 @@ SKIP_PATH_FRAGMENTS = (
     # Ollama model blobs are large binaries; we scan the manifests, not the blobs
     '.ollama/models/blobs',
     'snap',
+    # Windows per-user temp/application caches are noisy and can consume the
+    # file budget before project and Roaming configuration is inspected.
+    'AppData/Local/Temp',
+    'AppData/Local/Packages',
+    'AppData/LocalLow',
     # Separate product deployments — assessed independently, not part of this scan target
     'project-pharaoh',
 )

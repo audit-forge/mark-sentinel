@@ -70,6 +70,7 @@ ROOT = _exec_path.parent if _exec_path.is_file() else Path(__file__).parent
 DEFAULT_CONFIG = ROOT / 'agent_config.json'
 _PROCESS_NAME = 'sentinel-agent'
 UPDATE_PRODUCT = 'sentinel-agent'
+_WINDOWS_SERVICE_NAME = 'SentinelAgent'
 PINNED_UPDATE_PUBLIC_KEY_DER_B64 = 'MCowBQYDK2VwAyEAxQSQJT9gaFKKcPEy7nPM7Bdk0fT8LXNDIsQkw1qfLyw='
 _UPDATE_MANIFEST_KEYS = frozenset({'product', 'version', 'artifact', 'sha256', 'size', 'platform'})
 _VERSION_RE = re.compile(r'^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$')
@@ -581,6 +582,8 @@ def self_update(config: dict) -> bool:
             log.error('self_update: artifact hash mismatch')
             return False
         agent_binary_updated = False
+        staged_agent_binary: Path | None = None
+        live_agent_binary: Path | None = None
         with tarfile.open(fileobj=io.BytesIO(data), mode='r:gz') as tar:
             for member in tar.getmembers():
                 # strip leading 'sentinel/' prefix from archive paths
@@ -597,20 +600,28 @@ def self_update(config: dict) -> bool:
                         or member.islnk()):
                     log.warning('self_update: skipping unsafe path %s', member.name)
                     continue
-                dest = ROOT / rel
+                # Windows locks a running executable. Stage the replacement and
+                # let a detached service-restart script swap it after stopping
+                # the service instead of failing half-way through an update.
+                is_agent_binary = len(rel.parts) == 1 and rel.name.lower() in ('agent', 'agent.exe')
+                dest = ROOT / (str(rel) + '.new' if sys.platform == 'win32' and is_agent_binary else str(rel))
                 dest.parent.mkdir(parents=True, exist_ok=True)
                 with tar.extractfile(member) as src, open(dest, 'wb') as dst:
                     dst.write(src.read())
                 # Mark executable bits for compiled binaries
-                if rel.name in ('agent', 'audit') and len(rel.parts) == 1:
+                if rel.name.lower() in ('agent', 'agent.exe', 'audit', 'audit.exe') and len(rel.parts) == 1:
                     dest.chmod(0o755)
-                    if rel.name == 'agent':
+                    if is_agent_binary:
                         agent_binary_updated = True
+                        staged_agent_binary = dest
+                        live_agent_binary = ROOT / rel
 
         log.info('self_update: bundle extracted — restarting')
+        if sys.platform == 'win32' and agent_binary_updated:
+            return _restart_windows_service_after_update(staged_agent_binary, live_agent_binary)
         # If a compiled agent binary was shipped, exec it directly.
         # Otherwise fall back to re-running with the Python interpreter.
-        agent_bin = ROOT / 'agent'
+        agent_bin = ROOT / ('agent.exe' if sys.platform == 'win32' else 'agent')
         if agent_binary_updated and agent_bin.exists() and os.access(agent_bin, os.X_OK):
             os.execv(str(agent_bin), [str(agent_bin)] + sys.argv[1:])
         else:
@@ -619,6 +630,42 @@ def self_update(config: dict) -> bool:
             return True
     except Exception as e:
         log.error('self_update failed: %s', e)
+        return False
+
+
+def _restart_windows_service_after_update(staged: Path | None, live: Path | None) -> bool:
+    """Atomically activate a staged Windows agent through the service manager."""
+    if staged is None or live is None or not staged.is_file():
+        log.error('self_update: staged Windows agent binary is missing')
+        return False
+    script = ROOT / 'activate-agent-update.cmd'
+    script.write_text(
+        '@echo off\r\n'
+        f'sc stop {_WINDOWS_SERVICE_NAME} >nul 2>&1\r\n'
+        f'schtasks /end /tn {_WINDOWS_SERVICE_NAME} >nul 2>&1\r\n'
+        'timeout /t 3 /nobreak >nul\r\n'
+        f'move /y "{staged}" "{live}" >nul\r\n'
+        'if not errorlevel 1 goto :start\r\n'
+        # Never strand the installed agent if replacement is blocked by AV or a lock.
+        f'sc start {_WINDOWS_SERVICE_NAME} >nul 2>&1\r\n'
+        f'schtasks /run /tn {_WINDOWS_SERVICE_NAME} >nul 2>&1\r\n'
+        'exit /b 1\r\n'
+        ':start\r\n'
+        f'sc start {_WINDOWS_SERVICE_NAME} >nul 2>&1\r\n'
+        f'schtasks /run /tn {_WINDOWS_SERVICE_NAME} >nul 2>&1\r\n'
+        'del "%~f0"\r\n',
+        encoding='utf-8',
+    )
+    try:
+        subprocess.Popen(
+            ['cmd.exe', '/d', '/s', '/c', f'"{script}"'],
+            creationflags=0x00000008 | 0x00000200,  # DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
+            close_fds=True,
+        )
+        log.info('self_update: staged Windows agent activation through %s service', _WINDOWS_SERVICE_NAME)
+        return True
+    except OSError as e:
+        log.error('self_update: could not start Windows activation script: %s', e)
         return False
 
 
@@ -756,6 +803,39 @@ def _resolve_home() -> str:
     log.warning('No usable home directory found for scan target — defaulting to "/"'
                 ' (set "target" explicitly in agent_config.json to scan a specific path)')
     return '/'
+
+
+_WINDOWS_SYSTEM_PROFILES = frozenset({
+    'all users', 'default', 'default user', 'public', 'systemprofile',
+})
+
+
+def _windows_profile_dirs(users_root: Path | None = None) -> list[Path]:
+    """Return actual user profiles, excluding Windows template/system profiles."""
+    if users_root is None:
+        system_drive = os.environ.get('SystemDrive', 'C:').rstrip('\\/')
+        users_root = Path(system_drive + '\\Users')
+    try:
+        return sorted(
+            (path for path in users_root.iterdir()
+             if path.is_dir() and path.name.lower() not in _WINDOWS_SYSTEM_PROFILES
+             and _usable_dir(str(path))),
+            key=lambda path: path.name.lower(),
+        )
+    except OSError:
+        return []
+
+
+def _scan_targets(config: dict) -> list[str]:
+    """Choose scan roots without letting a Windows service miss real user data."""
+    configured = config.get('target') or '~'
+    if configured not in ('.', '~', ''):
+        return [str(configured)]
+    if sys.platform == 'win32':
+        profiles = _windows_profile_dirs()
+        if profiles:
+            return [str(profile) for profile in profiles]
+    return [_resolve_home()]
 
 
 def _k8s_env() -> dict:
@@ -1030,6 +1110,8 @@ def _merge_reports(reports: list[dict]) -> dict:
         return reports[0]
     seen_checks: set[str] = set()
     merged_findings: list[dict] = []
+    merged_inventory: list[dict] = []
+    seen_inventory: set[tuple] = set()
     summary = {'total_evaluated': 0, 'pass': 0, 'warn': 0, 'fail': 0, 'skip': 0,
                'has_critical_fail': False, 'critical_count': 0}
     profile_names: list[str] = []
@@ -1055,32 +1137,45 @@ def _merge_reports(reports: list[dict]) -> dict:
                     summary['critical_count'] += 1
                     summary['has_critical_fail'] = True
             summary['total_evaluated'] += 1
+        for finding in rpt.get('inventory_findings', []):
+            key = (
+                finding.get('check_id', ''),
+                finding.get('status', ''),
+                finding.get('details', ''),
+                tuple(finding.get('evidence') or []),
+            )
+            if key not in seen_inventory:
+                seen_inventory.add(key)
+                merged_inventory.append(finding)
     merged = dict(base)
+    merged['target'] = ', '.join(rpt.get('target', '') for rpt in reports if rpt.get('target'))
     merged['profile'] = ', '.join(profile_names)
     merged['findings'] = merged_findings
+    merged['inventory_findings'] = merged_inventory
     merged['summary'] = summary
     return merged
 
 
 def run_cycle(config: dict) -> bool:
-    target     = _resolve_home() if config.get('target', '~') in ('.', '~', '') else config.get('target')
+    targets    = _scan_targets(config)
     profiles   = [p.strip() for p in config.get('profile', 'default').split(',') if p.strip()] or ['default']
     device_id  = _device_id()
     hostname   = os.environ.get('SENTINEL_HOSTNAME', '').strip() or socket.gethostname()
 
-    log.info('Device: %s  Hostname: %s  Target: %s  Profiles: %s',
-             device_id, hostname, target, ', '.join(profiles))
+    log.info('Device: %s  Hostname: %s  Targets: %s  Profiles: %s',
+             device_id, hostname, ', '.join(targets), ', '.join(profiles))
 
     reports: list[dict] = []
-    for profile in profiles:
-        rpt = run_scan(target, profile)
-        if rpt is None:
-            log.warning('Scan failed for profile %s — skipping', profile)
-            continue
-        s = rpt.get('summary', {})
-        log.info('Profile %s — FAIL:%d WARN:%d PASS:%d', profile,
-                 s.get('fail', 0), s.get('warn', 0), s.get('pass', 0))
-        reports.append(rpt)
+    for target in targets:
+        for profile in profiles:
+            rpt = run_scan(target, profile)
+            if rpt is None:
+                log.warning('Scan failed for target %s, profile %s — skipping', target, profile)
+                continue
+            s = rpt.get('summary', {})
+            log.info('Target %s, profile %s — FAIL:%d WARN:%d PASS:%d', target, profile,
+                     s.get('fail', 0), s.get('warn', 0), s.get('pass', 0))
+            reports.append(rpt)
 
     if not reports:
         return False
@@ -1136,7 +1231,7 @@ def _install_windows_task(cmd: list[str]) -> None:
     """Register the agent as a Windows service, preferring NSSM with auto-download."""
     import urllib.request
     import zipfile
-    task_name = 'SentinelAgent'
+    task_name = _WINDOWS_SERVICE_NAME
     log_dir   = ROOT / 'logs'
     log_dir.mkdir(parents=True, exist_ok=True)
     log_file  = log_dir / 'agent.log'

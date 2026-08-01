@@ -1,6 +1,8 @@
 import base64
 import hashlib
+import io
 import json
+import tarfile
 
 import pytest
 from cryptography.hazmat.primitives import serialization
@@ -93,3 +95,80 @@ def test_self_update_rejects_non_https_server_without_fetching(monkeypatch):
     monkeypatch.setattr(agent, '_read_update_url', lambda *args: pytest.fail('must not fetch'))
 
     assert agent.self_update({'server': 'http://updates.example.test'}) is False
+
+
+def test_self_update_stages_and_activates_windows_executable(release_key, monkeypatch, tmp_path):
+    archive = io.BytesIO()
+    with tarfile.open(fileobj=archive, mode='w:gz') as tar:
+        info = tarfile.TarInfo('sentinel/agent.exe')
+        payload = b'new windows agent'
+        info.size = len(payload)
+        tar.addfile(info, io.BytesIO(payload))
+    artifact = archive.getvalue()
+    data, signature = _signed_manifest(
+        release_key,
+        artifact='agent.tar.gz',
+        sha256=hashlib.sha256(artifact).hexdigest(),
+        size=len(artifact),
+        version='1.0.5',
+        platform='windows',
+    )
+    monkeypatch.setattr(agent.platform, 'system', lambda: 'Windows')
+    monkeypatch.setattr(agent.sys, 'platform', 'win32')
+    monkeypatch.setattr(agent, 'ROOT', tmp_path)
+    monkeypatch.setattr(
+        agent,
+        '_read_update_url',
+        lambda url, headers, timeout=60: (
+            data if url.endswith('manifest.json') else signature
+            if url.endswith('manifest.sig') else artifact
+        ),
+    )
+    activated = []
+    monkeypatch.setattr(
+        agent,
+        '_restart_windows_service_after_update',
+        lambda staged, live: activated.append((staged, live)) or True,
+    )
+
+    assert agent.self_update({'server': 'https://updates.example.test'}) is True
+    assert (tmp_path / 'agent.exe.new').read_bytes() == b'new windows agent'
+    assert activated == [(tmp_path / 'agent.exe.new', tmp_path / 'agent.exe')]
+
+
+def test_self_update_uses_the_packaged_windows_agent_filename(release_key, monkeypatch, tmp_path):
+    archive = io.BytesIO()
+    with tarfile.open(fileobj=archive, mode='w:gz') as tar:
+        info = tarfile.TarInfo('sentinel/agent')
+        payload = b'new windows agent without extension'
+        info.size = len(payload)
+        tar.addfile(info, io.BytesIO(payload))
+    artifact = archive.getvalue()
+    data, signature = _signed_manifest(
+        release_key,
+        artifact='agent.tar.gz',
+        sha256=hashlib.sha256(artifact).hexdigest(),
+        size=len(artifact),
+        version='1.0.5',
+        platform='windows',
+    )
+    monkeypatch.setattr(agent.platform, 'system', lambda: 'Windows')
+    monkeypatch.setattr(agent.sys, 'platform', 'win32')
+    monkeypatch.setattr(agent, 'ROOT', tmp_path)
+    monkeypatch.setattr(
+        agent,
+        '_read_update_url',
+        lambda url, headers, timeout=60: (
+            data if url.endswith('manifest.json') else signature
+            if url.endswith('manifest.sig') else artifact
+        ),
+    )
+    activated = []
+    monkeypatch.setattr(
+        agent,
+        '_restart_windows_service_after_update',
+        lambda staged, live: activated.append((staged, live)) or True,
+    )
+
+    assert agent.self_update({'server': 'https://updates.example.test'}) is True
+    assert activated == [(tmp_path / 'agent.new', tmp_path / 'agent')]

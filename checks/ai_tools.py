@@ -28,14 +28,19 @@ _API_KEY_RE = re.compile(
 
 def _home_dirs() -> list:
     homes = {Path.home()}
-    # Agents normally run as root, so Path.home() alone misses interactive
-    # users. Linux uses /home; macOS uses /Users.
-    for home_root in (Path('/home'), Path('/Users')):
+    # Services do not inherit an interactive user's profile. Include every real
+    # user home so fleet inventory does not silently omit Windows installations.
+    home_roots = [Path('/home'), Path('/Users')]
+    if sys.platform == 'win32':
+        drive = os.environ.get('SystemDrive', 'C:').rstrip('\\/')
+        home_roots.append(Path(drive + '\\Users'))
+    excluded = {'shared', 'all users', 'default', 'default user', 'public', 'systemprofile'}
+    for home_root in home_roots:
         try:
             if home_root.exists():
                 for p in home_root.iterdir():
                     try:
-                        if p.is_dir() and p.name != 'Shared':
+                        if p.is_dir() and p.name.lower() not in excluded:
                             homes.add(p)
                     except OSError:
                         pass
