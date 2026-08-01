@@ -316,7 +316,7 @@ if (-not $NoService) {
         & $nssmPath set $ServiceName AppRestartDelay 30000
         & $nssmPath set $ServiceName AppStdout "$env:ProgramData\Arckon\arckon-agent.log"
         & $nssmPath set $ServiceName AppStderr "$env:ProgramData\Arckon\arckon-agent.log"
-        & $nssmPath set $ServiceName AppEnvironmentExtra "PYTHONUTF8=1" "SENTINEL_SERVER=" "SENTINEL_AGENT_TOKEN="
+        & $nssmPath set $ServiceName AppEnvironmentExtra "PYTHONUTF8=1" "SENTINEL_SERVER=" "SENTINEL_AGENT_TOKEN=" "SENTINEL_ALLOW_HTTP_UPDATE=1"
         & $nssmPath start $ServiceName
         Write-OK "Service registered and started via NSSM"
 
