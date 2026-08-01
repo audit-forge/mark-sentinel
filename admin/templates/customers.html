@@ -347,7 +347,7 @@ Service:  arckon-agent  (systemd unit)</pre>
 function openDeploy(cid, name, port, token) {
   var ip   = '{{ ip }}';
   var srv  = 'http://' + ip + ':' + port;
-  var base = 'http://' + ip;
+  var base = 'http://' + ip + ':' + port;
 
   document.getElementById('dm-name').textContent = name;
   document.querySelectorAll('.dm-cid').forEach(function(el){ el.textContent = cid; });
