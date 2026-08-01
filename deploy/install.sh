@@ -37,6 +37,22 @@ if [[ "$(id -u)" -ne 0 ]]; then
     exit 1
 fi
 
+# Validate server URL to prevent command injection
+if [[ -n "$OPT_SERVER" ]]; then
+    if [[ ! "$OPT_SERVER" =~ ^https?://[a-zA-Z0-9._:/-]+$ ]]; then
+        echo "Error: invalid server URL — must match http(s)://host:port format" >&2
+        exit 1
+    fi
+fi
+
+# Validate token (alphanumeric + dash + underscore only)
+if [[ -n "$OPT_TOKEN" ]]; then
+    if [[ ! "$OPT_TOKEN" =~ ^[a-zA-Z0-9_-]+$ ]]; then
+        echo "Error: invalid token — must be alphanumeric with dashes/underscores only" >&2
+        exit 1
+    fi
+fi
+
 # ── Detect OS and architecture ────────────────────────────────────────────────
 
 detect_os() {
