@@ -38,6 +38,7 @@ jobs:
           VERSION="${TAG#v}"
           test "$VERSION" = "$(python -c 'from arckon_version import VERSION; print(VERSION)')"
           ARTIFACT="arckon-agent-${VERSION}-linux-amd64.tar.gz"
+          python -m pip install -r requirements.txt 'nuitka[onefile]' zstandard ordered-set
           python scripts/package_release.py --platform linux --output "$ARTIFACT" --build-only
           echo "artifact=$ARTIFACT" >> "$GITHUB_OUTPUT"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
