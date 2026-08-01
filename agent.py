@@ -52,6 +52,7 @@ import socket
 import subprocess
 import tarfile
 import time
+import shutil
 from pathlib import Path, PurePosixPath
 from urllib import error as _urlerr
 from urllib import request as _urlreq
@@ -1109,13 +1110,71 @@ def _install_service(args: argparse.Namespace, cfg: dict) -> None:
 
 
 def _install_windows_task(cmd: list[str]) -> None:
-    """Register the agent as a Windows Task Scheduler task that starts at logon."""
+    """Register the agent as a Windows service, preferring NSSM with auto-download."""
+    import urllib.request
+    import zipfile
     task_name = 'SentinelAgent'
     log_dir   = ROOT / 'logs'
     log_dir.mkdir(parents=True, exist_ok=True)
     log_file  = log_dir / 'agent.log'
 
-    # .bat launcher — redirects stdout+stderr to the log file
+    # Try to find NSSM on PATH, or download it if missing.
+    nssm_path = shutil.which('nssm')
+    if not nssm_path:
+        nssm_dir = Path(os.environ.get('ProgramData', 'C:\\ProgramData')) / 'Sentinel' / 'nssm'
+        nssm_dir.mkdir(parents=True, exist_ok=True)
+        nssm_exe = nssm_dir / 'nssm.exe'
+        if not nssm_exe.exists():
+            log.info('NSSM not found — downloading for proper Windows Service support...')
+            try:
+                import tempfile
+                tmp_zip = Path(tempfile.mktemp(suffix='.zip'))
+                urllib.request.urlretrieve('https://nssm.cc/release/nssm-2.24.zip', str(tmp_zip))
+                with zipfile.ZipFile(str(tmp_zip), 'r') as zf:
+                    arch = 'win64' if os.environ.get('PROCESSOR_ARCHITECTURE', '') == 'AMD64' else 'win32'
+                    for name in zf.namelist():
+                        if name.endswith(f'{arch}/nssm.exe'):
+                            with zf.open(name) as src, open(str(nssm_exe), 'wb') as dst:
+                                dst.write(src.read())
+                            break
+                tmp_zip.unlink(missing_ok=True)
+                if nssm_exe.exists():
+                    nssm_path = str(nssm_exe)
+                    log.info('NSSM downloaded to %s', nssm_path)
+            except Exception as e:
+                log.warning('Could not download NSSM: %s — falling back to Task Scheduler', e)
+
+    if nssm_path:
+        # NSSM creates a proper Windows Service that starts at boot (not just logon).
+        log.info('Installing service via NSSM...')
+        subprocess.run([nssm_path, 'stop', task_name], capture_output=True)
+        subprocess.run([nssm_path, 'remove', task_name, 'confirm'], capture_output=True)
+        subprocess.run([nssm_path, 'install', task_name, sys.executable], capture_output=True)
+        agent_exe = str(Path(sys.argv[0]).resolve()) if sys.argv[0] else str(ROOT / 'agent.exe')
+        if Path(agent_exe).suffix == '.exe':
+            subprocess.run([nssm_path, 'set', task_name, 'Application', agent_exe], capture_output=True)
+            subprocess.run([nssm_path, 'set', task_name, 'AppParameters', '--daemon'], capture_output=True)
+        else:
+            subprocess.run([nssm_path, 'set', task_name, 'AppParameters', f'"{Path(sys.argv[0])}" --daemon'], capture_output=True)
+        subprocess.run([nssm_path, 'set', task_name, 'AppDirectory', str(ROOT)], capture_output=True)
+        subprocess.run([nssm_path, 'set', task_name, 'DisplayName', 'Arckon Sentinel Agent'], capture_output=True)
+        subprocess.run([nssm_path, 'set', task_name, 'Description', 'Distributed security audit agent'], capture_output=True)
+        subprocess.run([nssm_path, 'set', task_name, 'Start', 'SERVICE_AUTO_START'], capture_output=True)
+        subprocess.run([nssm_path, 'set', task_name, 'AppRestartDelay', '30000'], capture_output=True)
+        pd = os.environ.get('ProgramData', 'C:\\ProgramData')
+        subprocess.run([nssm_path, 'set', task_name, 'AppStdout', f'{pd}\\Sentinel\\sentinel-agent.log'], capture_output=True)
+        subprocess.run([nssm_path, 'set', task_name, 'AppStderr', f'{pd}\\Sentinel\\sentinel-agent.log'], capture_output=True)
+        subprocess.run([nssm_path, 'start', task_name], capture_output=True)
+        log.info('Service installed and started via NSSM (starts at boot).')
+        log.info('  Service: %s', task_name)
+        log.info('  Logs   : %s\\Sentinel\\sentinel-agent.log', pd)
+        log.info('  Stop   : nssm stop %s', task_name)
+        log.info('  Remove : agent.exe --uninstall-service')
+        return
+
+    # Fallback: Task Scheduler (starts at logon, not boot)
+    log.info('NSSM unavailable — installing via Task Scheduler (starts at logon)...')
+
     bat_path = ROOT / 'start_agent.bat'
     bat_lines = [
         '@echo off',
@@ -1124,7 +1183,6 @@ def _install_windows_task(cmd: list[str]) -> None:
     ]
     bat_path.write_text('\r\n'.join(bat_lines) + '\r\n', encoding='utf-8')
 
-    # VBScript wrapper — runs the bat with window style 0 (completely hidden)
     vbs_path = ROOT / 'run_agent_hidden.vbs'
     vbs_path.write_text(
         f'Set sh = CreateObject("WScript.Shell")\r\n'
@@ -1132,10 +1190,8 @@ def _install_windows_task(cmd: list[str]) -> None:
         encoding='utf-8',
     )
 
-    # Delete any existing task before recreating
     subprocess.run(['schtasks', '/delete', '/f', '/tn', task_name],
                    capture_output=True)
-
     result = subprocess.run([
         'schtasks', '/create', '/f',
         '/tn', task_name,
@@ -1151,7 +1207,6 @@ def _install_windows_task(cmd: list[str]) -> None:
         sys.exit(1)
 
     subprocess.run(['schtasks', '/run', '/tn', task_name], capture_output=True)
-
     log.info('Service installed and started (hidden).')
     log.info('  Task  : %s (Task Scheduler)', task_name)
     log.info('  Logs  : %s', log_file)

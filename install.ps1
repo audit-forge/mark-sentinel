@@ -208,34 +208,60 @@ if (-not $NoService) {
 
     $nssmCmd = Get-Command "nssm" -ErrorAction SilentlyContinue; $nssmPath = if ($nssmCmd) { $nssmCmd.Source } else { $null }
 
+    if (-not $nssmPath) {
+        Write-Step "NSSM not found — downloading it for proper Windows Service support ..."
+        try {
+            $nssmDir = "$env:ProgramData\Sentinel\nssm"
+            New-Item -ItemType Directory -Path $nssmDir -Force | Out-Null
+            $nssmZip     = "$env:TEMP\nssm-$([guid]::NewGuid()).zip"
+            $nssmExtract = "$env:TEMP\nssm-extract-$([guid]::NewGuid())"
+            Invoke-WebRequest -Uri "https://nssm.cc/release/nssm-2.24.zip" -OutFile $nssmZip -UseBasicParsing -TimeoutSec 60
+            Expand-Archive -Path $nssmZip -DestinationPath $nssmExtract -Force
+            $arch   = if ([Environment]::Is64BitOperatingSystem) { "win64" } else { "win32" }
+            $nssmSrc = Get-ChildItem -Path $nssmExtract -Recurse -Filter "nssm.exe" |
+                Where-Object { $_.FullName -like "*\$arch\*" } | Select-Object -First 1
+            if ($nssmSrc) {
+                Copy-Item -Path $nssmSrc.FullName -Destination "$nssmDir\nssm.exe" -Force
+                $nssmPath = "$nssmDir\nssm.exe"
+                Write-OK "NSSM downloaded to $nssmPath"
+            } else {
+                Write-Warn "Downloaded NSSM archive but couldn't find nssm.exe for $arch inside it."
+            }
+            Remove-Item $nssmZip -Force -ErrorAction SilentlyContinue
+            Remove-Item $nssmExtract -Recurse -Force -ErrorAction SilentlyContinue
+        } catch {
+            Write-Warn "Could not download NSSM automatically: $_"
+        }
+    }
+
     if ($nssmPath) {
         Write-Step "Using NSSM to create service ..."
 
         $existingSvc = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
         if ($existingSvc) {
             Write-Step "Stopping existing service ..."
-            & nssm stop $ServiceName 2>$null
-            & nssm remove $ServiceName confirm 2>$null
+            & $nssmPath stop $ServiceName 2>$null
+            & $nssmPath remove $ServiceName confirm 2>$null
         }
 
-        & nssm install $ServiceName $PythonExe
+        & $nssmPath install $ServiceName $PythonExe
         # Use compiled agent.exe if present, otherwise fall back to python agent.py
         $AgentExe = Join-Path $InstallDir "agent.exe"
         if (Test-Path $AgentExe) {
-            & nssm set $ServiceName Application $AgentExe
-            & nssm set $ServiceName AppParameters "--daemon --config `"$ConfigFile`""
+            & $nssmPath set $ServiceName Application $AgentExe
+            & $nssmPath set $ServiceName AppParameters "--daemon --config `"$ConfigFile`""
         } else {
-            & nssm set $ServiceName AppParameters "`"$InstallDir\agent.py`" --daemon --config `"$ConfigFile`""
+            & $nssmPath set $ServiceName AppParameters "`"$InstallDir\agent.py`" --daemon --config `"$ConfigFile`""
         }
-        & nssm set $ServiceName AppDirectory $InstallDir
-        & nssm set $ServiceName DisplayName "M.A.R.K. Sentinel Agent"
-        & nssm set $ServiceName Description "Distributed security audit agent (M.A.R.K. Sentinel)"
-        & nssm set $ServiceName Start SERVICE_AUTO_START
-        & nssm set $ServiceName AppRestartDelay 30000
-        & nssm set $ServiceName AppStdout "$env:ProgramData\Sentinel\sentinel-agent.log"
-        & nssm set $ServiceName AppStderr "$env:ProgramData\Sentinel\sentinel-agent.log"
-        & nssm set $ServiceName AppEnvironmentExtra "PYTHONUTF8=1" "SENTINEL_SERVER=" "SENTINEL_AGENT_TOKEN="
-        & nssm start $ServiceName
+        & $nssmPath set $ServiceName AppDirectory $InstallDir
+        & $nssmPath set $ServiceName DisplayName "M.A.R.K. Sentinel Agent"
+        & $nssmPath set $ServiceName Description "Distributed security audit agent (M.A.R.K. Sentinel)"
+        & $nssmPath set $ServiceName Start SERVICE_AUTO_START
+        & $nssmPath set $ServiceName AppRestartDelay 30000
+        & $nssmPath set $ServiceName AppStdout "$env:ProgramData\Sentinel\sentinel-agent.log"
+        & $nssmPath set $ServiceName AppStderr "$env:ProgramData\Sentinel\sentinel-agent.log"
+        & $nssmPath set $ServiceName AppEnvironmentExtra "PYTHONUTF8=1" "SENTINEL_SERVER=" "SENTINEL_AGENT_TOKEN="
+        & $nssmPath start $ServiceName
         Write-OK "Service registered and started via NSSM"
 
     } else {
