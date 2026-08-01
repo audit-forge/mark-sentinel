@@ -222,16 +222,21 @@ Set-Acl -Path $ConfigFile -AclObject $acl
 
 # -- Verify agent files are present --------------------------------------------
 
+$AgentExe = "$InstallDir\agent.exe"
 $AgentScript = "$InstallDir\agent.py"
-if (-not (Test-Path $AgentScript)) {
+if (-not (Test-Path $AgentExe) -and -not (Test-Path $AgentScript)) {
     Write-Host ""
-    Write-Host "  [FAIL] agent.py not found at $AgentScript" -ForegroundColor Red
-    Write-Host "         Bundle download may have failed. Check network connectivity and token." -ForegroundColor Yellow
+    Write-Host "  [FAIL] Neither agent.exe nor agent.py found at $InstallDir" -ForegroundColor Red
+    Write-Host "         Download may have failed. Check network connectivity and token." -ForegroundColor Yellow
     Stop-Transcript | Out-Null
     if ([Environment]::UserInteractive) { Read-Host "`n  Press Enter to close" }
     exit 1
 }
-Write-OK "Agent files present at $InstallDir"
+if (Test-Path $AgentExe) {
+    Write-OK "Agent binary (agent.exe) present at $InstallDir"
+} else {
+    Write-OK "Agent script (agent.py) present at $InstallDir"
+}
 
 # -- Windows Service registration ----------------------------------------------
 
