@@ -28,8 +28,9 @@ def format_json(
         "critical_count": len(critical_fails),
     }
 
+    from arckon_version import VERSION as _AGENT_VERSION
     report = {
-        "mark_sentinel_version": "1.0.0-phase1",
+        "mark_sentinel_version": _AGENT_VERSION,
         "scan_date": str(date.today()),
         "target": target,
         "mode": mode,

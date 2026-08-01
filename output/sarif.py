@@ -6,6 +6,13 @@ import json
 from datetime import date
 from checks import CheckResult
 
+def _get_version():
+    try:
+        from arckon_version import VERSION
+        return VERSION
+    except ImportError:
+        return "unknown"
+
 SARIF_SCHEMA = (
     "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json"
 )
@@ -38,7 +45,7 @@ def format_sarif(results: list, profile: dict, target: str, mode: str) -> str:
         "tool": {
             "driver": {
                 "name": "Arckon by RiskRaven",
-                "version": "1.0.0-phase1",
+                "version": _get_version(),
                 "informationUri": "https://github.com/audit-forge/mark-sentinel",
                 "rules": rules,
             }
