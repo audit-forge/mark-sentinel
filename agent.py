@@ -222,11 +222,21 @@ def run_scan(target: str, profile: str) -> dict | None:
     """
     audit_script = ROOT / 'audit.py'
     audit_binary = ROOT / 'audit'
+    audit_dist_binary = ROOT / 'audit.dist' / ('audit.exe' if sys.platform == 'win32' else 'audit')
 
-    # Use compiled binary if available, fall back to Python script
+    # Use compiled binary if available, fall back to audit.dist (standalone Nuitka), then Python script
     if audit_binary.exists() and os.access(audit_binary, os.X_OK):
         cmd = [
             str(audit_binary),
+            '--mode', 'config',
+            '--target', target,
+            '--profile', profile,
+            '--output', 'json',
+            '--quiet',
+        ]
+    elif audit_dist_binary.exists() and os.access(audit_dist_binary, os.X_OK):
+        cmd = [
+            str(audit_dist_binary),
             '--mode', 'config',
             '--target', target,
             '--profile', profile,
@@ -243,7 +253,7 @@ def run_scan(target: str, profile: str) -> dict | None:
             '--quiet',
         ]
     else:
-        log.error('Neither audit binary nor audit.py found at %s', ROOT)
+        log.error('Neither audit binary, audit.dist/audit, nor audit.py found at %s', ROOT)
         return None
     log.info('Scan: %s', ' '.join(cmd))
 
@@ -808,11 +818,20 @@ def run_k8s_scan(context_name: str) -> dict | None:
     """Run a k8s-mode Sentinel audit and return the parsed JSON report."""
     audit_script = ROOT / 'audit.py'
     audit_binary = ROOT / 'audit'
+    audit_dist_binary = ROOT / 'audit.dist' / ('audit.exe' if sys.platform == 'win32' else 'audit')
 
-    # Use compiled binary if available, fall back to Python script
+    # Use compiled binary if available, fall back to audit.dist (standalone Nuitka), then Python script
     if audit_binary.exists() and os.access(audit_binary, os.X_OK):
         cmd = [
             str(audit_binary),
+            '--mode', 'k8s',
+            '--profile', 'kubernetes',
+            '--output', 'json',
+            '--quiet',
+        ]
+    elif audit_dist_binary.exists() and os.access(audit_dist_binary, os.X_OK):
+        cmd = [
+            str(audit_dist_binary),
             '--mode', 'k8s',
             '--profile', 'kubernetes',
             '--output', 'json',
@@ -922,14 +941,18 @@ def run_docker_security_scan() -> dict | None:
     """Run docker-mode audit and return parsed JSON report."""
     audit_script = ROOT / 'audit.py'
     audit_binary = ROOT / 'audit'
+    audit_dist_binary = ROOT / 'audit.dist' / ('audit.exe' if sys.platform == 'win32' else 'audit')
     if audit_binary.exists() and os.access(audit_binary, os.X_OK):
         cmd = [str(audit_binary), '--mode', 'docker', '--profile', 'docker',
+               '--output', 'json', '--quiet']
+    elif audit_dist_binary.exists() and os.access(audit_dist_binary, os.X_OK):
+        cmd = [str(audit_dist_binary), '--mode', 'docker', '--profile', 'docker',
                '--output', 'json', '--quiet']
     elif audit_script.exists():
         cmd = [sys.executable, str(audit_script), '--mode', 'docker', '--profile', 'docker',
                '--output', 'json', '--quiet']
     else:
-        log.error('Neither audit binary nor audit.py found at %s', ROOT)
+        log.error('Neither audit binary, audit.dist/audit, nor audit.py found at %s', ROOT)
         return None
     log.info('Docker security scan: %s', ' '.join(cmd[:5]))
     try:
