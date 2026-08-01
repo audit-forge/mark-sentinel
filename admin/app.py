@@ -363,11 +363,11 @@ async def serve_installer(filename: str):
     allowed = {"install.sh", "install.ps1", "install.bat"}
     if filename not in allowed:
         raise HTTPException(404)
-    path = f"/app/{filename}"
-    if not os.path.exists(path):
-        raise HTTPException(404)
-    media_type = "text/plain"
-    return FileResponse(path, media_type=media_type, filename=filename)
+    # Prefer the deploy/ version (Nuitka binary install), fall back to root.
+    for candidate in [f"/app/deploy/{filename}", f"/app/{filename}"]:
+        if os.path.exists(candidate):
+            return FileResponse(candidate, media_type="text/plain", filename=filename)
+    raise HTTPException(404)
 
 
 # ── Customers ─────────────────────────────────────────────────────────────────

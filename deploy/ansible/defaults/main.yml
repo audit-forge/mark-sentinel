@@ -1,0 +1,12 @@
+---
+# Default variables for arckon-agent role
+arckon_server: "http://localhost:7331"
+arckon_token: ""
+arckon_target: "/"
+arckon_profile: "default"
+arckon_interval: 900
+arckon_install_prefix: "/opt/arckon"
+arckon_config_dir: "/etc/arckon"
+arckon_config_file: "/etc/arckon/agent_config.json"
+arckon_service_name: "arckon-agent"
+arckon_user: "arckon"

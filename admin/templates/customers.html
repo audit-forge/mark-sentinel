@@ -244,6 +244,9 @@
     <div style="display:flex;border-bottom:1px solid #E5E7EB">
       <button class="dtab on"  id="dtab-mac" onclick="showDTab('mac')">macOS / Linux</button>
       <button class="dtab"     id="dtab-win" onclick="showDTab('win')">Windows</button>
+      <button class="dtab"     id="dtab-ans" onclick="showDTab('ans')">Ansible</button>
+      <button class="dtab"     id="dtab-tf"  onclick="showDTab('tf')">Terraform</button>
+      <button class="dtab"     id="dtab-mdm" onclick="showDTab('mdm')">MDM / Jamf</button>
       <button class="dtab"     id="dtab-av"  onclick="showDTab('av')">AV Exclusions</button>
     </div>
 
@@ -260,7 +263,7 @@
           <pre id="dm-mac-cmd" style="background:#F9FAFB;border:1px solid #E5E7EB;border-radius:6px;padding:16px 16px 16px 16px;font-size:12.5px;font-family:'Menlo','Consolas',monospace;color:#4F46E5;white-space:pre-wrap;word-break:break-all;line-height:1.6;padding-right:70px"></pre>
           <button onclick="dCopy('dm-mac-cmd',this)" style="position:absolute;top:10px;right:10px;background:#F9FAFB;border:1px solid #E5E7EB;color:#6B7280;font-size:12px;padding:4px 10px;border-radius:4px;cursor:pointer;font-family:inherit">Copy</button>
         </div>
-        <p style="font-size:13px;color:#6B7280;margin-top:14px">Requires Python 3.11+. Installs to <code>/opt/sentinel/</code> and registers as a persistent system service (launchd on macOS, systemd on Linux).</p>
+        <p style="font-size:13px;color:#6B7280;margin-top:14px">No Python required — downloads a Nuitka-compiled native binary. Installs to <code>/opt/arckon/</code> and registers as a persistent system service (launchd on macOS, systemd on Linux).</p>
       </div>
 
       <!-- Windows pane -->
@@ -270,7 +273,37 @@
           <pre id="dm-win-cmd" style="background:#F9FAFB;border:1px solid #E5E7EB;border-radius:6px;padding:16px;font-size:12.5px;font-family:'Menlo','Consolas',monospace;color:#4F46E5;white-space:pre-wrap;word-break:break-all;line-height:1.6;padding-right:70px"></pre>
           <button onclick="dCopy('dm-win-cmd',this)" style="position:absolute;top:10px;right:10px;background:#F9FAFB;border:1px solid #E5E7EB;color:#6B7280;font-size:12px;padding:4px 10px;border-radius:4px;cursor:pointer;font-family:inherit">Copy</button>
         </div>
-        <p style="font-size:13px;color:#6B7280;margin-top:14px">Requires Python 3.11+. Installs to <code>C:\Program Files\Sentinel\</code> and registers as a Windows Service. Uses NSSM if installed; falls back to sc.exe.</p>
+        <p style="font-size:13px;color:#6B7280;margin-top:14px">No Python required — downloads a Nuitka-compiled native binary. Installs to <code>C:\Program Files\Arckon\</code> and registers as a Windows Service. Auto-downloads NSSM if not present.</p>
+      </div>
+
+      <!-- Ansible pane -->
+      <div id="dpane-ans" style="display:none">
+        <p style="font-size:14px;color:#6B7280;margin-bottom:14px">Add to your Ansible inventory and run the arckon-agent role:</p>
+        <div style="position:relative">
+          <pre id="dm-ans-cmd" style="background:#F9FAFB;border:1px solid #E5E7EB;border-radius:6px;padding:16px;font-size:12.5px;font-family:'Menlo','Consolas',monospace;color:#4F46E5;white-space:pre-wrap;word-break:break-all;line-height:1.6;padding-right:70px"></pre>
+          <button onclick="dCopy('dm-ans-cmd',this)" style="position:absolute;top:10px;right:10px;background:#F9FAFB;border:1px solid #E5E7EB;color:#6B7280;font-size:12px;padding:4px 10px;border-radius:4px;cursor:pointer;font-family:inherit">Copy</button>
+        </div>
+        <p style="font-size:13px;color:#6B7280;margin-top:14px">Requires the arckon-agent Ansible role from the repo (<code>deploy/ansible/</code>). Idempotent — safe to run repeatedly.</p>
+      </div>
+
+      <!-- Terraform pane -->
+      <div id="dpane-tf" style="display:none">
+        <p style="font-size:14px;color:#6B7280;margin-bottom:14px">Provision the agent on new cloud VMs via user_data:</p>
+        <div style="position:relative">
+          <pre id="dm-tf-cmd" style="background:#F9FAFB;border:1px solid #E5E7EB;border-radius:6px;padding:16px;font-size:12.5px;font-family:'Menlo','Consolas',monospace;color:#4F46E5;white-space:pre-wrap;word-break:break-all;line-height:1.6;padding-right:70px"></pre>
+          <button onclick="dCopy('dm-tf-cmd',this)" style="position:absolute;top:10px;right:10px;background:#F9FAFB;border:1px solid #E5E7EB;color:#6B7280;font-size:12px;padding:4px 10px;border-radius:4px;cursor:pointer;font-family:inherit">Copy</button>
+        </div>
+        <p style="font-size:13px;color:#6B7280;margin-top:14px">Paste into your VM <code>user_data</code> block. The agent starts on first boot and auto-updates from the server.</p>
+      </div>
+
+      <!-- MDM / Jamf pane -->
+      <div id="dpane-mdm" style="display:none">
+        <p style="font-size:14px;color:#6B7280;margin-bottom:14px">For Jamf Pro, Kandji, Intune, or other MDM — deploy via a shell script policy or .pkg:</p>
+        <div style="position:relative">
+          <pre id="dm-mdm-cmd" style="background:#F9FAFB;border:1px solid #E5E7EB;border-radius:6px;padding:16px;font-size:12.5px;font-family:'Menlo','Consolas',monospace;color:#4F46E5;white-space:pre-wrap;word-break:break-all;line-height:1.6;padding-right:70px"></pre>
+          <button onclick="dCopy('dm-mdm-cmd',this)" style="position:absolute;top:10px;right:10px;background:#F9FAFB;border:1px solid #E5E7EB;color:#6B7280;font-size:12px;padding:4px 10px;border-radius:4px;cursor:pointer;font-family:inherit">Copy</button>
+        </div>
+        <p style="font-size:13px;color:#6B7280;margin-top:14px">For Jamf: create a Policy with this script as a Files and Processes payload. For Intune: use as a Shell Script on macOS devices. The Nuitka binary runs without Python.</p>
       </div>
 
       <!-- AV Exclusions pane -->
@@ -279,26 +312,26 @@
 
         <div style="margin-bottom:18px">
           <div style="font-size:12px;font-weight:600;color:#6B7280;letter-spacing:.8px;text-transform:uppercase;margin-bottom:8px">Windows</div>
-          <pre style="background:#F9FAFB;border:1px solid #E5E7EB;border-radius:6px;padding:14px;font-size:13px;font-family:'Menlo','Consolas',monospace;color:#374151;line-height:1.7">Paths:    C:\Program Files\Sentinel\
+          <pre style="background:#F9FAFB;border:1px solid #E5E7EB;border-radius:6px;padding:14px;font-size:13px;font-family:'Menlo','Consolas',monospace;color:#374151;line-height:1.7">Paths:    C:\Program Files\Arckon\
           C:\ProgramData\Sentinel\
-Process:  python.exe  (parent: C:\Program Files\Sentinel\)
+Process:  agent.exe  (Nuitka-compiled, no Python needed)
 Service:  SentinelAgent</pre>
         </div>
 
         <div style="margin-bottom:18px">
           <div style="font-size:12px;font-weight:600;color:#6B7280;letter-spacing:.8px;text-transform:uppercase;margin-bottom:8px">macOS</div>
-          <pre style="background:#F9FAFB;border:1px solid #E5E7EB;border-radius:6px;padding:14px;font-size:13px;font-family:'Menlo','Consolas',monospace;color:#374151;line-height:1.7">Paths:    /opt/sentinel/
-          /etc/sentinel/
-          /Library/LaunchDaemons/io.hash.sentinel-agent.plist
-Process:  python3  (parent: /opt/sentinel/venv/)</pre>
+          <pre style="background:#F9FAFB;border:1px solid #E5E7EB;border-radius:6px;padding:14px;font-size:13px;font-family:'Menlo','Consolas',monospace;color:#374151;line-height:1.7">Paths:    /opt/arckon/
+          /etc/arckon/
+          /Library/LaunchDaemons/ai.mfdynamics.arckon-agent.plist
+Process:  agent  (Nuitka-compiled, no Python needed)</pre>
         </div>
 
         <div style="margin-bottom:18px">
           <div style="font-size:12px;font-weight:600;color:#6B7280;letter-spacing:.8px;text-transform:uppercase;margin-bottom:8px">Linux</div>
-          <pre style="background:#F9FAFB;border:1px solid #E5E7EB;border-radius:6px;padding:14px;font-size:13px;font-family:'Menlo','Consolas',monospace;color:#374151;line-height:1.7">Paths:    /opt/sentinel/
-          /etc/sentinel/
-Process:  python3  (parent: /opt/sentinel/venv/)
-Service:  sentinel-agent  (systemd unit)</pre>
+          <pre style="background:#F9FAFB;border:1px solid #E5E7EB;border-radius:6px;padding:14px;font-size:13px;font-family:'Menlo','Consolas',monospace;color:#374151;line-height:1.7">Paths:    /opt/arckon/
+          /etc/arckon/
+Process:  agent  (Nuitka-compiled, no Python needed)
+Service:  arckon-agent  (systemd unit)</pre>
         </div>
 
         <div style="background:#F9FAFB;border:1px solid #4488ff30;border-radius:6px;padding:14px;font-size:13px;color:#6699ff">
@@ -330,6 +363,29 @@ function openDeploy(cid, name, port, token) {
     "$s=(Invoke-WebRequest '" + base + "/install/install.ps1' -UseBasicParsing).Content; " +
     "&([scriptblock]::Create($s)) -Server '" + srv + "' -Token '" + (token || 'TOKEN') + "'";
 
+  document.getElementById('dm-ans-cmd').textContent =
+    "# ansible-playbook -i hosts deploy-agent.yml\n" +
+    "---\n" +
+    "- hosts: all\n" +
+    "  become: true\n" +
+    "  vars:\n" +
+    "    arckon_server: '" + srv + "'\n" +
+    "    arckon_token: '" + (token || 'TOKEN') + "'\n" +
+    "  roles:\n" +
+    "    - arckon-agent";
+
+  document.getElementById('dm-tf-cmd').textContent =
+    '# Terraform user_data for new VMs\n' +
+    'user_data = <<-EOF\n' +
+    '#!/bin/bash\n' +
+    'curl -fsSL ' + base + '/install/install.sh | bash -s -- --server ' + srv + ' --token ' + (token || 'TOKEN') + ' --target /\n' +
+    'EOF';
+
+  document.getElementById('dm-mdm-cmd').textContent =
+    '#!/bin/bash\n' +
+    '# Arckon Agent MDM/Jamf deployment script\n' +
+    'curl -fsSL ' + base + '/install/install.sh | bash -s -- --server ' + srv + ' --token ' + (token || 'TOKEN') + ' --target /';
+
   document.getElementById('dm-av-server').textContent = srv;
 
   showDTab('mac');
@@ -339,7 +395,7 @@ function closeDeploy() {
   document.getElementById('deployModal').style.display = 'none';
 }
 function showDTab(t) {
-  ['mac','win','av'].forEach(function(n) {
+  ['mac','win','ans','tf','mdm','av'].forEach(function(n) {
     document.getElementById('dpane-' + n).style.display = n === t ? 'block' : 'none';
     document.getElementById('dtab-'  + n).classList.toggle('on', n === t);
   });

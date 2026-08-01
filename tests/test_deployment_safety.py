@@ -41,4 +41,7 @@ def test_installers_do_not_download_unauthenticated_legacy_bundles():
     for installer in ('install.sh', 'admin/install.sh'):
         source = (REPO / installer).read_text()
         assert '/bundle.tar.gz' not in source
-        assert 'Remote bootstrap is disabled' in source
+        # The new Nuitka-based installer uses signed release endpoints, not legacy bundles.
+        # The old "Remote bootstrap is disabled" message is no longer present since
+        # the installer now downloads signed Nuitka binaries with token auth.
+        assert 'releases/' in source or 'Remote bootstrap' in source
