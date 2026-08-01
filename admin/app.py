@@ -359,14 +359,18 @@ async def test_email(request: Request):
 
 @app.get("/install/{filename}")
 async def serve_installer(filename: str):
-    from fastapi.responses import FileResponse
+    from fastapi.responses import PlainTextResponse
     allowed = {"install.sh", "install.ps1", "install.bat"}
     if filename not in allowed:
         raise HTTPException(404)
     # Prefer the deploy/ version (Nuitka binary install), fall back to root.
     for candidate in [f"/app/deploy/{filename}", f"/app/{filename}"]:
         if os.path.exists(candidate):
-            return FileResponse(candidate, media_type="text/plain", filename=filename)
+            data = open(candidate, "rb").read()
+            # Strip UTF-8 BOM so Invoke-WebRequest + [scriptblock]::Create works in PS 5.1
+            if data[:3] == b"\xef\xbb\xbf":
+                data = data[3:]
+            return PlainTextResponse(data.decode("utf-8"), media_type="text/plain")
     raise HTTPException(404)
 
 
