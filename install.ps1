@@ -131,8 +131,16 @@ if ($Server -ne "") {
                 Write-OK "SHA256 verified"
             }
 
-            # Extract to install directory
-            tar -xzf $ArtifactTmp -C $InstallDir
+            # Extract to install directory (strip top-level "sentinel/" folder)
+            $ExtractTmp = Join-Path $env:TEMP "arckon-extract"
+            if (Test-Path $ExtractTmp) { Remove-Item $ExtractTmp -Recurse -Force }
+            tar -xzf $ArtifactTmp -C $ExtractTmp 2>$null
+            if (Test-Path (Join-Path $ExtractTmp "sentinel")) {
+                Copy-Item -Path (Join-Path $ExtractTmp "sentinel\*") -Destination $InstallDir -Recurse -Force
+            } else {
+                Copy-Item -Path (Join-Path $ExtractTmp "*") -Destination $InstallDir -Recurse -Force
+            }
+            Remove-Item $ExtractTmp -Recurse -Force -ErrorAction SilentlyContinue
             Remove-Item $ArtifactTmp -Force -ErrorAction SilentlyContinue
             Write-OK "Agent extracted to $InstallDir"
         } catch {
