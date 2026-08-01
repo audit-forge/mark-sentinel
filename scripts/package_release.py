@@ -90,20 +90,14 @@ def _build_nuitka_binary(
     if platform_name in ('windows', 'win32'):
         cmd += [
             '--windows-console-mode=disable',
-            '--windows-disable-console',
         ]
     elif platform_name in ('darwin', 'macos'):
         # Console application, not an app bundle.
-        cmd += [
-            '--macos-create-app-bundle',
-        ]
         # macOS universal binaries cannot be produced on an arm64 Mac unless
         # we explicitly request a single-arch native build. Cross-compilation
         # to Linux/Windows from macOS is not supported by local Nuitka.
         if platform.system() == 'Darwin':
             cmd += ['--macos-target-arch=arm64']
-    else:
-        cmd += ['--linux-target']
 
     if cc:
         env = os.environ.copy()
