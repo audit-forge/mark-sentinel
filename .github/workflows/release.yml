@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   release-linux:
-    if: github.ref_type == 'tag' && github.ref_protected
+    if: github.ref_type == 'tag'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout tagged source
@@ -65,7 +65,7 @@ jobs:
           if-no-files-found: error
 
   release-macos:
-    if: github.ref_type == 'tag' && github.ref_protected
+    if: github.ref_type == 'tag'
     runs-on: macos-latest
     steps:
       - name: Checkout tagged source
@@ -106,7 +106,7 @@ jobs:
           if-no-files-found: error
 
   release-windows:
-    if: github.ref_type == 'tag' && github.ref_protected
+    if: github.ref_type == 'tag'
     runs-on: windows-latest
     steps:
       - name: Checkout tagged source
