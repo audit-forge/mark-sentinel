@@ -1,14 +1,14 @@
 ﻿#Requires -RunAsAdministrator
 <#
 .SYNOPSIS
-    M.A.R.K. Sentinel Agent - Windows Installer
+    Arckon Agent - Windows Installer
 
 .DESCRIPTION
-    Installs the Sentinel Agent to C:\Program Files\Sentinel\, creates config at
-    C:\ProgramData\Sentinel\agent_config.json, and optionally registers a Windows Service.
+    Installs the Arckon Agent to C:\Program Files\Arckon\, creates config at
+    C:\ProgramData\Arckon\agent_config.json, and optionally registers a Windows Service.
 
 .PARAMETER Server
-    Sentinel server URL (e.g. http://10.0.1.50:7331)
+    Arckon server URL (e.g. http://10.0.1.50:7331)
 
 .PARAMETER Token
     Agent authentication token
@@ -29,11 +29,11 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-$InstallDir  = "C:\Sentinel"
-$ConfigDir   = "C:\ProgramData\Sentinel"
+$InstallDir  = "C:\Program Files\Arckon"
+$ConfigDir   = "C:\ProgramData\Arckon"
 $ConfigFile  = "$ConfigDir\agent_config.json"
 $InstallLog  = "$ConfigDir\install.log"
-$ServiceName = "SentinelAgent"
+$ServiceName = "ArckonAgent"
 $ScriptDir   = if ($PSScriptRoot -and $PSScriptRoot -ne "") { $PSScriptRoot } else { $PWD.Path }
 
 if (-not (Test-Path $ConfigDir)) { New-Item -ItemType Directory -Path $ConfigDir -Force | Out-Null }
@@ -59,7 +59,7 @@ function Write-Warn {
 }
 
 Write-Host ""
-Write-Host "M.A.R.K. Sentinel Agent - Windows Installer" -ForegroundColor White
+Write-Host "Arckon Agent - Windows Installer" -ForegroundColor White
 Write-Host "============================================" -ForegroundColor DarkGray
 Write-Host ""
 
@@ -95,55 +95,87 @@ if (-not (Test-Path $InstallDir)) {
     New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null
 }
 
-# -- Download agent bundle from server (web install path) ---------------------
+# -- Download Nuitka binary release from server (web install path) -------------
 
 if ($Server -ne "") {
-    Write-Step "Downloading agent bundle from $Server ..."
-    $BundleUrl = $Server.TrimEnd('/') + '/bundle.tar.gz'
-    $BundleTmp = Join-Path $env:TEMP "sentinel-bundle.tar.gz"
+    Write-Step "Downloading Arckon agent from $Server ..."
+
+    # Fetch the signed manifest
+    $ManifestUrl = $Server.TrimEnd('/') + '/releases/windows/manifest.json'
+    $Headers = @{ Authorization = "Bearer $Token" }
     try {
-        $webClient = New-Object System.Net.WebClient
-        $webClient.Headers.Add("Authorization", "Bearer $Token")
-        $webClient.DownloadFile($BundleUrl, $BundleTmp)
-        tar -xzf $BundleTmp --strip-components=1 -C $InstallDir 2>$null
-        Remove-Item $BundleTmp -Force -ErrorAction SilentlyContinue
-        Write-OK "Agent bundle downloaded and extracted"
+        $Manifest = Invoke-RestMethod -Uri $ManifestUrl -Headers $Headers -TimeoutSec 30
+        $Artifact = $Manifest.artifact
+        $ArtifactSha256 = $Manifest.sha256
+        $ArtifactSize = $Manifest.size
+        $Version = $Manifest.version
+        Write-OK "Release v$Version found ($Artifact, $ArtifactSize bytes)"
     } catch {
-        Write-Warn "Could not download bundle: $_"
+        Write-Warn "Could not fetch manifest: $_"
+        $Manifest = $null
+    }
+
+    if ($Manifest) {
+        # Download the artifact
+        $ArtifactUrl = $Server.TrimEnd('/') + '/releases/windows/' + $Artifact
+        $ArtifactTmp = Join-Path $env:TEMP $Artifact
+        try {
+            Invoke-WebRequest -Uri $ArtifactUrl -Headers $Headers -OutFile $ArtifactTmp -UseBasicParsing -TimeoutSec 120
+            Write-OK "Downloaded $Artifact"
+
+            # Verify SHA256
+            $DownloadedHash = (Get-FileHash $ArtifactTmp -Algorithm SHA256).Hash.ToLower()
+            if ($DownloadedHash -ne $ArtifactSha256.ToLower()) {
+                Write-Warn "SHA256 mismatch! Expected $ArtifactSha256, got $DownloadedHash"
+            } else {
+                Write-OK "SHA256 verified"
+            }
+
+            # Extract to install directory
+            tar -xzf $ArtifactTmp -C $InstallDir
+            Remove-Item $ArtifactTmp -Force -ErrorAction SilentlyContinue
+            Write-OK "Agent extracted to $InstallDir"
+        } catch {
+            Write-Warn "Could not download artifact: $_"
+            Write-Warn "Falling back to local file copy."
+        }
+    } else {
         Write-Warn "Falling back to local file copy."
     }
 }
 
-# -- Copy files (local install / fallback) ------------------------------------
+# -- Copy files (local fallback only — Nuitka binary download is preferred) ------
 
-$FilesToCopy = @("agent.py", "audit.py", "storage.py", "server.py", "requirements.txt")
-foreach ($f in $FilesToCopy) {
-    $src = Join-Path $ScriptDir $f
-    if (Test-Path $src) {
-        Copy-Item -Path $src -Destination $InstallDir -Force
+if (-not (Test-Path (Join-Path $InstallDir "agent.exe")) -and -not (Test-Path (Join-Path $InstallDir "agent.py"))) {
+    $FilesToCopy = @("agent.py", "audit.py", "storage.py", "server.py", "requirements.txt")
+    foreach ($f in $FilesToCopy) {
+        $src = Join-Path $ScriptDir $f
+        if (Test-Path $src) {
+            Copy-Item -Path $src -Destination $InstallDir -Force
+        }
+    }
+    $DirsToCopy = @("checks", "connectors", "profiles")
+    foreach ($d in $DirsToCopy) {
+        $src = Join-Path $ScriptDir $d
+        if (Test-Path $src) {
+            $dst = Join-Path $InstallDir $d
+            if (Test-Path $dst) { Remove-Item $dst -Recurse -Force }
+            Copy-Item -Path $src -Destination $dst -Recurse -Force
+        }
     }
 }
 
-$DirsToCopy = @("checks", "connectors", "profiles")
-foreach ($d in $DirsToCopy) {
-    $src = Join-Path $ScriptDir $d
-    if (Test-Path $src) {
-        $dst = Join-Path $InstallDir $d
-        if (Test-Path $dst) { Remove-Item $dst -Recurse -Force }
-        Copy-Item -Path $src -Destination $dst -Recurse -Force
+# -- Install pip dependencies (only if using Python fallback, not Nuitka) -------
+
+$AgentExe = Join-Path $InstallDir "agent.exe"
+if (-not (Test-Path $AgentExe)) {
+    Write-Step "Installing Python dependencies ..."
+    $ReqFile = Join-Path $InstallDir "requirements.txt"
+    if (Test-Path $ReqFile) {
+        & $PythonExe -m pip install --quiet --upgrade pip
+        & $PythonExe -m pip install --quiet -r $ReqFile
+        Write-OK "Dependencies installed"
     }
-}
-
-# -- Install pip dependencies --------------------------------------------------
-
-Write-Step "Installing Python dependencies ..."
-$ReqFile = Join-Path $InstallDir "requirements.txt"
-if (Test-Path $ReqFile) {
-    & $PythonExe -m pip install --quiet --upgrade pip
-    & $PythonExe -m pip install --quiet -r $ReqFile
-    Write-OK "Dependencies installed"
-} else {
-    Write-Warn "requirements.txt not found at $ReqFile, skipping."
 }
 
 # -- Create config -------------------------------------------------------------
@@ -211,7 +243,7 @@ if (-not $NoService) {
     if (-not $nssmPath) {
         Write-Step "NSSM not found -- downloading it for proper Windows Service support ..."
         try {
-            $nssmDir = "$env:ProgramData\Sentinel\nssm"
+            $nssmDir = "$env:ProgramData\Arckon\nssm"
             New-Item -ItemType Directory -Path $nssmDir -Force | Out-Null
             $nssmZip     = "$env:TEMP\nssm-$([guid]::NewGuid()).zip"
             $nssmExtract = "$env:TEMP\nssm-extract-$([guid]::NewGuid())"
@@ -254,12 +286,12 @@ if (-not $NoService) {
             & $nssmPath set $ServiceName AppParameters "`"$InstallDir\agent.py`" --daemon --config `"$ConfigFile`""
         }
         & $nssmPath set $ServiceName AppDirectory $InstallDir
-        & $nssmPath set $ServiceName DisplayName "M.A.R.K. Sentinel Agent"
-        & $nssmPath set $ServiceName Description "Distributed security audit agent (M.A.R.K. Sentinel)"
+        & $nssmPath set $ServiceName DisplayName "Arckon Agent"
+        & $nssmPath set $ServiceName Description "Distributed security audit agent (Arckon)"
         & $nssmPath set $ServiceName Start SERVICE_AUTO_START
         & $nssmPath set $ServiceName AppRestartDelay 30000
-        & $nssmPath set $ServiceName AppStdout "$env:ProgramData\Sentinel\sentinel-agent.log"
-        & $nssmPath set $ServiceName AppStderr "$env:ProgramData\Sentinel\sentinel-agent.log"
+        & $nssmPath set $ServiceName AppStdout "$env:ProgramData\Arckon\arckon-agent.log"
+        & $nssmPath set $ServiceName AppStderr "$env:ProgramData\Arckon\arckon-agent.log"
         & $nssmPath set $ServiceName AppEnvironmentExtra "PYTHONUTF8=1" "SENTINEL_SERVER=" "SENTINEL_AGENT_TOKEN="
         & $nssmPath start $ServiceName
         Write-OK "Service registered and started via NSSM"
@@ -267,19 +299,19 @@ if (-not $NoService) {
     } else {
         Write-Warn "NSSM not found; falling back to sc.exe wrapper script."
 
-        $WrapperScript = "$InstallDir\sentinel-service.ps1"
+        $WrapperScript = "$InstallDir\arckon-service.ps1"
         @"
-# Auto-generated service wrapper for M.A.R.K. Sentinel Agent
+# Auto-generated service wrapper for Arckon Agent
 Set-Location '$InstallDir'
 `$env:PYTHONUNBUFFERED = '1'
 `$env:PYTHONUTF8 = '1'
 $AgentExe = '$InstallDir\agent.exe'
 if (Test-Path `$AgentExe) {
     & `$AgentExe --daemon --config '$ConfigFile' 2>&1 |
-        Tee-Object -FilePath '$ConfigDir\sentinel-agent.log' -Append
+        Tee-Object -FilePath '$ConfigDir\arckon-agent.log' -Append
 } else {
     & '$PythonExe' '$InstallDir\agent.py' --daemon --config '$ConfigFile' 2>&1 |
-        Tee-Object -FilePath '$ConfigDir\sentinel-agent.log' -Append
+        Tee-Object -FilePath '$ConfigDir\arckon-agent.log' -Append
 }
 "@ | ForEach-Object { Write-FileNoBOM $WrapperScript $_ }
 
@@ -298,9 +330,9 @@ if (Test-Path `$AgentExe) {
         sc.exe create $ServiceName `
             binPath= "`"$pwshExe`" -NonInteractive -NoProfile -File `"$WrapperScript`"" `
             start= auto `
-            DisplayName= "M.A.R.K. Sentinel Agent" | Out-Null
+            DisplayName= "Arckon Agent" | Out-Null
 
-        sc.exe description $ServiceName "Distributed security audit agent (M.A.R.K. Sentinel)" | Out-Null
+        sc.exe description $ServiceName "Distributed security audit agent (Arckon)" | Out-Null
         sc.exe failure $ServiceName reset= 86400 actions= restart/30000/restart/30000/restart/30000 | Out-Null
 
         Start-Service -Name $ServiceName
@@ -328,7 +360,7 @@ if (Test-Path `$AgentExe) {
     } else {
         Write-Host ""
         Write-Host "  [FAIL] Service failed to start." -ForegroundColor Red
-        $logFile = "$ConfigDir\sentinel-agent.log"
+        $logFile = "$ConfigDir\arckon-agent.log"
         if (Test-Path $logFile) {
             Write-Host "  Last log entries:" -ForegroundColor Yellow
             Get-Content $logFile -Tail 20 | ForEach-Object { Write-Host "    $_" -ForegroundColor DarkYellow }
@@ -375,7 +407,7 @@ try {
 }
 
 Write-Host ""
-Write-Host "M.A.R.K. Sentinel Agent installed successfully." -ForegroundColor Green
+Write-Host "Arckon Agent installed successfully." -ForegroundColor Green
 Write-Host "  Install dir : $InstallDir"
 Write-Host "  Config      : $ConfigFile"
 Write-Host "  Shortcut    : $ShortcutPath"
