@@ -291,6 +291,12 @@ install_launchd() {
   </array>
   <key>RunAtLoad</key>          <true/>
   <key>KeepAlive</key>          <true/>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>LANG</key>             <string>en_US.UTF-8</string>
+    <key>LC_ALL</key>           <string>en_US.UTF-8</string>
+    <key>PYTHONUTF8</key>       <string>1</string>
+  </dict>
   <key>StandardOutPath</key>    <string>/var/log/arckon-agent.log</string>
   <key>StandardErrorPath</key>  <string>/var/log/arckon-agent.log</string>
 </dict>

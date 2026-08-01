@@ -1254,7 +1254,12 @@ def _install_launchd(cmd: list[str]) -> None:
         'KeepAlive':         True,
         'StandardOutPath':   str(log_dir / 'agent.log'),
         'StandardErrorPath': str(log_dir / 'agent.log'),
-        'EnvironmentVariables': {'PATH': '/usr/local/bin:/usr/bin:/bin'},
+        'EnvironmentVariables': {
+            'PATH': '/usr/local/bin:/usr/bin:/bin',
+            'LANG': 'en_US.UTF-8',
+            'LC_ALL': 'en_US.UTF-8',
+            'PYTHONUTF8': '1',
+        },
     }
     with open(plist_path, 'wb') as f:
         _plist.dump(plist, f)

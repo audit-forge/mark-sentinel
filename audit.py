@@ -77,13 +77,13 @@ def load_profile(name: str) -> dict:
                            if not p.stem.endswith('_controls'))
         print(f"[ERROR] Profile '{name}' not found. Available: {', '.join(available)}", file=sys.stderr)
         sys.exit(1)
-    with open(profile_path) as f:
+    with open(profile_path, encoding='utf-8') as f:
         profile = json.load(f)
     emphasis = profile.get('framework_emphasis')
     if emphasis:
         controls_path = profiles_dir / f'{emphasis}_controls.json'
         if controls_path.exists():
-            with open(controls_path) as f:
+            with open(controls_path, encoding='utf-8') as f:
                 profile['_controls'] = json.load(f)
     return profile
 
@@ -416,9 +416,9 @@ examples:
             from output.comparison import compare_reports
             import json as _json
             before_path, after_path = args.compare
-            with open(before_path) as _bf:
+            with open(before_path, encoding='utf-8') as _bf:
                 before = _json.load(_bf)
-            with open(after_path) as _af:
+            with open(after_path, encoding='utf-8') as _af:
                 after = _json.load(_af)
             out = compare_reports(before, after)
             print(out)
@@ -596,12 +596,12 @@ examples:
     _atlas_map: dict = {}
     _iso_map: dict = {}
     try:
-        with open(_profiles_dir / 'atlas_controls.json') as _f:
+        with open(_profiles_dir / 'atlas_controls.json', encoding='utf-8') as _f:
             _atlas_map = json.load(_f)
     except (FileNotFoundError, json.JSONDecodeError):
         pass
     try:
-        with open(_profiles_dir / 'iso42001_controls.json') as _f:
+        with open(_profiles_dir / 'iso42001_controls.json', encoding='utf-8') as _f:
             _iso_map = json.load(_f)
     except (FileNotFoundError, json.JSONDecodeError):
         pass
