@@ -468,6 +468,7 @@ def generate_aibom_json(
         vulnerabilities.append({
             'id':          r['check_id'],
             'description': r['title'],
+            'detail':      r['details'],
             'severity':    r['severity'].lower(),
             'affects': [{'ref': r['hostname']}],
         })
@@ -601,17 +602,20 @@ def generate_aibom_pdf(
         pdf.cell(pdf.epw, 2, '', border='LBR', new_x='LMARGIN', new_y='NEXT')
         pdf.ln(2)
 
-    for title, component_type in (
-        ('AI Models', 'machine-learning-model'),
-        ('AI Packages', 'library'),
-        ('AI Developer Tools', 'platform'),
-        ('AI Services', 'service'),
+    for title, description, component_type in (
+        ('AI Models', 'Detected models and their version-pinning status. A floating model can change behavior without a configuration change.', 'machine-learning-model'),
+        ('AI Packages', 'AI-related software dependencies detected in scanned projects. Pinned versions support repeatable, auditable builds.', 'library'),
+        ('AI Developer Tools', 'AI-enabled developer tools detected on managed devices. Review their data handling and approved-use status.', 'platform'),
+        ('AI Services', 'Cloud AI services detected from device telemetry or network activity. These indicate possible AI data flows.', 'service'),
     ):
         components = [item for item in bom['components'] if item.get('type') == component_type]
         if not components:
             continue
         pdf.set_font('Helvetica', 'B', 13)
         pdf.cell(0, 8, title, new_x='LMARGIN', new_y='NEXT')
+        pdf.set_font('Helvetica', '', 8)
+        pdf.multi_cell(pdf.epw, 4, text(description), new_x='LMARGIN', new_y='NEXT')
+        pdf.ln(1)
         for component in components:
             component_card(component)
         pdf.ln(2)
@@ -619,15 +623,25 @@ def generate_aibom_pdf(
     if bom['vulnerabilities']:
         pdf.set_font('Helvetica', 'B', 13)
         pdf.cell(0, 8, 'Supply Chain Risks', new_x='LMARGIN', new_y='NEXT')
+        pdf.set_font('Helvetica', '', 8)
+        pdf.multi_cell(
+            pdf.epw, 4,
+            text('These are device-level findings. A device can contain pinned components and still have a risk if another component, dependency, or configuration on that same device needs review.'),
+            new_x='LMARGIN', new_y='NEXT',
+        )
+        pdf.ln(1)
         for risk in bom['vulnerabilities']:
             affected = ', '.join(item.get('ref', '') for item in risk.get('affects', []))
+            affected_count = len([item for item in risk.get('affects', []) if item.get('ref')])
             pdf.set_fill_color(254, 242, 242)
             pdf.set_font('Helvetica', 'B', 9)
             pdf.multi_cell(pdf.epw, 5, text(
                 f"[{risk.get('severity', '').upper()}] {risk.get('id', '')} - {risk.get('description', '')}"
             ), border=1, fill=True, new_x='LMARGIN', new_y='NEXT')
             pdf.set_font('Helvetica', '', 8)
-            field('Affected device', affected)
+            field('What it is', risk.get('description', ''))
+            field('Why it needs review', risk.get('detail', ''))
+            field(f'Affected devices ({affected_count})', affected)
             pdf.cell(pdf.epw, 2, '', border='LBR', new_x='LMARGIN', new_y='NEXT')
             pdf.ln(2)
 
