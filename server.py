@@ -1345,6 +1345,8 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             '/api/fleet/eu-ai-act-report': self._api_eu_ai_act_report,
             '/api/fleet/aibom':            self._api_fleet_aibom,
             '/api/fleet/aibom.json':       self._api_fleet_aibom_json,
+            '/api/fleet/aibom.csv':        self._api_fleet_aibom_csv,
+            '/api/fleet/aibom.pdf':        self._api_fleet_aibom_pdf,
             '/api/branding':               self._api_get_branding,
             '/api/psa/config':             self._api_get_psa_config,
             '/api/wiki/config':            self._api_get_wiki_config,
@@ -4442,6 +4444,48 @@ load();
         except Exception as e:
             self._send(500, f'AI-BOM JSON failed: {e}'.encode(), 'text/plain')
 
+    def _api_fleet_aibom_csv(self):
+        """GET /api/fleet/aibom.csv?org=... — spreadsheet AI-BOM download."""
+        try:
+            import urllib.parse as _up
+            qs = _up.parse_qs(_up.urlparse(self.path).query)
+            org_name = qs.get('org', [''])[0]
+            store = self._store()
+            devices = [{**d, '_report': store.get_latest_report(d['device_id'])}
+                       for d in store.list_devices(client_org_id=self._scoped_client_org())]
+            from aibom_generator import generate_aibom_csv
+            data = generate_aibom_csv(devices, org_name, store.list_shadow_devices())
+            safe_org = (org_name or 'Fleet').replace(' ', '_').replace('/', '-')
+            self.send_response(200)
+            self.send_header('Content-Type', 'text/csv; charset=utf-8')
+            self.send_header('Content-Disposition', f'attachment; filename="AI_BOM_{safe_org}.csv"')
+            self.send_header('Content-Length', str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+        except Exception as e:
+            self._send(500, f'AI-BOM CSV failed: {e}'.encode(), 'text/plain')
+
+    def _api_fleet_aibom_pdf(self):
+        """GET /api/fleet/aibom.pdf?org=... — printable AI-BOM download."""
+        try:
+            import urllib.parse as _up
+            qs = _up.parse_qs(_up.urlparse(self.path).query)
+            org_name = qs.get('org', [''])[0]
+            store = self._store()
+            devices = [{**d, '_report': store.get_latest_report(d['device_id'])}
+                       for d in store.list_devices(client_org_id=self._scoped_client_org())]
+            from aibom_generator import generate_aibom_pdf
+            data = generate_aibom_pdf(devices, org_name, store.list_shadow_devices())
+            safe_org = (org_name or 'Fleet').replace(' ', '_').replace('/', '-')
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/pdf')
+            self.send_header('Content-Disposition', f'attachment; filename="AI_BOM_{safe_org}.pdf"')
+            self.send_header('Content-Length', str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+        except Exception as e:
+            self._send(500, f'AI-BOM PDF failed: {e}'.encode(), 'text/plain')
+
     # ── Alert event log API ───────────────────────────────────────────────────
 
     def _api_get_alert_events(self):
@@ -6548,13 +6592,15 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
 
     <div style="background:#ffffff;border:1px solid #F3F4F6;border-radius:8px;padding:20px">
       <div style="font-size:15px;font-weight:700;color:#111827;margin-bottom:6px">&#129302; AI Bill of Materials</div>
-      <div style="font-size:12px;color:#6B7280;line-height:1.6;margin-bottom:12px">Complete inventory of AI models, packages, developer tools, and SaaS services detected across the fleet. Includes supply chain risk findings. CycloneDX-AI format JSON export.</div>
+       <div style="font-size:12px;color:#6B7280;line-height:1.6;margin-bottom:12px">Complete inventory of AI models, packages, developer tools, and SaaS services detected across the fleet. JSON supports automation, CSV supports audits and spreadsheets, and PDF is suitable for review and sharing.</div>
       <input id="aibom-org-name" class="form-input" type="text" placeholder="Organization name for this report"
              style="font-size:12px;margin-bottom:10px;max-width:280px"
              onchange="localStorage.setItem('aibom_org_name', this.value)">
       <div style="display:flex;gap:8px;flex-wrap:wrap">
-        <button class="scan-btn" onclick="openAibomReport('html')" style="color:#4F46E5;border-color:#C7D2FE;font-size:12px">&#128065; Preview</button>
-        <button class="scan-btn" onclick="openAibomReport('json')" style="color:#16A34A;border-color:#238636;font-size:12px">&#8659; Download JSON</button>
+         <button class="scan-btn" onclick="openAibomReport('html')" style="color:#4F46E5;border-color:#C7D2FE;font-size:12px">&#128065; Preview</button>
+         <button class="scan-btn" onclick="openAibomReport('json')" style="color:#16A34A;border-color:#238636;font-size:12px">&#8659; Download JSON</button>
+         <button class="scan-btn" onclick="openAibomReport('pdf')" style="color:#16A34A;border-color:#238636;font-size:12px">&#8659; Download PDF</button>
+         <button class="scan-btn" onclick="openAibomReport('csv')" style="color:#CA8A04;border-color:#FDE68A;font-size:12px">&#8659; Download CSV</button>
       </div>
     </div>
 
@@ -6840,11 +6886,11 @@ function openEuaiReport(fmt) {{
 function openAibomReport(fmt) {{
   const input = document.getElementById('aibom-org-name');
   const org = input ? input.value.trim() : '';
-  if (fmt === 'json') {{
-    window.location.href = '/api/fleet/aibom.json?org=' + encodeURIComponent(org);
-  }} else {{
-    window.open('/api/fleet/aibom?org=' + encodeURIComponent(org), '_blank');
-  }}
+   if (fmt === 'html') {{
+     window.open('/api/fleet/aibom?org=' + encodeURIComponent(org), '_blank');
+   }} else {{
+     window.location.href = '/api/fleet/aibom.' + fmt + '?org=' + encodeURIComponent(org);
+   }}
 }}
 
 ;(function() {{

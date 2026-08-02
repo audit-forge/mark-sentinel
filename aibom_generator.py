@@ -4,6 +4,8 @@ Produces a structured inventory of all AI components detected across the fleet.
 Output: CycloneDX-AI-inspired JSON + printable HTML report.
 """
 import html
+import csv
+import io
 import re
 import time
 import uuid
@@ -483,6 +485,119 @@ def generate_aibom_json(
         'components':       components,
         'vulnerabilities':  vulnerabilities,
     }
+
+
+def _component_properties(component: dict) -> dict[str, str]:
+    return {prop.get('name', ''): prop.get('value', '') for prop in component.get('properties', [])}
+
+
+def generate_aibom_csv(
+    devices: list[dict],
+    org_name: str = '',
+    shadow_devices: list[dict] | None = None,
+) -> bytes:
+    """Return a spreadsheet-friendly AI-BOM inventory and risk register."""
+    bom = generate_aibom_json(devices, org_name, shadow_devices)
+    output = io.StringIO(newline='')
+    writer = csv.DictWriter(output, fieldnames=[
+        'record_type', 'component_type', 'name', 'version', 'supplier', 'pinned',
+        'devices', 'country', 'origin', 'source', 'risk', 'check_id', 'severity',
+        'description', 'affected_device',
+    ])
+    writer.writeheader()
+    for component in bom['components']:
+        props = _component_properties(component)
+        writer.writerow({
+            'record_type': 'component',
+            'component_type': component.get('type', ''),
+            'name': component.get('name', ''),
+            'version': component.get('version', ''),
+            'supplier': component.get('supplier', {}).get('name', ''),
+            'pinned': props.get('arckon:pinned', ''),
+            'devices': props.get('arckon:devices', ''),
+            'country': props.get('arckon:country', ''),
+            'origin': props.get('arckon:origin', ''),
+            'source': props.get('arckon:source', ''),
+            'risk': '; '.join(
+                prop.get('value', '') for prop in component.get('properties', [])
+                if prop.get('name') == 'arckon:risk'
+            ),
+        })
+    for vulnerability in bom['vulnerabilities']:
+        writer.writerow({
+            'record_type': 'risk',
+            'check_id': vulnerability.get('id', ''),
+            'severity': vulnerability.get('severity', ''),
+            'description': vulnerability.get('description', ''),
+            'affected_device': ', '.join(
+                item.get('ref', '') for item in vulnerability.get('affects', [])
+            ),
+        })
+    return output.getvalue().encode('utf-8-sig')
+
+
+def generate_aibom_pdf(
+    devices: list[dict],
+    org_name: str = '',
+    shadow_devices: list[dict] | None = None,
+) -> bytes:
+    """Return a concise, printable AI-BOM report for non-technical readers."""
+    from fpdf import FPDF
+
+    bom = generate_aibom_json(devices, org_name, shadow_devices)
+    pdf = FPDF()
+    pdf.set_compression(False)
+    pdf.set_auto_page_break(auto=True, margin=14)
+    pdf.add_page()
+
+    def text(value: object) -> str:
+        return str(value).encode('latin-1', 'replace').decode('latin-1')
+
+    pdf.set_font('Helvetica', 'B', 18)
+    pdf.cell(0, 10, text('AI Bill of Materials'), new_x='LMARGIN', new_y='NEXT')
+    pdf.set_font('Helvetica', '', 10)
+    pdf.cell(0, 6, text(f"Organization: {org_name or 'Fleet'}"), new_x='LMARGIN', new_y='NEXT')
+    pdf.cell(0, 6, text(f"Generated: {bom['metadata']['timestamp']}"), new_x='LMARGIN', new_y='NEXT')
+    pdf.ln(4)
+
+    for title, component_type in (
+        ('AI Models', 'machine-learning-model'),
+        ('AI Packages', 'library'),
+        ('AI Developer Tools', 'platform'),
+        ('AI Services', 'service'),
+    ):
+        components = [item for item in bom['components'] if item.get('type') == component_type]
+        if not components:
+            continue
+        pdf.set_font('Helvetica', 'B', 13)
+        pdf.cell(0, 8, title, new_x='LMARGIN', new_y='NEXT')
+        pdf.set_font('Helvetica', '', 9)
+        for component in components:
+            props = _component_properties(component)
+            details = [
+                component.get('version', ''),
+                component.get('supplier', {}).get('name', ''),
+                f"Devices: {props.get('arckon:devices', '')}",
+            ]
+            if props.get('arckon:pinned'):
+                details.append(f"Pinned: {props['arckon:pinned']}")
+            if props.get('arckon:risk'):
+                details.append(f"Risk: {props['arckon:risk']}")
+            pdf.multi_cell(pdf.epw, 5, text(f"- {component.get('name', '')}: " + ' | '.join(d for d in details if d)))
+        pdf.ln(2)
+
+    if bom['vulnerabilities']:
+        pdf.set_font('Helvetica', 'B', 13)
+        pdf.cell(0, 8, 'Supply Chain Risks', new_x='LMARGIN', new_y='NEXT')
+        pdf.set_font('Helvetica', '', 9)
+        for risk in bom['vulnerabilities']:
+            affected = ', '.join(item.get('ref', '') for item in risk.get('affects', []))
+            pdf.multi_cell(pdf.epw, 5, text(
+                f"- [{risk.get('severity', '').upper()}] {risk.get('id', '')}: "
+                f"{risk.get('description', '')} ({affected})"
+            ))
+
+    return bytes(pdf.output())
 
 
 # ── HTML output ───────────────────────────────────────────────────────────────
