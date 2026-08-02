@@ -36,7 +36,7 @@ def test_aibom_pdf_is_a_pdf_and_includes_org_name():
     assert data.startswith(b'%PDF')
     assert b'MF Dynamics' in data
     assert b'Summary:' in data
-    assert b'Devices:' in data
+    assert b'claude-opus-4-7' in data
 
 
 def test_aibom_export_routes_and_controls_are_available():

@@ -575,6 +575,8 @@ def generate_aibom_pdf(
 
     def component_card(component: dict) -> None:
         props = _component_properties(component)
+        devices = props.get('arckon:devices', '')
+        device_count = len([device for device in devices.split(',') if device.strip()])
         pdf.set_draw_color(209, 213, 219)
         pdf.set_fill_color(249, 250, 251)
         pdf.set_font('Helvetica', 'B', 10)
@@ -593,7 +595,7 @@ def generate_aibom_pdf(
             details.append(f"Country: {props['arckon:country']}")
         if details:
             pdf.multi_cell(pdf.epw, 4, text(' | '.join(details)), border='LR', new_x='LMARGIN', new_y='NEXT')
-        field('Devices', props.get('arckon:devices', ''))
+        field(f'Devices ({device_count})', devices)
         field('Source', props.get('arckon:source', ''))
         field('Risk', props.get('arckon:risk', ''))
         pdf.cell(pdf.epw, 2, '', border='LBR', new_x='LMARGIN', new_y='NEXT')
