@@ -178,10 +178,13 @@ jobs:
             releases/sentinel-release-windows-${GITHUB_REF_NAME}/arckon-agent-*.tar.gz \
             --title "Sentinel ${VERSION}" \
             --generate-notes
+          cp "releases/sentinel-release-linux-${GITHUB_REF_NAME}/manifest.json" releases/linux-manifest.json
+          cp "releases/sentinel-release-linux-${GITHUB_REF_NAME}/manifest.sig" releases/linux-manifest.sig
+          cp "releases/sentinel-release-macos-${GITHUB_REF_NAME}/manifest.json" releases/macos-manifest.json
+          cp "releases/sentinel-release-macos-${GITHUB_REF_NAME}/manifest.sig" releases/macos-manifest.sig
+          cp "releases/sentinel-release-windows-${GITHUB_REF_NAME}/manifest.json" releases/windows-manifest.json
+          cp "releases/sentinel-release-windows-${GITHUB_REF_NAME}/manifest.sig" releases/windows-manifest.sig
           gh release upload "${GITHUB_REF_NAME}" \
-            "releases/sentinel-release-linux-${GITHUB_REF_NAME}/manifest.json#linux-manifest.json" \
-            "releases/sentinel-release-linux-${GITHUB_REF_NAME}/manifest.sig#linux-manifest.sig" \
-            "releases/sentinel-release-macos-${GITHUB_REF_NAME}/manifest.json#macos-manifest.json" \
-            "releases/sentinel-release-macos-${GITHUB_REF_NAME}/manifest.sig#macos-manifest.sig" \
-            "releases/sentinel-release-windows-${GITHUB_REF_NAME}/manifest.json#windows-manifest.json" \
-            "releases/sentinel-release-windows-${GITHUB_REF_NAME}/manifest.sig#windows-manifest.sig"
+            releases/linux-manifest.json releases/linux-manifest.sig \
+            releases/macos-manifest.json releases/macos-manifest.sig \
+            releases/windows-manifest.json releases/windows-manifest.sig
