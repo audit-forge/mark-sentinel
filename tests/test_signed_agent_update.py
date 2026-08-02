@@ -110,7 +110,7 @@ def test_self_update_stages_and_activates_windows_executable(release_key, monkey
         artifact='agent.tar.gz',
         sha256=hashlib.sha256(artifact).hexdigest(),
         size=len(artifact),
-        version='1.0.5',
+        version='1.0.6',
         platform='windows',
     )
     monkeypatch.setattr(agent.platform, 'system', lambda: 'Windows')
@@ -149,7 +149,7 @@ def test_self_update_uses_the_packaged_windows_agent_filename(release_key, monke
         artifact='agent.tar.gz',
         sha256=hashlib.sha256(artifact).hexdigest(),
         size=len(artifact),
-        version='1.0.5',
+        version='1.0.6',
         platform='windows',
     )
     monkeypatch.setattr(agent.platform, 'system', lambda: 'Windows')

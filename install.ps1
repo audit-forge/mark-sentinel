@@ -34,6 +34,7 @@ $ConfigDir   = "C:\ProgramData\Arckon"
 $ConfigFile  = "$ConfigDir\agent_config.json"
 $InstallLog  = "$ConfigDir\install.log"
 $ServiceName = "ArckonAgent"
+$LegacyServiceName = "SentinelAgent"
 $ScriptDir   = if ($PSScriptRoot -and $PSScriptRoot -ne "") { $PSScriptRoot } else { $PWD.Path }
 
 if (-not (Test-Path $ConfigDir)) { New-Item -ItemType Directory -Path $ConfigDir -Force | Out-Null }
@@ -85,8 +86,7 @@ foreach ($candidate in @("python", "python3", "py")) {
 }
 
 if (-not $PythonExe) {
-    Write-Error "Python 3.11 or later is required but was not found in PATH.`nInstall from https://www.python.org/downloads/ then re-run."
-    exit 1
+    Write-Warn "Python 3.11+ not found. It is only required if binary download fails."
 }
 
 # -- Prepare install directory -------------------------------------------------
@@ -203,7 +203,7 @@ if (-not (Test-Path $ConfigFile)) {
         @{
             server   = "http://localhost:7331"
             token    = "replace-with-your-secret-token"
-            target   = "."
+            target   = "~"
             profile  = "default"
             interval = 3600
         } | ConvertTo-Json -Depth 5 | ForEach-Object { Write-FileNoBOM $ConfigFile $_ }
@@ -300,13 +300,16 @@ if (-not $NoService) {
             $ErrorActionPreference = "Stop"
         }
 
-        & $nssmPath install $ServiceName $PythonExe
         # Use compiled agent.exe if present, otherwise fall back to python agent.py
         $AgentExe = Join-Path $InstallDir "agent.exe"
         if (Test-Path $AgentExe) {
-            & $nssmPath set $ServiceName Application $AgentExe
+            & $nssmPath install $ServiceName $AgentExe
             & $nssmPath set $ServiceName AppParameters "--daemon --config `"$ConfigFile`""
         } else {
+            if (-not $PythonExe) {
+                throw "agent.exe was not installed and Python 3.11+ is unavailable for the source fallback."
+            }
+            & $nssmPath install $ServiceName $PythonExe
             & $nssmPath set $ServiceName AppParameters "`"$InstallDir\agent.py`" --daemon --config `"$ConfigFile`""
         }
         & $nssmPath set $ServiceName AppDirectory $InstallDir
@@ -321,56 +324,20 @@ if (-not $NoService) {
         Write-OK "Service registered and started via NSSM"
 
     } else {
-        Write-Warn "NSSM not found; falling back to sc.exe wrapper script."
+        throw "NSSM is required for a Windows service. Installation stopped rather than creating a non-SCM-compliant PowerShell service wrapper."
+    }
 
-        $WrapperScript = "$InstallDir\arckon-service.ps1"
-        @"
-# Auto-generated service wrapper for Arckon Agent
-Set-Location '$InstallDir'
-`$env:PYTHONUNBUFFERED = '1'
-`$env:PYTHONUTF8 = '1'
-$AgentExe = '$InstallDir\agent.exe'
-if (Test-Path `$AgentExe) {
-    & `$AgentExe --daemon --config '$ConfigFile' 2>&1 |
-        Tee-Object -FilePath '$ConfigDir\arckon-agent.log' -Append
-} else {
-    & '$PythonExe' '$InstallDir\agent.py' --daemon --config '$ConfigFile' 2>&1 |
-        Tee-Object -FilePath '$ConfigDir\arckon-agent.log' -Append
-}
-"@ | ForEach-Object { Write-FileNoBOM $WrapperScript $_ }
-
-        $existingSvc = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
-        if ($existingSvc) {
-            Stop-Service -Name $ServiceName -Force -ErrorAction SilentlyContinue
-            sc.exe delete $ServiceName | Out-Null
-            Start-Sleep -Seconds 2
+    # The product was formerly branded Sentinel. Remove only the obsolete
+    # service after the canonical ArckonAgent service has been registered.
+    $legacySvc = Get-Service -Name $LegacyServiceName -ErrorAction SilentlyContinue
+    if ($legacySvc) {
+        & $nssmPath stop $LegacyServiceName 2>$null
+        & $nssmPath remove $LegacyServiceName confirm 2>$null
+        if (Get-Service -Name $LegacyServiceName -ErrorAction SilentlyContinue) {
+            sc.exe stop $LegacyServiceName | Out-Null
+            sc.exe delete $LegacyServiceName | Out-Null
         }
-
-        $pwshCmd = Get-Command "pwsh" -ErrorAction SilentlyContinue; $pwshExe = if ($pwshCmd) { $pwshCmd.Source } else { $null }
-        if (-not $pwshExe) {
-            $pwshExe = (Get-Command "powershell" -ErrorAction SilentlyContinue).Source
-        }
-
-        $scResult = sc.exe create $ServiceName `
-            binPath= "`"$pwshExe`" -NonInteractive -NoProfile -File `"$WrapperScript`"" `
-            start= auto `
-            DisplayName= "Arckon Agent" 2>&1
-        if ($LASTEXITCODE -ne 0) {
-            Write-Warn "sc.exe create failed: $scResult"
-        }
-
-        sc.exe description $ServiceName "Distributed security audit agent (Arckon)" | Out-Null
-        sc.exe failure $ServiceName reset= 86400 actions= restart/30000/restart/30000/restart/30000 | Out-Null
-
-        $svc = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
-        if ($svc) {
-            Start-Service -Name $ServiceName
-            Write-OK "Service registered and started via sc.exe"
-            Write-Warn "For production use, install NSSM (https://nssm.cc) for better service management."
-        } else {
-            Write-Warn "Service creation failed. You can start the agent manually:"
-            Write-Warn "  & '$InstallDir\agent.exe' --daemon --config '$ConfigFile'"
-        }
+        Write-OK "Removed obsolete $LegacyServiceName service"
     }
 
     # -- Verify service is running (retry up to 3x) ---------------------------

@@ -70,7 +70,7 @@ ROOT = _exec_path.parent if _exec_path.is_file() else Path(__file__).parent
 DEFAULT_CONFIG = ROOT / 'agent_config.json'
 _PROCESS_NAME = 'sentinel-agent'
 UPDATE_PRODUCT = 'sentinel-agent'
-_WINDOWS_SERVICE_NAME = 'SentinelAgent'
+_WINDOWS_SERVICE_NAME = 'ArckonAgent'
 PINNED_UPDATE_PUBLIC_KEY_DER_B64 = 'MCowBQYDK2VwAyEAxQSQJT9gaFKKcPEy7nPM7Bdk0fT8LXNDIsQkw1qfLyw='
 _UPDATE_MANIFEST_KEYS = frozenset({'product', 'version', 'artifact', 'sha256', 'size', 'platform'})
 _VERSION_RE = re.compile(r'^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$')
@@ -209,8 +209,7 @@ def load_config(path: Path | None = None) -> dict:
         cfg['server'] = os.environ['SENTINEL_SERVER']
     if os.environ.get('SENTINEL_AGENT_TOKEN'):
         cfg['token'] = os.environ['SENTINEL_AGENT_TOKEN']
-    if cfg.get('target', '') in ('~', '.', ''):
-        cfg['target'] = _resolve_home()
+    cfg['_config_path'] = str(path)
     return cfg
 
 
@@ -1428,8 +1427,10 @@ def _uninstall_service() -> None:
         subprocess.run(['systemctl', '--user', 'daemon-reload'], capture_output=True)
         log.info('Service removed.')
     elif system == 'Windows':
-        subprocess.run(['schtasks', '/end',   '/tn', 'SentinelAgent'], capture_output=True)
-        result = subprocess.run(['schtasks', '/delete', '/f', '/tn', 'SentinelAgent'],
+        subprocess.run(['sc', 'stop', _WINDOWS_SERVICE_NAME], capture_output=True)
+        subprocess.run(['sc', 'delete', _WINDOWS_SERVICE_NAME], capture_output=True)
+        subprocess.run(['schtasks', '/end',   '/tn', _WINDOWS_SERVICE_NAME], capture_output=True)
+        result = subprocess.run(['schtasks', '/delete', '/f', '/tn', _WINDOWS_SERVICE_NAME],
                                 capture_output=True, text=True)
         if result.returncode == 0:
             log.info('Task Scheduler task removed.')
@@ -1669,6 +1670,10 @@ def main() -> None:
                         cfg['profile'] = updates['profile']
                     if 'extra_subnets' in updates:
                         cfg['extra_subnets'] = updates['extra_subnets']
+                    if 'target' in updates:
+                        if not isinstance(updates['target'], str) or not updates['target'].strip():
+                            raise ValueError('target must be a non-empty string')
+                        cfg['target'] = updates['target']
                     if 'interval' in updates:
                         new_interval = int(updates['interval'])
                         if new_interval < 60:
@@ -1677,9 +1682,9 @@ def main() -> None:
                         interval = cfg['interval']
                     # Persist non-token fields directly
                     non_token = {k: v for k, v in updates.items()
-                                 if k in ('profile', 'interval', 'extra_subnets')}
+                                  if k in ('profile', 'interval', 'extra_subnets', 'target')}
                     if non_token:
-                        config_path = DEFAULT_CONFIG
+                        config_path = Path(cfg.get('_config_path', DEFAULT_CONFIG))
                         existing = json.loads(config_path.read_text(encoding='utf-8')) if config_path.exists() else {}
                         existing.update(non_token)
                         config_path.write_text(json.dumps(existing, indent=2), encoding='utf-8')

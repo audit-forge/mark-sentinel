@@ -40,7 +40,7 @@ jobs:
           test "$VERSION" = "$(python -c 'from arckon_version import VERSION; print(VERSION)')"
           ARTIFACT="arckon-agent-${VERSION}-linux-amd64.tar.gz"
           python -m pip install -r requirements.txt 'nuitka[onefile]' zstandard ordered-set
-          python scripts/package_release.py --platform linux --output "$ARTIFACT" --build-only
+          python -c "from pathlib import Path; from scripts.package_release import package_release; package_release(Path('.'), Path('$ARTIFACT'), 'linux', build=False)"
           python scripts/create_release.py "$ARTIFACT" \
             --version "$VERSION" \
             --platform linux \
