@@ -173,8 +173,15 @@ jobs:
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
           gh release create "${GITHUB_REF_NAME}" \
-            releases/sentinel-release-linux-*/**/* \
-            releases/sentinel-release-macos-*/**/* \
-            releases/sentinel-release-windows-*/**/* \
+            releases/sentinel-release-linux-${GITHUB_REF_NAME}/arckon-agent-*.tar.gz \
+            releases/sentinel-release-macos-${GITHUB_REF_NAME}/arckon-agent-*.tar.gz \
+            releases/sentinel-release-windows-${GITHUB_REF_NAME}/arckon-agent-*.tar.gz \
             --title "Sentinel ${VERSION}" \
             --generate-notes
+          gh release upload "${GITHUB_REF_NAME}" \
+            "releases/sentinel-release-linux-${GITHUB_REF_NAME}/manifest.json#linux-manifest.json" \
+            "releases/sentinel-release-linux-${GITHUB_REF_NAME}/manifest.sig#linux-manifest.sig" \
+            "releases/sentinel-release-macos-${GITHUB_REF_NAME}/manifest.json#macos-manifest.json" \
+            "releases/sentinel-release-macos-${GITHUB_REF_NAME}/manifest.sig#macos-manifest.sig" \
+            "releases/sentinel-release-windows-${GITHUB_REF_NAME}/manifest.json#windows-manifest.json" \
+            "releases/sentinel-release-windows-${GITHUB_REF_NAME}/manifest.sig#windows-manifest.sig"
