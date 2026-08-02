@@ -6886,11 +6886,12 @@ function openEuaiReport(fmt) {{
 function openAibomReport(fmt) {{
   const input = document.getElementById('aibom-org-name');
   const org = input ? input.value.trim() : '';
-   if (fmt === 'html') {{
+  if (fmt === 'html') {{
      window.open('/api/fleet/aibom?org=' + encodeURIComponent(org), '_blank');
-   }} else {{
-     window.location.href = '/api/fleet/aibom.' + fmt + '?org=' + encodeURIComponent(org);
-   }}
+  }} else {{
+     // Keep the dashboard interactive while a server-side export is generated.
+     window.open('/api/fleet/aibom.' + fmt + '?org=' + encodeURIComponent(org), '_blank');
+  }}
 }}
 
 ;(function() {{

@@ -44,3 +44,4 @@ def test_aibom_export_routes_and_controls_are_available():
     assert "'/api/fleet/aibom.pdf':" in server
     assert "openAibomReport('pdf')" in server
     assert "openAibomReport('csv')" in server
+    assert "window.location.href = '/api/fleet/aibom." not in server
