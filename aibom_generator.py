@@ -558,7 +558,46 @@ def generate_aibom_pdf(
     pdf.set_font('Helvetica', '', 10)
     pdf.cell(0, 6, text(f"Organization: {org_name or 'Fleet'}"), new_x='LMARGIN', new_y='NEXT')
     pdf.cell(0, 6, text(f"Generated: {bom['metadata']['timestamp']}"), new_x='LMARGIN', new_y='NEXT')
+    component_count = len(bom['components'])
+    risk_count = len(bom['vulnerabilities'])
+    pdf.set_fill_color(239, 246, 255)
+    pdf.set_font('Helvetica', 'B', 10)
+    pdf.cell(pdf.epw, 8, text(f'Summary: {component_count} AI components | {risk_count} supply-chain risks'),
+             fill=True, new_x='LMARGIN', new_y='NEXT')
     pdf.ln(4)
+
+    def field(label: str, value: str) -> None:
+        if value:
+            pdf.set_font('Helvetica', 'B', 8)
+            pdf.write(4, text(f'{label}: '))
+            pdf.set_font('Helvetica', '', 8)
+            pdf.multi_cell(pdf.epw - pdf.get_string_width(f'{label}: '), 4, text(value))
+
+    def component_card(component: dict) -> None:
+        props = _component_properties(component)
+        pdf.set_draw_color(209, 213, 219)
+        pdf.set_fill_color(249, 250, 251)
+        pdf.set_font('Helvetica', 'B', 10)
+        pdf.multi_cell(pdf.epw, 6, text(component.get('name', 'Unknown component')), border=1,
+                       fill=True, new_x='LMARGIN', new_y='NEXT')
+        pdf.set_font('Helvetica', '', 8)
+        details = []
+        if component.get('version'):
+            details.append(f"Version: {component['version']}")
+        supplier = component.get('supplier', {}).get('name', '')
+        if supplier:
+            details.append(f'Provider: {supplier}')
+        if props.get('arckon:pinned'):
+            details.append(f"Pinned: {props['arckon:pinned']}")
+        if props.get('arckon:country'):
+            details.append(f"Country: {props['arckon:country']}")
+        if details:
+            pdf.multi_cell(pdf.epw, 4, text(' | '.join(details)), border='LR', new_x='LMARGIN', new_y='NEXT')
+        field('Devices', props.get('arckon:devices', ''))
+        field('Source', props.get('arckon:source', ''))
+        field('Risk', props.get('arckon:risk', ''))
+        pdf.cell(pdf.epw, 2, '', border='LBR', new_x='LMARGIN', new_y='NEXT')
+        pdf.ln(2)
 
     for title, component_type in (
         ('AI Models', 'machine-learning-model'),
@@ -571,31 +610,24 @@ def generate_aibom_pdf(
             continue
         pdf.set_font('Helvetica', 'B', 13)
         pdf.cell(0, 8, title, new_x='LMARGIN', new_y='NEXT')
-        pdf.set_font('Helvetica', '', 9)
         for component in components:
-            props = _component_properties(component)
-            details = [
-                component.get('version', ''),
-                component.get('supplier', {}).get('name', ''),
-                f"Devices: {props.get('arckon:devices', '')}",
-            ]
-            if props.get('arckon:pinned'):
-                details.append(f"Pinned: {props['arckon:pinned']}")
-            if props.get('arckon:risk'):
-                details.append(f"Risk: {props['arckon:risk']}")
-            pdf.multi_cell(pdf.epw, 5, text(f"- {component.get('name', '')}: " + ' | '.join(d for d in details if d)))
+            component_card(component)
         pdf.ln(2)
 
     if bom['vulnerabilities']:
         pdf.set_font('Helvetica', 'B', 13)
         pdf.cell(0, 8, 'Supply Chain Risks', new_x='LMARGIN', new_y='NEXT')
-        pdf.set_font('Helvetica', '', 9)
         for risk in bom['vulnerabilities']:
             affected = ', '.join(item.get('ref', '') for item in risk.get('affects', []))
+            pdf.set_fill_color(254, 242, 242)
+            pdf.set_font('Helvetica', 'B', 9)
             pdf.multi_cell(pdf.epw, 5, text(
-                f"- [{risk.get('severity', '').upper()}] {risk.get('id', '')}: "
-                f"{risk.get('description', '')} ({affected})"
-            ))
+                f"[{risk.get('severity', '').upper()}] {risk.get('id', '')} - {risk.get('description', '')}"
+            ), border=1, fill=True, new_x='LMARGIN', new_y='NEXT')
+            pdf.set_font('Helvetica', '', 8)
+            field('Affected device', affected)
+            pdf.cell(pdf.epw, 2, '', border='LBR', new_x='LMARGIN', new_y='NEXT')
+            pdf.ln(2)
 
     return bytes(pdf.output())
 
