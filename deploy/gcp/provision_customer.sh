@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Provision a new customer container + nginx vhost.
-# Usage: provision_customer.sh <customer_id> [public_ip] [tier] [expires] [max_seats] [customer_name] [port] [agent_token]
+# Usage: provision_customer.sh <customer_id> [public_ip] [tier] [expires] [max_seats] [customer_name] [port] [agent_token] [baseline_profile]
 set -euo pipefail
 
 CUSTOMER_ID="$1"
@@ -20,6 +20,12 @@ mkdir -p "$DATA_DIR"
 chown -R 999:999 "$DATA_DIR"
 
 AGENT_TOKEN="${8:-}"
+BASELINE_PROFILE="${9:-default}"
+case "$BASELINE_PROFILE" in
+  default|iso42001|atlas|financial|fedramp|fedramp_20x|cmmc|biotech|healthcare|lifesciences|owasp_agentic|eu_ai_act|professional_services) ;;
+  *) BASELINE_PROFILE="default" ;;
+esac
+printf '{"profile":"%s"}\n' "$BASELINE_PROFILE" > "${DATA_DIR}/baseline_profile.json"
 if [ -z "$AGENT_TOKEN" ] && [ -f "${DATA_DIR}/agent_token.txt" ]; then
   AGENT_TOKEN=$(cat "${DATA_DIR}/agent_token.txt")
 fi

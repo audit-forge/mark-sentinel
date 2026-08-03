@@ -63,6 +63,23 @@ def _is_world_readable(path: Path) -> bool:
         return False
 
 
+def _is_other_traversable(path: Path, root: Path) -> bool:
+    """Return whether another local user can traverse every directory to path."""
+    if os.name == 'nt':
+        # Windows ACLs are not represented by POSIX mode bits.
+        return True
+    current = path.parent
+    try:
+        while True:
+            if not (current.stat().st_mode & stat.S_IXOTH):
+                return False
+            if current == root:
+                return True
+            current = current.parent
+    except OSError:
+        return False
+
+
 def _file_contains_key(path: Path) -> list:
     try:
         text = path.read_text(errors='ignore')
@@ -103,7 +120,7 @@ def _world_readable_in(directory: Path, skip_subdirs: set = frozenset()) -> list
         for p in directory.rglob('*'):
             if any(part in skip_subdirs for part in p.relative_to(directory).parts):
                 continue
-            if p.is_file() and _is_world_readable(p):
+            if p.is_file() and _is_world_readable(p) and _is_other_traversable(p, directory):
                 found.append(str(p))
     except OSError:
         pass
@@ -210,7 +227,7 @@ def check_tool_002(ctx: ScanContext) -> CheckResult:
             category=CATEGORY,
             details=f'Config files readable by all users: {", ".join(capped)}{overflow}',
             evidence=capped,
-            remediation='chmod -R 700 ~/.claude',
+            remediation='chmod 700 ~/.claude && find ~/.claude -type f -exec chmod 600 {} +',
             frameworks={'NIST AI RMF': 'GOVERN 1.7', 'OWASP LLM': 'LLM06'},
         )
 

@@ -83,6 +83,37 @@ ROOT = Path(__file__).parent
 RELEASE_DIR = ROOT / 'releases' / 'current'
 _serve_port = PORT   # updated at startup so handlers can reference it
 
+# A baseline is one normal endpoint profile per customer. Container profiles
+# remain opt-in commands because they need different discovery semantics.
+_BASELINE_PROFILES = frozenset({
+    'default', 'fedramp', 'fedramp_20x', 'cmmc', 'financial',
+    'professional_services', 'healthcare', 'biotech', 'lifesciences',
+    'owasp_agentic', 'eu_ai_act', 'iso42001', 'atlas',
+})
+_BASELINE_PROFILE_PATH = ROOT / 'data' / 'baseline_profile.json'
+
+
+def _load_baseline_profile() -> str:
+    try:
+        profile = json.loads(_BASELINE_PROFILE_PATH.read_text(encoding='utf-8')).get('profile')
+        if profile in _BASELINE_PROFILES:
+            return profile
+    except (OSError, ValueError, AttributeError):
+        pass
+    return 'default'
+
+
+def _save_baseline_profile(profile: str) -> None:
+    _BASELINE_PROFILE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    temp_path = _BASELINE_PROFILE_PATH.with_suffix('.tmp')
+    temp_path.write_text(json.dumps({'profile': profile}, indent=2) + '\n', encoding='utf-8')
+    temp_path.replace(_BASELINE_PROFILE_PATH)
+
+
+def _is_container_device(device: dict) -> bool:
+    hostname = device.get('hostname', '')
+    return hostname.startswith('docker:') or hostname.startswith('k8s:')
+
 
 def _release_file(request_path: str, platform: str | None = None) -> Path | None:
     """Resolve a release path under the platform-specific directory without traversal.
@@ -1331,6 +1362,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             '/probe':          self._serve_probe_tester if _has_live_scan() else lambda: self._send(403, b'Live scanning requires a Pro license. Contact sales@markai.io to upgrade.', 'text/plain'),
             '/command':        lambda: self._redirect('/'),
             '/api/config':           self._api_get_config,
+            '/api/baseline-profile': self._api_get_baseline_profile,
             '/api/alerts/config':    self._api_get_alert_config,
             '/api/alerts/events':    self._api_get_alert_events,
             '/api/alerts/active-issues': self._api_get_active_issues,
@@ -1468,6 +1500,8 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self._api_set_live_scan_config()
         elif path == '/api/config':
             self._api_set_config()
+        elif path == '/api/baseline-profile':
+            self._api_set_baseline_profile()
         elif path == '/api/alerts/config':
             self._api_set_alert_config()
         elif path == '/api/alerts/test':
@@ -2535,7 +2569,7 @@ load();
 
         # Duplicate hostname detection — warn when a new device_id uses an existing hostname
         duplicate_warning = None
-        if is_new:
+        if is_new and not (hostname.startswith('docker:') or hostname.startswith('k8s:')):
             try:
                 existing = [d for d in store.find_devices_by_hostname(hostname)
                             if d['device_id'] != device_id]
@@ -2593,6 +2627,16 @@ load();
             log.error('agent store error: %s', e)
             self._send(500, b'Storage error', 'text/plain')
             return
+
+        # New devices inherit the customer baseline before their first
+        # scheduled scan. Existing devices are updated when an admin changes
+        # the baseline, preserving one-time scan overrides.
+        if is_new:
+            try:
+                profile = _load_baseline_profile()
+                store.enqueue_command(device_id, f'set_config:{json.dumps({"profile": profile})}')
+            except Exception as _be:
+                log.error('baseline profile dispatch error: %s', _be)
 
         try:
             from alerts import load_alert_config, fire_alerts
@@ -2727,23 +2771,32 @@ load();
         batch_size, sleep_secs = PRESETS.get(stagger, PRESETS['normal'])
 
         store   = self._store()
-        devices = store.list_devices()
-        ids     = [d['device_id'] for d in devices if d.get('device_id')]
-        total   = len(ids)
+        devices = [d for d in store.list_devices(client_org_id=self._scoped_client_org()) if d.get('device_id')]
+        total   = len(devices)
 
         def _dispatch():
             for i in range(0, total, batch_size):
-                batch = ids[i:i + batch_size]
-                for did in batch:
+                batch = devices[i:i + batch_size]
+                for device in batch:
+                    did = device['device_id']
                     cs = _get_store_for_device(did)
-                    for p in (profiles or ['default', 'iso42001']):
-                        cs.enqueue_command(did, f'scan_profile:{p}')
+                    if profiles:
+                        for p in profiles:
+                            cs.enqueue_command(did, f'scan_profile:{p}')
+                    elif device.get('hostname', '').startswith('docker:'):
+                        cs.enqueue_command(did, 'scan_profile:docker')
+                    elif device.get('hostname', '').startswith('k8s:'):
+                        cs.enqueue_command(did, 'scan_profile:kubernetes')
+                    else:
+                        # No explicit override: scan each device's saved
+                        # customer baseline profile.
+                        cs.enqueue_command(did, 'scan_now')
                 if sleep_secs and i + batch_size < total:
                     time.sleep(sleep_secs)
 
         threading.Thread(target=_dispatch, daemon=True, name='scan-all-dispatch').start()
         self._json({'status': 'dispatching', 'total': total,
-                    'profiles': profiles or ['default', 'iso42001'], 'stagger': stagger,
+                    'profiles': profiles, 'using_baseline': not profiles, 'stagger': stagger,
                     'batch_size': batch_size, 'sleep_secs': sleep_secs})
 
     def _api_fleet_update(self, device_id: str):
@@ -3923,6 +3976,40 @@ load();
             self._json(json.loads(config_path.read_text(encoding='utf-8')))
         except Exception as e:
             self._json({'error': str(e)}, 500)
+
+    def _api_get_baseline_profile(self):
+        self._json({'profile': _load_baseline_profile()})
+
+    def _api_set_baseline_profile(self):
+        length = _content_length(self.headers)
+        if not length:
+            self._send(400, b'Empty body', 'text/plain')
+            return
+        try:
+            profile = json.loads(self.rfile.read(length)).get('profile', '')
+        except (json.JSONDecodeError, AttributeError):
+            self._send(400, b'Invalid JSON', 'text/plain')
+            return
+        if profile not in _BASELINE_PROFILES:
+            self._json({'error': 'invalid baseline profile'}, 400)
+            return
+        try:
+            _save_baseline_profile(profile)
+            store = self._store()
+            devices = [d for d in store.list_devices(client_org_id=self._scoped_client_org())
+                       if not _is_container_device(d)]
+            pushed = 0
+            payload = json.dumps({'profile': profile})
+            for device in devices:
+                device_id = device.get('device_id', '')
+                if device_id:
+                    _get_store_for_device(device_id).enqueue_command(device_id, f'set_config:{payload}')
+                    pushed += 1
+        except Exception as e:
+            log.error('baseline profile save error: %s', e)
+            self._json({'error': 'could not save baseline profile'}, 500)
+            return
+        self._json({'status': 'saved', 'profile': profile, 'pushed_to_agents': pushed})
 
     def _api_set_config(self):
         length = _content_length(self.headers)
@@ -6054,11 +6141,12 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
       {_btn_technical_report}
       {'<button id="btn-evidence-export" class="scan-btn" onclick="downloadEvidencePackage(this)" style="color:#a371f7;border-color:#E5E7EB;font-size:12px">&#8659; Evidence Package</button>' if _has_evidence_package() else '<button disabled title="Evidence Package requires a Plus license" class="scan-btn" style="color:#9CA3AF;border-color:#F3F4F6;font-size:12px;cursor:default">&#128274; Evidence Pkg (Plus)</button>'}
       <div style="position:relative;display:inline-block">
-        <button id="scan-profile-btn" onclick="toggleScanProfileMenu(event)" class="form-select" style="font-size:12px;padding:3px 10px;height:28px;cursor:pointer;min-width:160px;text-align:left;background:#fff">Base Scan + ISO 42001 &#9660;</button>
+        <button id="scan-profile-btn" onclick="toggleScanProfileMenu(event)" class="form-select" style="font-size:12px;padding:3px 10px;height:28px;cursor:pointer;min-width:160px;text-align:left;background:#fff">Customer default &#9660;</button>
         <div id="scan-profile-menu" style="display:none;position:absolute;top:31px;left:0;z-index:200;background:#fff;border:1px solid #E5E7EB;border-radius:6px;box-shadow:0 4px 16px rgba(0,0,0,0.12);padding:8px 12px;min-width:240px">
-          <div style="font-size:10px;color:#9CA3AF;font-weight:600;text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">Run profiles on all devices</div>
-          <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:#111827;padding:3px 0;cursor:pointer"><input type="checkbox" class="scan-profile-cb" value="default" checked onchange="updateScanProfileBtn()"> Base Scan</label>
-          <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:#111827;padding:3px 0;cursor:pointer"><input type="checkbox" class="scan-profile-cb" value="iso42001" checked onchange="updateScanProfileBtn()"> ISO 42001</label>
+          <div style="font-size:10px;color:#9CA3AF;font-weight:600;text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">Optional one-time override</div>
+          <div style="font-size:11px;color:#6B7280;margin-bottom:6px">Leave clear to run each device's customer default.</div>
+          <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:#111827;padding:3px 0;cursor:pointer"><input type="checkbox" class="scan-profile-cb" value="default" onchange="updateScanProfileBtn()"> Base Scan</label>
+          <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:#111827;padding:3px 0;cursor:pointer"><input type="checkbox" class="scan-profile-cb" value="iso42001" onchange="updateScanProfileBtn()"> ISO 42001</label>
           <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:#111827;padding:3px 0;cursor:pointer"><input type="checkbox" class="scan-profile-cb" value="atlas" onchange="updateScanProfileBtn()"> MITRE ATLAS</label>
           <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:#111827;padding:3px 0;cursor:pointer"><input type="checkbox" class="scan-profile-cb" value="professional_services" onchange="updateScanProfileBtn()"> Professional Services</label>
           <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:#111827;padding:3px 0;cursor:pointer"><input type="checkbox" class="scan-profile-cb" value="financial" onchange="updateScanProfileBtn()"> Financial Services</label>
@@ -6339,22 +6427,12 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
     <div class="panel-sub-hdr" style="font-size:12px;color:#6B7280;font-weight:600;text-transform:uppercase;letter-spacing:.06em;margin-bottom:14px">Configuration</div>
     <div id="cfg-saved" style="display:none;color:#16A34A;font-size:12px;margin-bottom:10px">&#10003; Saved — takes effect on next scan</div>
     <div style="display:grid;grid-template-columns:160px 1fr;gap:10px 16px;align-items:center;max-width:640px">
-      <label style="font-size:13px;color:#6B7280;align-self:start;padding-top:4px">Compliance Profile</label>
-      <div id="cfg-profile-group" style="display:flex;flex-wrap:wrap;gap:8px 24px">
-        <label style="font-size:13px;color:#111827;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="cfg-profile-cb" value="default"> Base Scan</label>
-        <label style="font-size:13px;color:#111827;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="cfg-profile-cb" value="iso42001"> ISO 42001 (AI Management System)</label>
-        <label style="font-size:13px;color:#111827;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="cfg-profile-cb" value="atlas"> MITRE ATLAS (Adversarial ML)</label>
-        <label style="font-size:13px;color:#111827;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="cfg-profile-cb" value="financial"> Financial Services</label>
-        <label style="font-size:13px;color:#111827;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="cfg-profile-cb" value="fedramp"> FedRAMP / NIST 800-53</label>
-        <label style="font-size:13px;color:#111827;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="cfg-profile-cb" value="fedramp_20x"> FedRAMP 20x (KSI-Aligned)</label>
-        <label style="font-size:13px;color:#111827;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="cfg-profile-cb" value="cmmc"> CMMC 2.0</label>
-        <label style="font-size:13px;color:#111827;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="cfg-profile-cb" value="biotech"> Biotech (FDA 21 CFR Part 11 / HIPAA / GxP)</label>
-        <label style="font-size:13px;color:#111827;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="cfg-profile-cb" value="healthcare"> Healthcare (HIPAA / HITECH / FDA SaMD)</label>
-        <label style="font-size:13px;color:#111827;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="cfg-profile-cb" value="owasp_agentic"> OWASP Agentic AI Top 10</label>
-        <label style="font-size:13px;color:#111827;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="cfg-profile-cb" value="eu_ai_act"> EU AI Act (High-Risk Systems)</label>
-        <label style="font-size:13px;color:#111827;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="cfg-profile-cb" value="professional_services"> Professional Services (NIST AI RMF / AICPA)</label>
-        <label style="font-size:13px;color:#111827;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="cfg-profile-cb" value="kubernetes"> Kubernetes (CIS K8s Benchmark)</label>
-        <label style="font-size:13px;color:#111827;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="cfg-profile-cb" value="docker"> Docker (Container Security)</label>
+      <label style="font-size:13px;color:#6B7280;align-self:start;padding-top:4px">Default Device Scan</label>
+      <div>
+        <select id="cfg-baseline-profile" class="form-select" style="max-width:360px">
+          <option value="default">Base Scan</option><option value="iso42001">ISO 42001 (AI Management System)</option><option value="atlas">MITRE ATLAS (Adversarial ML)</option><option value="financial">Financial Services</option><option value="fedramp">FedRAMP / NIST 800-53</option><option value="fedramp_20x">FedRAMP 20x (KSI-Aligned)</option><option value="cmmc">CMMC 2.0</option><option value="biotech">Biotech (FDA 21 CFR Part 11 / HIPAA / GxP)</option><option value="healthcare">Healthcare (HIPAA / HITECH / FDA SaMD)</option><option value="lifesciences">Life Sciences</option><option value="owasp_agentic">OWASP Agentic AI Top 10</option><option value="eu_ai_act">EU AI Act (High-Risk Systems)</option><option value="professional_services">Professional Services (NIST AI RMF / AICPA)</option>
+        </select>
+        <div style="font-size:11px;color:#9CA3AF;margin-top:5px">Applied to new agents, scheduled scans, and Scan All. Docker and Kubernetes scans remain separate.</div>
       </div>
       <label style="font-size:13px;color:#6B7280">Scan Interval</label>
       <div style="display:flex;align-items:center;gap:8px">
@@ -7441,7 +7519,7 @@ function updateScanProfileBtn() {{
   const checked = [...document.querySelectorAll('.scan-profile-cb:checked')].map(c => c.value);
   const btn = document.getElementById('scan-profile-btn');
   if (!btn) return;
-  if (checked.length === 0)      btn.innerHTML = 'No profiles &#9660;';
+  if (checked.length === 0)      btn.innerHTML = 'Customer default &#9660;';
   else if (checked.length === 1) btn.innerHTML = (PROFILE_LABELS[checked[0]] || checked[0]) + ' &#9660;';
   else                           btn.innerHTML = checked.length + ' profiles &#9660;';
 }}
@@ -7454,7 +7532,6 @@ document.addEventListener('click', function(e) {{
 
 async function scanAllDevices(btn) {{
   const profiles = [...document.querySelectorAll('.scan-profile-cb:checked')].map(c => c.value);
-  if (!profiles.length) {{ alert('Select at least one profile before scanning.'); return; }}
   const stagger  = document.getElementById('scan-all-stagger')?.value || 'normal';
   btn.disabled   = true;
   btn.textContent = 'Queuing…';
@@ -7469,6 +7546,9 @@ async function scanAllDevices(btn) {{
       const label = stagger === 'instant' ? 'all at once' :
                     stagger === 'slow'    ? `10 per 60s` : `25 per 30s`;
       btn.textContent = `Dispatching ${{data.total}} (${{label}})`;
+      // A command is normally claimed within 15 seconds; refresh promptly so
+      // the operator sees the resulting profile/report without reloading.
+      [15000, 30000, 60000].forEach(delay => setTimeout(refreshDevices, delay));
       setTimeout(() => {{ btn.disabled = false; btn.textContent = '►► Scan All'; }}, 10000);
     }} else {{
       btn.disabled = false;
@@ -9272,49 +9352,47 @@ async function loadConfig() {{
     const r = await fetch('/api/config');
     if (!r.ok) return;
     const c = await r.json();
-    const profs = (c.profile || '').split(',').map(p => p.trim()).filter(Boolean);
-    document.querySelectorAll('.cfg-profile-cb').forEach(cb => {{
-      cb.checked = profs.includes(cb.value);
-    }});
     const intvl = document.getElementById('cfg-interval');
     if (intvl && c.interval) intvl.value = c.interval;
     const subnets = document.getElementById('cfg-subnets');
     if (subnets && c.extra_subnets) subnets.value = c.extra_subnets;
   }} catch (_) {{}}
+  try {{
+    const r = await fetch('/api/baseline-profile');
+    if (!r.ok) return;
+    const c = await r.json();
+    const profile = document.getElementById('cfg-baseline-profile');
+    if (profile && c.profile) profile.value = c.profile;
+  }} catch (_) {{}}
 }}
 
 async function saveConfig() {{
   const body = {{}};
-  const checked = [...document.querySelectorAll('.cfg-profile-cb:checked')].map(cb => cb.value);
-  if (checked.length) body.profile = checked.join(',');
   const intvl = document.getElementById('cfg-interval')?.value?.trim();
   if (intvl) body.interval = parseInt(intvl, 10);
   const subnets = document.getElementById('cfg-subnets')?.value?.trim();
   if (subnets !== undefined) body.extra_subnets = subnets;
   try {{
+    const baseline = document.getElementById('cfg-baseline-profile')?.value;
+    const baselineRequest = baseline ? fetch('/api/baseline-profile', {{
+      method: 'POST', headers: {{'Content-Type': 'application/json'}}, body: JSON.stringify({{profile: baseline}}),
+    }}) : null;
     const r = await fetch('/api/config', {{
       method: 'POST',
       headers: {{'Content-Type': 'application/json'}},
       body: JSON.stringify(body),
     }});
     const d = await r.json();
-
-    // Immediately dispatch Scan All with the same profiles so the fleet table
-    // updates within minutes instead of waiting for the next automatic cycle.
-    if (checked.length && d.pushed_to_agents > 0) {{
-      await fetch('/api/fleet/scan/all', {{
-        method: 'POST',
-        headers: {{'Content-Type': 'application/json'}},
-        body: JSON.stringify({{profiles: checked, stagger: 'normal'}}),
-      }});
-    }}
+    const baselineResponse = baselineRequest ? await baselineRequest : null;
+    const baselineResult = baselineResponse ? await baselineResponse.json() : {{pushed_to_agents: 0}};
+    if (baselineResponse && !baselineResponse.ok) throw new Error(baselineResult.error || 'Baseline save failed');
 
     const el = document.getElementById('cfg-saved');
     if (el) {{
-      const n = d.pushed_to_agents || 0;
+      const n = Math.max(d.pushed_to_agents || 0, baselineResult.pushed_to_agents || 0);
       el.textContent = n > 0
-        ? `✓ Saved and scan dispatched to ${{n}} agent${{n !== 1 ? 's' : ''}} — profile column updates shortly`
-        : '✓ Saved — connect an agent to apply the profile';
+        ? `✓ Saved and applied to ${{n}} agent${{n !== 1 ? 's' : ''}}`
+        : '✓ Saved — new agents will receive this default on enrollment';
       el.style.display = 'block';
       setTimeout(() => el.style.display = 'none', 6000);
     }}

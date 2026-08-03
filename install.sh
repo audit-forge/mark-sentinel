@@ -275,6 +275,16 @@ install_launchd() {
     echo "Installing launchd daemon ..."
 
     local plist_dst="/Library/LaunchDaemons/ai.mfdynamics.arckon-agent.plist"
+    # Early Python-based installers used these labels. Remove them before
+    # installing the compiled-agent daemon so they cannot run a stale agent
+    # alongside the current service or reference a removed virtualenv.
+    for legacy_label in io.riskraven.arckon-agent io.hash.sentinel-agent; do
+        local legacy_plist="/Library/LaunchDaemons/${legacy_label}.plist"
+        if [[ -f "$legacy_plist" ]]; then
+            launchctl bootout "system/${legacy_label}" 2>/dev/null || true
+            rm -f "$legacy_plist"
+        fi
+    done
     cat > "$plist_dst" <<EOPLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"

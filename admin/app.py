@@ -424,6 +424,7 @@ async def add_customer(
     tier: str = Form("standard"),
     max_seats: int = Form(5),
     parent_customer_id: str = Form(""),
+    baseline_profile: str = Form("default"),
 ):
     try:
         require_super_admin(request)
@@ -433,6 +434,9 @@ async def add_customer(
     cid = customer_id.lower().strip().replace(" ", "-")
     if tier not in ("standard", "plus"):
         tier = "standard"
+    valid_profiles = {"default", "iso42001", "atlas", "financial", "fedramp", "fedramp_20x", "cmmc", "biotech", "healthcare", "lifesciences", "owasp_agentic", "eu_ai_act", "professional_services"}
+    if baseline_profile not in valid_profiles:
+        baseline_profile = "default"
     expires = (date.today() + timedelta(days=365)).isoformat()
     agent_token = secrets.token_urlsafe(32)
     parent_customer_id = parent_customer_id.strip() or None
@@ -459,10 +463,10 @@ async def add_customer(
         if port > 7100:
             return RedirectResponse("/customers?error=port_capacity", status_code=303)
         conn.execute(
-            "INSERT INTO customers (id, name, created_at, active, tier, license_expires_at, max_seats, port, agent_token, parent_customer_id) "
-            "VALUES (?,?,?,1,?,?,?,?,?,?)",
+            "INSERT INTO customers (id, name, created_at, active, tier, license_expires_at, max_seats, port, agent_token, parent_customer_id, baseline_profile) "
+            "VALUES (?,?,?,1,?,?,?,?,?,?,?)",
             (cid, customer_name.strip(), datetime.now(timezone.utc).isoformat(), tier, expires, max_seats, port,
-             agent_token, parent_customer_id)
+              agent_token, parent_customer_id, baseline_profile)
         )
         if customer_email.strip():
             email = customer_email.strip().lower()
@@ -481,7 +485,7 @@ async def add_customer(
                 from mailer import send_welcome_email
                 send_welcome_email(email, customer_name.strip(), login_url, temp_password)
     _write_license_file(cid, customer_name.strip(), tier, expires, max_seats)
-    _run_script("provision_customer.sh", cid, PUBLIC_IP, tier, expires, str(max_seats), customer_name.strip(), str(port), agent_token)
+    _run_script("provision_customer.sh", cid, PUBLIC_IP, tier, expires, str(max_seats), customer_name.strip(), str(port), agent_token, baseline_profile)
     return RedirectResponse("/customers", status_code=303)
 
 

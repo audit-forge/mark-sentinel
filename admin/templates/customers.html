@@ -50,6 +50,12 @@
         <label>Max Licenses</label>
         <input type="number" name="max_seats" value="5" min="1" max="500">
       </div>
+      <div class="form-group" style="max-width:220px">
+        <label>Default Device Scan</label>
+        <select name="baseline_profile">
+          <option value="default">Base Scan</option><option value="iso42001">ISO 42001</option><option value="atlas">MITRE ATLAS</option><option value="financial">Financial Services</option><option value="fedramp">FedRAMP / NIST 800-53</option><option value="fedramp_20x">FedRAMP 20x</option><option value="cmmc">CMMC 2.0</option><option value="biotech">Biotech</option><option value="healthcare">Healthcare</option><option value="lifesciences">Life Sciences</option><option value="owasp_agentic">OWASP Agentic AI</option><option value="eu_ai_act">EU AI Act</option><option value="professional_services">Professional Services</option>
+        </select>
+      </div>
       <div class="form-group" style="max-width:200px">
         <label>Parent MSP <span style="font-weight:400;color:#6B7280">(optional)</span></label>
         <select name="parent_customer_id">

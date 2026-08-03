@@ -75,6 +75,7 @@ def init_db():
             ('parent_customer_id',  "TEXT"),
             ('is_reseller',         "INTEGER NOT NULL DEFAULT 0"),
             ('is_msp',              "INTEGER NOT NULL DEFAULT 0"),
+            ('baseline_profile',    "TEXT NOT NULL DEFAULT 'default'"),
         ]:
             try:
                 conn.execute(f"ALTER TABLE customers ADD COLUMN {col} {defn}")
