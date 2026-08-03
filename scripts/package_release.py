@@ -81,6 +81,12 @@ def _build_nuitka_binary(
         '--standalone',
         '--onefile',
         '--follow-imports',
+        # These packages are imported by the compiled agent/audit binaries at
+        # runtime. Include them explicitly so onefile releases work outside
+        # the source checkout.
+        '--include-package=checks',
+        '--include-package=connectors',
+        '--include-package=output',
         '--assume-yes-for-downloads',
         f'--output-filename={output_name}{extension}',
         f'--output-dir={dist_dir}',
