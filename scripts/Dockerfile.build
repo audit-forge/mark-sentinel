@@ -12,23 +12,34 @@ RUN pip install --no-cache-dir --upgrade pip setuptools wheel && \
     pip install --no-cache-dir -r requirements.txt && \
     pip install --no-cache-dir "nuitka[onefile]" ordered-set zstandard
 
-# Copy source files — connectors must be a package directory, not flattened
-COPY audit.py checks/ profiles/ output/ ./
+# Copy source files while preserving Python package directories. A multi-source
+# COPY into ./ flattens directory contents and breaks Nuitka package discovery.
+COPY audit.py arckon_version.py ./
+COPY checks/ ./checks/
+COPY profiles/ ./profiles/
+COPY output/ ./output/
 COPY connectors/ ./connectors/
 
 # Compile scanner binary (audit.py)
-# Note: checks/ and output/ are shipped in the bundle alongside audit binary
+# Bundle all runtime packages: onefile binaries execute from a temporary
+# directory, not the source checkout used during compilation.
 RUN python -m nuitka --onefile --assume-yes-for-downloads \
+    --include-module=arckon_version \
+    --include-package=checks \
+    --include-package=connectors \
+    --include-package=output \
     --output-dir=/out --output-filename=audit \
     audit.py
 
-# Copy agent source files
-COPY agent.py arckon_version.py discovery.py ./
+# Copy remaining agent source files
+COPY agent.py discovery.py ./
 
 # Compile agent binary (agent.py + discovery.py + connectors/)
 RUN python -m nuitka --onefile --assume-yes-for-downloads \
     --include-module=discovery \
+    --include-package=checks \
     --include-package=connectors \
+    --include-package=output \
     --output-dir=/out --output-filename=agent \
     agent.py
 

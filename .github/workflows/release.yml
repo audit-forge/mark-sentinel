@@ -12,6 +12,9 @@ jobs:
   release-linux:
     if: github.ref_type == 'tag'
     runs-on: ubuntu-latest
+    # Native Nuitka builds are intentionally allowed enough time to compile
+    # and execute the extracted artifact smoke test.
+    timeout-minutes: 60
     steps:
       - name: Checkout tagged source
         uses: actions/checkout@v4
@@ -54,6 +57,14 @@ jobs:
         run: |
           python -c "from pathlib import Path; import hashlib; import agent; release = Path('releases/linux'); manifest = agent._validate_update_manifest((release / 'manifest.json').read_bytes(), (release / 'manifest.sig').read_bytes()); artifact = release / manifest['artifact']; assert manifest['artifact'] == Path('$ARTIFACT').name; assert manifest['size'] == artifact.stat().st_size; assert manifest['sha256'] == hashlib.sha256(artifact.read_bytes()).hexdigest(); assert manifest['platform'] == 'linux'"
 
+      - name: Smoke test extracted Linux audit binary
+        env:
+          ARTIFACT: ${{ steps.package.outputs.artifact }}
+        run: |
+          mkdir smoke-release
+          tar -xzf "$ARTIFACT" -C smoke-release
+          ./smoke-release/sentinel/audit --mode config --target "$PWD/smoke-release" --profile default --output json --quiet > /dev/null
+
       - name: Upload Linux release files
         uses: actions/upload-artifact@v4
         with:
@@ -64,6 +75,7 @@ jobs:
   release-macos:
     if: github.ref_type == 'tag'
     runs-on: macos-latest
+    timeout-minutes: 60
     steps:
       - name: Checkout tagged source
         uses: actions/checkout@v4
@@ -111,6 +123,7 @@ jobs:
   release-windows:
     if: github.ref_type == 'tag'
     runs-on: windows-latest
+    timeout-minutes: 60
     steps:
       - name: Checkout tagged source
         uses: actions/checkout@v4
