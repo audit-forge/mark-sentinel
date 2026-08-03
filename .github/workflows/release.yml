@@ -161,6 +161,9 @@ jobs:
     needs: [release-linux, release-macos, release-windows]
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout tagged source
+        uses: actions/checkout@v4
+
       - name: Download all release artifacts
         uses: actions/download-artifact@v4
         with:
