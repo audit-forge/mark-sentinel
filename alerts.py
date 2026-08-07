@@ -36,7 +36,7 @@ import logging
 import smtplib
 import time
 import urllib.request
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from email.mime.application import MIMEApplication
@@ -148,12 +148,26 @@ def save_alert_config(path: Path, new_data: dict, existing_path: Path) -> None:
     else:
         slack_webhook = existing.get('slack_webhook', '')
 
+    def _validate_or_preserve(incoming: str, existing_val: str, validator, label: str) -> str:
+        incoming = incoming.strip()
+        if not incoming:
+            return existing_val
+        if not validator(incoming):
+            raise ValueError(f'{label} is not a valid URL')
+        return incoming
+
     triggers_raw = new_data.get('triggers', {})
     clean = {
         'slack_webhook':  slack_webhook,
-        'gchat_webhook':  str(new_data.get('gchat_webhook', '')).strip(),
-        'teams_webhook':  str(new_data.get('teams_webhook', '')).strip(),
-        'webhook_url':    str(new_data.get('webhook_url', '')).strip(),
+        'gchat_webhook':  _validate_or_preserve(
+            str(new_data.get('gchat_webhook', '')), existing.get('gchat_webhook', ''),
+            is_valid_gchat_webhook, 'Google Chat webhook'),
+        'teams_webhook':  _validate_or_preserve(
+            str(new_data.get('teams_webhook', '')), existing.get('teams_webhook', ''),
+            is_valid_teams_webhook, 'Microsoft Teams webhook'),
+        'webhook_url':    _validate_or_preserve(
+            str(new_data.get('webhook_url', '')), existing.get('webhook_url', ''),
+            lambda u: is_valid_url(u, ('http', 'https')), 'Webhook URL'),
         'email': {
             'smtp_host': str(email_new.get('smtp_host', '')).strip(),
             'smtp_port': int(email_new.get('smtp_port', 587)),
@@ -417,12 +431,16 @@ def send_test_alert(alert_cfg: dict, channel: str) -> tuple[bool, str]:
         url = alert_cfg.get('gchat_webhook', '').strip()
         if not url:
             return False, 'No Google Chat webhook URL configured'
+        if not is_valid_gchat_webhook(url):
+            return False, 'Google Chat webhook must be a https://chat.googleapis.com/v1/spaces/.../messages?key=...&token=... URL'
         ok = _post_gchat(url, _format_text(payload))
         return ok, 'Test sent to Google Chat' if ok else 'Google Chat delivery failed — check the webhook URL'
     if channel == 'teams':
         url = alert_cfg.get('teams_webhook', '').strip()
         if not url:
             return False, 'No Teams webhook URL configured'
+        if not is_valid_teams_webhook(url):
+            return False, 'Teams webhook must be a https://*.webhook.office.com/webhookb2/.../IncomingWebhook/... URL'
         ok = _post_teams(url, _format_text(payload))
         return ok, 'Test sent to Microsoft Teams' if ok else 'Teams delivery failed — check the webhook URL'
     return False, f'Unknown channel: {channel}'
@@ -470,14 +488,20 @@ def _dispatch(alert_cfg: dict, payload: dict) -> list[str]:
         elif not is_valid_slack_webhook(slack_url):
             log.error('Skipping invalid Slack webhook URL')
     if gchat_url:
-        _post_gchat(gchat_url, text)
-        fired.append('google_chat')
+        if is_valid_gchat_webhook(gchat_url) and _post_gchat(gchat_url, text):
+            fired.append('google_chat')
+        elif not is_valid_gchat_webhook(gchat_url):
+            log.error('Skipping invalid Google Chat webhook URL')
     if teams_url:
-        _post_teams(teams_url, text)
-        fired.append('teams')
+        if is_valid_teams_webhook(teams_url) and _post_teams(teams_url, text):
+            fired.append('teams')
+        elif not is_valid_teams_webhook(teams_url):
+            log.error('Skipping invalid Microsoft Teams webhook URL')
     if webhook_url:
-        _post_webhook(webhook_url, payload)
-        fired.append('webhook')
+        if is_valid_url(webhook_url, ('http', 'https')) and _post_webhook(webhook_url, payload):
+            fired.append('webhook')
+        elif not is_valid_url(webhook_url, ('http', 'https')):
+            log.error('Skipping invalid generic webhook URL')
     if email_cfg.get('smtp_host') and email_cfg.get('to'):
         _send_email(email_cfg, _alert_subject(payload), text)
         fired.append('email')
@@ -576,6 +600,50 @@ def is_valid_slack_webhook(webhook_url: str) -> bool:
                 and parsed.hostname == 'hooks.slack.com'
                 and parsed.path.startswith('/services/')
                 and len(parsed.path.split('/')) >= 5)
+    except (TypeError, ValueError):
+        return False
+
+
+def is_valid_url(url: str, allowed_schemes: tuple[str, ...] = ('https',)) -> bool:
+    """Basic URL validation: allowed scheme and a non-empty host."""
+    try:
+        parsed = urlparse(url)
+        return (parsed.scheme in allowed_schemes
+                and parsed.hostname is not None
+                and parsed.hostname != '')
+    except (TypeError, ValueError):
+        return False
+
+
+def is_valid_gchat_webhook(url: str) -> bool:
+    """Accept only Google Chat Space incoming webhook URLs.
+
+    Expected shape:
+      https://chat.googleapis.com/v1/spaces/{spaceId}/messages?key={key}&token={token}
+    """
+    try:
+        parsed = urlparse(url)
+        if parsed.scheme != 'https' or parsed.hostname != 'chat.googleapis.com':
+            return False
+        if not parsed.path.startswith('/v1/spaces/'):
+            return False
+        if not parsed.path.rstrip('/').endswith('/messages'):
+            return False
+        qs = parse_qs(parsed.query)
+        return bool(qs.get('key')) and bool(qs.get('token'))
+    except (TypeError, ValueError):
+        return False
+
+
+def is_valid_teams_webhook(url: str) -> bool:
+    """Accept only Microsoft Teams incoming webhook URLs."""
+    try:
+        parsed = urlparse(url)
+        return (parsed.scheme == 'https'
+                and parsed.hostname is not None
+                and parsed.hostname.endswith('.webhook.office.com')
+                and parsed.path.startswith('/webhookb2/')
+                and '/IncomingWebhook/' in parsed.path)
     except (TypeError, ValueError):
         return False
 

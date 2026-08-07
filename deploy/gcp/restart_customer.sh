@@ -33,18 +33,25 @@ fi
 # overwrites this header, so direct callers never learn the capability.
 NGINX_CONF_DIR="${NGINX_CONF_DIR:-/opt/sentinel/deploy/gcp/nginx}"
 NGINX_CONF="${NGINX_CONF_DIR}/${CUSTOMER_ID}.conf"
-if [ -f "$NGINX_CONF" ] && ! grep -q 'X-Sentinel-Proxy-Token' "$NGINX_CONF"; then
+if [ -f "$NGINX_CONF" ]; then
   python3 - "$NGINX_CONF" "$CONTAINER_NAME" "$PROXY_TOKEN" <<'PY'
 import sys
 
 path, container, token = sys.argv[1:]
 content = open(path, encoding="utf-8").read()
 needle = f"proxy_pass http://{container}:7331;"
-replacement = needle + f"\n        proxy_set_header X-Sentinel-Proxy-Token {token};"
-if needle not in content:
+protected_start = content.find("    location / {")
+protected_end = content.find("    location @login_redirect", protected_start)
+if protected_start < 0 or protected_end < 0:
+    raise SystemExit(f"expected authenticated location not found in {path}")
+protected = content[protected_start:protected_end]
+if needle not in protected:
     raise SystemExit(f"expected upstream {container!r} not found in {path}")
-with open(path, "w", encoding="utf-8") as output:
-    output.write(content.replace(needle, replacement))
+if "X-Sentinel-Proxy-Token" not in protected:
+    protected = protected.replace(
+        needle, needle + f"\n        proxy_set_header X-Sentinel-Proxy-Token {token};", 1)
+    with open(path, "w", encoding="utf-8") as output:
+        output.write(content[:protected_start] + protected + content[protected_end:])
 PY
 fi
 

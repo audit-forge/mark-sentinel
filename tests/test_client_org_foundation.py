@@ -839,6 +839,13 @@ def test_the_authenticated_location_pins_the_customer_id_to_its_own_vhost(
     assert headers["X-Sentinel-Customer-ID"] == VHOST_CUSTOMER
 
 
+def test_api_auth_returns_http_errors_instead_of_cross_port_login_redirect(rendered_vhost):
+    """Fetch calls must receive a 401/403, not a redirect to the port-80 UI."""
+    block = _location_blocks(rendered_vhost)["/api/"]
+    assert "auth_request /_auth;" in block
+    assert not any(line.startswith("error_page ") for line in block)
+
+
 def test_the_authenticated_location_uses_no_undefined_variables(rendered_vhost):
     """An identity header set from a variable nobody assigns renders empty --
     which fails open on any consumer that treats "absent" as "unrestricted"."""
@@ -881,6 +888,6 @@ def test_the_rendered_vhost_still_does_the_rest_of_its_job(rendered_vhost):
     assert "proxy_pass http://user-manager:8000/auth/verify;" in blocks["= /_auth"]
     assert "proxy_set_header X-Customer-ID acme;" in blocks["= /_auth"]
     assert "proxy_read_timeout 300;" in blocks["/api/agent/"]
-    assert rendered_vhost.count("proxy_read_timeout 300;") == 4
+    assert rendered_vhost.count("proxy_read_timeout 300;") == 5
     assert any("return 302 http://203.0.113.10/login?next=" in line
                for line in blocks["@login_redirect"])

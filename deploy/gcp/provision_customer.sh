@@ -182,6 +182,45 @@ server {
         proxy_set_header X-Sentinel-Impersonated-By "";
     }
 
+    # API callers must receive an HTTP authentication error, not a redirect to
+    # the port-80 login site. A fetch redirect across ports becomes an opaque
+    # browser network error and hides the real expired-session condition.
+    location /api/ {
+        auth_request /_auth;
+        auth_request_set \$sentinel_user_email      \$upstream_http_x_arckon_user_email;
+        auth_request_set \$sentinel_user_role       \$upstream_http_x_arckon_user_role;
+        auth_request_set \$sentinel_client_org_id   \$upstream_http_x_arckon_client_org_id;
+        auth_request_set \$sentinel_is_reseller     \$upstream_http_x_arckon_is_reseller;
+        auth_request_set \$sentinel_is_msp          \$upstream_http_x_arckon_is_msp;
+        auth_request_set \$sentinel_verified_user_email      \$upstream_http_x_sentinel_user_email;
+        auth_request_set \$sentinel_verified_user_role       \$upstream_http_x_sentinel_user_role;
+        auth_request_set \$sentinel_verified_client_org_id   \$upstream_http_x_sentinel_client_org_id;
+        auth_request_set \$sentinel_verified_is_reseller     \$upstream_http_x_sentinel_is_reseller;
+        auth_request_set \$sentinel_verified_is_msp          \$upstream_http_x_sentinel_is_msp;
+        auth_request_set \$sentinel_impersonated_by \$upstream_http_x_sentinel_impersonated_by;
+
+        proxy_pass http://${CONTAINER_NAME}:7331;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Sentinel-Proxy-Token ${PROXY_TOKEN};
+        proxy_set_header X-Arckon-User-Email      \$sentinel_user_email;
+        proxy_set_header X-Arckon-User-Role       \$sentinel_user_role;
+        proxy_set_header X-Arckon-Customer-ID     ${CUSTOMER_ID};
+        proxy_set_header X-Arckon-Client-Org-ID   \$sentinel_client_org_id;
+        proxy_set_header X-Arckon-Is-Reseller     \$sentinel_is_reseller;
+        proxy_set_header X-Arckon-Is-MSP          \$sentinel_is_msp;
+        proxy_set_header X-Sentinel-User-Email      \$sentinel_verified_user_email;
+        proxy_set_header X-Sentinel-User-Role       \$sentinel_verified_user_role;
+        proxy_set_header X-Sentinel-Customer-ID     ${CUSTOMER_ID};
+        proxy_set_header X-Sentinel-Client-Org-ID   \$sentinel_verified_client_org_id;
+        proxy_set_header X-Sentinel-Is-Reseller     \$sentinel_verified_is_reseller;
+        proxy_set_header X-Sentinel-Is-MSP          \$sentinel_verified_is_msp;
+        proxy_set_header X-Sentinel-Impersonated-By \$sentinel_impersonated_by;
+        proxy_read_timeout 300;
+        proxy_buffering off;
+    }
+
     location / {
         auth_request /_auth;
         error_page 401 403 = @login_redirect;

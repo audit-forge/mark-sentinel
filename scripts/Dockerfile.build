@@ -32,11 +32,12 @@ RUN python -m nuitka --onefile --assume-yes-for-downloads \
     audit.py
 
 # Copy remaining agent source files
-COPY agent.py discovery.py ./
+COPY agent.py discovery.py network_inventory.py ./
 
-# Compile agent binary (agent.py + discovery.py + connectors/)
+# Compile agent binary (agent.py + passive network inventory + connectors/)
 RUN python -m nuitka --onefile --assume-yes-for-downloads \
     --include-module=discovery \
+    --include-module=network_inventory \
     --include-package=checks \
     --include-package=connectors \
     --include-package=output \

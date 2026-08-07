@@ -359,6 +359,27 @@ def report_discovery(results: list, config: dict, device_id: str, hostname: str)
     return False
 
 
+def report_network_assets(results: list, config: dict, device_id: str, hostname: str) -> bool:
+    """POST passive neighbor-cache observations to the separate asset inventory."""
+    server = config.get('server', '').rstrip('/')
+    if not server:
+        return True
+    payload = json.dumps({'device_id': device_id, 'hostname': hostname, 'results': results}).encode()
+    headers = {'Content-Type': 'application/json', 'Content-Length': str(len(payload)),
+               'User-Agent': f'sentinel-agent/{VERSION}'}
+    if config.get('token'):
+        headers['Authorization'] = f"Bearer {config['token']}"
+    try:
+        req = _urlreq.Request(f'{server}/api/agent/network-assets', data=payload, headers=headers, method='POST')
+        with _urlreq.urlopen(req, timeout=30) as resp:
+            if 200 <= resp.status < 300:
+                log.info('Passive network asset report accepted (%d observations)', len(results))
+                return True
+    except Exception as e:
+        log.warning('Passive network asset report error: %s', e)
+    return False
+
+
 def _apply_token_update(config: dict, new_token: str) -> None:
     """Persist a new agent token to disk and update the live config dict.
     Called when the server signals a token rotation via check-in response or set_config."""
@@ -1641,6 +1662,13 @@ def main() -> None:
                     report_discovery(send_results, cfg, device_id, hostname)
                 except Exception as e:
                     log.error('Network discovery error: %s', e)
+            elif cmd == 'discover_network_assets':
+                try:
+                    from network_inventory import collect_passive_neighbors
+                    log.info('Passive network asset discovery triggered by server')
+                    report_network_assets(collect_passive_neighbors(), cfg, device_id, hostname)
+                except Exception as e:
+                    log.error('Passive network asset discovery error: %s', e)
             elif cmd == 'discover_mcp':
                 try:
                     from discovery import discover_mcp_servers, expand_subnets, _local_subnet_hosts

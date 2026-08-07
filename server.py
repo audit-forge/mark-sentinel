@@ -1196,7 +1196,8 @@ class _Handler(http.server.BaseHTTPRequestHandler):
     # a new path). The rollup dashboard (/clients) is deliberately NOT
     # here — that view spans every client org for the MSP and must stay
     # admin-only.
-    _CLIENT_VIEWER_ALLOWED_EXACT = frozenset({'/', '/api/status', '/api/devices', '/api/maintenance-notice'})
+    _CLIENT_VIEWER_ALLOWED_EXACT = frozenset({'/', '/api/status', '/api/devices', '/api/maintenance-notice',
+                                              '/api/fleet/network-assets'})
     _CLIENT_VIEWER_ALLOWED_PREFIX = ('/api/fleet/report',)
 
     def _client_viewer_gate(self, path: str) -> bool:
@@ -1372,6 +1373,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             '/api/fleet/live-stats': self._api_fleet_live_stats,
             '/api/fleet/k8s-status': self._api_fleet_k8s_status,
             '/api/fleet/shadow':  self._api_fleet_shadow,
+            '/api/fleet/network-assets': self._api_fleet_network_assets,
             '/api/fleet/mcp':        self._api_fleet_mcp,
             '/api/fleet/mcp/report': self._api_fleet_mcp_report,
             '/api/fleet/eu-ai-act-report': self._api_eu_ai_act_report,
@@ -1466,6 +1468,12 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                 self._send(401, b'Unauthorized', 'text/plain')
                 return
             self._api_agent_mcp()
+            return
+        if path == '/api/agent/network-assets':
+            if not self._check_agent_bearer():
+                self._send(401, b'Unauthorized', 'text/plain')
+                return
+            self._api_agent_network_assets()
             return
 
         # All other POST endpoints require dashboard auth
@@ -1562,6 +1570,10 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self._api_fleet_discover_all()
         elif path.startswith('/api/fleet/discover/'):
             self._api_fleet_discover(path[len('/api/fleet/discover/'):])
+        elif path == '/api/fleet/network-assets/discover/all':
+            self._api_fleet_network_assets_discover_all()
+        elif path.startswith('/api/fleet/network-assets/discover/'):
+            self._api_fleet_network_assets_discover(path[len('/api/fleet/network-assets/discover/'):])
         elif path.startswith('/api/fleet/shadow/dismiss/'):
             self._api_fleet_shadow_dismiss(path[len('/api/fleet/shadow/dismiss/'):])
         elif path.startswith('/api/fleet/inventory/approve/'):
@@ -2927,6 +2939,48 @@ load();
                 queued.append(did)
         self._json({'status': 'queued', 'count': len(queued), 'devices': queued})
 
+    def _api_agent_network_assets(self):
+        """POST /api/agent/network-assets — authenticated passive neighbor observations."""
+        length = _content_length(self.headers)
+        if not length or length > 2_097_152:
+            self._send(400, b'Bad request', 'text/plain')
+            return
+        try:
+            body = json.loads(self.rfile.read(length))
+        except json.JSONDecodeError:
+            self._send(400, b'Invalid JSON', 'text/plain')
+            return
+        device_id, results = str(body.get('device_id', '')).strip(), body.get('results', [])
+        cust = self._get_agent_customer()
+        store = _get_store(cust['id'] if cust else 'default')
+        if not device_id or not store.get_device(device_id) or not isinstance(results, list) or len(results) > 10000:
+            self._send(400, b'Missing known device_id or invalid results', 'text/plain')
+            return
+        import ipaddress
+        import re
+        mac_re = re.compile(r'^(?:[0-9a-f]{2}:){5}[0-9a-f]{2}$', re.I)
+        stored = 0
+        for result in results:
+            if not isinstance(result, dict):
+                continue
+            ip = str(result.get('ip_address', '')).strip()
+            try:
+                ipaddress.ip_address(ip)
+            except ValueError:
+                continue
+            mac = str(result.get('mac_address', '')).strip().replace('-', ':').lower()
+            if mac and not mac_re.fullmatch(mac):
+                continue
+            interface = str(result.get('interface', '')).strip()[:128]
+            source = str(result.get('source', '')).strip()[:64]
+            hostname = str(result.get('hostname', '')).strip()[:255]
+            if not source:
+                continue
+            store.upsert_network_asset(device_id, ip, mac, interface, source, hostname)
+            stored += 1
+        log.info('passive network inventory: %s reported %d observations', device_id, stored)
+        self._json({'status': 'accepted', 'stored': stored})
+
     def _api_fleet_discover(self, device_id: str):
         """POST /api/fleet/discover/<device_id> — push discover_network to one agent."""
         device_id = device_id.strip()
@@ -2939,6 +2993,24 @@ load();
             return
         _get_store_for_device(device_id).enqueue_command(device_id, 'discover_network')
         self._json({'status': 'queued', 'device_id': device_id})
+
+    def _api_fleet_network_assets_discover_all(self):
+        """Queue an explicit passive neighbor-cache collection on every agent."""
+        devices = self._store().list_devices(client_org_id=self._scoped_client_org())
+        queued = [d['device_id'] for d in devices if d.get('device_id')]
+        for device_id in queued:
+            _get_store_for_device(device_id).enqueue_command(device_id, 'discover_network_assets')
+        self._json({'status': 'queued', 'count': len(queued), 'devices': queued})
+
+    def _api_fleet_network_assets_discover(self, device_id: str):
+        device_id = device_id.strip()
+        device = self._store().get_device(device_id)
+        scope = self._scoped_client_org()
+        if not device or (scope is not None and device.get('client_org_id') != scope):
+            self._json({'error': 'device not found'}, 404)
+            return
+        command_id = _get_store_for_device(device_id).enqueue_command(device_id, 'discover_network_assets')
+        self._json({'status': 'queued', 'device_id': device_id, 'command_id': command_id})
 
     def _api_fleet_live_stats(self):
         """GET /api/fleet/live-stats — lightweight poll: stat counts + device rows HTML."""
@@ -3058,6 +3130,11 @@ load();
             self._json({'devices': shadow, 'count': len(shadow)})
         except Exception as e:
             self._json({'error': str(e)}, 500)
+
+    def _api_fleet_network_assets(self):
+        """GET /api/fleet/network-assets — separately stored passive network inventory."""
+        assets = self._store().list_network_assets(client_org_id=self._scoped_client_org())
+        self._json({'assets': assets, 'count': len(assets)})
 
     def _api_fleet_shadow_dismiss(self, shadow_id_str: str):
         """POST /api/fleet/shadow/dismiss/<id|all> — dismiss one or all shadow findings."""
@@ -5004,6 +5081,7 @@ async function moveSelectedDevices(){
             # assets. MSP admins (org_scope is None) still see everything.
             shadow  = store.list_shadow_devices() if org_scope is None else []
             mcp     = store.list_mcp_servers() if org_scope is None else []
+            network_assets = store.list_network_assets(client_org_id=org_scope)
             print(f'[SENTINEL] _serve_fleet: got {len(devices)} devices, {len(shadow)} shadow, {len(mcp)} mcp', flush=True)
         except Exception as _e:
             print(f'[SENTINEL] _serve_fleet: store error: {_e}', flush=True)
@@ -5011,10 +5089,11 @@ async function moveSelectedDevices(){
             devices = []
             shadow  = []
             mcp     = []
+            network_assets = []
         try:
             user = self._session_user()
             body = _build_fleet_html(
-                devices, shadow, mcp,
+                devices, shadow, mcp, network_assets,
                 current_user_email=user['email'] if user else '',
                 current_user_role=user.get('role', '') if user else '',
                 current_user_is_reseller=bool(user.get('is_reseller')) if user else False,
@@ -5827,6 +5906,7 @@ def send_client_org_report(customer_id: str, org_id: str, org_name: str, report_
 
 def _build_fleet_html(devices: list[dict], shadow: list[dict] | None = None,
                       mcp: list[dict] | None = None,
+                      network_assets: list[dict] | None = None,
                       current_user_email: str = '',
                       current_user_role: str = '',
                       current_user_is_reseller: bool = False,
@@ -5835,7 +5915,9 @@ def _build_fleet_html(devices: list[dict], shadow: list[dict] | None = None,
                       store=None) -> str:
     shadow = shadow or []
     mcp    = mcp    or []
+    network_assets = network_assets or []
     ts_now = int(time.time())
+    import html as _html
 
     def _age(ts: int | None) -> str:
         if not ts:
@@ -5848,6 +5930,19 @@ def _build_fleet_html(devices: list[dict], shadow: list[dict] | None = None,
         if secs < 86400:
             return f'{secs // 3600}h ago'
         return f'{secs // 86400}d ago'
+
+    asset_rows = ''.join(
+        '<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td></tr>'.format(
+            _html.escape(a.get('ip_address', '')), _html.escape(a.get('mac_address', '') or '—'),
+            _html.escape(a.get('hostname', '') or '—'), _html.escape(a.get('interface', '') or '—'),
+            _html.escape(a.get('source', '')), _html.escape(a.get('reporter_hostname', '') or a.get('reporter_device_id', '')),
+            _age(a.get('last_seen')),
+        ) for a in network_assets)
+    if not asset_rows:
+        asset_rows = '<tr><td colspan="7" class="empty">No passive neighbor-cache observations yet.</td></tr>'
+    asset_options = ''.join('<option value="{}">{}</option>'.format(
+        _html.escape(d.get('device_id', ''), quote=True), _html.escape(d.get('hostname', '') or d.get('device_id', ''))
+    ) for d in devices)
 
     def _risk_cls(fail: int, warn: int, pas: int) -> str:
         if fail == 0 and warn == 0 and pas == 0:
@@ -6082,6 +6177,7 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
       {'<button class="sb-item" id="nav-reseller" onclick="navTo(\'reseller\')">&#127970; MSP View</button>' if current_user_is_reseller else ''}
       <div class="sb-group">Fleet</div>
       <button class="sb-item" id="nav-shadow" onclick="navTo('shadow')">&#9888; Shadow AI</button>
+      <button class="sb-item" id="nav-network-assets" onclick="navTo('network-assets')">&#128421; Network Assets</button>
       <button class="sb-item" id="nav-alerts" onclick="navTo('alerts')">&#128276; Alerts <span id="alert-badge" style="display:none;background:#DC2626;color:#fff;border-radius:10px;font-size:10px;padding:1px 6px;margin-left:4px;font-weight:700"></span></button>
       <button class="sb-item" id="nav-mcp" onclick="navTo('mcp')">&#128279; MCP Servers</button>
       <div class="sb-group">Security</div>
@@ -6218,6 +6314,20 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
     </div>
   </div>
   {_build_shadow_section(shadow, ts_now)}
+  </div>
+
+  <div class="page" id="page-network-assets">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;gap:8px;flex-wrap:wrap">
+      <div><div class="sec-hdr" style="margin:0;padding:0">Network Asset Inventory</div>
+      <div style="font-size:12px;color:#6B7280;margin-top:4px">Passive ARP and IPv6 neighbor-cache observations only. No probes or reverse DNS.</div></div>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <select id="network-asset-device" class="form-select" style="font-size:12px;padding:4px">{asset_options}</select>
+        <button class="scan-btn" onclick="discoverNetworkAssets(false, this)">Collect selected</button>
+        <button class="scan-btn" onclick="discoverNetworkAssets(true, this)" style="color:#4F46E5">Collect all agents</button>
+      </div>
+    </div>
+    <table class="dev-table"><thead><tr><th>IP address</th><th>MAC address</th><th>Hostname</th><th>Interface</th><th>Source</th><th>Reporter</th><th>Last seen</th></tr></thead>
+    <tbody>{asset_rows}</tbody></table>
   </div>
 
   <div class="page" id="page-alerts">
@@ -6873,7 +6983,7 @@ function navTo(page) {{
 }}
 (function() {{
   const hash = window.location.hash.replace('#', '');
-  const valid = ['overview','shadow','alerts','mcp','riskregister','inventory','schedules',
+  const valid = ['overview','shadow','network-assets','alerts','mcp','riskregister','inventory','schedules',
                  'discovery','findings','reports','siem','settings','users','probe','reseller'];
   if (hash && valid.includes(hash)) {{ navTo(hash); }}
 }})();
@@ -7607,6 +7717,23 @@ async function discoverAll(btn) {{
   }}
 }}
 
+async function discoverNetworkAssets(all, btn) {{
+  const device = document.getElementById('network-asset-device')?.value;
+  if (!all && !device) {{ alert('Select an agent first.'); return; }}
+  const label = btn.textContent;
+  btn.disabled = true; btn.textContent = 'Queuing…';
+  try {{
+    const path = all ? '/api/fleet/network-assets/discover/all' :
+      '/api/fleet/network-assets/discover/' + encodeURIComponent(device);
+    const resp = await fetch(path, {{method: 'POST'}});
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.error || 'request failed');
+    btn.textContent = 'Queued (' + (data.count || 1) + ')';
+    setTimeout(() => location.reload(), 30000);
+  }} catch (e) {{ alert('Passive collection failed: ' + e.message); btn.textContent = label; }}
+  finally {{ setTimeout(() => {{ btn.disabled = false; btn.textContent = label; }}, 3000); }}
+}}
+
 async function dismissShadow(id) {{
   if (!confirm('Dismiss this finding? It will reappear if rediscovered.')) return;
   const resp = await fetch('/api/fleet/shadow/dismiss/' + id, {{method: 'POST'}});
@@ -8182,17 +8309,18 @@ function renderInventory() {{
   else if (_invStatus === 'all') rows = activeItems;
   else                         rows = activeItems.filter(i => i.approval_status === _invStatus);
 
-  // Deduplicate by (service, reporter_hostname) — collapse multiple IPs for same service into one row
+  // Deduplicate only like-for-like observations. Multiple CDN addresses for one
+  // service stay summarized, but network, local, and DNS observations never mix.
   const _invGroups = {{}};
   for (const item of rows) {{
-    const key = (item.service||'') + '||' + (item.reporter_hostname||'');
+    const key = (item.source||'') + '||' + (item.service||'') + '||' + (item.reporter_hostname||'');
     if (!_invGroups[key]) _invGroups[key] = [];
     _invGroups[key].push(item);
   }}
   const _statusPriority = {{unapproved:0, under_review:1, approved:2}};
   rows = Object.values(_invGroups).map(items => {{
     items.sort((a,b) => (_statusPriority[a.approval_status]||0) - (_statusPriority[b.approval_status]||0));
-    return Object.assign({{}}, items[0], {{_endpointCount: items.length}});
+    return Object.assign({{}}, items[0], {{_endpointCount: items.length, _endpoints: items}});
   }});
 
   const el = document.getElementById('inv-body');
@@ -8212,9 +8340,16 @@ function renderInventory() {{
     // For network discoveries host is the remote IP — show IP with agent as secondary label.
     const isNetwork = !isLocalHost && item.host && item.host !== item.reporter_hostname;
     const cnt = item._endpointCount || 1;
+    const formatEndpoint = (host, port) => {{
+      const displayHost = host && host.includes(':') ? '[' + host + ']' : host;
+      return displayHost + (port ? ':' + port : '');
+    }};
     const hostDisplay = isLocalHost
       ? (item.reporter_hostname || 'local')
-      : (cnt > 1 ? cnt + ' endpoints' : item.host);
+      : (cnt > 1 ? cnt + ' network endpoints' : formatEndpoint(item.host, item.port));
+    const endpointDetails = cnt > 1 && isNetwork
+      ? `<details style="margin-top:4px;font-size:10px;color:#6B7280"><summary style="cursor:pointer">View observed endpoints</summary><div style="margin-top:3px;word-break:break-all">${{item._endpoints.map(endpoint => esc(formatEndpoint(endpoint.host, endpoint.port))).join('<br>')}}</div></details>`
+      : '';
     const agentLabel = isNetwork
       ? `<div style="font-size:10px;color:#9CA3AF;margin-top:1px">via ${{esc(item.reporter_hostname||'')}} agent</div>`
       : '';
@@ -8250,7 +8385,7 @@ function renderInventory() {{
     }}
     return `<tr style="${{isFP ? 'opacity:0.55' : ''}}">
       <td style="font-size:16px">${{icon}}</td>
-      <td style="color:#111827;font-weight:600">${{esc(hostDisplay)}}${{item.port ? ':'+item.port : ''}}${{agentLabel}}</td>
+      <td style="color:#111827;font-weight:600">${{esc(hostDisplay)}}${{agentLabel}}${{endpointDetails}}</td>
       <td style="color:#6B7280">${{esc(item.service||item.source)}}</td>
       <td style="color:#6B7280;font-size:12px">${{esc(models)}}</td>
       <td style="color:#6B7280;font-size:11px">${{esc(item.reporter_hostname||'')}}</td>

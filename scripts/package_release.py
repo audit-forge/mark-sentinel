@@ -12,7 +12,7 @@ from pathlib import Path, PurePosixPath
 
 _RUNTIME_DIRECTORIES = ('profiles',)
 _SOURCE_FILES = (
-    'agent.py', 'audit.py', 'arckon_version.py', 'discovery.py',
+    'agent.py', 'audit.py', 'arckon_version.py', 'discovery.py', 'network_inventory.py',
     'storage.py', 'aibom_generator.py', 'eu_ai_act_report.py',
     'requirements.txt', 'install.sh', 'install.ps1',
 )
