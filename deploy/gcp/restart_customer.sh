@@ -7,6 +7,7 @@ set -euo pipefail
 CUSTOMER_ID="$1"
 CONTAINER_NAME="sentinel-${CUSTOMER_ID}"
 DATA_DIR="/opt/sentinel-data/${CUSTOMER_ID}"
+SPEND_SECRET_DIR="${SENTINEL_SPEND_SECRET_ROOT:-/opt/sentinel-data/.spend-secrets}/${CUSTOMER_ID}/spend"
 HOST_LICENSES_DIR="${HOST_LICENSES_DIR:-/opt/licenses}"
 LICENSE_FILE="${HOST_LICENSES_DIR}/${CUSTOMER_ID}/license.json"
 
@@ -14,6 +15,11 @@ if [ ! -d "$DATA_DIR" ]; then
   echo "ERROR: data dir $DATA_DIR not found" >&2
   exit 1
 fi
+
+# Persist spend-provider keys outside the customer data mount. Each customer
+# receives only its own directory; the container never sees another tenant's
+# secrets.
+install -d -o 999 -g 999 -m 0700 "$SPEND_SECRET_DIR"
 
 AGENT_TOKEN=$(cat "${DATA_DIR}/agent_token.txt" 2>/dev/null || true)
 if [ -z "$AGENT_TOKEN" ]; then
@@ -74,6 +80,7 @@ docker run -d \
   -e "SENTINEL_TRUSTED_PROXY_TOKEN=${PROXY_TOKEN}" \
   ${LICENSE_MOUNT} \
   -v "${DATA_DIR}:/app/data" \
+  -v "${SPEND_SECRET_DIR}:/opt/sentinel-secrets/spend" \
   mark-sentinel:latest \
   python3 server.py --no-browser --port 7331
 

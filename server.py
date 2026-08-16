@@ -66,7 +66,7 @@ import threading
 import time
 import webbrowser
 from collections import defaultdict
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 from urllib.parse import unquote, urlparse
 
@@ -288,6 +288,97 @@ def _content_length(headers) -> int:
         return max(0, int(headers.get('Content-Length', 0)))
     except (ValueError, TypeError):
         return 0
+
+
+_SPEND_SECRET_ROOT = Path(os.environ.get('SENTINEL_SPEND_SECRET_DIR', '/opt/sentinel-secrets/spend'))
+
+
+def _spend_customer_dir(customer_id: str) -> Path:
+    """Return the per-customer directory used by this customer's AgentStore."""
+    return ROOT / 'data' / 'customers' / customer_id
+
+
+def _spend_config_path(customer_id: str) -> Path:
+    return _spend_customer_dir(customer_id) / 'spend_config.json'
+
+
+def _spend_budget_path(customer_id: str) -> Path:
+    return _spend_customer_dir(customer_id) / 'spend_budget.json'
+
+
+def _spend_fetch_state_path(customer_id: str) -> Path:
+    return _spend_customer_dir(customer_id) / 'spend_last_fetch.txt'
+
+
+def _spend_secret_dir(customer_id: str) -> Path:
+    # Hash this path component so no user-controlled string can influence it.
+    import hashlib
+    return _SPEND_SECRET_ROOT / hashlib.sha256(customer_id.encode()).hexdigest()
+
+
+def _load_spend_config(customer_id: str) -> dict:
+    """Load the redacted AI spend provider configuration from disk.
+
+    The config contains only redacted key entries (key_hash + key_last4 +
+    api_key_env / api_key_file). Full keys are never stored in this file. This
+    function returns the redacted config as-is; key resolution happens at
+    fetch time via connectors.key_store.resolve_key().
+    """
+    from connectors import key_store
+    return key_store.load_config(_spend_config_path(customer_id))
+
+
+def _fetch_all_spend(config: dict, days: int) -> list[dict]:
+    """Fetch spend records from all configured providers, tagging each record
+    with the client_org_id of the key that produced it."""
+    from datetime import date, timedelta
+    from connectors import key_store
+    from connectors.openai_cost_connector import OpenAICostConnector
+    from connectors.anthropic_cost_connector import AnthropicCostConnector
+    from connectors.gemini_cost_connector import GeminiCostConnector
+    from connectors.ollama_cost_connector import OllamaCostConnector
+
+    end = date.today()
+    start = end - timedelta(days=days - 1)
+    all_records: list = []
+
+    mapping = {
+        'openai': OpenAICostConnector,
+        'anthropic': AnthropicCostConnector,
+        'gemini': GeminiCostConnector,
+        'ollama': OllamaCostConnector,
+    }
+
+    redacted_keys = key_store.config_to_redacted_keys(config)
+    for rec in redacted_keys:
+        provider = rec.provider
+        if provider not in mapping:
+            continue
+        cls = mapping[provider]
+        try:
+            if provider == 'ollama':
+                connector = cls(base_url='http://localhost:11434')
+            else:
+                full_key = key_store.resolve_key(rec)
+                if not full_key:
+                    log.warning('spend fetch: no resolvable key for %s/%s',
+                                provider, rec.client_org_id)
+                    continue
+                connector = cls(api_key=full_key)
+                del full_key
+            records = connector.fetch_usage(start, end)
+            for r in records:
+                d = r.to_dict()
+                d['client_org_id'] = rec.client_org_id
+                d['key_id'] = rec.key_hash[:16]
+                d['key_label'] = rec.label
+                d['key_last4'] = rec.key_last4
+                all_records.append(d)
+        except Exception as e:
+            log.warning('spend fetch failed for %s/%s: %s',
+                        provider, rec.client_org_id, e)
+
+    return all_records
 
 
 def _agent_token() -> str:
@@ -1197,7 +1288,9 @@ class _Handler(http.server.BaseHTTPRequestHandler):
     # here — that view spans every client org for the MSP and must stay
     # admin-only.
     _CLIENT_VIEWER_ALLOWED_EXACT = frozenset({'/', '/api/status', '/api/devices', '/api/maintenance-notice',
-                                              '/api/fleet/network-assets'})
+                                              '/api/fleet/network-assets', '/api/spend/summary',
+                                              '/api/spend/by-model', '/api/spend/by-provider',
+                                              '/api/spend/daily'})
     _CLIENT_VIEWER_ALLOWED_PREFIX = ('/api/fleet/report',)
 
     def _client_viewer_gate(self, path: str) -> bool:
@@ -1218,6 +1311,13 @@ class _Handler(http.server.BaseHTTPRequestHandler):
     def _store(self):
         user = self._session_user()
         return _get_store(user['customer_id'] if user else 'default')
+
+    def _spend_customer_id(self) -> str:
+        """Authenticated customer boundary for all spend config and secrets."""
+        user = self._session_user()
+        if not user or not user.get('customer_id'):
+            raise _TenantScopeError('spend access requires an authenticated customer')
+        return user['customer_id']
 
     def _check_dashboard_auth(self) -> bool:
         return self._session_user() is not None
@@ -1384,6 +1484,13 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             '/api/branding':               self._api_get_branding,
             '/api/psa/config':             self._api_get_psa_config,
             '/api/wiki/config':            self._api_get_wiki_config,
+            '/api/spend/summary':          self._api_spend_summary,
+            '/api/spend/by-model':         self._api_spend_by_model,
+            '/api/spend/by-provider':      self._api_spend_by_provider,
+            '/api/spend/daily':            self._api_spend_daily,
+            '/api/spend/by-client-org':    self._api_spend_by_client_org,
+            '/api/spend/by-api-key':       self._api_spend_by_api_key,
+            '/api/spend/keys':             self._api_spend_keys_list,
             '/download/shortcut': self._serve_shortcut,
         }
         if path in static:
@@ -1623,6 +1730,14 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         elif path.startswith('/api/fleet/risk-register/override/') and path.endswith('/delete'):
             check_id = path[len('/api/fleet/risk-register/override/'):-len('/delete')]
             self._api_rr_override_delete(check_id)
+        elif path == '/api/spend/fetch':
+            self._api_spend_fetch()
+        elif path == '/api/spend/budget':
+            self._api_spend_set_budget()
+        elif path == '/api/spend/keys':
+            self._api_spend_keys_add()
+        elif path == '/api/spend/keys/remove':
+            self._api_spend_keys_remove()
         else:
             self._not_found()
 
@@ -1733,7 +1848,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         self.send_response(302)
         self.send_header('Set-Cookie',
             'sentinel_session=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0')
-        if os.environ.get('SENTINEL_TRUSTED_PROXY'):
+        if os.environ.get('SENTINEL_TRUSTED_PROXY_TOKEN'):
             # Cloud mode: clear admin-panel JWT via its logout endpoint,
             # which then redirects to the clean /login page.
             host = self.headers.get('Host', '').split(':')[0]
@@ -2820,7 +2935,7 @@ load();
         if store.get_device(device_id) is None:
             self._json({'error': 'device not found'}, 404)
             return
-        cmd_id = _get_store_for_device(device_id).enqueue_command(device_id, 'update_self')
+        cmd_id = store.enqueue_command(device_id, 'update_self')
         self._json({'status': 'queued', 'device_id': device_id, 'command_id': cmd_id})
 
     def _api_fleet_update_all(self):
@@ -2831,7 +2946,7 @@ load();
         for d in devices:
             did = d.get('device_id', '')
             if did:
-                _get_store_for_device(did).enqueue_command(did, 'update_self')
+                store.enqueue_command(did, 'update_self')
                 queued.append(did)
         self._json({'status': 'queued', 'count': len(queued), 'devices': queued})
 
@@ -2856,7 +2971,7 @@ load();
         for d in devices:
             did = d.get('device_id', '')
             if did:
-                _get_store_for_device(did).enqueue_command(did, f'set_config:{cmd_payload}')
+                store.enqueue_command(did, f'set_config:{cmd_payload}')
                 queued.append(did)
         log.info('Token push queued for %d devices (customer %s)', len(queued), cust.get('id'))
         self._json({'status': 'queued', 'device_count': len(queued)})
@@ -3633,7 +3748,9 @@ load();
             for item in items:
                 s = item.get('approval_status', 'unapproved')
                 counts[s] = counts.get(s, 0) + 1
-            self._json({'items': items, 'counts': counts})
+            user = self._session_user()
+            self._json({'items': items, 'counts': counts,
+                        'current_user': user.get('email', '') if user else ''})
         except Exception as e:
             log.error('inventory error: %s', e, exc_info=True)
             self._json({'error': str(e)}, 500)
@@ -3734,6 +3851,317 @@ load();
         except Exception as e:
             log.error('shadow CSV error: %s', e, exc_info=True)
             self._json({'error': str(e)}, 500)
+
+    # ── AI spend tracking API ─────────────────────────────────────────────────
+
+    def _api_spend_summary(self):
+        """GET /api/spend/summary?days=30 — total cost and token usage.
+
+        Scoped: a client_viewer sees only its own client org; an MSP admin
+        sees all client orgs (or one if ?client_org=<id> is passed)."""
+        try:
+            days = self._spend_days_param()
+            org = self._scoped_client_org()
+            summary = self._store().get_ai_spend_summary(days=days, client_org_id=org)
+            self._json(summary)
+        except _TenantScopeError:
+            self._json({'error': 'invalid client-org scope'}, 403)
+        except Exception as e:
+            log.error('spend summary error: %s', e, exc_info=True)
+            self._json({'error': 'spend summary unavailable'}, 500)
+
+    def _api_spend_by_model(self):
+        """GET /api/spend/by-model?days=30 — spend broken down by model."""
+        try:
+            days = self._spend_days_param()
+            org = self._scoped_client_org()
+            summary = self._store().get_ai_spend_summary(days=days, client_org_id=org)
+            self._json({'days': days, 'items': summary.get('by_model', [])})
+        except _TenantScopeError:
+            self._json({'error': 'invalid client-org scope'}, 403)
+        except Exception as e:
+            log.error('spend by-model error: %s', e, exc_info=True)
+            self._json({'error': 'spend by-model unavailable'}, 500)
+
+    def _api_spend_by_provider(self):
+        """GET /api/spend/by-provider?days=30 — spend broken down by provider."""
+        try:
+            days = self._spend_days_param()
+            org = self._scoped_client_org()
+            summary = self._store().get_ai_spend_summary(days=days, client_org_id=org)
+            self._json({'days': days, 'items': summary.get('by_provider', [])})
+        except _TenantScopeError:
+            self._json({'error': 'invalid client-org scope'}, 403)
+        except Exception as e:
+            log.error('spend by-provider error: %s', e, exc_info=True)
+            self._json({'error': 'spend by-provider unavailable'}, 500)
+
+    def _api_spend_daily(self):
+        """GET /api/spend/daily?days=30 — daily spend trend."""
+        try:
+            days = self._spend_days_param()
+            org = self._scoped_client_org()
+            summary = self._store().get_ai_spend_summary(days=days, client_org_id=org)
+            self._json({'days': days, 'items': summary.get('daily', [])})
+        except _TenantScopeError:
+            self._json({'error': 'invalid client-org scope'}, 403)
+        except Exception as e:
+            log.error('spend daily error: %s', e, exc_info=True)
+            self._json({'error': 'spend daily unavailable'}, 500)
+
+    def _api_spend_by_client_org(self):
+        """GET /api/spend/by-client-org?days=30 — spend per MSP client org.
+
+        MSP admin only: aggregates every client org under this customer. A
+        client_viewer is denied by the role check in _do_GET_inner."""
+        try:
+            days = self._spend_days_param()
+            items = self._store().get_ai_spend_by_client_org(days=days)
+            self._json({'days': days, 'items': items})
+        except Exception as e:
+            log.error('spend by-client-org error: %s', e, exc_info=True)
+            self._json({'error': 'spend by-client-org unavailable'}, 500)
+
+    def _api_spend_by_api_key(self):
+        """GET /api/spend/by-api-key?days=30 — spend per configured API key.
+
+        Returns redacted key metadata (label + last4) only; never the full key.
+        MSP admin only."""
+        try:
+            from connectors import key_store
+            days = self._spend_days_param()
+            config = _load_spend_config(self._spend_customer_id())
+            configured = {
+                key_store.public_view(rk)['key_id']: key_store.public_view(rk)
+                for rk in key_store.config_to_redacted_keys(config)
+            }
+            spend_rows = self._store().get_ai_spend_by_key(days=days)
+            by_key = {row['key_id']: row for row in spend_rows}
+            items = []
+            for key_id, view in configured.items():
+                row = by_key.pop(key_id, {})
+                items.append({**view, 'spend_usd': row.get('spend_usd', 0.0),
+                              'total_tokens': row.get('total_tokens', 0)})
+            self._json({'days': days, 'items': items})
+        except Exception as e:
+            log.error('spend by-api-key error: %s', e, exc_info=True)
+            self._json({'error': 'spend by-api-key unavailable'}, 500)
+
+    def _spend_days_param(self) -> int:
+        """Parse and clamp the `days` query parameter for spend endpoints."""
+        from urllib.parse import parse_qs, urlparse as _up
+        try:
+            query = parse_qs(_up(self.path).query)
+            raw = query.get('days', ['30'])[0]
+            days = int(raw)
+        except (ValueError, TypeError, IndexError):
+            days = 30
+        allowed = (7, 30, 90, 365)
+        if days not in allowed:
+            # Pick the nearest allowed bucket, capped at 365.
+            days = min(allowed, key=lambda x: abs(x - days))
+            if days > 365:
+                days = 365
+        return days
+
+    def _api_spend_fetch(self):
+        """POST /api/spend/fetch — trigger a fetch from configured providers.
+
+        Only admins may trigger fetches. A simple per-day guard prevents
+        accidental API hammering; repeated calls on the same calendar day reuse
+        the stored data unless force=1.
+        """
+        try:
+            body = self._read_json_body(default={})
+            days = body.get('days', 7)
+            try:
+                days = int(days)
+            except (ValueError, TypeError):
+                days = 7
+            if days < 1 or days > 365:
+                days = 7
+            force = bool(body.get('force'))
+
+            customer_id = self._spend_customer_id()
+            last_fetch_path = _spend_fetch_state_path(customer_id)
+            today = str(date.today())
+            if not force and last_fetch_path.exists() and last_fetch_path.read_text().strip() == today:
+                self._json({'fetched': 0, 'skipped': True, 'reason': 'already fetched today; use force=1 to override'})
+                return
+
+            config = _load_spend_config(customer_id)
+            records = _fetch_all_spend(config, days)
+            count = self._store().upsert_ai_spend(records)
+
+            last_fetch_path.parent.mkdir(parents=True, exist_ok=True)
+            last_fetch_path.write_text(today, encoding='utf-8')
+            self._json({'fetched': count, 'providers': list(config.get('providers', {}).keys())})
+        except json.JSONDecodeError:
+            self._json({'error': 'invalid JSON'}, 400)
+        except Exception as e:
+            log.error('spend fetch error: %s', e, exc_info=True)
+            self._json({'error': 'spend fetch failed'}, 500)
+
+    def _api_spend_keys_list(self):
+        """GET /api/spend/keys — list configured API keys (redacted only).
+
+        Returns label, provider, client_org_id, key_last4, and a key_hash
+        prefix. Never returns the full key, the env var name, or the secret
+        file path."""
+        try:
+            from connectors import key_store
+            config = _load_spend_config(self._spend_customer_id())
+            redacted = key_store.config_to_redacted_keys(config)
+            items = [key_store.public_view(rk) for rk in redacted]
+            self._json({'items': items})
+        except Exception as e:
+            log.error('spend keys list error: %s', e, exc_info=True)
+            self._json({'error': 'spend keys list unavailable'}, 500)
+
+    def _api_spend_keys_add(self):
+        """POST /api/spend/keys — add or rotate a provider API key for a client org.
+
+        Accepts {provider, client_org_id, label, api_key, persist?}. The full
+        api_key is used only to derive a hash + last4 and (optionally) write a
+        0600 secret file. The full key is never written to spend_config.json and
+        never returned by any API."""
+        try:
+            from connectors import key_store
+            body = self._read_json_body(default={})
+            provider = str(body.get('provider', '')).strip().lower()
+            client_org_id = str(body.get('client_org_id', '')).strip()
+            label = str(body.get('label', '')).strip()[:80]
+            full_key = str(body.get('api_key', ''))
+            persist = bool(body.get('persist', True))
+
+            if not provider or provider not in ('openai', 'anthropic', 'gemini', 'ollama'):
+                self._json({'error': 'invalid provider'}, 400)
+                return
+            if not full_key or len(full_key) < 8:
+                self._json({'error': 'api_key too short'}, 400)
+                return
+            if not label:
+                label = f"{provider} ({client_org_id or 'default'})"
+
+            # Verify the client_org_id belongs to this MSP customer (if orgs exist).
+            if client_org_id:
+                try:
+                    org = _get_registry().get_client_org(client_org_id)
+                    user = self._session_user()
+                    if not org or not org.get('active'):
+                        self._json({'error': 'unknown or inactive client org'}, 400)
+                        return
+                    if user and org.get('customer_id') != user.get('customer_id'):
+                        self._json({'error': 'client org does not belong to this customer'}, 403)
+                        return
+                except Exception:
+                    self._json({'error': 'client org validation failed'}, 400)
+                    return
+
+            api_key_file = ""
+            api_key_env = ""
+            if persist:
+                # Write the full key to a 0600 secret file named by its hash.
+                secret_path = key_store.write_secret_file(
+                    _spend_secret_dir(self._spend_customer_id()), full_key)
+                api_key_file = str(secret_path)
+            else:
+                # Expect the operator to provide the key via env var; store a
+                # placeholder env name derived from the label.
+                api_key_env = f"SPEND_{provider.upper()}_{client_org_id.upper() or 'DEFAULT'}_KEY"
+
+            # Build the redacted record. full_key is discarded after this.
+            redacted = key_store.redact(
+                full_key, provider, client_org_id, label,
+                api_key_env=api_key_env, api_key_file=api_key_file,
+            )
+            del full_key
+
+            customer_id = self._spend_customer_id()
+            config = _load_spend_config(customer_id)
+            key_store.upsert_key(config, redacted)
+            key_store.save_config(_spend_config_path(customer_id), config)
+
+            self._json({'ok': True, 'key': key_store.public_view(redacted)})
+        except json.JSONDecodeError:
+            self._json({'error': 'invalid JSON'}, 400)
+        except Exception as e:
+            log.error('spend keys add error: %s', e, exc_info=True)
+            self._json({'error': 'spend key add failed'}, 500)
+
+    def _api_spend_keys_remove(self):
+        """POST /api/spend/keys/remove — remove a configured API key.
+
+        Removes the redacted config entry and (if present) the secret file.
+        Never returns the full key."""
+        try:
+            from connectors import key_store
+            body = self._read_json_body(default={})
+            provider = str(body.get('provider', '')).strip().lower()
+            key_id = str(body.get('key_id', '')).strip()
+            if not provider or len(key_id) < 8:
+                self._json({'error': 'provider and key_id required'}, 400)
+                return
+
+            customer_id = self._spend_customer_id()
+            config = _load_spend_config(customer_id)
+            redacted = key_store.config_to_redacted_keys(config)
+            targets = [r for r in redacted
+                       if r.provider == provider and r.key_hash.startswith(key_id)]
+            if len(targets) != 1:
+                self._json({'error': 'key not found'}, 404)
+                return
+            target = targets[0]
+            if target and target.api_key_file:
+                try:
+                    Path(target.api_key_file).unlink()
+                except OSError:
+                    pass
+            key_store.remove_key(config, provider, key_id)
+            key_store.save_config(_spend_config_path(customer_id), config)
+            self._json({'ok': True})
+        except json.JSONDecodeError:
+            self._json({'error': 'invalid JSON'}, 400)
+        except Exception as e:
+            log.error('spend keys remove error: %s', e, exc_info=True)
+            self._json({'error': 'spend key remove failed'}, 500)
+
+    def _api_spend_set_budget(self):
+        """POST /api/spend/budget — set budget alert thresholds."""
+        try:
+            body = self._read_json_body(default={})
+            daily_usd = body.get('daily_usd')
+            per_model_usd = body.get('per_model_usd')
+            try:
+                daily_usd = None if daily_usd is None else max(0.0, float(daily_usd))
+                per_model_usd = None if per_model_usd is None else max(0.0, float(per_model_usd))
+            except (ValueError, TypeError):
+                self._json({'error': 'budget values must be numeric'}, 400)
+                return
+            safe = {}
+            if daily_usd is not None:
+                safe['daily_usd'] = round(daily_usd, 2)
+            if per_model_usd is not None:
+                safe['per_model_usd'] = round(per_model_usd, 2)
+            path = _spend_budget_path(self._spend_customer_id())
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps(safe, indent=2), encoding='utf-8')
+            self._json({'ok': True, 'budget': safe})
+        except json.JSONDecodeError:
+            self._json({'error': 'invalid JSON'}, 400)
+        except Exception as e:
+            log.error('spend budget error: %s', e, exc_info=True)
+            self._json({'error': 'spend budget update failed'}, 500)
+
+    def _read_json_body(self, default=None) -> dict:
+        """Read and parse a JSON POST body; return default on empty/missing."""
+        cl = _content_length(self.headers)
+        if not cl:
+            return default if default is not None else {}
+        raw = self.rfile.read(cl)
+        if not raw:
+            return default if default is not None else {}
+        return json.loads(raw.decode('utf-8'))
 
     def _api_approve_service_globally(self):
         """POST /api/fleet/inventory/approve-service — globally approve or unapprove a service name."""
@@ -6177,12 +6605,12 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
       {'<button class="sb-item" id="nav-reseller" onclick="navTo(\'reseller\')">&#127970; MSP View</button>' if current_user_is_reseller else ''}
       <div class="sb-group">Fleet</div>
       <button class="sb-item" id="nav-shadow" onclick="navTo('shadow')">&#9888; Shadow AI</button>
-      <button class="sb-item" id="nav-network-assets" onclick="navTo('network-assets')">&#128421; Network Assets</button>
+      <button class="sb-item" id="nav-inventory" onclick="navTo('inventory')">&#129302; AI Asset Inventory</button>
+      <button class="sb-item" id="nav-spend" onclick="navTo('spend')">&#128176; AI Spend</button>
       <button class="sb-item" id="nav-alerts" onclick="navTo('alerts')">&#128276; Alerts <span id="alert-badge" style="display:none;background:#DC2626;color:#fff;border-radius:10px;font-size:10px;padding:1px 6px;margin-left:4px;font-weight:700"></span></button>
       <button class="sb-item" id="nav-mcp" onclick="navTo('mcp')">&#128279; MCP Servers</button>
       <div class="sb-group">Security</div>
       <button class="sb-item" id="nav-riskregister" onclick="navTo('riskregister')">&#128203; Risk Register</button>
-      <button class="sb-item" id="nav-inventory" onclick="navTo('inventory')">&#128196; Asset Inventory</button>
       <div class="sb-group">Operations</div>
       <button class="sb-item" id="nav-schedules" onclick="navTo('schedules')">&#128337; Schedules</button>
       <button class="sb-item" id="nav-discovery" onclick="navTo('discovery')">&#128270; Discovery</button>
@@ -6316,20 +6744,6 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
   {_build_shadow_section(shadow, ts_now)}
   </div>
 
-  <div class="page" id="page-network-assets">
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;gap:8px;flex-wrap:wrap">
-      <div><div class="sec-hdr" style="margin:0;padding:0">Network Asset Inventory</div>
-      <div style="font-size:12px;color:#6B7280;margin-top:4px">Passive ARP and IPv6 neighbor-cache observations only. No probes or reverse DNS.</div></div>
-      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-        <select id="network-asset-device" class="form-select" style="font-size:12px;padding:4px">{asset_options}</select>
-        <button class="scan-btn" onclick="discoverNetworkAssets(false, this)">Collect selected</button>
-        <button class="scan-btn" onclick="discoverNetworkAssets(true, this)" style="color:#4F46E5">Collect all agents</button>
-      </div>
-    </div>
-    <table class="dev-table"><thead><tr><th>IP address</th><th>MAC address</th><th>Hostname</th><th>Interface</th><th>Source</th><th>Reporter</th><th>Last seen</th></tr></thead>
-    <tbody>{asset_rows}</tbody></table>
-  </div>
-
   <div class="page" id="page-alerts">
   <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:8px">
     <div>
@@ -6411,6 +6825,86 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
   </div>
   <div id="inv-body">
     <div style="color:#6B7280;font-size:13px;padding:16px 0">Loading inventory…</div>
+  </div>
+  </div>
+
+  <div class="page" id="page-spend">
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:8px">
+    <div>
+      <div class="sec-hdr" style="margin:0;padding:0">AI Spend</div>
+      <div style="font-size:12px;color:#6B7280;margin-top:4px">Token usage and estimated cost across your AI providers · updated on fetch</div>
+    </div>
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+      <select id="spend-days" class="form-select" style="font-size:12px;padding:4px 8px" onchange="loadSpend()">
+        <option value="7">Last 7 days</option>
+        <option value="30" selected>Last 30 days</option>
+        <option value="90">Last 90 days</option>
+        <option value="365">Last 12 months</option>
+      </select>
+      <button id="spend-refresh-btn" class="scan-btn" onclick="loadSpend(this)" style="font-size:12px;color:#4F46E5;border-color:#E5E7EB">&#8635; Refresh</button>
+      <button id="spend-fetch-btn" class="scan-btn" onclick="triggerSpendFetch(this)" style="font-size:12px;color:#16A34A;border-color:#238636">&#128230; Fetch Latest</button>
+    </div>
+  </div>
+
+  <div id="spend-summary-cards" style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:16px"></div>
+  <script>window._spendIsMsp = {('true' if current_user_is_msp else 'false')};</script>
+
+  <div style="margin-bottom:20px">
+    <div style="font-size:12px;font-weight:600;color:#374151;text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">Spend by Provider</div>
+    <div id="spend-by-provider" style="display:flex;flex-direction:column;gap:6px">
+      <div style="color:#9CA3AF;font-size:13px;padding:12px 0">Loading…</div>
+    </div>
+  </div>
+
+  <div style="margin-bottom:20px">
+    <div style="font-size:12px;font-weight:600;color:#374151;text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">Spend by Model</div>
+    <table class="dev-table" style="width:100%">
+      <thead><tr><th>Provider</th><th>Model</th><th style="text-align:right">Input tokens</th><th style="text-align:right">Output tokens</th><th style="text-align:right">Total tokens</th><th style="text-align:right">Cost (USD)</th></tr></thead>
+      <tbody id="spend-by-model-body"><tr><td colspan="6" style="color:#9CA3AF;font-size:13px;padding:12px 0">Loading…</td></tr></tbody>
+    </table>
+  </div>
+
+  <div style="margin-bottom:20px">
+    <div style="font-size:12px;font-weight:600;color:#374151;text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">Daily Spend Trend</div>
+    <div id="spend-daily" style="display:flex;flex-direction:column;gap:4px">
+      <div style="color:#9CA3AF;font-size:13px;padding:12px 0">Loading…</div>
+    </div>
+  </div>
+
+  {('<div id="spend-msp-section" style="display:none;margin-bottom:20px;border-top:1px solid #F3F4F6;padding-top:16px">' if current_user_is_msp else '')}
+  {('    <div style="font-size:12px;font-weight:600;color:#374151;text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">Spend by Client Org <span style="font-weight:400;color:#9CA3AF;text-transform:none;letter-spacing:0;margin-left:6px">(MSP view — not visible to client viewers)</span></div>' if current_user_is_msp else '')}
+  {('    <table class="dev-table" style="width:100%"><thead><tr><th>Client Org</th><th style="text-align:right">Providers</th><th style="text-align:right">Models</th><th style="text-align:right">Total tokens</th><th style="text-align:right">Cost (USD)</th></tr></thead><tbody id="spend-by-client-org-body"><tr><td colspan="5" style="color:#9CA3AF;font-size:13px;padding:12px 0">Loading…</td></tr></tbody></table>' if current_user_is_msp else '')}
+  {('</div>' if current_user_is_msp else '')}
+
+  <div id="spend-keys-section" style="display:none;margin-bottom:20px;border-top:1px solid #F3F4F6;padding-top:16px">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;flex-wrap:wrap;gap:6px">
+      <div style="font-size:12px;font-weight:600;color:#374151;text-transform:uppercase;letter-spacing:.05em">API Keys <span style="font-weight:400;color:#9CA3AF;text-transform:none;letter-spacing:0;margin-left:6px">(redacted — full keys are never shown or stored in the config)</span></div>
+      <button class="scan-btn" onclick="showAddKeyForm()" style="font-size:12px;color:#4F46E5;border-color:#E5E7EB">+ Add / Rotate Key</button>
+    </div>
+    <table class="dev-table" style="width:100%">
+      <thead><tr><th>Provider</th>{'<th>Client Org</th>' if current_user_is_msp else ''}<th>Label</th><th>Key (redacted)</th><th style="text-align:right">Spend (USD)</th><th></th></tr></thead>
+      <tbody id="spend-keys-body"><tr><td colspan="6" style="color:#9CA3AF;font-size:13px;padding:12px 0">Loading…</td></tr></tbody>
+    </table>
+
+    <div id="spend-add-key-form" style="display:none;margin-top:12px;padding:12px;background:#F9FAFB;border:1px solid #E5E7EB;border-radius:6px">
+      <div style="font-size:12px;font-weight:600;margin-bottom:8px">Add / Rotate API Key</div>
+      <div style="display:flex;flex-direction:column;gap:6px">
+        <select id="spend-key-provider" class="form-select" style="font-size:12px;padding:4px" onchange="updateSpendKeyHelp()">
+          <option value="openai">OpenAI</option>
+          <option value="anthropic">Anthropic</option>
+          <option value="gemini">Gemini</option>
+          <option value="ollama">Ollama</option>
+        </select>
+        <div id="spend-key-help" style="font-size:11px;color:#6B7280;background:#F9FAFB;border:1px solid #E5E7EB;border-radius:4px;padding:8px 10px;line-height:1.5"></div>
+        {('<input id="spend-key-org" class="form-input" placeholder="Client org ID (leave blank for unscoped)" style="font-size:12px;padding:6px">' if current_user_is_msp else '')}
+        <input id="spend-key-label" class="form-input" placeholder="Label (e.g. 'Production key')" style="font-size:12px;padding:6px">
+        <input id="spend-key-value" type="password" class="form-input" placeholder="API key (stored hashed; never shown again)" style="font-size:12px;padding:6px">
+        <div style="display:flex;gap:6px">
+          <button class="scan-btn" onclick="submitAddKey()" style="font-size:12px;color:#16A34A;border-color:#238636">Save</button>
+          <button class="scan-btn" onclick="hideAddKeyForm()" style="font-size:12px;color:#6B7280;border-color:#E5E7EB">Cancel</button>
+        </div>
+      </div>
+    </div>
   </div>
   </div>
 
@@ -6966,6 +7460,7 @@ function navTo(page) {{
   if (page === 'siem') {{ loadSiemConfig(); loadPsaClientOrgs(); loadPsaConfig(); }}
   if (page === 'users') {{ loadUsers(); loadCustomerInfo(); }}
   if (page === 'alerts') {{ loadActiveIssues(); loadAlertEvents(); }}
+  if (page === 'spend') {{ loadSpend(); }}
   if (page === 'probe') {{
     const fr = document.getElementById('probe-iframe');
     if (fr && fr.getAttribute('data-loaded') === '0') {{
@@ -6983,7 +7478,7 @@ function navTo(page) {{
 }}
 (function() {{
   const hash = window.location.hash.replace('#', '');
-  const valid = ['overview','shadow','network-assets','alerts','mcp','riskregister','inventory','schedules',
+  const valid = ['overview','shadow','alerts','mcp','riskregister','inventory','spend','schedules',
                  'discovery','findings','reports','siem','settings','users','probe','reseller'];
   if (hash && valid.includes(hash)) {{ navTo(hash); }}
 }})();
@@ -8235,6 +8730,236 @@ async function downloadFleetReport(tier, btn) {{
   }}
 }}
 
+// ── AI Spend ─────────────────────────────────────────────────────────────
+async function loadSpend(btn) {{
+  const daysSel = document.getElementById('spend-days');
+  const days = daysSel ? daysSel.value : 30;
+  const orig = btn ? btn.textContent : '';
+  if (btn) {{ btn.disabled = true; btn.textContent = 'Loading…'; }}
+  try {{
+    const [sumRes, modelRes, provRes, dailyRes] = await Promise.all([
+      fetch('/api/spend/summary?days=' + days),
+      fetch('/api/spend/by-model?days=' + days),
+      fetch('/api/spend/by-provider?days=' + days),
+      fetch('/api/spend/daily?days=' + days),
+    ]);
+    if (!sumRes.ok) throw new Error('spend summary failed');
+    const sum = await sumRes.json();
+    const models = (await modelRes.json()).items || [];
+    const providers = (await provRes.json()).items || [];
+    const daily = (await dailyRes.json()).items || [];
+
+    // Summary cards
+    const cards = document.getElementById('spend-summary-cards');
+    cards.innerHTML = [
+      _spendCard('Total cost', '$' + (sum.total_cost_usd || 0).toFixed(2), '#DC2626'),
+      _spendCard('Total tokens', (sum.total_tokens || 0).toLocaleString(), '#4F46E5'),
+      _spendCard('Input tokens', (sum.input_tokens || 0).toLocaleString(), '#6B7280'),
+      _spendCard('Output tokens', (sum.output_tokens || 0).toLocaleString(), '#6B7280'),
+    ].join('');
+
+    // By provider
+    const provDiv = document.getElementById('spend-by-provider');
+    if (!providers.length) {{
+      provDiv.innerHTML = '<div style="color:#9CA3AF;font-size:13px;padding:12px 0">No spend data yet. Click Fetch Latest to pull from your configured providers.</div>';
+    }} else {{
+      provDiv.innerHTML = providers.map(p =>
+        _spendBar(p.provider, p.cost_usd, p.total_tokens, providers[0].cost_usd || 1)
+      ).join('');
+    }}
+
+    // By model table
+    const modelBody = document.getElementById('spend-by-model-body');
+    if (!models.length) {{
+      modelBody.innerHTML = '<tr><td colspan="6" style="color:#9CA3AF;font-size:13px;padding:12px 0">No model data yet.</td></tr>';
+    }} else {{
+      modelBody.innerHTML = models.map(m =>
+        '<tr><td>' + (m.provider||'') + '</td><td>' + (m.model||'') + '</td>' +
+        '<td style="text-align:right">' + (m.input_tokens||0).toLocaleString() + '</td>' +
+        '<td style="text-align:right">' + (m.output_tokens||0).toLocaleString() + '</td>' +
+        '<td style="text-align:right">' + (m.total_tokens||0).toLocaleString() + '</td>' +
+        '<td style="text-align:right;font-weight:600">$' + (m.cost_usd||0).toFixed(2) + '</td></tr>'
+      ).join('');
+    }}
+
+    // Daily trend
+    const dailyDiv = document.getElementById('spend-daily');
+    if (!daily.length) {{
+      dailyDiv.innerHTML = '<div style="color:#9CA3AF;font-size:13px;padding:12px 0">No daily data yet.</div>';
+    }} else {{
+      const maxCost = Math.max(...daily.map(d => d.cost_usd || 0), 0.01);
+      dailyDiv.innerHTML = daily.map(d =>
+        _spendBar(d.period_date, d.cost_usd, d.total_tokens, maxCost, true)
+      ).join('');
+    }}
+
+    // MSP-only sections: try to load by-client-org and by-api-key. These
+    // 403 for client_viewers, which is the intended scoping — we hide them.
+    loadSpendMspSections(days);
+  }} catch(e) {{
+    document.getElementById('spend-by-provider').innerHTML =
+      '<div style="color:#DC2626;font-size:13px;padding:12px 0">Error loading spend: ' + e + '</div>';
+  }} finally {{
+    if (btn) {{ btn.disabled = false; btn.textContent = orig; }}
+  }}
+}}
+
+async function loadSpendMspSections(days) {{
+  // by-client-org
+  try {{
+    const r = await fetch('/api/spend/by-client-org?days=' + days);
+    if (r.ok) {{
+      const items = (await r.json()).items || [];
+      document.getElementById('spend-msp-section').style.display = 'block';
+      const body = document.getElementById('spend-by-client-org-body');
+      if (!items.length) {{
+        body.innerHTML = '<tr><td colspan="5" style="color:#9CA3AF;font-size:13px;padding:12px 0">No client org data yet.</td></tr>';
+      }} else {{
+        body.innerHTML = items.map(o =>
+          '<tr><td>' + (o.client_org_id || '(unscoped)') + '</td>' +
+          '<td style="text-align:right">' + (o.provider_count||0) + '</td>' +
+          '<td style="text-align:right">' + (o.model_count||0) + '</td>' +
+          '<td style="text-align:right">' + (o.total_tokens||0).toLocaleString() + '</td>' +
+          '<td style="text-align:right;font-weight:600">$' + (o.cost_usd||0).toFixed(2) + '</td></tr>'
+        ).join('');
+      }}
+    }}
+  }} catch(e) {{ /* 403 for client_viewers — expected, leave hidden */ }}
+
+  // by-api-key (keys list + spend)
+  try {{
+    const kr = await fetch('/api/spend/keys');
+    if (kr.ok) {{
+      const keys = (await kr.json()).items || [];
+      document.getElementById('spend-keys-section').style.display = 'block';
+      const body = document.getElementById('spend-keys-body');
+      const isMsp = window._spendIsMsp === true;
+      const colspan = isMsp ? 6 : 5;
+      if (!keys.length) {{
+        body.innerHTML = '<tr><td colspan="' + colspan + '" style="color:#9CA3AF;font-size:13px;padding:12px 0">No API keys configured. Click Add / Rotate Key to add one.</td></tr>';
+      }} else {{
+        body.innerHTML = keys.map(k => {{
+          let row = '<tr><td>' + (k.provider||'') + '</td>';
+          if (isMsp) row += '<td>' + (k.client_org_id || '(unscoped)') + '</td>';
+          row += '<td>' + (k.label||'') + '</td>' +
+            '<td><code style="font-size:11px;background:#F3F4F6;padding:1px 4px;border-radius:3px">…' + (k.key_last4||'') + '</code></td>' +
+            '<td style="text-align:right">$' + (k.spend_usd||0).toFixed(2) + '</td>' +
+            '<td style="text-align:right"><button class="scan-btn" onclick="removeKey(\'' + (k.provider||'') + '\',\'' + (k.key_id||'') + '\')" style="font-size:11px;color:#DC2626;border-color:#FECACA">Remove</button></td></tr>';
+          return row;
+        }}).join('');
+      }}
+    }}
+  }} catch(e) {{ /* 403 for client_viewers — expected */ }}
+}}
+
+function _spendCard(label, value, color) {{
+  return '<div class="inv-count-card"><div class="inv-count-n" style="color:' + color + '">' + value + '</div>' +
+         '<div style="color:#6B7280">' + label + '</div></div>';
+}}
+
+function _spendBar(label, cost, tokens, maxCost, isDaily) {{
+  const pct = Math.max(2, Math.min(100, (cost / (maxCost || 1)) * 100));
+  return '<div style="display:flex;align-items:center;gap:8px;font-size:12px">' +
+    '<div style="min-width:120px;color:#374151">' + label + '</div>' +
+    '<div style="flex:1;background:#F3F4F6;border-radius:4px;height:18px;position:relative;overflow:hidden">' +
+      '<div style="width:' + pct + '%;height:100%;background:#4F46E5;border-radius:4px"></div>' +
+    '</div>' +
+    '<div style="min-width:110px;text-align:right;font-weight:600;color:#374151">$' + (cost||0).toFixed(2) +
+      ' <span style="color:#9CA3AF;font-weight:400">· ' + (tokens||0).toLocaleString() + ' tok</span></div>' +
+  '</div>';
+}}
+
+async function triggerSpendFetch(btn) {{
+  const orig = btn.textContent;
+  btn.disabled = true; btn.textContent = 'Fetching…';
+  try {{
+    const r = await fetch('/api/spend/fetch', {{
+      method: 'POST', headers: {{'Content-Type': 'application/json'}},
+      body: JSON.stringify({{days: 7, force: true}})
+    }});
+    const res = await r.json();
+    if (res.skipped) {{
+      alert('Already fetched today. Click Fetch Latest again with force to override (this is intentional to avoid hammering provider APIs).');
+    }} else {{
+      alert('Fetched ' + (res.fetched || 0) + ' record(s) from: ' + ((res.providers||[]).join(', ') || 'none'));
+    }}
+    loadSpend();
+  }} catch(e) {{
+    alert('Fetch failed: ' + e);
+  }} finally {{
+    btn.disabled = false; btn.textContent = orig;
+  }}
+}}
+
+function showAddKeyForm() {{
+  document.getElementById('spend-add-key-form').style.display = 'block';
+  updateSpendKeyHelp();
+}}
+function hideAddKeyForm() {{
+  document.getElementById('spend-add-key-form').style.display = 'none';
+  document.getElementById('spend-key-value').value = '';
+}}
+
+const _SPEND_KEY_HELP = {{
+  'openai': '<b>OpenAI API key</b><br>' +
+    '1. Sign in at <a href="https://platform.openai.com/" target="_blank">platform.openai.com</a><br>' +
+    '2. Go to <b>API Keys</b> (left menu) → <b>Create new secret key</b><br>' +
+    '3. Copy the <code>sk-...</code> key immediately — OpenAI won\u2019t show it again<br>' +
+    '4. The key needs <b>Usage read</b> scope for spend tracking<br>' +
+    '<span style="color:#9CA3AF">Cost shown here is estimated from token counts × published per-model pricing.</span>',
+  'anthropic': '<b>Anthropic Admin API key</b><br>' +
+    '1. Sign in at <a href="https://console.anthropic.com/" target="_blank">console.anthropic.com</a> and open <b>Settings → Organization</b><br>' +
+    '2. Create an <b>Admin API key</b> with Usage and Cost access<br>' +
+    '3. Paste the <code>sk-ant-admin01-...</code> key here; normal Claude API keys cannot read organization spend<br>' +
+    '<span style="color:#9CA3AF">Arckon records Anthropic\u2019s billed USD cost and token usage. Individual accounts cannot use this API.</span>',
+  'gemini': '<b>Google Gemini API key</b><br>' +
+    '1. Go to <a href="https://aistudio.google.com/app/apikey" target="_blank">aistudio.google.com/app/apikey</a><br>' +
+    '2. Click <b>Create API key</b> and copy it<br>' +
+    '3. The public Gemini API does not expose per-account spend; this connector currently returns $0<br>' +
+    '<span style="color:#9CA3AF">For real cost data, use Google Cloud Billing export or Cloud Monitoring (separate setup).</span>',
+  'ollama': '<b>Ollama (self-hosted or Ollama Cloud)</b><br>' +
+    'Ollama Cloud does not provide an account-wide usage or billing API, so a key cannot import historical spend.<br>' +
+    'Arckon can capture <code>prompt_eval_count</code> and <code>eval_count</code> from each generate/chat response after call telemetry is integrated.<br>' +
+    '<span style="color:#9CA3AF">Self-hosted API spend is $0; Cloud costs require configured model rates and are estimates, not provider-billed totals.</span>',
+}};
+
+function updateSpendKeyHelp() {{
+  const p = document.getElementById('spend-key-provider').value;
+  const el = document.getElementById('spend-key-help');
+  if (el) el.innerHTML = _SPEND_KEY_HELP[p] || '';
+}}
+
+async function submitAddKey() {{
+  const provider = document.getElementById('spend-key-provider').value;
+  const orgEl = document.getElementById('spend-key-org');
+  const client_org_id = orgEl ? orgEl.value.trim() : '';
+  const label = document.getElementById('spend-key-label').value.trim();
+  const api_key = document.getElementById('spend-key-value').value;
+  if (!api_key || api_key.length < 8) {{ alert('API key is too short.'); return; }}
+  try {{
+    const r = await fetch('/api/spend/keys', {{
+      method: 'POST', headers: {{'Content-Type': 'application/json'}},
+      body: JSON.stringify({{provider, client_org_id, label, api_key, persist: true}})
+    }});
+    const res = await r.json();
+    if (!r.ok) {{ alert('Error: ' + (res.error || 'failed')); return; }}
+    hideAddKeyForm();
+    loadSpend();
+  }} catch(e) {{ alert('Save failed: ' + e); }}
+}}
+
+async function removeKey(provider, key_id) {{
+  if (!confirm('Remove this API key? Its secret file will be deleted.')) return;
+  try {{
+    const r = await fetch('/api/spend/keys/remove', {{
+      method: 'POST', headers: {{'Content-Type': 'application/json'}},
+      body: JSON.stringify({{provider, key_id}})
+    }});
+    if (!r.ok) {{ alert('Remove failed'); return; }}
+    loadSpend();
+  }} catch(e) {{ alert('Remove failed: ' + e); }}
+}}
+
 let _invData = [];
 let _invStatus = 'all';
 
@@ -8259,13 +8984,9 @@ function _fmtTs(epoch) {{
 }}
 
 async function loadInventory() {{
-  let inv, email;
+  let inv;
   try {{
-    const [invRes, _email] = await Promise.all([
-      fetch('/api/fleet/inventory'),
-      _loadSessionUser(),
-    ]);
-    email = _email;
+    const invRes = await fetch('/api/fleet/inventory');
     if (!invRes.ok) {{
       let detail = '';
       try {{ const j = await invRes.json(); detail = j.error || ''; }} catch(_) {{}}
@@ -8282,6 +9003,7 @@ async function loadInventory() {{
     return;
   }}
   _invData = inv.items || [];
+  const email = inv.current_user || '';
   const c = inv.counts || {{}};
   document.getElementById('inv-counts').innerHTML =
     `<div class="inv-count-card"><div class="inv-count-n" style="color:#DC2626">${{c.unapproved||0}}</div><div style="color:#6B7280">Unapproved</div></div>` +

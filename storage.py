@@ -207,6 +207,37 @@ class AgentStore:
                     reviewed    INTEGER NOT NULL DEFAULT 0
                 );
 
+                CREATE TABLE IF NOT EXISTS ai_spend (
+                    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                    provider      TEXT NOT NULL,
+                    model         TEXT NOT NULL DEFAULT '',
+                    period_date   TEXT NOT NULL,
+                    client_org_id TEXT NOT NULL DEFAULT '',
+                    key_id        TEXT NOT NULL DEFAULT '',
+                    key_label     TEXT NOT NULL DEFAULT '',
+                    key_last4     TEXT NOT NULL DEFAULT '',
+                    input_tokens  INTEGER NOT NULL DEFAULT 0,
+                    output_tokens INTEGER NOT NULL DEFAULT 0,
+                    total_tokens  INTEGER NOT NULL DEFAULT 0,
+                    cost_usd      REAL NOT NULL DEFAULT 0.0,
+                    currency      TEXT NOT NULL DEFAULT 'USD',
+                    request_count INTEGER,
+                    raw_snapshot  TEXT NOT NULL DEFAULT '',
+                    fetched_at    INTEGER NOT NULL,
+                    UNIQUE(provider, model, period_date, client_org_id, key_id)
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_ai_spend_period
+                    ON ai_spend(period_date DESC);
+                CREATE INDEX IF NOT EXISTS idx_ai_spend_provider_period
+                    ON ai_spend(provider, period_date DESC);
+                CREATE INDEX IF NOT EXISTS idx_ai_spend_model
+                    ON ai_spend(model);
+                CREATE INDEX IF NOT EXISTS idx_ai_spend_client_org
+                    ON ai_spend(client_org_id, period_date DESC);
+                CREATE INDEX IF NOT EXISTS idx_ai_spend_key
+                    ON ai_spend(key_id, period_date DESC);
+
             """)
             # Migrations
             cols = {r[1] for r in conn.execute("PRAGMA table_info(devices)")}
@@ -218,6 +249,11 @@ class AgentStore:
                 # migration can't fail against existing data.
                 conn.execute("ALTER TABLE devices ADD COLUMN client_org_id TEXT DEFAULT NULL")
                 conn.execute("CREATE INDEX IF NOT EXISTS idx_devices_client_org ON devices(client_org_id)")
+            # ai_spend: add client_org_id to pre-existing tables (nullable→default '')
+            spend_cols = {r[1] for r in conn.execute("PRAGMA table_info(ai_spend)")}
+            if 'client_org_id' not in spend_cols:
+                conn.execute("ALTER TABLE ai_spend ADD COLUMN client_org_id TEXT NOT NULL DEFAULT ''")
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_ai_spend_client_org ON ai_spend(client_org_id, period_date DESC)")
             sh_cols = {r[1] for r in conn.execute("PRAGMA table_info(shadow_devices)")}
             if 'approval_status' not in sh_cols:
                 conn.execute(
@@ -1137,6 +1173,182 @@ class AgentStore:
     def mark_all_alerts_reviewed(self) -> None:
         with self._lock, self._conn() as conn:
             conn.execute("UPDATE alert_events SET reviewed=1 WHERE reviewed=0")
+
+    # ── AI spend tracking ─────────────────────────────────────────────────────
+
+    def upsert_ai_spend(self, records: list) -> int:
+        """Insert or replace AI spend records.  Each record may carry a
+        `client_org_id` (MSP client org the key belongs to); empty string means
+        unscoped/single-tenant."""
+        if not records:
+            return 0
+        now = int(time.time())
+        with self._lock, self._conn() as conn:
+            for rec in records:
+                conn.execute(
+                    """INSERT INTO ai_spend
+                           (provider, model, period_date, client_org_id, key_id, key_label, key_last4, input_tokens,
+                            output_tokens, total_tokens, cost_usd, currency,
+                            request_count, raw_snapshot, fetched_at)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                       ON CONFLICT(provider, model, period_date, client_org_id, key_id) DO UPDATE SET
+                           input_tokens  = excluded.input_tokens,
+                           output_tokens = excluded.output_tokens,
+                           total_tokens  = excluded.total_tokens,
+                           cost_usd      = excluded.cost_usd,
+                           currency      = excluded.currency,
+                           request_count = excluded.request_count,
+                           raw_snapshot  = excluded.raw_snapshot,
+                           fetched_at    = excluded.fetched_at""",
+                    (
+                        rec.get('provider', ''),
+                        rec.get('model', ''),
+                        rec.get('period_date', ''),
+                        rec.get('client_org_id', '') or '',
+                        rec.get('key_id', '') or '',
+                        rec.get('key_label', '') or '',
+                        rec.get('key_last4', '') or '',
+                        int(rec.get('input_tokens', 0) or 0),
+                        int(rec.get('output_tokens', 0) or 0),
+                        int(rec.get('total_tokens', 0) or 0),
+                        float(rec.get('cost_usd', 0.0) or 0.0),
+                        rec.get('currency', 'USD'),
+                        rec.get('request_count'),
+                        rec.get('raw_snapshot', ''),
+                        now,
+                    ),
+                )
+        return len(records)
+
+    def get_ai_spend_summary(self, days: int = 30, client_org_id: str | None = None) -> dict:
+        """Return rolled-up AI spend for the last N days.
+
+        client_org_id: pass a specific org id to filter to that client's spend
+        only (used by client_viewer scoping and the MSP drill-down); pass None
+        for no filtering (MSP admin aggregate view across all client orgs)."""
+        cutoff = self._days_ago_iso(days)
+        where = "WHERE period_date >= ?"
+        params: list = [cutoff]
+        if client_org_id is not None:
+            where += " AND client_org_id = ?"
+            params.append(client_org_id)
+        with self._lock, self._conn() as conn:
+            total = conn.execute(
+                f"""SELECT COALESCE(SUM(cost_usd), 0), COALESCE(SUM(input_tokens), 0),
+                          COALESCE(SUM(output_tokens), 0), COALESCE(SUM(total_tokens), 0)
+                   FROM ai_spend {where}""",
+                params,
+            ).fetchone()
+            by_provider = conn.execute(
+                f"""SELECT provider,
+                          COALESCE(SUM(cost_usd), 0) AS cost_usd,
+                          COALESCE(SUM(total_tokens), 0) AS total_tokens,
+                          COUNT(DISTINCT model) AS model_count
+                   FROM ai_spend
+                   {where}
+                   GROUP BY provider
+                   ORDER BY cost_usd DESC""",
+                params,
+            ).fetchall()
+            by_model = conn.execute(
+                f"""SELECT provider, model,
+                          COALESCE(SUM(cost_usd), 0) AS cost_usd,
+                          COALESCE(SUM(total_tokens), 0) AS total_tokens,
+                          COALESCE(SUM(input_tokens), 0) AS input_tokens,
+                          COALESCE(SUM(output_tokens), 0) AS output_tokens
+                   FROM ai_spend
+                   {where}
+                   GROUP BY provider, model
+                   ORDER BY cost_usd DESC""",
+                params,
+            ).fetchall()
+            daily = conn.execute(
+                f"""SELECT period_date,
+                          COALESCE(SUM(cost_usd), 0) AS cost_usd,
+                          COALESCE(SUM(total_tokens), 0) AS total_tokens
+                   FROM ai_spend
+                   {where}
+                   GROUP BY period_date
+                   ORDER BY period_date ASC""",
+                params,
+            ).fetchall()
+        return {
+            'period_days': days,
+            'client_org_id': client_org_id,
+            'total_cost_usd': total[0] if total else 0.0,
+            'input_tokens': total[1] if total else 0,
+            'output_tokens': total[2] if total else 0,
+            'total_tokens': total[3] if total else 0,
+            'by_provider': [dict(r) for r in by_provider],
+            'by_model': [dict(r) for r in by_model],
+            'daily': [dict(r) for r in daily],
+        }
+
+    def get_ai_spend_by_client_org(self, days: int = 30) -> list[dict]:
+        """Return spend broken down by client_org_id for the last N days.
+
+        MSP admin view: aggregates every client org under this customer. A
+        client_viewer should never reach this method — the caller gates it."""
+        cutoff = self._days_ago_iso(days)
+        with self._lock, self._conn() as conn:
+            rows = conn.execute(
+                """SELECT COALESCE(client_org_id, '') AS client_org_id,
+                          COALESCE(SUM(cost_usd), 0) AS cost_usd,
+                          COALESCE(SUM(total_tokens), 0) AS total_tokens,
+                          COALESCE(SUM(input_tokens), 0) AS input_tokens,
+                          COALESCE(SUM(output_tokens), 0) AS output_tokens,
+                          COUNT(DISTINCT provider) AS provider_count,
+                          COUNT(DISTINCT model) AS model_count
+                   FROM ai_spend
+                   WHERE period_date >= ?
+                   GROUP BY client_org_id
+                   ORDER BY cost_usd DESC""",
+                (cutoff,),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def get_ai_spend_by_key(self, days: int = 30) -> list[dict]:
+        """Return spend grouped by the redacted key identity, never the key."""
+        cutoff = self._days_ago_iso(days)
+        with self._lock, self._conn() as conn:
+            rows = conn.execute(
+                """SELECT provider, client_org_id, key_id, key_label, key_last4,
+                          COALESCE(SUM(cost_usd), 0) AS spend_usd,
+                          COALESCE(SUM(total_tokens), 0) AS total_tokens
+                   FROM ai_spend WHERE period_date >= ?
+                   GROUP BY provider, client_org_id, key_id, key_label, key_last4
+                   ORDER BY spend_usd DESC""",
+                (cutoff,),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def get_ai_spend_by_date(self, start_date: str, end_date: str | None = None,
+                             client_org_id: str | None = None) -> list[dict]:
+        """Return raw ai_spend rows between two ISO dates (inclusive)."""
+        end = end_date or start_date
+        if end < start_date:
+            start_date, end = end, start_date
+        where = "WHERE period_date >= ? AND period_date <= ?"
+        params: list = [start_date, end]
+        if client_org_id is not None:
+            where += " AND client_org_id = ?"
+            params.append(client_org_id)
+        with self._lock, self._conn() as conn:
+            rows = conn.execute(
+                f"""SELECT id, provider, model, period_date, client_org_id,
+                          input_tokens, output_tokens, total_tokens, cost_usd,
+                          currency, request_count, fetched_at
+                   FROM ai_spend
+                   {where}
+                   ORDER BY period_date DESC, cost_usd DESC""",
+                params,
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    @staticmethod
+    def _days_ago_iso(days: int) -> str:
+        import datetime as _dt
+        return (_dt.date.today() - _dt.timedelta(days=days)).isoformat()
 
     def upsert_mcp_server(self, reporter_device_id: str, reporter_hostname: str,
                           host: str, port: int, server_name: str, tools: list,

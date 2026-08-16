@@ -124,7 +124,7 @@ For each: capture `actor_id`/`actor_name`/`actor_role` from `get_current_user(re
 
 ## Deploy
 Same pattern as every other change to this app:
-`scp <file> neepai@35.255.19.236:/opt/sentinel/<file>` (or `docker cp` into the
+`scp <file> neepai@34.58.90.147:/opt/sentinel/<file>` (or `docker cp` into the
 running container for files that live inside it — check how `alerts.py`/`storage.py`
 were deployed last time), then `docker restart sentinel-mfdynamicsllc` and/or
 `sentinel-admin` as appropriate. Verify containers come back healthy with `docker ps`.

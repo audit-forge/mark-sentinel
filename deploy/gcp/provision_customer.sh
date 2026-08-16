@@ -15,9 +15,11 @@ NGINX_CONF_DIR="${NGINX_CONF_DIR:-/opt/sentinel/deploy/gcp/nginx}"
 HOST_LICENSES_DIR="${HOST_LICENSES_DIR:-/opt/licenses}"
 LICENSE_FILE="${HOST_LICENSES_DIR}/${CUSTOMER_ID}/license.json"
 DATA_DIR="${SENTINEL_DATA_ROOT:-/opt/sentinel-data}/${CUSTOMER_ID}"
+SPEND_SECRET_DIR="${SENTINEL_SPEND_SECRET_ROOT:-${SENTINEL_DATA_ROOT:-/opt/sentinel-data}/.spend-secrets}/${CUSTOMER_ID}/spend"
 
 mkdir -p "$DATA_DIR"
 chown -R 999:999 "$DATA_DIR"
+install -d -o 999 -g 999 -m 0700 "$SPEND_SECRET_DIR"
 
 AGENT_TOKEN="${8:-}"
 BASELINE_PROFILE="${9:-default}"
@@ -61,6 +63,7 @@ docker run -d \
   -e "SENTINEL_TRUSTED_PROXY_TOKEN=${PROXY_TOKEN}" \
   ${LICENSE_MOUNT} \
   -v "${DATA_DIR}:/app/data" \
+  -v "${SPEND_SECRET_DIR}:/opt/sentinel-secrets/spend" \
   mark-sentinel:latest \
   python3 server.py --no-browser --port 7331
 

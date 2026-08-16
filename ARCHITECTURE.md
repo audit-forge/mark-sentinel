@@ -41,9 +41,9 @@ Three scan modes:
 `api`, `claude`, `gemini`, `vertex`, `ollama`, `hash`, `docker`, `kubectl`, `presidio`, `defectdojo`
 
 ## Tech stack
-Python CLI. FastAPI admin panel. Docker. GCP VM at 35.255.19.236.
-Admin panel: `http://admin.35.255.19.236.nip.io`
-SSH: `ssh neepai@35.255.19.236`
+Python CLI. FastAPI admin panel. Docker. GCP VM at 34.58.90.147.
+Admin panel: `http://admin.34.58.90.147.nip.io`
+SSH: `ssh neepai@34.58.90.147`
 Local code: `/Users/keithferguson/arckon/`
 
 ## Current phase

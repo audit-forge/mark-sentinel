@@ -267,11 +267,13 @@ class SplunkHECConnector(BaseSiemConnector):
         req.add_header('Content-Type', 'application/json')
         ctx = self._ssl_context()
         try:
-            resp = urllib.request.urlopen(req, context=ctx)
+            resp = urllib.request.urlopen(req, context=ctx, timeout=10)
             return resp.status, resp.read().decode('utf-8', errors='replace')
         except urllib.error.HTTPError as e:
             body = e.read().decode('utf-8', errors='replace') if e.fp else ''
             return e.code, body
+        except urllib.error.URLError as e:
+            return 0, str(e.reason)
 
     def send(self, finding: ArckonFinding) -> tuple[bool, str]:
         cfg = self.cfg
@@ -280,16 +282,22 @@ class SplunkHECConnector(BaseSiemConnector):
             payload['index'] = cfg['index']
         if cfg.get('sourcetype'):
             payload['sourcetype'] = cfg['sourcetype']
-        status, body = self._post(payload)
-        if status != 200:
-            return False, f"{status} {body}"
-        try:
-            resp_json = json.loads(body)
-            if resp_json.get('code') != 0:
+        for attempt in range(3):
+            status, body = self._post(payload)
+            if status == 200:
+                try:
+                    resp_json = json.loads(body)
+                    if resp_json.get('code') == 0:
+                        return True, 'sent'
+                    return False, f"{status} {body}"
+                except (json.JSONDecodeError, KeyError):
+                    return True, 'sent'
+            if status not in (0, 500, 502, 503, 504) or attempt == 2:
                 return False, f"{status} {body}"
-        except (json.JSONDecodeError, KeyError):
-            pass
-        return True, 'sent'
+            # Container startup can briefly precede DNS availability. Retry only
+            # transient network/server failures with a short bounded backoff.
+            time.sleep(2 ** attempt)
+        return False, "Splunk HEC retry loop exhausted"
 
     def test(self) -> tuple[bool, str]:
         index = self.cfg.get('index', 'arckon')

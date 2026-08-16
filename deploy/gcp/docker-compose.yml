@@ -18,13 +18,17 @@ services:
 
   user-manager:
     build:
-      context: ../../admin
+      context: ../..
+      dockerfile: admin/Dockerfile
     container_name: sentinel-admin
     environment:
       - SECRET_KEY_FILE=/run/secrets/secret_key
       - ADMIN_EMAIL=${ADMIN_EMAIL}
       - ADMIN_PASSWORD_FILE=/run/secrets/admin_password
       - PUBLIC_IP=${PUBLIC_IP}
+      - PUBLIC_ADMIN_URL=${PUBLIC_ADMIN_URL:-https://admin.riskraven.ai}
+      - PUBLIC_DASHBOARD_URL=${PUBLIC_DASHBOARD_URL:-https://arckon.riskraven.ai}
+      - PUBLIC_DASHBOARD_PORT=${PUBLIC_DASHBOARD_PORT:-7001}
       - DB_PATH=/data/sentinel.db
       - MAX_CUSTOMERS=${MAX_CUSTOMERS:-0}
       - LICENSES_DIR=/licenses
@@ -43,6 +47,20 @@ services:
     networks:
       - sentinel-net
     restart: always
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: sentinel-cloudflared
+    # The token stays in a root-owned host file. It is deliberately not an
+    # environment variable, which Docker would expose through inspect.
+    command: ["tunnel", "--no-autoupdate", "run", "--token-file", "/run/secrets/cloudflare_tunnel_token"]
+    volumes:
+      - /opt/sentinel-secrets/cloudflare-tunnel-token:/run/secrets/cloudflare_tunnel_token:ro
+    networks:
+      - sentinel-net
+    restart: always
+    depends_on:
+      - nginx
 
 networks:
   sentinel-net:

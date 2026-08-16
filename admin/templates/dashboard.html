@@ -237,11 +237,11 @@ loadMaintenanceList();
   <table>
     <tr>
       <td style="color:#6B7280;width:160px">Admin Panel</td>
-      <td><span class="url">http://admin.{{ ip }}.nip.io</span></td>
+      <td><a class="url" href="{{ admin_url }}" target="_blank">{{ admin_url }}</a></td>
     </tr>
     <tr>
       <td style="color:#6B7280">Customer URL pattern</td>
-      <td><span class="url">http://{{ ip }}:[port]  — find each customer's live link in the "Dashboard URL" column on the <a href="/customers">Customers page</a></span></td>
+      <td><span class="url">{{ dashboard_url }} — find each customer's live link in the "Dashboard URL" column on the <a href="/customers">Customers page</a></span></td>
     </tr>
   </table>
   <div style="margin-top:16px;padding-top:16px;border-top:1px solid #E5E7EB;display:flex;align-items:center;gap:16px;flex-wrap:wrap">

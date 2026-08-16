@@ -154,7 +154,7 @@ if ($Server -ne "") {
     }
 }
 
-# -- Copy files (local fallback only — Nuitka binary download is preferred) ------
+# -- Copy files (local fallback only; Nuitka binary download is preferred) ------
 
 if (-not (Test-Path (Join-Path $InstallDir "agent.exe")) -and -not (Test-Path (Join-Path $InstallDir "agent.py"))) {
     $FilesToCopy = @("agent.py", "audit.py", "storage.py", "server.py", "requirements.txt")

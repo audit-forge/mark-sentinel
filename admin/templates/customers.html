@@ -161,7 +161,7 @@
       </td>
       <td>
         {% if c.port and c.active %}
-          <a class="url" href="http://{{ ip }}:{{ c.port }}" target="_blank">{{ ip }}:{{ c.port }}</a>
+          <a class="url" href="{{ c.dashboard_url }}" target="_blank">{{ c.dashboard_url }}</a>
         {% else %}
           <span style="color:#6B7280">—</span>
         {% endif %}
@@ -193,7 +193,7 @@
       <td style="display:flex;gap:6px;flex-wrap:wrap">
         {% if c.active %}
           <button type="button" class="btn btn-sm"
-                  onclick="openDeploy('{{ c.id }}','{{ c.name | replace("'","\\x27") }}',{{ c.port or 7001 }},'{{ c.agent_token or '' }}')"
+                  onclick="openDeploy('{{ c.id }}','{{ c.name | replace("'","\\x27") }}','{{ c.dashboard_url or '' }}','{{ c.agent_token or '' }}')"
                   style="background:#F9FAFB;color:#4488ff;border:1px solid #4488ff40">Deploy</button>
           <button type="button" class="btn btn-sm"
                   onclick="openRotate('{{ c.id }}','{{ c.name | replace("'","\\x27") }}')"
@@ -350,10 +350,10 @@ Service:  arckon-agent  (systemd unit)</pre>
 </div>
 
 <script>
-function openDeploy(cid, name, port, token) {
+function openDeploy(cid, name, server, token) {
   var ip   = '{{ ip }}';
-  var srv  = 'http://' + ip + ':' + port;
-  var base = 'http://' + ip + ':' + port;
+  var srv  = server || ('http://' + ip + ':7001');
+  var base = srv;
 
   document.getElementById('dm-name').textContent = name;
   document.querySelectorAll('.dm-cid').forEach(function(el){ el.textContent = cid; });

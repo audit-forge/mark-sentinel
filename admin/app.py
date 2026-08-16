@@ -53,7 +53,10 @@ def _load_admin_password() -> str:
 ADMIN_EMAIL    = os.environ.get("ADMIN_EMAIL", "admin@sentinel.local")
 MAX_CUSTOMERS  = int(os.environ.get("MAX_CUSTOMERS", "0"))  # 0 = unlimited
 ADMIN_PASSWORD = _load_admin_password()
-PUBLIC_IP = os.environ.get("PUBLIC_IP", "35.255.19.236")
+PUBLIC_IP = os.environ.get("PUBLIC_IP", "34.58.90.147")
+PUBLIC_ADMIN_URL = os.environ.get("PUBLIC_ADMIN_URL", "").rstrip("/") or f"http://admin.{PUBLIC_IP}.nip.io"
+PUBLIC_DASHBOARD_URL = os.environ.get("PUBLIC_DASHBOARD_URL", "").rstrip("/")
+PUBLIC_DASHBOARD_PORT = int(os.environ.get("PUBLIC_DASHBOARD_PORT", "7001"))
 
 
 @app.on_event("startup")
@@ -146,7 +149,10 @@ def _sentinel_url(customer_id: str | None) -> str:
         row = conn.execute("SELECT port FROM customers WHERE id=?", (customer_id,)).fetchone()
     if not row or not row["port"]:
         return "/login"
-    return f"http://{PUBLIC_IP}:{row['port']}"
+    port = int(row["port"])
+    if PUBLIC_DASHBOARD_URL and port == PUBLIC_DASHBOARD_PORT:
+        return PUBLIC_DASHBOARD_URL
+    return f"http://{PUBLIC_IP}:{port}"
 
 
 # ── Auth ──────────────────────────────────────────────────────────────────────
@@ -282,7 +288,8 @@ async def dashboard(request: Request):
     return templates.TemplateResponse("dashboard.html", {
         "request": request, "user": user,
         "customer_count": customer_count, "user_count": user_count,
-        "ip": PUBLIC_IP,
+        "admin_url": PUBLIC_ADMIN_URL,
+        "dashboard_url": PUBLIC_DASHBOARD_URL or f"http://{PUBLIC_IP}:[port]",
         "seats": seats,
         "overages": overages,
         "alerts": [dict(r) for r in alert_rows],
@@ -363,14 +370,15 @@ async def serve_installer(filename: str):
     allowed = {"install.sh", "install.ps1", "install.bat"}
     if filename not in allowed:
         raise HTTPException(404)
-    # Prefer the deploy/ version (Nuitka binary install), fall back to root.
-    for candidate in [f"/app/deploy/{filename}", f"/app/{filename}"]:
+    # The root installer is the canonical current release. Deploy bundles can
+    # retain obsolete branded installers, so use one only as a fallback.
+    for candidate in [f"/app/{filename}", f"/app/deploy/{filename}"]:
         if os.path.exists(candidate):
             data = open(candidate, "rb").read()
             # Strip UTF-8 BOM so Invoke-WebRequest + [scriptblock]::Create works in PS 5.1
             if data[:3] == b"\xef\xbb\xbf":
                 data = data[3:]
-            return PlainTextResponse(data.decode("utf-8"), media_type="text/plain")
+            return PlainTextResponse(data.decode("utf-8"), media_type="text/plain; charset=utf-8")
     raise HTTPException(404)
 
 
@@ -403,12 +411,14 @@ async def customers_page(request: Request):
         except (TypeError, ValueError):
             c["days_remaining"] = None
         c["parent_name"] = all_names.get(c.get("parent_customer_id")) if c.get("parent_customer_id") else None
+        c["dashboard_url"] = _sentinel_url(c["id"]) if c.get("active") and c.get("port") else None
         customers.append(c)
     if parent_filter:
         customers = [c for c in customers if c.get("parent_customer_id") == parent_filter]
     return templates.TemplateResponse("customers.html", {
         "request": request, "user": user,
         "customers": customers, "ip": PUBLIC_IP, "status": status,
+        "public_dashboard_url": PUBLIC_DASHBOARD_URL,
         "resellers": [dict(r) for r in resellers],
         "parent_filter": parent_filter,
         "parent_filter_name": all_names.get(parent_filter, parent_filter) if parent_filter else None,
@@ -481,7 +491,7 @@ async def add_customer(
                     (str(uuid.uuid4()), email, hash_password(temp_password),
                      "customer_admin", cid, datetime.now(timezone.utc).isoformat())
                 )
-                login_url = f"http://{PUBLIC_IP}/login"
+                login_url = f"{PUBLIC_ADMIN_URL}/login"
                 from mailer import send_welcome_email
                 send_welcome_email(email, customer_name.strip(), login_url, temp_password)
     _write_license_file(cid, customer_name.strip(), tier, expires, max_seats)
@@ -878,7 +888,7 @@ async def forgot_password_submit(request: Request, email: str = Form(...)):
                 "INSERT INTO password_resets (id, user_id, token, expires_at) VALUES (?,?,?,?)",
                 (str(uuid.uuid4()), row["id"], token, expires)
             )
-            reset_url = f"http://{PUBLIC_IP}/reset-password?token={token}"
+            reset_url = f"{PUBLIC_ADMIN_URL}/reset-password?token={token}"
             from mailer import send_password_reset_email
             send_password_reset_email(email.strip().lower(), reset_url)
     return templates.TemplateResponse("forgot_password.html", {"request": request, "sent": True})
@@ -1362,7 +1372,7 @@ async def api_reseller_customers(request: Request):
             "id": d["id"], "name": d["name"], "active": bool(d["active"]),
             "tier": d["tier"], "max_seats": d["max_seats"], "current_agents": d["current_agents"],
             "license_expires_at": d["license_expires_at"],
-            "dashboard_url": f"http://{PUBLIC_IP}:{d['port']}" if d.get("port") and d["active"] else None,
+            "dashboard_url": _sentinel_url(d["id"]) if d.get("port") and d["active"] else None,
         })
     return JSONResponse({"customers": customers_out})
 
@@ -1411,8 +1421,8 @@ async def reseller_impersonate(request: Request):
     return JSONResponse({
         "ok": True,
         "token": impersonation_token,
-        "dashboard_url": f"http://{PUBLIC_IP}:{target['port']}",
-        "return_url": f"http://{PUBLIC_IP}:{me['port']}" if me["port"] else "",
+        "dashboard_url": _sentinel_url(target_id),
+        "return_url": _sentinel_url(user["customer_id"]) if me["port"] else "",
         "customer_name": target["name"],
     })
 
