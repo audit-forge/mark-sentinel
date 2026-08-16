@@ -97,6 +97,31 @@ def test_self_update_rejects_non_https_server_without_fetching(monkeypatch):
     assert agent.self_update({'server': 'http://updates.example.test'}) is False
 
 
+def test_signed_update_opener_uses_the_agent_ca_context(monkeypatch):
+    captured = {}
+
+    class Opener:
+        def open(self, request, timeout):
+            captured['request'] = request
+            captured['timeout'] = timeout
+            return type('Response', (), {
+                '__enter__': lambda self: self,
+                '__exit__': lambda self, *args: None,
+                'status': 200,
+                'read': lambda self: b'ok',
+            })()
+
+    def build_opener(*handlers):
+        captured['handlers'] = handlers
+        return Opener()
+
+    monkeypatch.setattr(agent._urlreq, 'build_opener', build_opener)
+
+    assert agent._read_update_url('https://updates.example.test/manifest.json', {}) == b'ok'
+    https_handler = next(h for h in captured['handlers'] if isinstance(h, agent._urlreq.HTTPSHandler))
+    assert https_handler._context is agent._HTTPS_CONTEXT
+
+
 def test_self_update_stages_and_activates_windows_executable(release_key, monkeypatch, tmp_path):
     archive = io.BytesIO()
     with tarfile.open(fileobj=archive, mode='w:gz') as tar:

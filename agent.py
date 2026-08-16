@@ -49,6 +49,7 @@ import os
 import platform
 import re
 import socket
+import ssl
 import subprocess
 import tarfile
 import time
@@ -57,6 +58,7 @@ from pathlib import Path, PurePosixPath
 from urllib import error as _urlerr
 from urllib import request as _urlreq
 from urllib.parse import quote, urlparse
+import certifi
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
@@ -74,6 +76,12 @@ _WINDOWS_SERVICE_NAME = 'ArckonAgent'
 PINNED_UPDATE_PUBLIC_KEY_DER_B64 = 'MCowBQYDK2VwAyEAxQSQJT9gaFKKcPEy7nPM7Bdk0fT8LXNDIsQkw1qfLyw='
 _UPDATE_MANIFEST_KEYS = frozenset({'product', 'version', 'artifact', 'sha256', 'size', 'platform'})
 _VERSION_RE = re.compile(r'^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$')
+_HTTPS_CONTEXT = ssl.create_default_context(cafile=certifi.where())
+
+
+def _urlopen(request, timeout: int):
+    """Open URLs with certifi so compiled macOS agents trust public HTTPS CAs."""
+    return _urlreq.urlopen(request, timeout=timeout, context=_HTTPS_CONTEXT)
 
 
 def _set_process_name() -> None:
@@ -314,7 +322,7 @@ def report_mcp(results: list, config: dict, device_id: str, hostname: str) -> bo
     url = f'{server}/api/agent/mcp'
     try:
         req = _urlreq.Request(url, data=payload, headers=headers, method='POST')
-        with _urlreq.urlopen(req, timeout=30) as resp:
+        with _urlopen(req, timeout=30) as resp:
             if 200 <= resp.status < 300:
                 log.info('MCP report accepted (%d servers)', len(results))
                 return True
@@ -347,7 +355,7 @@ def report_discovery(results: list, config: dict, device_id: str, hostname: str)
     url = f'{server}/api/agent/discovery'
     try:
         req = _urlreq.Request(url, data=payload, headers=headers, method='POST')
-        with _urlreq.urlopen(req, timeout=30) as resp:
+        with _urlopen(req, timeout=30) as resp:
             if 200 <= resp.status < 300:
                 log.info('Discovery report accepted (%d results)', len(results))
                 return True
@@ -371,7 +379,7 @@ def report_network_assets(results: list, config: dict, device_id: str, hostname:
         headers['Authorization'] = f"Bearer {config['token']}"
     try:
         req = _urlreq.Request(f'{server}/api/agent/network-assets', data=payload, headers=headers, method='POST')
-        with _urlreq.urlopen(req, timeout=30) as resp:
+        with _urlopen(req, timeout=30) as resp:
             if 200 <= resp.status < 300:
                 log.info('Passive network asset report accepted (%d observations)', len(results))
                 return True
@@ -431,7 +439,7 @@ def report_to_server(report: dict, config: dict,
     for attempt in range(1, 4):
         try:
             req = _urlreq.Request(url, data=payload, headers=headers, method='POST')
-            with _urlreq.urlopen(req, timeout=30) as resp:
+            with _urlopen(req, timeout=30) as resp:
                 if 200 <= resp.status < 300:
                     try:
                         body = json.loads(resp.read())
@@ -480,7 +488,7 @@ def poll_for_command(config: dict, device_id: str) -> str | None:
         headers['Authorization'] = f'Bearer {token}'
     try:
         req = _urlreq.Request(url, headers=headers)
-        with _urlreq.urlopen(req, timeout=10) as resp:
+        with _urlopen(req, timeout=10) as resp:
             data = json.loads(resp.read())
             cmd = data.get('command')
             if cmd:
@@ -507,7 +515,8 @@ class _NoRedirect(_urlreq.HTTPRedirectHandler):
 
 
 def _read_update_url(url: str, headers: dict[str, str], timeout: int = 60) -> bytes:
-    opener = _urlreq.build_opener(_NoRedirect())
+    opener = _urlreq.build_opener(
+        _NoRedirect(), _urlreq.HTTPSHandler(context=_HTTPS_CONTEXT))
     req = _urlreq.Request(url, headers=headers)
     with opener.open(req, timeout=timeout) as resp:
         if not 200 <= resp.status < 300:

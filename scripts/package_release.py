@@ -93,6 +93,11 @@ def _build_nuitka_binary(
         str(source),
     ]
 
+    # Onefile builds do not inherit macOS's certificate store. Ship certifi's
+    # CA bundle so the compiled agent can verify Cloudflare HTTPS certificates.
+    import certifi
+    cmd.append(f'--include-data-file={certifi.where()}=certifi/cacert.pem')
+
     if platform_name in ('windows', 'win32'):
         cmd += [
             '--windows-console-mode=disable',
