@@ -41,6 +41,11 @@ chmod +x "$TMP/agent" "$TMP/audit"
 mkdir -p "$TMP/app"
 tar xzf "$TMP/app.tar.gz" -C "$TMP/app"
 
+# license.json is a per-customer bind mount inside the running container. It
+# must never be delivered by a generic application release or docker cp will
+# fail trying to replace the mounted file.
+rm -f "$TMP/app/license.json"
+
 # Deploy into the running container
 docker cp "$TMP/agent"   sentinel-mfdynamicsllc:/app/agent
 docker cp "$TMP/audit"   sentinel-mfdynamicsllc:/app/audit

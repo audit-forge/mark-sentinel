@@ -60,6 +60,12 @@ jobs:
             cp "release-assets/arckon-agent-${VERSION}-${platform}"*.tar.gz "releases/$platform/"
           done
 
+          # Unknown platforms use /releases/current as a Linux-compatible
+          # fallback. Never retain a stale generic manifest alongside the
+          # promoted platform-specific release.
+          rm -rf releases/current
+          cp -a releases/linux releases/current
+
           python - <<'PY'
           from pathlib import Path
           import agent

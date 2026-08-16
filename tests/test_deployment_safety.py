@@ -11,7 +11,7 @@ def test_legacy_gcp_upload_requires_explicit_manual_confirmation():
 
     assert '\n  push:' not in workflow
     assert 'workflow_dispatch:' in workflow
-    assert "inputs.confirm_gcp_upload == 'UPLOAD_LEGACY_ARTIFACTS'" in workflow
+    assert "inputs.confirm_gcp_upload == 'PROMOTE_SIGNED_RELEASE'" in workflow
 
 
 def test_deployed_workloads_do_not_mount_the_host_docker_socket():
