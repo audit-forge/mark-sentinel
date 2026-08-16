@@ -4,13 +4,17 @@ on:
   workflow_dispatch:
     inputs:
       confirm_gcp_upload:
-        description: Type UPLOAD_LEGACY_ARTIFACTS to upload to the legacy GCS path.
+        description: Type PROMOTE_SIGNED_RELEASE to promote one signed release to GCS.
+        required: true
+        type: string
+      release_tag:
+        description: Published signed release tag to promote (for example v1.0.10).
         required: true
         type: string
 
 jobs:
   build-and-deploy:
-    if: inputs.confirm_gcp_upload == 'UPLOAD_LEGACY_ARTIFACTS'
+    if: inputs.confirm_gcp_upload == 'PROMOTE_SIGNED_RELEASE'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -18,6 +22,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.release_tag }}
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -32,6 +38,52 @@ jobs:
           echo "=== Built binaries ==="
           ls -lh dist/
 
+      - name: Assemble one verified multi-platform release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.release_tag }}
+        run: |
+          [[ "$TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
+          VERSION="${TAG#v}"
+          test "$VERSION" = "$(python -c 'from arckon_version import VERSION; print(VERSION)')"
+
+          mkdir release-assets
+          gh release download "$TAG" --dir release-assets \
+            --pattern 'arckon-agent-*.tar.gz' \
+            --pattern '*-manifest.json' \
+            --pattern '*-manifest.sig'
+
+          for platform in linux macos windows; do
+            mkdir -p "releases/$platform"
+            cp "release-assets/${platform}-manifest.json" "releases/$platform/manifest.json"
+            cp "release-assets/${platform}-manifest.sig" "releases/$platform/manifest.sig"
+            cp "release-assets/arckon-agent-${VERSION}-${platform}"*.tar.gz "releases/$platform/"
+          done
+
+          python - <<'PY'
+          from pathlib import Path
+          import agent
+
+          expected = __import__('arckon_version').VERSION
+          for platform in ('linux', 'macos', 'windows'):
+              release = Path('releases') / platform
+              manifest = agent._validate_update_manifest(
+                  (release / 'manifest.json').read_bytes(),
+                  (release / 'manifest.sig').read_bytes(),
+              )
+              assert manifest['version'] == expected
+              assert manifest['platform'] == platform
+              assert (release / manifest['artifact']).is_file()
+          PY
+
+          tar \
+            --exclude=.git \
+            --exclude=dist \
+            --exclude=release-assets \
+            --exclude=__pycache__ \
+            --exclude='*/__pycache__' \
+            -czf "$RUNNER_TEMP/app.tar.gz" .
+
       - name: Authenticate to GCP
         uses: google-github-actions/auth@v2
         with:
@@ -42,13 +94,14 @@ jobs:
 
       - name: Upload to GCS deploy bucket
         run: |
-          # Upload all deployment artifacts to GCS
-          gsutil cp dist/agent dist/audit \
-            server.py discovery.py agent.py \
+          # Upload artifacts before the manifest. The VM deployer only acts
+          # after this manifest changes, so it never reads a partial release.
+          gsutil cp dist/agent dist/audit "$RUNNER_TEMP/app.tar.gz" \
             gs://arckon-deploy-artifacts/latest/
 
-          # Write a deploy manifest so the GCP instance knows a new deploy is ready
-          echo "{\"sha\":\"${{ github.sha }}\",\"ref\":\"${{ github.ref_name }}\",\"ts\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}" \
+          # Write the promotion manifest last so the VM deployer sees a
+          # complete, one-version server and agent release set.
+          echo "{\"sha\":\"${{ github.sha }}\",\"ref\":\"${{ inputs.release_tag }}\",\"version\":\"${{ inputs.release_tag }}\",\"ts\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}" \
             | gsutil cp - gs://arckon-deploy-artifacts/latest/manifest.json
 
           echo "=== Uploaded to gs://arckon-deploy-artifacts/latest/ ==="
