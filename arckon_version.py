@@ -1,4 +1,4 @@
 """Single source of truth for Arckon product versioning."""
 
-VERSION = "1.0.13"
+VERSION = "1.0.14"
 EDGE_DNS_EVENT_SCHEMA_VERSION = 1
