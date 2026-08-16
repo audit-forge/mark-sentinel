@@ -370,9 +370,9 @@ async def serve_installer(filename: str):
     allowed = {"install.sh", "install.ps1", "install.bat"}
     if filename not in allowed:
         raise HTTPException(404)
-    # The root installer is the canonical current release. Deploy bundles can
-    # retain obsolete branded installers, so use one only as a fallback.
-    for candidate in [f"/app/{filename}", f"/app/deploy/{filename}"]:
+    # Canonical root installers are copied to /installers during the admin
+    # image build. Do not serve legacy admin-local installer copies.
+    for candidate in [f"/installers/{filename}"]:
         if os.path.exists(candidate):
             data = open(candidate, "rb").read()
             # Strip UTF-8 BOM so Invoke-WebRequest + [scriptblock]::Create works in PS 5.1
