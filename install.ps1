@@ -126,9 +126,18 @@ if ($Server -ne "") {
             # Verify SHA256
             $DownloadedHash = (Get-FileHash $ArtifactTmp -Algorithm SHA256).Hash.ToLower()
             if ($DownloadedHash -ne $ArtifactSha256.ToLower()) {
-                Write-Warn "SHA256 mismatch! Expected $ArtifactSha256, got $DownloadedHash"
+                throw "SHA256 mismatch! Expected $ArtifactSha256, got $DownloadedHash"
             } else {
                 Write-OK "SHA256 verified"
+            }
+
+            # Windows locks a running executable. Stop the current service only
+            # after the replacement has downloaded and passed its hash check.
+            $existingSvc = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
+            if ($existingSvc -and $existingSvc.Status -ne "Stopped") {
+                Write-Step "Stopping existing service before replacing agent.exe ..."
+                Stop-Service -Name $ServiceName -Force -ErrorAction Stop
+                $existingSvc.WaitForStatus("Stopped", [TimeSpan]::FromSeconds(15))
             }
 
             # Extract to a temp directory, then copy contents (strip sentinel/ prefix)
@@ -294,9 +303,9 @@ if (-not $NoService) {
         if ($existingSvc) {
             Write-Step "Stopping existing service ..."
             $ErrorActionPreference = "Continue"
-            & $nssmPath stop $ServiceName 2>$null
+            & $nssmPath stop $ServiceName 2>&1 | Out-Null
             Start-Sleep -Seconds 2
-            & $nssmPath remove $ServiceName confirm 2>$null
+            & $nssmPath remove $ServiceName confirm 2>&1 | Out-Null
             $ErrorActionPreference = "Stop"
         }
 
@@ -331,8 +340,8 @@ if (-not $NoService) {
     # service after the canonical ArckonAgent service has been registered.
     $legacySvc = Get-Service -Name $LegacyServiceName -ErrorAction SilentlyContinue
     if ($legacySvc) {
-        & $nssmPath stop $LegacyServiceName 2>$null
-        & $nssmPath remove $LegacyServiceName confirm 2>$null
+        & $nssmPath stop $LegacyServiceName 2>&1 | Out-Null
+        & $nssmPath remove $LegacyServiceName confirm 2>&1 | Out-Null
         if (Get-Service -Name $LegacyServiceName -ErrorAction SilentlyContinue) {
             sc.exe stop $LegacyServiceName | Out-Null
             sc.exe delete $LegacyServiceName | Out-Null
