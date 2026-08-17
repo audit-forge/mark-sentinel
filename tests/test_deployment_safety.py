@@ -27,6 +27,15 @@ def test_deployed_workloads_do_not_mount_the_host_docker_socket():
             assert not service.get('ports')
             assert '/opt/sentinel-secrets/deployer-token:/run/secrets/deploy_token:ro' in service['volumes']
 
+
+def test_proxy_capabilities_are_mounted_outside_the_source_tree():
+    compose = yaml.safe_load((REPO / 'deploy' / 'gcp' / 'docker-compose.yml').read_text())
+    assert '/opt/sentinel-nginx/proxy-tokens:/etc/nginx/proxy-tokens:ro' in compose['services']['nginx']['volumes']
+    for script in ('provision_customer.sh', 'restart_customer.sh'):
+        source = (REPO / 'deploy' / 'gcp' / script).read_text()
+        assert 'NGINX_PROXY_TOKEN_DIR' in source
+        assert '/etc/nginx/proxy-tokens/' in source or 'proxy-tokens' in source
+
     manifests = REPO / 'deploy' / 'k8s'
     for manifest in manifests.rglob('*agent-daemonset.yaml'):
         document = yaml.safe_load_all(manifest.read_text())

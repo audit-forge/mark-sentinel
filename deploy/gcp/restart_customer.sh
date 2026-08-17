@@ -7,6 +7,7 @@ set -euo pipefail
 CUSTOMER_ID="$1"
 CONTAINER_NAME="sentinel-${CUSTOMER_ID}"
 DATA_DIR="/opt/sentinel-data/${CUSTOMER_ID}"
+NGINX_PROXY_TOKEN_DIR="${NGINX_PROXY_TOKEN_DIR:-/opt/sentinel-nginx/proxy-tokens}"
 SPEND_SECRET_DIR="${SENTINEL_SPEND_SECRET_ROOT:-/opt/sentinel-data/.spend-secrets}/${CUSTOMER_ID}/spend"
 HOST_LICENSES_DIR="${HOST_LICENSES_DIR:-/opt/licenses}"
 LICENSE_FILE="${HOST_LICENSES_DIR}/${CUSTOMER_ID}/license.json"
@@ -34,32 +35,10 @@ if [ -z "$PROXY_TOKEN" ]; then
   umask 077
   printf '%s\n' "$PROXY_TOKEN" > "$PROXY_TOKEN_FILE"
 fi
-
-# Migrate existing generated vhosts before replacing their backend. nginx
-# overwrites this header, so direct callers never learn the capability.
-NGINX_CONF_DIR="${NGINX_CONF_DIR:-/opt/sentinel/deploy/gcp/nginx}"
-NGINX_CONF="${NGINX_CONF_DIR}/${CUSTOMER_ID}.conf"
-if [ -f "$NGINX_CONF" ]; then
-  python3 - "$NGINX_CONF" "$CONTAINER_NAME" "$PROXY_TOKEN" <<'PY'
-import sys
-
-path, container, token = sys.argv[1:]
-content = open(path, encoding="utf-8").read()
-needle = f"proxy_pass http://{container}:7331;"
-protected_start = content.find("    location / {")
-protected_end = content.find("    location @login_redirect", protected_start)
-if protected_start < 0 or protected_end < 0:
-    raise SystemExit(f"expected authenticated location not found in {path}")
-protected = content[protected_start:protected_end]
-if needle not in protected:
-    raise SystemExit(f"expected upstream {container!r} not found in {path}")
-if "X-Sentinel-Proxy-Token" not in protected:
-    protected = protected.replace(
-        needle, needle + f"\n        proxy_set_header X-Sentinel-Proxy-Token {token};", 1)
-    with open(path, "w", encoding="utf-8") as output:
-        output.write(content[:protected_start] + protected + content[protected_end:])
-PY
-fi
+install -d -m 0750 "$NGINX_PROXY_TOKEN_DIR"
+umask 077
+printf 'proxy_set_header X-Sentinel-Proxy-Token %s;\n' "$PROXY_TOKEN" \
+  > "${NGINX_PROXY_TOKEN_DIR}/${CUSTOMER_ID}.conf"
 
 LICENSE_MOUNT=""
 if [ -f "$LICENSE_FILE" ]; then

@@ -12,6 +12,7 @@ CUSTOMER_NAME="${6:-$CUSTOMER_ID}"
 PORT="${7:-7001}"
 CONTAINER_NAME="sentinel-${CUSTOMER_ID}"
 NGINX_CONF_DIR="${NGINX_CONF_DIR:-/opt/sentinel/deploy/gcp/nginx}"
+NGINX_PROXY_TOKEN_DIR="${NGINX_PROXY_TOKEN_DIR:-/opt/sentinel-nginx/proxy-tokens}"
 HOST_LICENSES_DIR="${HOST_LICENSES_DIR:-/opt/licenses}"
 LICENSE_FILE="${HOST_LICENSES_DIR}/${CUSTOMER_ID}/license.json"
 DATA_DIR="${SENTINEL_DATA_ROOT:-/opt/sentinel-data}/${CUSTOMER_ID}"
@@ -42,6 +43,10 @@ else
   umask 077
   printf '%s\n' "$PROXY_TOKEN" > "$PROXY_TOKEN_FILE"
 fi
+install -d -m 0750 "$NGINX_PROXY_TOKEN_DIR"
+umask 077
+printf 'proxy_set_header X-Sentinel-Proxy-Token %s;\n' "$PROXY_TOKEN" \
+  > "${NGINX_PROXY_TOKEN_DIR}/${CUSTOMER_ID}.conf"
 if [ -z "$AGENT_TOKEN" ]; then
   AGENT_TOKEN=$(python3 -c "import secrets; print(secrets.token_urlsafe(32))")
   echo "$AGENT_TOKEN" > "${DATA_DIR}/agent_token.txt"
@@ -206,7 +211,7 @@ server {
         proxy_set_header Host \$host;
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Sentinel-Proxy-Token ${PROXY_TOKEN};
+        include /etc/nginx/proxy-tokens/${CUSTOMER_ID}.conf;
         proxy_set_header X-Arckon-User-Email      \$sentinel_user_email;
         proxy_set_header X-Arckon-User-Role       \$sentinel_user_role;
         proxy_set_header X-Arckon-Customer-ID     ${CUSTOMER_ID};
@@ -248,7 +253,7 @@ server {
         proxy_set_header Host \$host;
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Sentinel-Proxy-Token ${PROXY_TOKEN};
+        include /etc/nginx/proxy-tokens/${CUSTOMER_ID}.conf;
         proxy_set_header X-Arckon-User-Email      \$sentinel_user_email;
         proxy_set_header X-Arckon-User-Role       \$sentinel_user_role;
         proxy_set_header X-Arckon-Customer-ID     ${CUSTOMER_ID};
