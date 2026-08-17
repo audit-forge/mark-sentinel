@@ -9,4 +9,4 @@ fpdf2==2.8.3
 # Signed agent release manifest verification and release signing helper.
 cryptography==50.0.0
 # Compiled macOS agents need an explicit CA bundle for Cloudflare HTTPS.
-certifi==2025.8.3
+certifi==2026.7.22
