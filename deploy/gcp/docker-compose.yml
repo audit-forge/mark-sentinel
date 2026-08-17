@@ -23,6 +23,7 @@ services:
     container_name: sentinel-admin
     environment:
       - SECRET_KEY_FILE=/run/secrets/secret_key
+      - DEPLOY_TOKEN_FILE=/run/secrets/deploy_token
       - ADMIN_EMAIL=${ADMIN_EMAIL}
       - ADMIN_PASSWORD_FILE=/run/secrets/admin_password
       - PUBLIC_IP=${PUBLIC_IP}
@@ -42,8 +43,22 @@ services:
     volumes:
       - /opt/sentinel-data:/data
       - /opt/sentinel-secrets/admin-secret-key:/run/secrets/secret_key:ro
+      - /opt/sentinel-secrets/deployer-token:/run/secrets/deploy_token:ro
       - /opt/sentinel-secrets/admin-password:/run/secrets/admin_password:ro
       - /opt/licenses:/licenses
+    networks:
+      - sentinel-net
+    restart: always
+
+  deployer:
+    build: ./deployer
+    container_name: sentinel-deployer
+    environment:
+      - DEPLOY_TOKEN_FILE=/run/secrets/deploy_token
+    volumes:
+      - /opt/sentinel:/opt/sentinel:rw
+      - /var/run/docker.sock:/var/run/docker.sock:rw
+      - /opt/sentinel-secrets/deployer-token:/run/secrets/deploy_token:ro
     networks:
       - sentinel-net
     restart: always

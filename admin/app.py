@@ -56,9 +56,21 @@ def _load_admin_password() -> str:
                 pw = ""
     return pw or "changeme"
 
+
+def _load_deploy_token() -> str:
+    token_path = os.environ.get("DEPLOY_TOKEN_FILE", "")
+    if not token_path:
+        return ""
+    try:
+        with open(token_path, encoding="utf-8") as token_file:
+            return token_file.read().strip()
+    except OSError:
+        return ""
+
 ADMIN_EMAIL    = os.environ.get("ADMIN_EMAIL", "admin@sentinel.local")
 MAX_CUSTOMERS  = int(os.environ.get("MAX_CUSTOMERS", "0"))  # 0 = unlimited
 ADMIN_PASSWORD = _load_admin_password()
+DEPLOY_TOKEN = _load_deploy_token()
 PUBLIC_IP = os.environ.get("PUBLIC_IP", "34.58.90.147")
 PUBLIC_ADMIN_URL = os.environ.get("PUBLIC_ADMIN_URL", "").rstrip("/") or f"http://admin.{PUBLIC_IP}.nip.io"
 PUBLIC_DASHBOARD_URL = os.environ.get("PUBLIC_DASHBOARD_URL", "").rstrip("/")
@@ -341,7 +353,14 @@ async def deploy(request: Request):
         return RedirectResponse("/login")
     import urllib.request as urlreq
     try:
-        req = urlreq.Request("http://sentinel-deployer:9000/deploy", method="POST", data=b"")
+        if not DEPLOY_TOKEN:
+            raise RuntimeError("deployment token is not configured")
+        req = urlreq.Request(
+            "http://sentinel-deployer:9000/deploy",
+            method="POST",
+            data=b"",
+            headers={"X-Arckon-Deploy-Token": DEPLOY_TOKEN},
+        )
         with urlreq.urlopen(req, timeout=5) as r:
             code = r.status
         result = "started" if code == 202 else "busy" if code == 409 else "failed"

@@ -1,5 +1,5 @@
 #!/bin/sh
-LOCK=/tmp/deploying
+LOCK=/run/deployer/deploy.lock
 cleanup() { rm -f "$LOCK"; echo "[deployer] Lock released"; }
 trap cleanup EXIT
 

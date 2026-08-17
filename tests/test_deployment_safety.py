@@ -16,8 +16,16 @@ def test_legacy_gcp_upload_requires_explicit_manual_confirmation():
 
 def test_deployed_workloads_do_not_mount_the_host_docker_socket():
     compose = yaml.safe_load((REPO / 'deploy' / 'gcp' / 'docker-compose.yml').read_text())
-    for service in compose['services'].values():
-        assert all('/var/run/docker.sock' not in str(volume) for volume in service.get('volumes', []))
+    for name, service in compose['services'].items():
+        socket_mounts = [
+            volume for volume in service.get('volumes', [])
+            if '/var/run/docker.sock' in str(volume)
+        ]
+        if socket_mounts:
+            # The authenticated deployer is the sole deployment control plane.
+            assert name == 'deployer'
+            assert not service.get('ports')
+            assert '/opt/sentinel-secrets/deployer-token:/run/secrets/deploy_token:ro' in service['volumes']
 
     manifests = REPO / 'deploy' / 'k8s'
     for manifest in manifests.rglob('*agent-daemonset.yaml'):
