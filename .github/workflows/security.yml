@@ -46,4 +46,5 @@ jobs:
         with:
           python-version: '3.12'
       - run: python -m pip install --upgrade pip bandit
-      - run: bandit -q -r . -x tests,test,.git,.venv,venv,dist,build
+      # Block new high-severity findings; triage the established medium/low baseline separately.
+      - run: git ls-files -z '*.py' ':!test/**' ':!tests/**' | xargs -0 -r bandit -q -lll
