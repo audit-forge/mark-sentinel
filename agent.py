@@ -1273,9 +1273,11 @@ def _install_windows_task(cmd: list[str]) -> None:
         nssm_exe = nssm_dir / 'nssm.exe'
         if not nssm_exe.exists():
             log.info('NSSM not found — downloading for proper Windows Service support...')
+            tmp_zip = None
             try:
                 import tempfile
-                tmp_zip = Path(tempfile.mktemp(suffix='.zip'))
+                with tempfile.NamedTemporaryFile(suffix='.zip', delete=False) as tmp:
+                    tmp_zip = Path(tmp.name)
                 urllib.request.urlretrieve('https://nssm.cc/release/nssm-2.24.zip', str(tmp_zip))
                 with zipfile.ZipFile(str(tmp_zip), 'r') as zf:
                     arch = 'win64' if os.environ.get('PROCESSOR_ARCHITECTURE', '') == 'AMD64' else 'win32'
@@ -1284,12 +1286,14 @@ def _install_windows_task(cmd: list[str]) -> None:
                             with zf.open(name) as src, open(str(nssm_exe), 'wb') as dst:
                                 dst.write(src.read())
                             break
-                tmp_zip.unlink(missing_ok=True)
                 if nssm_exe.exists():
                     nssm_path = str(nssm_exe)
                     log.info('NSSM downloaded to %s', nssm_path)
             except Exception as e:
                 log.warning('Could not download NSSM: %s — falling back to Task Scheduler', e)
+            finally:
+                if tmp_zip:
+                    tmp_zip.unlink(missing_ok=True)
 
     if nssm_path:
         # NSSM creates a proper Windows Service that starts at boot (not just logon).

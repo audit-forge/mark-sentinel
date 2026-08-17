@@ -1,6 +1,7 @@
 import os
 import uuid
 import json
+import re
 import secrets
 import sqlite3
 import string
@@ -24,6 +25,11 @@ _login_attempts: dict[str, list[float]] = defaultdict(list)
 _LOGIN_WINDOW   = 300   # 5 minutes
 _LOGIN_MAX      = 10    # max attempts per window
 _LOCKOUT_SECS   = 600   # 10 minute lockout after exceeding limit
+_CUSTOMER_ID_PATTERN = re.compile(r"[a-z0-9][a-z0-9-]{0,62}")
+
+
+def _is_valid_customer_id(customer_id: str) -> bool:
+    return bool(_CUSTOMER_ID_PATTERN.fullmatch(customer_id))
 
 def _check_rate_limit(ip: str) -> bool:
     """Return True if the IP is allowed to attempt login, False if locked out."""
@@ -79,21 +85,25 @@ def _ensure_super_admin():
 
 def _get_shadow_ai_devices(customer_id: str) -> list[dict]:
     """Query the Sentinel app database for detected shadow AI devices."""
+    if not _is_valid_customer_id(customer_id):
+        return []
     try:
         cmd = [
             "sudo", "docker", "exec", f"sentinel-{customer_id}", "python3", "-c",
-            f"""
+            """
 import sqlite3
 import json
+import sys
 try:
-    db = sqlite3.connect('/app/data/customers/{customer_id}/agents.db')
+    customer_id = sys.argv[1]
+    db = sqlite3.connect(f'/app/data/customers/{customer_id}/agents.db')
     db.row_factory = sqlite3.Row
     rows = db.execute('SELECT reporter_hostname, host, service, models_json, source, last_seen FROM shadow_devices WHERE dismissed=0 ORDER BY last_seen DESC').fetchall()
     devices = [dict(r) for r in rows]
     print(json.dumps(devices))
 except Exception as e:
     print(json.dumps([]))
-"""
+""", customer_id,
         ]
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
         if result.returncode == 0:
@@ -113,6 +123,8 @@ def _get_client_orgs(customer_id: str) -> list[dict]:
     /opt/sentinel-data/{customer_id}); the admin container mounts the whole parent
     dir at /data, so it can read it read-only without going through that customer's API.
     """
+    if not _is_valid_customer_id(customer_id):
+        return []
     db_file = f"/data/{customer_id}/customers.db"
     if not os.path.isfile(db_file):
         return []
@@ -442,6 +454,8 @@ async def add_customer(
         return RedirectResponse("/login")
     _require_host_operations()
     cid = customer_id.lower().strip().replace(" ", "-")
+    if not _is_valid_customer_id(cid):
+        return RedirectResponse("/customers?error=invalid_id", status_code=303)
     if tier not in ("standard", "plus"):
         tier = "standard"
     valid_profiles = {"default", "iso42001", "atlas", "financial", "fedramp", "fedramp_20x", "cmmc", "biotech", "healthcare", "lifesciences", "owasp_agentic", "eu_ai_act", "professional_services"}
