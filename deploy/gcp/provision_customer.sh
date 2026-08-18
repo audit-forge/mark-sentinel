@@ -5,6 +5,8 @@ set -euo pipefail
 
 CUSTOMER_ID="$1"
 PUBLIC_IP="${2:-$(curl -sf http://metadata.google.internal/computeMetadata/v1/instance/network-interfaces/0/access-configs/0/external-ip -H 'Metadata-Flavor: Google' || echo '34.58.90.147')}"
+PUBLIC_ADMIN_URL="${PUBLIC_ADMIN_URL:-https://admin.riskraven.ai}"
+PUBLIC_DASHBOARD_URL="${PUBLIC_DASHBOARD_URL:-https://arckon.riskraven.ai}"
 TIER="${3:-standard}"
 EXPIRES="${4:-}"
 MAX_SEATS="${5:-5}"
@@ -272,7 +274,7 @@ server {
     }
 
     location @login_redirect {
-        return 302 http://${PUBLIC_IP}/login?next=http://\$host:\$server_port\$request_uri;
+        return 302 ${PUBLIC_ADMIN_URL}/login?next=${PUBLIC_DASHBOARD_URL}\$request_uri;
     }
 }
 EOF
