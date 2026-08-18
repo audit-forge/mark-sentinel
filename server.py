@@ -1216,6 +1216,10 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         proxy = self._proxy_session_user()
         if proxy:
             return proxy
+        # Behind the trusted proxy, the admin-domain JWT is the only dashboard
+        # session authority. Do not revive a stale host-only legacy session after logout.
+        if os.environ.get('SENTINEL_TRUSTED_PROXY_TOKEN'):
+            return None
         token = _get_session_cookie(self.headers)
         return _get_registry().get_session(token) if token else None
 

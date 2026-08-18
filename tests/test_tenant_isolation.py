@@ -126,6 +126,8 @@ def _render_provisioned_conf(tmp_path: Path) -> str:
         'CONTAINER_NAME="sentinel-acme"\n'
         'PORT="7002"\n'
         'PUBLIC_IP="203.0.113.9"\n'
+        'PUBLIC_ADMIN_URL="https://admin.example.test"\n'
+        'PUBLIC_DASHBOARD_URL="https://dashboard.example.test"\n'
         'PROXY_TOKEN="test-proxy-token"\n'
         "cat <<EOF\n" + m.group(1) + "\nEOF\n"
     )
@@ -428,6 +430,15 @@ def test_identity_headers_with_wrong_proxy_capability_are_ignored(wired):
         "X-Sentinel-Customer-ID": "acme",
     }
     assert h._proxy_session_user() is None
+
+
+def test_trusted_proxy_does_not_fallback_to_a_stale_customer_cookie(wired, monkeypatch):
+    h = wired._Handler.__new__(wired._Handler)
+    h.headers = {}
+    monkeypatch.setattr(wired, "_get_session_cookie", lambda _headers: "stale-session")
+    monkeypatch.setattr(wired._Handler, "_proxy_session_user", lambda self: None)
+
+    assert h._session_user() is None
 
 
 def test_client_viewer_is_still_denied_write_and_rollup_routes(wired):
