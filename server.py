@@ -4508,7 +4508,7 @@ load();
             for device in devices:
                 device_id = device.get('device_id', '')
                 if device_id:
-                    _get_store_for_device(device_id).enqueue_command(device_id, f'set_config:{payload}')
+                    store.enqueue_command(device_id, f'set_config:{payload}')
                     pushed += 1
         except Exception as e:
             log.error('baseline profile save error: %s', e)

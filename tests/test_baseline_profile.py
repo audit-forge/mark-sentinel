@@ -27,6 +27,42 @@ def test_baseline_profile_persists_and_excludes_container_profiles(tmp_path, mon
     assert "kubernetes" not in srv._BASELINE_PROFILES
 
 
+def test_baseline_update_uses_the_authenticated_customer_store(tmp_path, monkeypatch):
+    srv = _server()
+    monkeypatch.setattr(srv, "_BASELINE_PROFILE_PATH", tmp_path / "baseline_profile.json")
+    commands = []
+
+    class Store:
+        def list_devices(self, client_org_id=None):
+            assert client_org_id is None
+            return [
+                {"device_id": "mac"},
+                {"device_id": "docker", "hostname": "docker:api"},
+            ]
+
+        def enqueue_command(self, device_id, command):
+            commands.append((device_id, command))
+
+    handler = srv._Handler.__new__(srv._Handler)
+    body = json.dumps({"profile": "lifesciences"}).encode()
+    handler.headers = {"Content-Length": str(len(body))}
+    handler.rfile = io.BytesIO(body)
+    handler._store = lambda: Store()
+    handler._scoped_client_org = lambda: None
+    response = {}
+    handler._json = lambda value, status=200: response.update(value=value, status=status)
+    monkeypatch.setattr(
+        srv,
+        "_get_store_for_device",
+        lambda _device_id: (_ for _ in ()).throw(AssertionError("must not use global device lookup")),
+    )
+
+    handler._api_set_baseline_profile()
+
+    assert commands == [("mac", 'set_config:{"profile": "lifesciences"}')]
+    assert response["value"]["pushed_to_agents"] == 1
+
+
 def test_scan_all_without_override_uses_each_devices_saved_baseline(monkeypatch):
     srv = _server()
     commands = []
