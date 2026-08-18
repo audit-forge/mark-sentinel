@@ -8848,7 +8848,7 @@ async function loadSpendMspSections(days) {{
           row += '<td>' + (k.label||'') + '</td>' +
             '<td><code style="font-size:11px;background:#F3F4F6;padding:1px 4px;border-radius:3px">…' + (k.key_last4||'') + '</code></td>' +
             '<td style="text-align:right">$' + (k.spend_usd||0).toFixed(2) + '</td>' +
-            '<td style="text-align:right"><button class="scan-btn" onclick="removeKey(\'' + (k.provider||'') + '\',\'' + (k.key_id||'') + '\')" style="font-size:11px;color:#DC2626;border-color:#FECACA">Remove</button></td></tr>';
+            '<td style="text-align:right"><button class="scan-btn" data-provider="' + encodeURIComponent(k.provider||'') + '" data-key-id="' + encodeURIComponent(k.key_id||'') + '" onclick="removeKey(decodeURIComponent(this.dataset.provider),decodeURIComponent(this.dataset.keyId))" style="font-size:11px;color:#DC2626;border-color:#FECACA">Remove</button></td></tr>';
           return row;
         }}).join('');
       }}
