@@ -15,3 +15,8 @@ def test_shadow_ai_query_passes_customer_id_as_an_argument():
     assert "customer_id = sys.argv[1]" in SOURCE
     assert '""", customer_id,' in SOURCE
     assert "f\"\"\"\nimport sqlite3" not in SOURCE
+
+
+def test_auth_cookie_can_cover_the_canonical_dashboard_subdomain():
+    assert "AUTH_COOKIE_DOMAIN" in SOURCE
+    assert "secure=bool(AUTH_COOKIE_DOMAIN)" in SOURCE

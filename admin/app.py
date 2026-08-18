@@ -75,6 +75,7 @@ PUBLIC_IP = os.environ.get("PUBLIC_IP", "34.58.90.147")
 PUBLIC_ADMIN_URL = os.environ.get("PUBLIC_ADMIN_URL", "").rstrip("/") or f"http://admin.{PUBLIC_IP}.nip.io"
 PUBLIC_DASHBOARD_URL = os.environ.get("PUBLIC_DASHBOARD_URL", "").rstrip("/")
 PUBLIC_DASHBOARD_PORT = int(os.environ.get("PUBLIC_DASHBOARD_PORT", "7001"))
+AUTH_COOKIE_DOMAIN = os.environ.get("AUTH_COOKIE_DOMAIN", "").strip() or None
 
 
 @app.on_event("startup")
@@ -222,7 +223,15 @@ async def login(
     else:
         destination = next
     resp = RedirectResponse(destination, status_code=303)
-    resp.set_cookie("token", token, httponly=True, max_age=28800, samesite="lax")
+    resp.set_cookie(
+        "token",
+        token,
+        httponly=True,
+        max_age=28800,
+        samesite="lax",
+        secure=bool(AUTH_COOKIE_DOMAIN),
+        domain=AUTH_COOKIE_DOMAIN,
+    )
     return resp
 
 
@@ -237,7 +246,7 @@ async def logout(request: Request, next: str = None):
         except Exception:
             dest = "/login"
     resp = RedirectResponse(dest, status_code=303)
-    resp.delete_cookie("token")
+    resp.delete_cookie("token", secure=bool(AUTH_COOKIE_DOMAIN), domain=AUTH_COOKIE_DOMAIN)
     return resp
 
 

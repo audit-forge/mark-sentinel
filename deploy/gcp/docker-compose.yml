@@ -31,6 +31,7 @@ services:
       - PUBLIC_ADMIN_URL=${PUBLIC_ADMIN_URL:-https://admin.riskraven.ai}
       - PUBLIC_DASHBOARD_URL=${PUBLIC_DASHBOARD_URL:-https://arckon.riskraven.ai}
       - PUBLIC_DASHBOARD_PORT=${PUBLIC_DASHBOARD_PORT:-7001}
+      - AUTH_COOKIE_DOMAIN=${AUTH_COOKIE_DOMAIN:-.riskraven.ai}
       - DB_PATH=/data/sentinel.db
       - MAX_CUSTOMERS=${MAX_CUSTOMERS:-0}
       - LICENSES_DIR=/licenses
