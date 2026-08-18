@@ -1853,10 +1853,10 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         self.send_header('Set-Cookie',
             'sentinel_session=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0')
         if os.environ.get('SENTINEL_TRUSTED_PROXY_TOKEN'):
-            # Cloud mode: clear admin-panel JWT via its logout endpoint,
-            # which then redirects to the clean /login page.
-            host = self.headers.get('Host', '').split(':')[0]
-            self.send_header('Location', f'http://{host}/logout')
+            # Cloud mode: the shared dashboard JWT belongs to the admin app.
+            # Send logout there so it clears the .riskraven.ai cookie.
+            logout_url = os.environ.get('SENTINEL_ADMIN_LOGOUT_URL', '')
+            self.send_header('Location', logout_url if logout_url.startswith('https://') else '/login')
         else:
             self.send_header('Location', '/login')
         self.end_headers()

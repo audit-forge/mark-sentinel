@@ -8,6 +8,7 @@ CUSTOMER_ID="$1"
 CONTAINER_NAME="sentinel-${CUSTOMER_ID}"
 DATA_DIR="/opt/sentinel-data/${CUSTOMER_ID}"
 NGINX_PROXY_TOKEN_DIR="${NGINX_PROXY_TOKEN_DIR:-/opt/sentinel-nginx/proxy-tokens}"
+PUBLIC_ADMIN_URL="${PUBLIC_ADMIN_URL:-https://admin.riskraven.ai}"
 SPEND_SECRET_DIR="${SENTINEL_SPEND_SECRET_ROOT:-/opt/sentinel-data/.spend-secrets}/${CUSTOMER_ID}/spend"
 HOST_LICENSES_DIR="${HOST_LICENSES_DIR:-/opt/licenses}"
 LICENSE_FILE="${HOST_LICENSES_DIR}/${CUSTOMER_ID}/license.json"
@@ -55,8 +56,9 @@ docker run -d \
   --network sentinel-net \
   --restart always \
   --label "sentinel.customer=${CUSTOMER_ID}" \
-  -e "SENTINEL_AGENT_TOKEN_FILE=/app/data/agent_token.txt" \
-  -e "SENTINEL_TRUSTED_PROXY_TOKEN=${PROXY_TOKEN}" \
+   -e "SENTINEL_AGENT_TOKEN_FILE=/app/data/agent_token.txt" \
+   -e "SENTINEL_TRUSTED_PROXY_TOKEN=${PROXY_TOKEN}" \
+   -e "SENTINEL_ADMIN_LOGOUT_URL=${PUBLIC_ADMIN_URL}/logout" \
   ${LICENSE_MOUNT} \
   -v "${DATA_DIR}:/app/data" \
   -v "${SPEND_SECRET_DIR}:/opt/sentinel-secrets/spend" \

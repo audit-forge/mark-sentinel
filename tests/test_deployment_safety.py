@@ -36,6 +36,12 @@ def test_proxy_capabilities_are_mounted_outside_the_source_tree():
         assert 'NGINX_PROXY_TOKEN_DIR' in source
         assert '/etc/nginx/proxy-tokens/' in source or 'proxy-tokens' in source
 
+
+def test_customer_containers_receive_the_central_logout_url():
+    for script in ('provision_customer.sh', 'restart_customer.sh'):
+        source = (REPO / 'deploy' / 'gcp' / script).read_text()
+        assert 'SENTINEL_ADMIN_LOGOUT_URL=${PUBLIC_ADMIN_URL}/logout' in source
+
     manifests = REPO / 'deploy' / 'k8s'
     for manifest in manifests.rglob('*agent-daemonset.yaml'):
         document = yaml.safe_load_all(manifest.read_text())
