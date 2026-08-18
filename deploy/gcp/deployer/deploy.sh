@@ -13,6 +13,10 @@ cd "$REPO_DIR"
 git pull
 echo "[deployer] Git pull complete"
 
+# New customer containers are created from this image, so keep it aligned with
+# the checked-out server source before any lifecycle action can provision one.
+docker build -t mark-sentinel:latest "$REPO_DIR"
+
 # Hot-patch running customer containers with updated Python source files.
 # This is necessary because mark-sentinel:latest is only rebuilt on new VM setup;
 # Python source changes arrive via git pull and must be copied in live.

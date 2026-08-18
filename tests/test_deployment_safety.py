@@ -27,21 +27,6 @@ def test_deployed_workloads_do_not_mount_the_host_docker_socket():
             assert not service.get('ports')
             assert '/opt/sentinel-secrets/deployer-token:/run/secrets/deploy_token:ro' in service['volumes']
 
-
-def test_proxy_capabilities_are_mounted_outside_the_source_tree():
-    compose = yaml.safe_load((REPO / 'deploy' / 'gcp' / 'docker-compose.yml').read_text())
-    assert '/opt/sentinel-nginx/proxy-tokens:/etc/nginx/proxy-tokens:ro' in compose['services']['nginx']['volumes']
-    for script in ('provision_customer.sh', 'restart_customer.sh'):
-        source = (REPO / 'deploy' / 'gcp' / script).read_text()
-        assert 'NGINX_PROXY_TOKEN_DIR' in source
-        assert '/etc/nginx/proxy-tokens/' in source or 'proxy-tokens' in source
-
-
-def test_customer_containers_receive_the_central_logout_url():
-    for script in ('provision_customer.sh', 'restart_customer.sh'):
-        source = (REPO / 'deploy' / 'gcp' / script).read_text()
-        assert 'SENTINEL_ADMIN_LOGOUT_URL=${PUBLIC_ADMIN_URL}/logout' in source
-
     manifests = REPO / 'deploy' / 'k8s'
     for manifest in manifests.rglob('*agent-daemonset.yaml'):
         document = yaml.safe_load_all(manifest.read_text())
@@ -58,6 +43,26 @@ def test_customer_containers_receive_the_central_logout_url():
                 volume.get('hostPath', {}).get('path') != '/var/run/docker.sock'
                 for volume in spec.get('volumes', [])
             )
+
+
+def test_proxy_capabilities_are_mounted_outside_the_source_tree():
+    compose = yaml.safe_load((REPO / 'deploy' / 'gcp' / 'docker-compose.yml').read_text())
+    assert '/opt/sentinel-nginx/proxy-tokens:/etc/nginx/proxy-tokens:ro' in compose['services']['nginx']['volumes']
+    for script in ('provision_customer.sh', 'restart_customer.sh'):
+        source = (REPO / 'deploy' / 'gcp' / script).read_text()
+        assert 'NGINX_PROXY_TOKEN_DIR' in source
+        assert '/etc/nginx/proxy-tokens/' in source or 'proxy-tokens' in source
+
+
+def test_customer_containers_receive_the_central_logout_url():
+    for script in ('provision_customer.sh', 'restart_customer.sh'):
+        source = (REPO / 'deploy' / 'gcp' / script).read_text()
+        assert 'SENTINEL_ADMIN_LOGOUT_URL=${PUBLIC_ADMIN_URL}/logout' in source
+
+
+def test_deployer_rebuilds_the_customer_image_from_current_source():
+    source = (REPO / 'deploy' / 'gcp' / 'deployer' / 'deploy.sh').read_text()
+    assert 'docker build -t mark-sentinel:latest "$REPO_DIR"' in source
 
 
 def test_installers_do_not_download_unauthenticated_legacy_bundles():
