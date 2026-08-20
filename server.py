@@ -8916,7 +8916,7 @@ async function triggerSpendFetch(btn) {{
     if (res.skipped) {{
       alert('Already fetched today. Click Fetch Latest again with force to override (this is intentional to avoid hammering provider APIs).');
     }} else {{
-      const errors = res.errors && res.errors.length ? '\n\nIssues:\n' + res.errors.join('\n') : '';
+      const errors = res.errors && res.errors.length ? '\\n\\nIssues:\\n' + res.errors.join('\\n') : '';
       alert('Fetched ' + (res.fetched || 0) + ' record(s) from: ' + ((res.providers||[]).join(', ') || 'none') + errors);
     }}
     loadSpend();
