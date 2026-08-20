@@ -10,7 +10,8 @@ REPO_DIR="${REPO_DIR:-/opt/sentinel}"
 echo "[deployer] Starting deploy at $(date)"
 cd "$REPO_DIR"
 
-git pull
+git fetch origin main
+git checkout --detach origin/main
 echo "[deployer] Git pull complete"
 
 # New customer containers are created from this image, so keep it aligned with
