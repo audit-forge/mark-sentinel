@@ -1,66 +1,30 @@
-"""
-Arckon — OpenAI cost/usage connector.
+"""Arckon — OpenAI organization costs connector.
 
-Fetches daily token usage and estimated cost from the OpenAI Usage/Project
-APIs.  Cost is estimated using a built-in per-model price table because the
-public API does not expose spend directly for many tiers.
-
-https://platform.openai.com/docs/api-reference/usage
+OpenAI exposes organization-wide billed costs through its Administration API.  That
+endpoint requires an Admin API key; project keys can make model requests but
+cannot read organization spend.
 """
 from __future__ import annotations
 
 import json
+import logging
+import time as time_module
 import urllib.error
+import urllib.parse
 import urllib.request
-from datetime import date, timedelta
+from datetime import date, datetime, time, timedelta, timezone
 from typing import Any
 
 from connectors.cost_connector import CostConnector, SpendRecord
 
-_OPENAI_USAGE_URL = "https://api.openai.com/v1/usage"
-
-# Rough per-model pricing (USD per 1M tokens).  Update as OpenAI publishes
-# new prices.  These are estimates; billing dashboards are authoritative.
-_MODEL_PRICES: dict[str, tuple[float, float]] = {
-    # (input_per_1m, output_per_1m)
-    "gpt-4o": (5.00, 15.00),
-    "gpt-4o-mini": (0.150, 0.600),
-    "gpt-4o-2024-05-13": (5.00, 15.00),
-    "gpt-4o-mini-2024-07-18": (0.150, 0.600),
-    "gpt-4-turbo": (10.00, 30.00),
-    "gpt-4-turbo-2024-04-09": (10.00, 30.00),
-    "gpt-4-0125-preview": (10.00, 30.00),
-    "gpt-4-1106-preview": (10.00, 30.00),
-    "gpt-4": (30.00, 60.00),
-    "gpt-3.5-turbo": (0.50, 1.50),
-    "gpt-3.5-turbo-0125": (0.50, 1.50),
-    "gpt-3.5-turbo-1106": (1.00, 2.00),
-    "o1-preview": (15.00, 60.00),
-    "o1-preview-2024-09-12": (15.00, 60.00),
-    "o1-mini": (3.00, 12.00),
-    "o1-mini-2024-09-12": (3.00, 12.00),
-    "text-embedding-3-small": (0.02, 0.0),
-    "text-embedding-3-large": (0.13, 0.0),
-    "text-embedding-ada-002": (0.10, 0.0),
-    "dall-e-3": (0.0, 0.0),  # image pricing is per image, not per token
-    "whisper-1": (0.0, 0.0),  # audio pricing is per minute
-    "tts-1": (0.0, 0.0),  # audio pricing is per 1M chars
-}
-
-
-def _estimate_cost(model: str, input_tokens: int, output_tokens: int) -> float:
-    in_price, out_price = _MODEL_PRICES.get(model, (0.0, 0.0))
-    if not in_price and not out_price:
-        return 0.0
-    input_cost = (input_tokens / 1_000_000.0) * in_price
-    output_cost = (output_tokens / 1_000_000.0) * out_price
-    return round(input_cost + output_cost, 6)
-
+_OPENAI_API_URL = "https://api.openai.com"
+_MAX_DAYS_PER_REQUEST = 31
+log = logging.getLogger(__name__)
 
 class OpenAICostConnector(CostConnector):
     provider = "openai"
 
-    def __init__(self, api_key: str = "", base_url: str = _OPENAI_USAGE_URL) -> None:
+    def __init__(self, api_key: str = "", base_url: str = _OPENAI_API_URL) -> None:
         super().__init__(api_key)
         self.base_url = base_url.rstrip("/")
 
@@ -70,62 +34,105 @@ class OpenAICostConnector(CostConnector):
         end_date: date | None = None,
     ) -> list[SpendRecord]:
         if not self.api_key:
-            raise ValueError("OpenAI API key is required")
+            raise ValueError("OpenAI Admin API key is required")
+        if not self.api_key.startswith("sk-admin-"):
+            raise ValueError(
+                "OpenAI spend tracking requires an Admin API key (sk-admin-...), "
+                "not a project key (sk-proj-...)"
+            )
 
         end = end_date or start_date
         if end < start_date:
             start_date, end = end, start_date
 
         records: list[SpendRecord] = []
-        for day in self._date_range(start_date, end):
-            records.extend(self._fetch_day(day))
+        chunk_start = start_date
+        while chunk_start <= end:
+            chunk_end = min(chunk_start + timedelta(days=_MAX_DAYS_PER_REQUEST - 1), end)
+            records.extend(self._fetch_range(chunk_start, chunk_end))
+            chunk_start = chunk_end + timedelta(days=1)
         return records
 
-    def _fetch_day(self, day: date) -> list[SpendRecord]:
-        # OpenAI usage endpoints generally accept a date query param.
-        url = f"{self.base_url}?date={day.isoformat()}"
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Accept": "application/json",
-        }
-        req = urllib.request.Request(url, headers=headers, method="GET")
-        try:
-            with urllib.request.urlopen(req, timeout=30) as resp:
-                body = json.loads(resp.read().decode())
-        except urllib.error.HTTPError as e:
-            err_body = e.read().decode()
-            raise RuntimeError(f"OpenAI usage API HTTP {e.code}: {err_body}") from e
-        except urllib.error.URLError as e:
-            raise RuntimeError(f"OpenAI usage API connection error: {e.reason}") from e
+    def _fetch_range(self, start_date: date, end_date: date) -> list[SpendRecord]:
+        start_time = int(datetime.combine(start_date, time.min, tzinfo=timezone.utc).timestamp())
+        end_time = int(datetime.combine(
+            end_date + timedelta(days=1), time.min, tzinfo=timezone.utc).timestamp())
+        params: list[tuple[str, str]] = [
+            ("start_time", str(start_time)),
+            ("end_time", str(end_time)),
+            ("bucket_width", "1d"),
+            ("group_by", "line_item"),
+            ("limit", str(_MAX_DAYS_PER_REQUEST)),
+        ]
+        page: str | None = None
+        buckets: list[dict[str, Any]] = []
+        while True:
+            query = list(params)
+            if page:
+                query.append(("page", page))
+            url = f"{self.base_url}/v1/organization/costs?{urllib.parse.urlencode(query)}"
+            headers = {
+                "Authorization": f"Bearer {self.api_key}",
+                "Accept": "application/json",
+                "User-Agent": "Arckon/1.0 (https://arckon.riskraven.ai)",
+            }
+            req = urllib.request.Request(url, headers=headers, method="GET")
+            for attempt in range(3):
+                try:
+                    with urllib.request.urlopen(req, timeout=30) as resp:
+                        body = json.loads(resp.read().decode())
+                    break
+                except urllib.error.HTTPError as e:
+                    if e.code in (429, 500, 502, 503, 504) and attempt < 2:
+                        log.warning("OpenAI Organization Costs API HTTP %s; retrying", e.code)
+                        time_module.sleep(2 ** attempt)
+                        continue
+                    if e.code in (401, 403):
+                        raise RuntimeError(
+                            "OpenAI Organization Costs API access denied; configure an "
+                            "OpenAI Admin API key (sk-admin-...), not a project key"
+                        ) from e
+                    log.warning("OpenAI Organization Costs API HTTP %s", e.code)
+                    raise RuntimeError(f"OpenAI Organization Costs API HTTP {e.code}") from e
+                except urllib.error.URLError as e:
+                    if attempt < 2:
+                        log.warning("OpenAI Organization Costs API connection error; retrying")
+                        time_module.sleep(2 ** attempt)
+                        continue
+                    raise RuntimeError("OpenAI Organization Costs API connection error") from e
 
-        # The /v1/usage response shape varies by account type.  Support the two
-        # most common shapes: a flat list of "data" entries, or nested buckets.
-        data = body.get("data", [])
-        if not data and "usage" in body:
-            data = body.get("usage", [])
+            data = body.get("data", [])
+            if not isinstance(data, list):
+                raise RuntimeError("OpenAI Organization Costs API returned an invalid data payload")
+            buckets.extend(bucket for bucket in data if isinstance(bucket, dict))
+            if not body.get("has_more"):
+                break
+            page = body.get("next_page")
+            if not page:
+                raise RuntimeError("OpenAI Organization Costs API returned has_more without next_page")
 
         out: list[SpendRecord] = []
-        for entry in data:
-            try:
-                model = entry.get("model") or entry.get("model_id") or "unknown"
-                input_tokens = int(entry.get("n_input_tokens", 0) or entry.get("input_tokens", 0))
-                output_tokens = int(entry.get("n_output_tokens", 0) or entry.get("output_tokens", 0))
-                req_count = entry.get("n_requests") or entry.get("request_count")
-                cost = _estimate_cost(model, input_tokens, output_tokens)
-
-                record = SpendRecord(
-                    provider=self.provider,
-                    model=model,
-                    period_date=day.isoformat(),
-                    input_tokens=input_tokens,
-                    output_tokens=output_tokens,
-                    cost_usd=cost,
-                    raw_snapshot=self._serialize_raw(entry),
-                    request_count=int(req_count) if req_count is not None else None,
-                )
-                out.append(record)
-            except (ValueError, TypeError) as e:
-                # Skip malformed entries rather than aborting the whole day.
+        for bucket in buckets:
+            bucket_start = bucket.get("start_time")
+            if not isinstance(bucket_start, int):
                 continue
-
+            period_date = datetime.fromtimestamp(bucket_start, tz=timezone.utc).date().isoformat()
+            for entry in bucket.get("results", []):
+                if not isinstance(entry, dict):
+                    continue
+                amount = entry.get("amount")
+                if not isinstance(amount, dict):
+                    continue
+                try:
+                    cost_usd = float(amount.get("value"))
+                except (TypeError, ValueError):
+                    continue
+                out.append(SpendRecord(
+                    provider=self.provider,
+                    model=entry.get("line_item") or "OpenAI organization cost",
+                    period_date=period_date,
+                    cost_usd=round(cost_usd, 6),
+                    currency=str(amount.get("currency") or "USD").upper(),
+                    raw_snapshot=self._serialize_raw(entry),
+                ))
         return out

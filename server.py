@@ -328,7 +328,7 @@ def _load_spend_config(customer_id: str) -> dict:
     return key_store.load_config(_spend_config_path(customer_id))
 
 
-def _fetch_all_spend(config: dict, days: int) -> list[dict]:
+def _fetch_all_spend(config: dict, days: int, errors: list[str] | None = None) -> list[dict]:
     """Fetch spend records from all configured providers, tagging each record
     with the client_org_id of the key that produced it."""
     from datetime import date, timedelta
@@ -363,6 +363,8 @@ def _fetch_all_spend(config: dict, days: int) -> list[dict]:
                 if not full_key:
                     log.warning('spend fetch: no resolvable key for %s/%s',
                                 provider, rec.client_org_id)
+                    if errors is not None:
+                        errors.append(f'{provider}: credential unavailable')
                     continue
                 connector = cls(api_key=full_key)
                 del full_key
@@ -375,8 +377,10 @@ def _fetch_all_spend(config: dict, days: int) -> list[dict]:
                 d['key_last4'] = rec.key_last4
                 all_records.append(d)
         except Exception as e:
-            log.warning('spend fetch failed for %s/%s: %s',
-                        provider, rec.client_org_id, e)
+            log.warning('spend fetch failed for %s/%s (%s)',
+                        provider, rec.client_org_id, type(e).__name__)
+            if errors is not None:
+                errors.append(f'{provider}: fetch failed; check provider credentials and service status')
 
     return all_records
 
@@ -3968,6 +3972,14 @@ load();
                 days = 365
         return days
 
+    def _require_spend_admin(self) -> bool:
+        """Deny credential and budget changes to non-admin dashboard users."""
+        user = self._session_user()
+        if user and user.get('role') in ('admin', 'customer_admin', 'super_admin'):
+            return True
+        self._json({'error': 'admin role required'}, 403)
+        return False
+
     def _api_spend_fetch(self):
         """POST /api/spend/fetch — trigger a fetch from configured providers.
 
@@ -3976,6 +3988,8 @@ load();
         the stored data unless force=1.
         """
         try:
+            if not self._require_spend_admin():
+                return
             body = self._read_json_body(default={})
             days = body.get('days', 7)
             try:
@@ -3994,12 +4008,18 @@ load();
                 return
 
             config = _load_spend_config(customer_id)
-            records = _fetch_all_spend(config, days)
+            errors: list[str] = []
+            records = _fetch_all_spend(config, days, errors)
             count = self._store().upsert_ai_spend(records)
 
-            last_fetch_path.parent.mkdir(parents=True, exist_ok=True)
-            last_fetch_path.write_text(today, encoding='utf-8')
-            self._json({'fetched': count, 'providers': list(config.get('providers', {}).keys())})
+            if not errors:
+                last_fetch_path.parent.mkdir(parents=True, exist_ok=True)
+                last_fetch_path.write_text(today, encoding='utf-8')
+            self._json({
+                'fetched': count,
+                'providers': list(config.get('providers', {}).keys()),
+                'errors': errors,
+            })
         except json.JSONDecodeError:
             self._json({'error': 'invalid JSON'}, 400)
         except Exception as e:
@@ -4030,6 +4050,8 @@ load();
         0600 secret file. The full key is never written to spend_config.json and
         never returned by any API."""
         try:
+            if not self._require_spend_admin():
+                return
             from connectors import key_store
             body = self._read_json_body(default={})
             provider = str(body.get('provider', '')).strip().lower()
@@ -4043,6 +4065,11 @@ load();
                 return
             if not full_key or len(full_key) < 8:
                 self._json({'error': 'api_key too short'}, 400)
+                return
+            if provider == 'openai' and not full_key.startswith('sk-admin-'):
+                self._json({
+                    'error': 'OpenAI spend tracking requires a read-only Admin API key (sk-admin-...), not a project key',
+                }, 400)
                 return
             if not label:
                 label = f"{provider} ({client_org_id or 'default'})"
@@ -4099,6 +4126,8 @@ load();
         Removes the redacted config entry and (if present) the secret file.
         Never returns the full key."""
         try:
+            if not self._require_spend_admin():
+                return
             from connectors import key_store
             body = self._read_json_body(default={})
             provider = str(body.get('provider', '')).strip().lower()
@@ -4133,6 +4162,8 @@ load();
     def _api_spend_set_budget(self):
         """POST /api/spend/budget — set budget alert thresholds."""
         try:
+            if not self._require_spend_admin():
+                return
             body = self._read_json_body(default={})
             daily_usd = body.get('daily_usd')
             per_model_usd = body.get('per_model_usd')
@@ -8885,7 +8916,8 @@ async function triggerSpendFetch(btn) {{
     if (res.skipped) {{
       alert('Already fetched today. Click Fetch Latest again with force to override (this is intentional to avoid hammering provider APIs).');
     }} else {{
-      alert('Fetched ' + (res.fetched || 0) + ' record(s) from: ' + ((res.providers||[]).join(', ') || 'none'));
+      const errors = res.errors && res.errors.length ? '\n\nIssues:\n' + res.errors.join('\n') : '';
+      alert('Fetched ' + (res.fetched || 0) + ' record(s) from: ' + ((res.providers||[]).join(', ') || 'none') + errors);
     }}
     loadSpend();
   }} catch(e) {{
@@ -8905,12 +8937,11 @@ function hideAddKeyForm() {{
 }}
 
 const _SPEND_KEY_HELP = {{
-  'openai': '<b>OpenAI API key</b><br>' +
+  'openai': '<b>OpenAI Admin API key</b><br>' +
     '1. Sign in at <a href="https://platform.openai.com/" target="_blank">platform.openai.com</a><br>' +
-    '2. Go to <b>API Keys</b> (left menu) → <b>Create new secret key</b><br>' +
-    '3. Copy the <code>sk-...</code> key immediately — OpenAI won\u2019t show it again<br>' +
-    '4. The key needs <b>Usage read</b> scope for spend tracking<br>' +
-    '<span style="color:#9CA3AF">Cost shown here is estimated from token counts × published per-model pricing.</span>',
+    '2. Go to <b>Organization Settings → Admin keys</b> and create a <b>Read only</b> key<br>' +
+    '3. Paste the <code>sk-admin-...</code> key here; project keys cannot read organization spend<br>' +
+    '<span style="color:#9CA3AF">Cost shown here is billed USD from OpenAI, grouped by its reported line item.</span>',
   'anthropic': '<b>Anthropic Admin API key</b><br>' +
     '1. Sign in at <a href="https://console.anthropic.com/" target="_blank">console.anthropic.com</a> and open <b>Settings → Organization</b><br>' +
     '2. Create an <b>Admin API key</b> with Usage and Cost access<br>' +
