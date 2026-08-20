@@ -7,6 +7,7 @@ from . import CheckResult, PASS, FAIL, WARN
 from connectors.config_connector import ScanContext
 
 CATEGORY = "AI-DEPLOY"
+PLAINTEXT_API_KEY_TITLE = "Plaintext Secret Outside Protected Secret Storage"
 
 # API key patterns — only match values that look like real keys (long, opaque)
 _API_KEY_RE = [
@@ -196,6 +197,10 @@ def check_deploy_001(ctx: ScanContext) -> CheckResult:
             m = regex.search(line)
             val = m.group(1) if m and m.lastindex else (m.group(0) if m else None)
             if m and not _is_placeholder(val):
+                # Google Chat incoming-webhook URLs include an AIza token as part
+                # of the webhook credential. They are not Gemini API keys.
+                if desc == 'Google/Gemini API key' and 'chat.googleapis.com/' in line:
+                    continue
                 key_hits.append((path, lineno, desc, line))
 
     gi_issues = []
@@ -206,24 +211,24 @@ def check_deploy_001(ctx: ScanContext) -> CheckResult:
             gi_issues.append(".gitignore does not include .env or *.env patterns")
 
     if key_hits:
-        ev = [f"{p}:{n} — {d}" for p, n, d, _ in key_hits[:5]]
-        ev += gi_issues
         return CheckResult(
             check_id="AI-DEPLOY-001",
-            title="API Keys Exposed in Source Files",
+            title=PLAINTEXT_API_KEY_TITLE,
             status=FAIL,
             severity="CRITICAL",
             category=CATEGORY,
             details=(
-                f"{len(key_hits)} API key(s) detected in source files outside .env. "
-                "Rotate these immediately — anyone with repo access can use them."
+                f"{len(key_hits)} secret(s) detected in plaintext configuration or deployment files. "
+                "Restrict access and rotate any credential that remains active."
             ),
-            evidence=[_mask(e) for e in ev],
+            evidence=[_mask(f"{p}:{n} — {d}") for p, n, d, _ in key_hits[:5]],
             remediation=(
                 "1. Rotate any exposed key at the provider dashboard NOW.\n"
-                "2. Remove the key from the source file; add it to a .env file instead.\n"
-                "3. Add '.env' and '*.env' to .gitignore.\n"
-                "4. Check git history: git log --all -S 'sk-' -- ."
+                "2. Remove the key from the plaintext file and store it in the service's protected "
+                "secret mechanism or environment.\n"
+                "3. Restrict secret files to the service identity (typically mode 0600).\n"
+                "4. If the file is tracked by Git, remove the key from history and add '.env' and '*.env' "
+                "to .gitignore."
             ),
             frameworks={"OWASP LLM": "LLM07", "FedRAMP": "IA-5", "NIST AI RMF": "MANAGE 2.2"},
         )
