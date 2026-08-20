@@ -629,11 +629,10 @@ def self_update(config: dict) -> bool:
                         or member.islnk()):
                     log.warning('self_update: skipping unsafe path %s', member.name)
                     continue
-                # Windows locks a running executable. Stage the replacement and
-                # let a detached service-restart script swap it after stopping
-                # the service instead of failing half-way through an update.
+                # Never write over the running agent executable. Windows needs a
+                # service-managed swap; POSIX can atomically replace the pathname.
                 is_agent_binary = len(rel.parts) == 1 and rel.name.lower() in ('agent', 'agent.exe')
-                dest = ROOT / (str(rel) + '.new' if sys.platform == 'win32' and is_agent_binary else str(rel))
+                dest = ROOT / (str(rel) + '.new' if is_agent_binary else str(rel))
                 dest.parent.mkdir(parents=True, exist_ok=True)
                 with tar.extractfile(member) as src, open(dest, 'wb') as dst:
                     dst.write(src.read())
@@ -648,6 +647,11 @@ def self_update(config: dict) -> bool:
         log.info('self_update: bundle extracted — restarting')
         if sys.platform == 'win32' and agent_binary_updated:
             return _restart_windows_service_after_update(staged_agent_binary, live_agent_binary)
+        if agent_binary_updated:
+            if staged_agent_binary is None or live_agent_binary is None:
+                log.error('self_update: staged agent binary is missing')
+                return False
+            os.replace(staged_agent_binary, live_agent_binary)
         # If a compiled agent binary was shipped, exec it directly.
         # Otherwise fall back to re-running with the Python interpreter.
         agent_bin = ROOT / ('agent.exe' if sys.platform == 'win32' else 'agent')
