@@ -25,6 +25,15 @@ RUN pip install --no-cache-dir --upgrade pip && \
 # Copy all source (server.py and supporting server-side modules)
 COPY . .
 
+# The dashboard is generated from a Python f-string, so source-only checks can
+# miss invalid JavaScript introduced during rendering. Fail the image build
+# before deployment, then remove Node so it is not part of the runtime image.
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends nodejs && \
+    python3 scripts/check_server_js.py && \
+    apt-get purge -y --auto-remove nodejs && \
+    rm -rf /var/lib/apt/lists/*
+
 # Copy pre-built Linux binaries compiled locally via scripts/build_binaries.sh
 # If dist/ doesn't exist, the COPY is skipped and the server falls back to
 # serving Python source (dev mode — source is still present in /app).
