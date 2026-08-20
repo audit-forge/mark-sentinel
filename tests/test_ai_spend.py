@@ -46,20 +46,26 @@ def test_openai_connector_requires_api_key():
         conn.fetch_usage(date.today())
 
 
-def test_openai_connector_parses_usage_data():
-    conn = OpenAICostConnector(api_key="sk-test")
-    mock_response = {
-        "data": [
-            {"model": "gpt-4o", "n_input_tokens": 2000000, "n_output_tokens": 500000,
-             "n_requests": 1500},
-            {"model": "gpt-4o-mini", "input_tokens": 1000000, "output_tokens": 300000,
-             "request_count": 2000},
-        ]
-    }
-    with patch.object(conn, "_fetch_day", side_effect=lambda day: []):
-        pass  # _fetch_day is exercised below
+def test_openai_connector_requires_admin_api_key():
+    conn = OpenAICostConnector(api_key="sk-proj-test")
+    with pytest.raises(ValueError, match="Admin API key"):
+        conn.fetch_usage(date.today())
 
-    # Direct day fetch with mocked urllib
+
+def test_openai_connector_parses_usage_data():
+    conn = OpenAICostConnector(api_key="sk-admin-test")
+    mock_response = {
+        "data": [{
+            "start_time": 1723593600,
+            "end_time": 1723680000,
+            "results": [
+                {"line_item": "completions", "amount": {"value": 17.5, "currency": "usd"}},
+                {"line_item": "audio", "amount": {"value": 2.25, "currency": "usd"}},
+            ],
+        }],
+        "has_more": False,
+    }
+
     import urllib.request
     class MockResponse:
         def __init__(self, body):
@@ -72,23 +78,55 @@ def test_openai_connector_parses_usage_data():
             pass
 
     def mock_urlopen(req, timeout=None):
+        assert "/v1/organization/costs?" in req.full_url
+        assert "bucket_width=1d" in req.full_url
+        assert "group_by=line_item" in req.full_url
         return MockResponse(json.dumps(mock_response).encode())
 
     with patch("urllib.request.urlopen", side_effect=mock_urlopen):
-        records = conn._fetch_day(date.today())
+        records = conn.fetch_usage(date(2024, 8, 14))
 
     assert len(records) == 2
-    assert records[0].model == "gpt-4o"
-    assert records[0].input_tokens == 2000000
-    assert records[0].output_tokens == 500000
-    assert records[0].cost_usd > 0
-    assert records[0].request_count == 1500
+    assert records[0].model == "completions"
+    assert records[0].cost_usd == 17.5
+    assert records[0].currency == "USD"
 
 
-def test_openai_cost_estimation():
-    from connectors.openai_cost_connector import _estimate_cost
-    cost = _estimate_cost("gpt-4o", 1_000_000, 1_000_000)
-    assert cost == 20.0
+def test_openai_connector_does_not_expose_upstream_error_body():
+    import io
+    import urllib.error
+
+    conn = OpenAICostConnector(api_key="sk-admin-test")
+    error = urllib.error.HTTPError(
+        "https://api.openai.com/test", 500, "Server Error", {}, io.BytesIO(b"internal detail"))
+    with patch("urllib.request.urlopen", side_effect=error):
+        with pytest.raises(RuntimeError, match="HTTP 500") as exc:
+            conn.fetch_usage(date(2024, 8, 14))
+    assert "internal detail" not in str(exc.value)
+
+
+def test_openai_connector_retries_transient_error():
+    import io
+    import urllib.error
+
+    conn = OpenAICostConnector(api_key="sk-admin-test")
+    response = {"data": [], "has_more": False}
+
+    class MockResponse:
+        def read(self):
+            return json.dumps(response).encode()
+        def __enter__(self):
+            return self
+        def __exit__(self, *args):
+            pass
+
+    error = urllib.error.HTTPError(
+        "https://api.openai.com/test", 429, "Too Many Requests", {}, io.BytesIO())
+    with patch("urllib.request.urlopen", side_effect=[error, MockResponse()]) as urlopen:
+        with patch("connectors.openai_cost_connector.time_module.sleep") as sleep:
+            assert conn.fetch_usage(date(2024, 8, 14)) == []
+    assert urlopen.call_count == 2
+    sleep.assert_called_once_with(1)
 
 
 # -- Anthropic cost connector -------------------------------------------------
@@ -324,6 +362,23 @@ def test_fetch_all_spend_tags_records_with_client_org_id():
     assert records[0]["client_org_id"] == "orgA"
     assert records[0]["key_label"] == "Acme"
     assert records[0]["key_last4"] == "abcdef"[-4:]
+
+
+def test_fetch_all_spend_returns_provider_error_to_the_caller():
+    import server
+    full_key = "sk-admin-test-abcdef"
+    config = {
+        "providers": {
+            "openai": [{"client_org_id": "orgA", "label": "Acme", "key_hash": hash_key(full_key),
+                          "key_last4": last4(full_key), "api_key_env": "TEST_OPENAI_KEY",
+                          "api_key_file": ""}],
+        }
+    }
+    errors = []
+    with patch.object(OpenAICostConnector, "fetch_usage", side_effect=RuntimeError("upstream detail")):
+        with patch.dict("os.environ", {"TEST_OPENAI_KEY": full_key}):
+            assert server._fetch_all_spend(config, days=1, errors=errors) == []
+    assert errors == ["openai: fetch failed; check provider credentials and service status"]
 
 
 # -- Key redaction security ---------------------------------------------------

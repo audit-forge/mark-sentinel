@@ -766,12 +766,18 @@ def rendered_vhost(tmp_path_factory):
         stub = stubs / name
         stub.write_text("#!/bin/sh\nexit 0\n")
         stub.chmod(0o755)
+    # The provisioner uses install -d for root-owned production secret paths.
+    # The test needs the directories but must not attempt a host chown.
+    install = stubs / "install"
+    install.write_text("#!/bin/sh\nfor last; do :; done\nif [ \"$1\" = \"-d\" ]; then mkdir -p \"$last\"; fi\n")
+    install.chmod(0o755)
     conf_dir = tmp / "nginx"
     env = dict(
         os.environ,
-        PATH=str(stubs) + os.pathsep + os.environ.get("PATH", ""),
-        NGINX_CONF_DIR=str(conf_dir),
-        SENTINEL_DATA_ROOT=str(tmp / "data"),
+            PATH=str(stubs) + os.pathsep + os.environ.get("PATH", ""),
+            NGINX_CONF_DIR=str(conf_dir),
+            NGINX_PROXY_TOKEN_DIR=str(tmp / "proxy-tokens"),
+            SENTINEL_DATA_ROOT=str(tmp / "data"),
         HOST_LICENSES_DIR=str(tmp / "licenses"),
     )
     proc = subprocess.run(
@@ -889,5 +895,5 @@ def test_the_rendered_vhost_still_does_the_rest_of_its_job(rendered_vhost):
     assert "proxy_set_header X-Customer-ID acme;" in blocks["= /_auth"]
     assert "proxy_read_timeout 300;" in blocks["/api/agent/"]
     assert rendered_vhost.count("proxy_read_timeout 300;") == 5
-    assert any("return 302 http://203.0.113.10/login?next=" in line
-               for line in blocks["@login_redirect"])
+    assert any("return 302 https://admin.riskraven.ai/login?next=https://arckon.riskraven.ai" in line
+                for line in blocks["@login_redirect"])
