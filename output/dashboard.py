@@ -1044,6 +1044,7 @@ function _pollForServer(){
 
 function renderScan(){
   const live=window.location.protocol!=='file:';
+  const deviceScan=Boolean(DATA.meta.device_id);
   if(!live){
     document.getElementById('view-scan').innerHTML=`
       <div class="server-notice">
@@ -1075,9 +1076,9 @@ function renderScan(){
     <div class="scan-form">
       <div class="sec-hdr" style="margin-bottom:6px">Run New Scan</div>
       <div style="font-size:11px;color:#6e7681;margin-bottom:16px;padding:8px 10px;background:#0d1117;border-radius:4px;border-left:3px solid #30363d">
-        Scans this server machine locally. To run a scan on a <em>remote</em> device use
-        <strong style="color:#e6edf3">Scan ▾</strong> in the fleet table — that queues a
-        command for the device agent to pick up on its next check-in.
+        ${deviceScan
+          ? 'Queues the selected profiles on this device. Results refresh when its agent reports back.'
+          : 'Scans this server machine locally. To run a scan on a <em>remote</em> device use <strong style="color:#e6edf3">Scan ▾</strong> in the fleet table.'}
       </div>
       <div class="form-row">
         <span class="form-label">Mode</span>
@@ -1086,10 +1087,10 @@ function renderScan(){
           <label class="radio-opt"><input type="radio" name="smode" value="single" ${scanMode==='single'?'checked':''} onchange="scanMode='single';renderScan()"> Single Provider</label>
         </div>
       </div>
-      <div class="form-row">
+      ${deviceScan?'':`<div class="form-row">
         <span class="form-label">Target</span>
         <input id="scan-target" class="form-input" type="text" value="." placeholder="Path to project (default: current directory)">
-      </div>
+      </div>`}
       ${provRow}
       <div class="form-row" style="align-items:flex-start">
         <span class="form-label" style="padding-top:3px">Profiles</span>
@@ -1141,6 +1142,17 @@ function updateRunBtn(){
 
 function _runOneProfile(target,profile,provider){
   return new Promise((resolve,reject)=>{
+    const deviceId=DATA.meta.device_id;
+    if(deviceId){
+      fetch('/api/fleet/scan/'+encodeURIComponent(deviceId),{
+        method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({profiles:[profile]}),
+      })
+        .then(r=>r.json().then(d=>({ok:r.ok,data:d})))
+        .then(({ok,data})=>ok?resolve():reject(data.error||'Failed to queue scan'))
+        .catch(reject);
+      return;
+    }
     const body={mode:scanMode,target,profile,providers:scanMode==='single'?[provider]:[]};
     fetch('/api/scan',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
       .then(r=>r.json())
@@ -1193,7 +1205,7 @@ async function runScan(){
     try{await _runOneProfile(target,profile,provider);}
     catch(e){_scanFinish('error',String(e));return;}
   }
-  _scanFinish('done');
+  _scanFinish(DATA.meta.device_id?'queued':'done');
 }
 
 function _attachEventStream(){
@@ -1225,7 +1237,9 @@ function _scanFinish(status,msg){
   const btn=document.getElementById('run-btn');
   if(btn){btn.disabled=false;btn.textContent='▶ Run Scan';}
   if(!res)return;
-  if(status==='done'){
+  if(status==='queued'){
+    res.innerHTML=`<div class="scan-done"><span class="t-ok" style="font-size:18px">✓</span><span class="t-ok" style="font-weight:700">Scan queued on this device</span><span style="color:#8b949e"> Results refresh when the agent reports back.</span></div>`;
+  } else if(status==='done'){
     res.innerHTML=`<div class="scan-done"><span class="t-ok" style="font-size:18px">✓</span><span class="t-ok" style="font-weight:700">Scan complete — results updated</span><button class="reload-btn" onclick="location.reload()">Reload Dashboard</button></div>`;
   } else {
     res.innerHTML=`<div class="scan-err-banner">⚠ Scan failed${msg?' — '+esc(msg):''}.  Check the terminal output above for details.</div>`;

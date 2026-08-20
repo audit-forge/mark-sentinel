@@ -2531,8 +2531,9 @@ load();
                 tmp_path = tf.name
             try:
                 generate([report], tmp_path,
-                         meta={'scan_date': report.get('scan_date', ''),
-                               'target':    report.get('target', device_id)})
+                          meta={'scan_date': report.get('scan_date', ''),
+                                'target':    report.get('target', device_id),
+                                'device_id': device_id})
                 html = Path(tmp_path).read_bytes()
             finally:
                 try:
