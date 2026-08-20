@@ -895,5 +895,5 @@ def test_the_rendered_vhost_still_does_the_rest_of_its_job(rendered_vhost):
     assert "proxy_set_header X-Customer-ID acme;" in blocks["= /_auth"]
     assert "proxy_read_timeout 300;" in blocks["/api/agent/"]
     assert rendered_vhost.count("proxy_read_timeout 300;") == 5
-    assert any("return 302 https://admin.riskraven.ai/login?next=https://arckon.riskraven.ai" in line
+    assert any("return 302 https://admin.riskraven.ai/login?next=http://203.0.113.10:7042" in line
                 for line in blocks["@login_redirect"])

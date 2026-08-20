@@ -7,11 +7,17 @@ CUSTOMER_ID="$1"
 PUBLIC_IP="${2:-$(curl -sf http://metadata.google.internal/computeMetadata/v1/instance/network-interfaces/0/access-configs/0/external-ip -H 'Metadata-Flavor: Google' || echo '34.58.90.147')}"
 PUBLIC_ADMIN_URL="${PUBLIC_ADMIN_URL:-https://admin.riskraven.ai}"
 PUBLIC_DASHBOARD_URL="${PUBLIC_DASHBOARD_URL:-https://arckon.riskraven.ai}"
+PUBLIC_DASHBOARD_PORT="${PUBLIC_DASHBOARD_PORT:-7001}"
 TIER="${3:-standard}"
 EXPIRES="${4:-}"
 MAX_SEATS="${5:-5}"
 CUSTOMER_NAME="${6:-$CUSTOMER_ID}"
 PORT="${7:-7001}"
+if [ "$PORT" = "$PUBLIC_DASHBOARD_PORT" ]; then
+  CUSTOMER_DASHBOARD_URL="$PUBLIC_DASHBOARD_URL"
+else
+  CUSTOMER_DASHBOARD_URL="http://${PUBLIC_IP}:${PORT}"
+fi
 CONTAINER_NAME="sentinel-${CUSTOMER_ID}"
 NGINX_CONF_DIR="${NGINX_CONF_DIR:-/opt/sentinel/deploy/gcp/nginx}"
 NGINX_PROXY_TOKEN_DIR="${NGINX_PROXY_TOKEN_DIR:-/opt/sentinel-nginx/proxy-tokens}"
@@ -276,7 +282,7 @@ server {
     }
 
     location @login_redirect {
-        return 302 ${PUBLIC_ADMIN_URL}/login?next=${PUBLIC_DASHBOARD_URL}\$request_uri;
+        return 302 ${PUBLIC_ADMIN_URL}/login?next=${CUSTOMER_DASHBOARD_URL}\$request_uri;
     }
 }
 EOF
