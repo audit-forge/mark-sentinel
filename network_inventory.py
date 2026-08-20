@@ -98,11 +98,15 @@ def collect_passive_neighbors(run=subprocess.run, system: str | None = None) -> 
         parser = parse_windows_neighbors
     elif system == 'Darwin':
         commands = [(['arp', '-an'], 'macos_arp'), (['ndp', '-an'], 'macos_ipv6_neighbor')]
-        parser = lambda text, source: parse_arp(text, source) if source == 'macos_arp' else parse_ndp(text, source)
+
+        def parser(text, source):
+            return parse_arp(text, source) if source == 'macos_arp' else parse_ndp(text, source)
     else:
         commands = [(['arp', '-an'], 'linux_arp'), (['ip', 'neigh', 'show'], 'linux_ipv4_neighbor'),
                     (['ip', '-6', 'neigh', 'show'], 'linux_ipv6_neighbor')]
-        parser = lambda text, source: parse_arp(text, source) if source == 'linux_arp' else parse_ip_neighbors(text, source)
+
+        def parser(text, source):
+            return parse_arp(text, source) if source == 'linux_arp' else parse_ip_neighbors(text, source)
     found: dict[tuple, dict] = {}
     for command, source in commands:
         try:
