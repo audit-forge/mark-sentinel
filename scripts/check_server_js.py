@@ -2,9 +2,10 @@
 """
 Extract the inline JavaScript from server.py and syntax-check it with node.
 
-Catches two classes of bug that broke the Arckon dashboard in June 2026:
+Catches three classes of bug that broke the Arckon dashboard in June 2026:
   1. Unicode smart/curly quotes ('') instead of ASCII ' in JS strings
-  2. Literal \\n in Python f-strings rendering as real newlines inside JS strings
+   2. Literal \\n in Python f-strings rendering as real newlines inside JS strings
+   3. Source-valid f-string escapes becoming invalid JavaScript when rendered
 
 Usage:
   python3 scripts/check_server_js.py            # check server.py in cwd
@@ -15,6 +16,33 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
+
+
+def _check_js(js: str, label: str) -> bool:
+    """Syntax-check a JavaScript string without retaining it on disk."""
+    with tempfile.NamedTemporaryFile(
+        suffix=".js", mode="w", encoding="utf-8", delete=False
+    ) as tmp:
+        tmp.write("(function() {\n")
+        tmp.write(js)
+        tmp.write("\n});\n")
+        tmp_path = tmp.name
+
+    result = subprocess.run(
+        ["node", "--check", tmp_path],
+        capture_output=True,
+        text=True,
+    )
+    Path(tmp_path).unlink(missing_ok=True)
+    if result.returncode != 0:
+        print(f"FAIL: JavaScript syntax error in {label}:\n{result.stderr.strip()}")
+        return False
+    return True
+
+
+def _largest_script(html: str) -> str:
+    blocks = re.findall(r"<script>(.*?)</script>", html, re.DOTALL)
+    return max(blocks, key=len) if blocks else ""
 
 
 def check_server_js(server_path: Path) -> bool:
@@ -74,29 +102,25 @@ def check_server_js(server_path: Path) -> bool:
             print(msg)
         return False
 
-    # Write JS to a temp file and run node --check
-    with tempfile.NamedTemporaryFile(
-        suffix=".js", mode="w", encoding="utf-8", delete=False
-    ) as tmp:
-        tmp.write("(function() {\n")
-        tmp.write(js)
-        tmp.write("\n});\n")
-        tmp_path = tmp.name
-
-    result = subprocess.run(
-        ["node", "--check", tmp_path],
-        capture_output=True,
-        text=True,
-    )
-    Path(tmp_path).unlink(missing_ok=True)
-
-    if result.returncode != 0:
-        # Adjust line numbers to point back into server.py
-        err = result.stderr.strip()
-        print(f"FAIL: JavaScript syntax error in server.py:\n{err}")
+    if not _check_js(js, "server.py source"):
         return False
 
-    print(f"OK: server.py JS passes syntax check ({len(js)} chars)")
+    # The dashboard is an f-string. Check its evaluated output too: Python can
+    # turn a source-valid `\n` escape into a newline inside a JS string literal.
+    sys.path.insert(0, str(server_path.parent))
+    try:
+        import server
+        rendered_js = _largest_script(server._build_fleet_html([], store=None))
+    except Exception as exc:
+        print(f"FAIL: could not render dashboard JavaScript: {type(exc).__name__}")
+        return False
+    if not rendered_js:
+        print("FAIL: rendered dashboard contains no script block")
+        return False
+    if not _check_js(rendered_js, "rendered dashboard"):
+        return False
+
+    print(f"OK: server.py and rendered dashboard JS pass syntax checks ({len(rendered_js)} chars)")
     return True
 
 
