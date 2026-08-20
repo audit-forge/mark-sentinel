@@ -69,10 +69,11 @@ docker run -d \
    -e "SENTINEL_AGENT_TOKEN_FILE=/app/data/agent_token.txt" \
    -e "SENTINEL_TRUSTED_PROXY_TOKEN=${PROXY_TOKEN}" \
    -e "SENTINEL_ADMIN_LOGOUT_URL=${PUBLIC_ADMIN_URL}/logout" \
-  ${LICENSE_MOUNT} \
-  -v "${DATA_DIR}:/app/data" \
-  -v "${SPEND_SECRET_DIR}:/opt/sentinel-secrets/spend" \
-  mark-sentinel:latest \
+   ${LICENSE_MOUNT} \
+   -v "${DATA_DIR}:/app/data" \
+   -v "${SPEND_SECRET_DIR}:/opt/sentinel-secrets/spend" \
+   -v /opt/sentinel/releases:/app/releases:ro \
+   mark-sentinel:latest \
   python3 server.py --no-browser --port 7331
 
 # Connect to arckon-net so nginx can reach sentinel-admin for auth_request

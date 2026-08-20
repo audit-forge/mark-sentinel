@@ -65,6 +65,17 @@ def test_openai_connector_parses_usage_data():
         }],
         "has_more": False,
     }
+    usage_response = {
+        "data": [{
+            "start_time": 1723593600,
+            "end_time": 1723680000,
+            "results": [{
+                "model": "gpt-4o", "input_tokens": 1200,
+                "output_tokens": 300, "num_model_requests": 12,
+            }],
+        }],
+        "has_more": False,
+    }
 
     import urllib.request
     class MockResponse:
@@ -78,18 +89,24 @@ def test_openai_connector_parses_usage_data():
             pass
 
     def mock_urlopen(req, timeout=None):
-        assert "/v1/organization/costs?" in req.full_url
         assert "bucket_width=1d" in req.full_url
-        assert "group_by=line_item" in req.full_url
-        return MockResponse(json.dumps(mock_response).encode())
+        if "/v1/organization/costs?" in req.full_url:
+            assert "group_by=line_item" in req.full_url
+            return MockResponse(json.dumps(mock_response).encode())
+        assert "/v1/organization/usage/completions?" in req.full_url
+        assert "group_by=model" in req.full_url
+        return MockResponse(json.dumps(usage_response).encode())
 
     with patch("urllib.request.urlopen", side_effect=mock_urlopen):
         records = conn.fetch_usage(date(2024, 8, 14))
 
-    assert len(records) == 2
-    assert records[0].model == "completions"
-    assert records[0].cost_usd == 17.5
-    assert records[0].currency == "USD"
+    by_model = {record.model: record for record in records}
+    assert by_model["completions"].cost_usd == 17.5
+    assert by_model["completions"].currency == "USD"
+    assert by_model["gpt-4o"].input_tokens == 1200
+    assert by_model["gpt-4o"].output_tokens == 300
+    assert by_model["gpt-4o"].total_tokens == 1500
+    assert by_model["gpt-4o"].request_count == 12
 
 
 def test_openai_connector_does_not_expose_upstream_error_body():
@@ -122,10 +139,10 @@ def test_openai_connector_retries_transient_error():
 
     error = urllib.error.HTTPError(
         "https://api.openai.com/test", 429, "Too Many Requests", {}, io.BytesIO())
-    with patch("urllib.request.urlopen", side_effect=[error, MockResponse()]) as urlopen:
+    with patch("urllib.request.urlopen", side_effect=[error, MockResponse(), MockResponse()]) as urlopen:
         with patch("connectors.openai_cost_connector.time_module.sleep") as sleep:
             assert conn.fetch_usage(date(2024, 8, 14)) == []
-    assert urlopen.call_count == 2
+    assert urlopen.call_count == 3
     sleep.assert_called_once_with(1)
 
 
