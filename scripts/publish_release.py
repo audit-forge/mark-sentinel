@@ -174,14 +174,24 @@ def _publish_to_host(
             f"sudo chmod -R 750 {final_dir}",
         ])
 
-    # 3. Atomically swap the live platform symlinks. Avoid 'cd' into a
-    # directory that the unprivileged SSH user cannot read; use absolute paths.
+    # 3. Swap the live platform paths to the new versioned directory.
+    # Historically these were real directories. When they are not symlinks,
+    # rename them to a dated backup before creating the symlink so the swap is
+    # a single-step operation and old releases remain recoverable.
+    backup_ts = time.strftime("%Y%m%d%H%M%S")
     _run(ssh_base + [
         f"--command="
-        f"cd /tmp && "
+        f"set -e && "
         f"for plat in {' '.join(_PLATFORMS)}; do "
-        f"  sudo ln -sfn {target_parent}/$plat /opt/sentinel/releases/$plat.new && "
-        f"  sudo mv -Tf /opt/sentinel/releases/$plat.new /opt/sentinel/releases/$plat; "
+        f"  live=/opt/sentinel/releases/$plat; "
+        f"  new={target_parent}/$plat; "
+        f"  if [ -L \"$live\" ]; then "
+        f"    sudo ln -sfn \"$new\" \"$live.new\" && sudo mv -Tf \"$live.new\" \"$live\"; "
+        f"  elif [ -d \"$live\" ]; then "
+        f"    sudo mv -Tf \"$live\" \"$live.v{version}-{backup_ts}\" && sudo ln -sfn \"$new\" \"$live\"; "
+        f"  else "
+        f"    sudo ln -sfn \"$new\" \"$live\"; "
+        f"  fi; "
         f"done && "
         f"echo 'Live release now points to v{version}'",
     ])
