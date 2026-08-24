@@ -184,7 +184,7 @@ def _publish_to_host(
         f"set -e && "
         f"for plat in {' '.join(_PLATFORMS)}; do "
         f"  live=/opt/sentinel/releases/$plat; "
-        f"  new={target_parent}/$plat; "
+        f"  new=v{version}/$plat; "
         f"  if [ -L \"$live\" ]; then "
         f"    sudo ln -sfn \"$new\" \"$live.new\" && sudo mv -Tf \"$live.new\" \"$live\"; "
         f"  elif [ -d \"$live\" ]; then "
