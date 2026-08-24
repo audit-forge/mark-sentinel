@@ -1,8 +1,9 @@
 # AI-SUPPLY — Model & Supply Chain Integrity Checks
 
 **Category:** Model & Supply Chain Integrity
-**Check IDs:** AI-SUPPLY-001 through AI-SUPPLY-005
-**Count:** 5 checks
+**Check IDs:** AI-SUPPLY-001 through AI-SUPPLY-007
+**Count:** 7 checks (this file documents 001–005 and 007; see check_supply_006 in
+checks/supply_chain.py for AI-SUPPLY-006, not yet written up here)
 
 Framework references: OWASP LLM03, LLM04 | OWASP Agentic OAGNT-08 | NIST AI RMF GOVERN 2.2, MAP 1.5 | FedRAMP CM-7, SA-12
 
@@ -229,3 +230,44 @@ When you say "use the latest version of GPT-4," the company can swap in a comple
 | NIST AI RMF | GOVERN 2.2 — Risk accountability; MAP 1.5 — Risk identification |
 | FedRAMP / NIST 800-53 | CM-6 — Configuration Settings; CM-3 — Configuration Change Control; SA-12 — Supply Chain Protection |
 | CMMC 2.0 | CM.L2-3.4.1 — Establish configuration baselines; CM.L2-3.4.2 — Establish and enforce security configuration settings |
+
+---
+
+## AI-SUPPLY-007: Local Model Provenance Gated Before Autonomous Execution
+
+**Severity:** CRITICAL when local models can execute unattended commands; WARN/HIGH for an unverified publisher; WARN/MEDIUM when local weights remain unverifiable despite execution gating
+**Check type:** Config audit + static analysis
+
+### Description
+Verifies that any agent harness backed by a locally-run, open-weight model (Ollama, LM Studio, vLLM, or similar) cannot execute shell commands without per-call human approval, and that locally-pulled Ollama models come from the publisher's official namespace rather than an unverified third party.
+
+Open-weight model checkpoints — unlike a hosted, vendor-controlled API model — can be fine-tuned by anyone and then distributed. Published research has demonstrated "sleeper agent" fine-tunes that stay dormant until a trigger condition, then emit malicious shell commands instead of a normal answer. Coding-agent harnesses (OpenCode, Codex, Claude Code, and others) routinely inject the current date into every system prompt, which is a ready-made, low-cost trigger condition for this kind of attack. Neither half of the chain — a local/open-weight model, or unattended execution — is exploitable on its own; this check flags the combination, and reports either signal alone as a lower-severity finding.
+
+### SMB Explanation
+If your AI coding assistant runs a model on your own computer (instead of a big company's cloud service) and that model can run commands on your machine without asking you first, you're trusting that nobody has ever slipped bad instructions into that model — including a "wait until this date, then do something malicious" instruction. This check makes sure that if you're running a model like that, it still has to ask before it runs anything, and that you're not running commands from a model that came from a stranger.
+
+### SKIP Criteria
+- No local/open-weight model is wired into an execution-capable agent (hosted-API-only deployment). This check does not apply.
+
+### WARN Criteria
+- A local model is execution-gated, but static scanning cannot verify that its weights were not replaced, locally built, or fine-tuned with a hidden trigger
+- A local Ollama model was pulled from a non-`library` (third-party/community) publisher namespace, regardless of whether it is currently wired into an agent
+
+### FAIL Criteria
+- A local/open-weight model is wired into an agent harness, AND
+- That harness (or any harness on the same system) can execute shell commands without per-call human approval
+
+### Remediation
+1. Require explicit per-call approval for bash/execute tools on any agent backed by a local model — set `permission.bash` to `ask` (or a narrow allowlist of read-only commands like `git status*`, `git diff*`) rather than `"*": allow`.
+2. For Claude Code, avoid `defaultMode: bypassPermissions` and unscoped `Bash` entries in `permissions.allow`.
+3. Only pull Ollama/Hugging Face models from the publisher's official namespace — verify before running a community fine-tune as your coding agent's backend.
+4. Record each local model's provenance (publisher, base model, why it's trusted) in your AI asset inventory — see AI-SUPPLY-001.
+5. If a task genuinely needs unattended execution, run it against a hosted, vendor-controlled model instead of a local checkpoint you cannot fully vet.
+
+### Framework Mappings
+| Framework | Control |
+|---|---|
+| OWASP LLM Top 10 | LLM03 — Supply Chain Vulnerabilities; LLM06 — Excessive Agency |
+| MITRE ATLAS | AML.T0017 — ML Supply Chain Compromise |
+| NIST AI RMF | GOVERN 6.1 — Risk management accountability; MANAGE 1.3 — Risk mitigation |
+| FedRAMP / NIST 800-53 | SA-12 — Supply Chain Protection; AC-3 — Access Enforcement |

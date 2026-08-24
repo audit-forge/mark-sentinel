@@ -8,6 +8,7 @@
   "AI-INP-005":    ["GOVERN", "MANAGE"],
   "AI-SUPPLY-003": ["MAP", "GOVERN"],
   "AI-SUPPLY-005": ["MAP", "GOVERN"],
+  "AI-SUPPLY-007": ["MAP", "GOVERN", "MANAGE"],
   "AI-GOV-001":    ["GOVERN"],
   "AI-GOV-002":    ["GOVERN"],
   "AI-GOV-003":    ["GOVERN", "MANAGE"],

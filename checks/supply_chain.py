@@ -1,10 +1,14 @@
 """
 AI-SUPPLY checks — Model & Supply Chain Integrity
-Checks: AI-SUPPLY-001 through AI-SUPPLY-006
+Checks: AI-SUPPLY-001 through AI-SUPPLY-007
 All checks are evaluable in config mode.
 """
+import json
 import re
-from . import CheckResult, PASS, FAIL, WARN
+
+import yaml
+
+from . import CheckResult, PASS, FAIL, WARN, SKIP
 from connectors.config_connector import ScanContext
 
 CATEGORY = "AI-SUPPLY"
@@ -878,6 +882,255 @@ def check_supply_006(ctx: ScanContext) -> CheckResult:
     )
 
 
+# --- AI-SUPPLY-007: local model provenance vs. unattended execution -------
+#
+# Locally-run, open-weight models can be fine-tuned to stay dormant until a
+# trigger condition — e.g. the current date, which most coding-agent
+# harnesses (OpenCode, Codex, Claude Code) inject into every system prompt
+# by default — then emit malicious output instead of a normal answer. This
+# is a supply-chain risk specific to open-weight models: a hosted,
+# vendor-controlled API model cannot be silently swapped for a poisoned
+# checkpoint the way a local model file can.
+#
+# Neither half of the chain proves exploitability on its own, so this check
+# only fails when BOTH a local/open-weight model AND unattended (no
+# per-call approval) command execution are found; a single signal is
+# reported as a WARN or folded into the PASS evidence instead.
+
+_LOCAL_MODEL_PROVIDER_RE = re.compile(
+    r'(?i)["\']?model["\']?\s*:\s*["\'](?:ollama|lmstudio|vllm|llama-cpp|local)[/:]'
+)
+_LOCAL_YAML_MODEL_RE = re.compile(
+    r'(?im)^\s*model\s*:\s*["\']?(?:ollama|lmstudio|vllm|llama-cpp|local)[/:]'
+)
+_LOCAL_BASEURL_RE = re.compile(
+    r'(?i)"baseURL"\s*:\s*"https?://(?:127\.0\.0\.1|localhost)'
+)
+_AGENT_MD_LOCAL_MODEL_RE = re.compile(
+    r'(?im)^model:\s*(?:ollama|lmstudio|vllm|llama-cpp|local)[/:]'
+)
+_OLLAMA_MANIFEST_NS_RE = re.compile(
+    r'ollama/models/manifests/registry\.ollama\.ai/([^/]+)/'
+)
+_OFFICIAL_OLLAMA_NAMESPACE = 'library'
+_AGENT_MD_PATH_RE = re.compile(r'(?i)(?:^|/)agents/[^/]+\.md$')
+
+
+def _is_agent_md(rel_path: str) -> bool:
+    return bool(_AGENT_MD_PATH_RE.search(rel_path.replace('\\', '/')))
+
+
+def _local_model_evidence(ctx: ScanContext) -> list:
+    ev = []
+    for rel_path, content in ctx.files.items():
+        name = rel_path.rsplit('/', 1)[-1].lower()
+        if name in ('opencode.json', 'opencode.jsonc'):
+            if _LOCAL_MODEL_PROVIDER_RE.search(content) or _LOCAL_BASEURL_RE.search(content):
+                ev.append(f"{rel_path}: primary model routed through a local runtime")
+        elif name.endswith(('.yml', '.yaml')):
+            if _LOCAL_YAML_MODEL_RE.search(content) or _LOCAL_BASEURL_RE.search(content):
+                ev.append(f"{rel_path}: local model configured in YAML")
+        elif _is_agent_md(rel_path) and _AGENT_MD_LOCAL_MODEL_RE.search(content):
+            ev.append(f"{rel_path}: agent backed by a local/open-weight model")
+    return ev
+
+
+def _unofficial_ollama_models(ctx: ScanContext) -> list:
+    hits = []
+    for rel_path in ctx.files:
+        m = _OLLAMA_MANIFEST_NS_RE.search(rel_path.replace('\\', '/'))
+        if m and m.group(1) != _OFFICIAL_OLLAMA_NAMESPACE:
+            hits.append(f"{rel_path} (publisher: {m.group(1)})")
+    return hits
+
+
+_WILDCARD_ALLOW_LINE_RE = re.compile(r'(?im)^[ \t]*"?\*"?[ \t]*:[ \t]*"?allow"?[ \t]*,?[ \t]*$')
+
+
+def _frontmatter_block(text: str) -> str:
+    """Return the YAML frontmatter of a Markdown agent file (between the
+    opening and closing '---'), or the text unchanged for plain JSON/YAML
+    config files that don't use frontmatter."""
+    if text.startswith('---'):
+        end = text.find('\n---', 3)
+        if end != -1:
+            return text[3:end]
+    return text
+
+
+def _permission_bash_wildcard_allow(text: str) -> bool:
+    try:
+        data = yaml.safe_load(_frontmatter_block(text))
+    except Exception:
+        data = None
+    if isinstance(data, dict):
+        candidates = [data.get('bash')]
+        perm = data.get('permission')
+        if isinstance(perm, dict):
+            candidates.append(perm.get('bash'))
+        for bash in candidates:
+            if isinstance(bash, str) and bash.strip().lower() == 'allow':
+                return True
+            if isinstance(bash, dict):
+                wildcard = bash.get('*')
+                if isinstance(wildcard, str) and wildcard.strip().lower() == 'allow':
+                    return True
+        return False
+    # Fallback for content yaml.safe_load can't parse (e.g. JSONC comments):
+    # require a "bash" section header and, nearby, a line that is *exactly*
+    # a wildcard key set to allow — not a specific command pattern like
+    # "git status*" that merely ends in an asterisk.
+    bash_idx = text.lower().find('bash')
+    if bash_idx == -1:
+        return False
+    window = text[bash_idx:bash_idx + 300]
+    return bool(_WILDCARD_ALLOW_LINE_RE.search(window))
+
+
+def _claude_settings_bypasses_permissions(content: str) -> bool:
+    try:
+        data = json.loads(content)
+    except Exception:
+        return bool(re.search(r'(?i)"defaultMode"\s*:\s*"bypassPermissions"', content))
+    if not isinstance(data, dict):
+        return False
+    if str(data.get('defaultMode', '')).strip().lower() == 'bypasspermissions':
+        return True
+    perms = data.get('permissions')
+    allow = perms.get('allow') if isinstance(perms, dict) else None
+    if isinstance(allow, list):
+        for item in allow:
+            if isinstance(item, str) and item.strip() in ('Bash', 'Bash(*)'):
+                return True
+    return False
+
+
+def _unattended_execution_evidence(ctx: ScanContext) -> list:
+    ev = []
+    for rel_path, content in ctx.files.items():
+        name = rel_path.rsplit('/', 1)[-1].lower()
+        if name in ('opencode.json', 'opencode.jsonc') or _is_agent_md(rel_path):
+            if _permission_bash_wildcard_allow(content):
+                ev.append(f"{rel_path}: bash execution allowed without per-call approval")
+        elif name in ('settings.json', 'settings.local.json'):
+            if _claude_settings_bypasses_permissions(content):
+                ev.append(f"{rel_path}: permission bypass configured (bypassPermissions or unscoped Bash allow)")
+    return ev
+
+
+def check_supply_007(ctx: ScanContext) -> CheckResult:
+    """AI-SUPPLY-007: Local Model Provenance Gated Before Autonomous Execution"""
+    local_model_ev = _local_model_evidence(ctx)
+    unofficial_ev = _unofficial_ollama_models(ctx)
+    unattended_ev = _unattended_execution_evidence(ctx)
+
+    if not local_model_ev and not unofficial_ev:
+        return CheckResult(
+            check_id="AI-SUPPLY-007",
+            title="Local Model Provenance Gated Before Autonomous Execution",
+            status=SKIP,
+            severity="HIGH",
+            category=CATEGORY,
+            details=(
+                "No agent harness backed by a local/open-weight model (Ollama, LM Studio, vLLM) "
+                "was found. This check targets the supply-chain risk of self-hosted model weights; "
+                "it does not apply to hosted-API-only deployments."
+            ),
+            frameworks={"OWASP LLM": "LLM03", "MITRE ATLAS": "AML.T0017", "NIST AI RMF": "GOVERN 6.1"},
+        )
+
+    if unattended_ev and local_model_ev:
+        return CheckResult(
+            check_id="AI-SUPPLY-007",
+            title="Local Model Provenance Gated Before Autonomous Execution",
+            status=FAIL,
+            severity="CRITICAL",
+            category=CATEGORY,
+            details=(
+                "Local/open-weight model usage was found alongside at least one agent configuration "
+                "that allows shell execution without per-call human approval. Open-weight checkpoints "
+                "can be fine-tuned to stay dormant until a trigger condition — most coding-agent "
+                "harnesses inject the current date into every system prompt, which is a ready-made "
+                "trigger — then emit malicious commands instead of a normal answer. Combined with "
+                "unattended execution, a compromised or swapped checkpoint could act before anyone "
+                "reviews the command."
+            ),
+            evidence=(local_model_ev + unofficial_ev + unattended_ev)[:8],
+            remediation=(
+                "1. Require explicit per-call approval for bash/execute tools on any agent backed by a "
+                "local model — set permission.bash to 'ask' (or a narrow allowlist of read-only commands "
+                "like 'git status*', 'git diff*') rather than '*': allow.\n"
+                "2. For Claude Code, avoid 'defaultMode: bypassPermissions' and unscoped 'Bash' entries "
+                "in permissions.allow.\n"
+                "3. Only pull Ollama/Hugging Face models from the publisher's official namespace — verify "
+                "before running a community fine-tune as your coding agent's backend.\n"
+                "4. Record each local model's provenance (publisher, base model, why it's trusted) in "
+                "your AI asset inventory — see AI-SUPPLY-001.\n"
+                "5. If a task genuinely needs unattended execution, run it against a hosted, "
+                "vendor-controlled model instead of a local checkpoint you cannot fully vet."
+            ),
+            frameworks={
+                "OWASP LLM": "LLM03, LLM06",
+                "MITRE ATLAS": "AML.T0017",
+                "NIST AI RMF": "GOVERN 6.1, MANAGE 1.3",
+                "FedRAMP": "SA-12, AC-3",
+            },
+        )
+
+    if unofficial_ev:
+        extra = " Unattended execution was also found on this system — do not wire the unverified model into that agent." if unattended_ev else ""
+        return CheckResult(
+            check_id="AI-SUPPLY-007",
+            title="Local Model Provenance Gated Before Autonomous Execution",
+            status=WARN,
+            severity="HIGH",
+            category=CATEGORY,
+            details=(
+                "A local model pulled from a non-official Ollama publisher namespace was found. "
+                "Command execution appears gated behind human approval, which limits blast radius, "
+                "but the model's provenance itself has not been verified." + extra
+            ),
+            evidence=(local_model_ev + unofficial_ev)[:8],
+            remediation=(
+                "1. Confirm the publisher of each non-'library' namespace model before continuing to "
+                "use it.\n"
+                "2. Prefer official-namespace pulls (ollama pull <model>) over community namespaces for "
+                "any model used by an execution-capable agent.\n"
+                "3. Record provenance in your AI asset inventory (AI-SUPPLY-001)."
+            ),
+            frameworks={"OWASP LLM": "LLM03", "MITRE ATLAS": "AML.T0017", "NIST AI RMF": "GOVERN 2.2"},
+        )
+
+    return CheckResult(
+        check_id="AI-SUPPLY-007",
+        title="Local Model Provenance Gated Before Autonomous Execution",
+        status=WARN,
+        severity="MEDIUM",
+        category=CATEGORY,
+        details=(
+            "Local/open-weight models are in use, but command execution requires per-call human "
+            "approval. This limits the impact of a sleeper/backdoored model, but a local namespace "
+            "or model tag alone cannot prove that its weights were not replaced, fine-tuned, or built "
+            "locally with a hidden trigger."
+        ),
+        evidence=local_model_ev[:8],
+        remediation=(
+            "1. Keep per-call approval for shell/execute tools; do not grant '*': allow to an agent "
+            "backed by a local model. This prevents a time-triggered model response from executing "
+            "without review.\n"
+            "2. Pin and record the exact model digest, publisher, base model, and acquisition method "
+            "in the AI asset inventory. Treat ':latest' and unrecorded local builds as unverified.\n"
+            "3. For a local fine-tune or custom Ollama model, document who built it, its training data, "
+            "and the reproducible build inputs; an Ollama 'library' namespace is not provenance evidence.\n"
+            "4. Before granting a local model tool access, run it in an isolated test environment with "
+            "benign prompts across date/time and environment variations, and review every proposed command.\n"
+            "5. If the model behaves unexpectedly, disable its tool access, preserve its digest and logs, "
+            "and replace it from a verified source."
+        ),
+        frameworks={"OWASP LLM": "LLM03", "MITRE ATLAS": "AML.T0017", "NIST AI RMF": "GOVERN 6.1"},
+    )
+
+
 def run_all(ctx: ScanContext) -> list:
     return [
         check_supply_001(ctx),
@@ -886,4 +1139,5 @@ def run_all(ctx: ScanContext) -> list:
         check_supply_004(ctx),
         check_supply_005(ctx),
         check_supply_006(ctx),
+        check_supply_007(ctx),
     ]

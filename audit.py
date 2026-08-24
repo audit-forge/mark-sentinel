@@ -115,6 +115,8 @@ def inventory_results(results: list) -> list:
             inventory.append(result)
         elif result.check_id == 'AI-SUPPLY-006' and result.evidence:
             inventory.append(result)
+        elif result.check_id == 'AI-SUPPLY-007' and result.evidence:
+            inventory.append(result)
     return inventory
 
 

@@ -53,6 +53,7 @@ _SMB_DETAILS = {
     "AI-SUPPLY-003": "The software libraries your AI uses are not pinned to specific versions — updates could introduce problems.",
     "AI-SUPPLY-004": "Cannot verify whether employees are using unauthorized AI tools with business data.",
     "AI-SUPPLY-005": "Your AI is set to use 'the latest version' — it could change behavior without warning.",
+    "AI-SUPPLY-007": "Your AI coding assistant uses a local model. Commands still need your approval, but Arckon cannot prove the downloaded or custom model weights are free of hidden triggers.",
     "AI-GOV-001": "No written rules for how AI should be used in your business.",
     "AI-GOV-002": "No policy for how long to keep AI conversation records or when to delete them.",
     "AI-GOV-003": "No plan for what to do if something goes wrong with your AI.",

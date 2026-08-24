@@ -25,7 +25,11 @@ SKIP_DIRS = frozenset({
     'CoreData', 'CloudKit', 'Containers',
     # IDE / editor artifacts
     '.idea', '.vscode', '.DS_Store',
-    # AI assistant conversation caches — not project config, can cause false positives
+    # AI assistant conversation caches — not project config, can cause false positives.
+    # .claude stays in SKIP_DIRS: its conversation/projects/shell-snapshots subdirs
+    # must not reach general checks (secret detection, AI-SUPPLY-006). Only
+    # .claude/settings.json and .claude/settings.local.json are collected, via
+    # the explicit file-level check in scan_directory before .claude is pruned.
     '.claude', '.cursor', '.aider',
 })
 
@@ -73,7 +77,16 @@ SKIP_PATH_FRAGMENTS = (
     'Public',
     # App caches / data dirs
     '.openclaw',
-    '.opencode',
+    # OpenCode session/cache/log subdirs — noisy, not agent config. The agents/
+    # subdir IS agent config and is collected via the explicit walk logic below.
+    '.config/opencode/sessions',
+    '.config/opencode/log',
+    '.config/opencode/cache',
+    '.config/opencode/plugins',
+    '.opencode/sessions',
+    '.opencode/log',
+    '.opencode/cache',
+    '.opencode/plugins',
     # Ollama model blobs are large binaries; we scan the manifests, not the blobs
     '.ollama/models/blobs',
     'snap',
@@ -84,6 +97,13 @@ SKIP_PATH_FRAGMENTS = (
     'AppData/LocalLow',
     # Separate product deployments — assessed independently, not part of this scan target
     'project-pharaoh',
+)
+
+# Allowlisted AI agent config directory — its .md files must reach supply-chain
+# checks even though its parent (.config/opencode) contains noisy session/log
+# subdirs that are excluded via SKIP_PATH_FRAGMENTS above.
+_AI_CONFIG_ALLOWLIST = (
+    '.config/opencode/agents/',   # OpenCode agent .md files (model + permissions)
 )
 TEXT_EXTS = frozenset({
     '.py', '.json', '.yml', '.yaml', '.txt', '.md', '.env',
@@ -174,11 +194,40 @@ def scan_directory(target_dir: str, mode: str = "config", max_files: int | None 
         if count >= limit:
             break
         rel_dir_str = str(Path(dirpath).relative_to(root)).replace('\\', '/')
-        if any(frag in rel_dir_str for frag in SKIP_PATH_FRAGMENTS):
+
+        # Check if this directory itself is an allowlisted AI-config path.
+        _is_allowlisted_dir = any(
+            frag in rel_dir_str + '/' for frag in _AI_CONFIG_ALLOWLIST
+        ) or any(
+            rel_dir_str.endswith(frag.rstrip('/')) for frag in _AI_CONFIG_ALLOWLIST
+        )
+
+        if not _is_allowlisted_dir and any(frag in rel_dir_str for frag in SKIP_PATH_FRAGMENTS):
             dirnames[:] = []
             continue
-        dirnames[:] = sorted(d for d in dirnames if d not in SKIP_DIRS)
+
+        # Normal dir: prune SKIP_DIRS. .claude stays pruned — its settings files
+        # are collected via the explicit file-level check below, not by descending.
+        _pruned = sorted(d for d in dirnames if d not in SKIP_DIRS)
         rel_dir = Path(dirpath).relative_to(root)
+
+        # Before pruning .claude, collect its settings*.json if present.
+        # These are the ONLY files we collect from inside .claude.
+        if '.claude' in dirnames and '.claude' not in _pruned:
+            for _fname in ('settings.json', 'settings.local.json'):
+                _claude_file = Path(dirpath) / '.claude' / _fname
+                if _claude_file.is_file() and count < limit:
+                    try:
+                        _content = _claude_file.read_text(encoding='utf-8', errors='replace')
+                        if _claude_file.stat().st_size <= MAX_FILE_BYTES:
+                            _rel = str(rel_dir / '.claude' / _fname).replace('\\', '/')
+                            ctx.files[_rel] = _content
+                            count += 1
+                            _categorize(ctx, _rel, _fname, _fname.lower(), _content)
+                    except (OSError, PermissionError):
+                        pass
+
+        dirnames[:] = _pruned
 
         for filename in filenames:
             if count >= limit:
@@ -187,6 +236,12 @@ def scan_directory(target_dir: str, mode: str = "config", max_files: int | None 
             filepath = Path(dirpath) / filename
             rel_path = str(rel_dir / filename) if str(rel_dir) != '.' else filename
             rel_path = rel_path.replace('\\', '/')
+
+            # If we're inside an allowlisted dir (.config/opencode/agents/),
+            # only collect .md agent files; skip everything else.
+            if _is_allowlisted_dir:
+                if not (rel_path.endswith('.md') and '.config/opencode/agents/' in rel_path):
+                    continue
 
             try:
                 size = filepath.stat().st_size
