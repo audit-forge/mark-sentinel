@@ -427,21 +427,46 @@ def _dockerfile_copies_build_context(content: str) -> bool:
     return False
 
 
+def _dockerfile_build_context_roots(ctx: ScanContext) -> dict[str, str]:
+    """Map each Dockerfile's build-context root (its own directory) to that
+    root's .dockerignore content, for every Dockerfile that COPY . .s its
+    build context. A credential file elsewhere on a broader scan (e.g. a
+    sibling project, or an unrelated /etc config on the same host) is not
+    reachable by that COPY and must not be treated as if it were."""
+    roots: dict[str, str] = {}
+    for path, content in ctx.files.items():
+        name = PurePosixPath(path).name.lower()
+        if name.startswith('dockerfile') and _dockerfile_copies_build_context(content):
+            root = str(PurePosixPath(path).parent)
+            ignore_path = '.dockerignore' if root == '.' else f'{root}/.dockerignore'
+            roots[root] = ctx.files.get(ignore_path, '')
+    return roots
+
+
+def _build_context_root_for(path: str, roots: dict[str, str]) -> str | None:
+    """Return the build-context root that contains `path`, or None if `path`
+    is outside every known Dockerfile's build context."""
+    for root in roots:
+        if root == '.' or path == root or path.startswith(root + '/'):
+            return root
+    return None
+
+
 def _docker_context_credential_findings(ctx: ScanContext) -> list[tuple[str, int, str, bool, str]]:
     """Find runtime credentials that COPY . . would bake into a Docker image."""
-    if not any(
-        PurePosixPath(path).name.lower().startswith('dockerfile') and _dockerfile_copies_build_context(content)
-        for path, content in ctx.files.items()
-    ):
+    roots = _dockerfile_build_context_roots(ctx)
+    if not roots:
         return []
 
-    dockerignore = ctx.files.get('.dockerignore', '')
     findings = []
     for path, content in ctx.files.items():
+        root = _build_context_root_for(path, roots)
+        if root is None:
+            continue  # not reachable by any Dockerfile's COPY . . on this scan
         is_env = path in ctx.env_files
         is_agent_config = PurePosixPath(path).name == 'agent_config.json'
         is_agent_token = PurePosixPath(path).name == 'agent_token.txt'
-        if not (is_env or is_agent_config or is_agent_token) or _dockerignore_excludes(path, dockerignore):
+        if not (is_env or is_agent_config or is_agent_token) or _dockerignore_excludes(path, roots[root]):
             continue
         if is_agent_token and content.strip() and not _is_placeholder(content.strip()):
             findings.append((path, 1, 'Agent authentication token baked into Docker image', False, ''))

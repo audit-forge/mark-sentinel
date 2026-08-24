@@ -113,3 +113,36 @@ def test_dockerignored_runtime_credentials_do_not_fail():
     }, ['deploy/gcp/.env']))
 
     assert result.status != FAIL
+
+
+def test_credential_outside_any_dockerfiles_build_context_is_not_flagged():
+    """A whole-filesystem scan (--target /) can see a Dockerfile that COPY . .s
+    its own directory, plus same-named runtime config files elsewhere on the
+    host that Dockerfile's build context can never reach (e.g. a native
+    service's own /etc config, or a sibling project). Only the file actually
+    inside that Dockerfile's own directory tree can be baked into its image."""
+    result = check_deploy_002(_ctx({
+        'opt/sentinel/Dockerfile': 'FROM python:3.12\nCOPY . .\n',
+        'opt/sentinel/agent_config.json': '{"token": "' + ('a' * 24) + '"}',
+        'etc/arckon/agent_config.json': '{"token": "' + ('b' * 24) + '"}',
+        'etc/other-service/agent_token.txt': 'c' * 24,
+    }))
+
+    assert result.status == FAIL
+    evidence = ' '.join(result.evidence)
+    assert 'opt/sentinel/agent_config.json' in evidence
+    assert 'etc/arckon/agent_config.json' not in evidence
+    assert 'etc/other-service/agent_token.txt' not in evidence
+
+
+def test_per_build_context_dockerignore_is_respected_not_only_the_root_one():
+    """A nested build context (e.g. admin/Dockerfile) uses its own
+    admin/.dockerignore, not a .dockerignore that happens to sit elsewhere
+    on a broader scan."""
+    result = check_deploy_002(_ctx({
+        'admin/Dockerfile': 'FROM python:3.12\nCOPY . .\n',
+        'admin/agent_config.json': '{"token": "' + ('a' * 24) + '"}',
+        'admin/.dockerignore': 'agent_config.json\n',
+    }))
+
+    assert result.status != FAIL
