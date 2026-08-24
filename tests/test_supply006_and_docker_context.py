@@ -70,14 +70,14 @@ def test_copy_from_stage_does_not_scan_local_build_context():
     assert result.status != FAIL
 
 
-def test_dockerignore_component_matching_does_not_overexclude_nested_files():
+def test_dockerignore_directory_matching_excludes_nested_files():
     result = check_deploy_002(_ctx({
         'Dockerfile': 'FROM python:3.12\nCOPY . /app\n',
         'deploy/gcp/.env': 'password=production-secret-value\n',
         '.dockerignore': 'deploy/*\n',
     }, ['deploy/gcp/.env']))
 
-    assert result.status == FAIL
+    assert result.status != FAIL
 
 
 def test_dockerignore_directory_rule_excludes_nested_runtime_file():
@@ -88,6 +88,16 @@ def test_dockerignore_directory_rule_excludes_nested_runtime_file():
     }))
 
     assert result.status != FAIL
+
+
+def test_docker_context_detection_covers_dot_slash_source():
+    result = check_deploy_002(_ctx({
+        'Dockerfile': 'FROM python:3.12\nCOPY ./ /app\n',
+        'agent_token.txt': 'a' * 24,
+        '.dockerignore': '',
+    }))
+
+    assert result.status == FAIL
 
 
 def test_dockerignored_runtime_credentials_do_not_fail():

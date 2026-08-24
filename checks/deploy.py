@@ -377,18 +377,19 @@ def _dockerignore_matches(path: str, pattern: str) -> bool:
     pattern = pattern.strip()
     if not pattern:
         return False
-    directory_rule = pattern.endswith('/')
     pattern_parts = tuple(part for part in pattern.strip('/').split('/') if part)
     if not pattern_parts:
         return False
-    if directory_rule:
-        candidates = path_parts[:-1]
+    # Docker excludes a subtree when a parent directory matches, even when the
+    # pattern does not end in '/'. Evaluate each path prefix for that behavior.
+    for end in range(1, len(path_parts) + 1):
+        candidate = path_parts[:end]
         if len(pattern_parts) == 1:
-            return any(fnmatch(part, pattern_parts[0]) for part in candidates)
-        return _dockerignore_parts_match(candidates, pattern_parts)
-    if len(pattern_parts) == 1:
-        return bool(path_parts) and fnmatch(path_parts[-1], pattern_parts[0])
-    return _dockerignore_parts_match(path_parts, pattern_parts)
+            if fnmatch(candidate[-1], pattern_parts[0]):
+                return True
+        elif _dockerignore_parts_match(candidate, pattern_parts):
+            return True
+    return False
 
 
 def _dockerignore_parts_match(path_parts: tuple[str, ...], pattern_parts: tuple[str, ...]) -> bool:
@@ -418,7 +419,8 @@ def _dockerfile_copies_build_context(content: str) -> bool:
         if any(part == '--from' or part.startswith('--from=') for part in parts[1:]):
             continue
         operands = [part for part in parts[1:] if not part.startswith('--')]
-        if len(operands) >= 2 and '.' in operands[:-1]:
+        if len(operands) >= 2 and any(PurePosixPath(source) == PurePosixPath('.')
+                                      for source in operands[:-1]):
             return True
     return False
 
