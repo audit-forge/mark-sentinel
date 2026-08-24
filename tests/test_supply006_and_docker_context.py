@@ -1,5 +1,5 @@
 from checks import FAIL, PASS
-from checks.deploy import check_deploy_002
+from checks.deploy import _dockerignore_excludes, check_deploy_002
 from checks.supply_chain import check_supply_006
 from connectors.config_connector import ScanContext
 
@@ -88,6 +88,10 @@ def test_dockerignore_directory_rule_excludes_nested_runtime_file():
     }))
 
     assert result.status != FAIL
+
+
+def test_dockerignore_directory_rule_does_not_exclude_same_named_file():
+    assert not _dockerignore_excludes('secrets', 'secrets/\n')
 
 
 def test_docker_context_detection_covers_dot_slash_source():

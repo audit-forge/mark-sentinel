@@ -377,12 +377,14 @@ def _dockerignore_matches(path: str, pattern: str) -> bool:
     pattern = pattern.strip()
     if not pattern:
         return False
+    directory_rule = pattern.endswith('/')
     pattern_parts = tuple(part for part in pattern.strip('/').split('/') if part)
     if not pattern_parts:
         return False
     # Docker excludes a subtree when a parent directory matches, even when the
     # pattern does not end in '/'. Evaluate each path prefix for that behavior.
-    for end in range(1, len(path_parts) + 1):
+    max_end = len(path_parts) - 1 if directory_rule else len(path_parts)
+    for end in range(1, max_end + 1):
         candidate = path_parts[:end]
         if len(pattern_parts) == 1:
             if fnmatch(candidate[-1], pattern_parts[0]):
