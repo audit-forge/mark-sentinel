@@ -139,8 +139,7 @@ def _publish_to_host(
     tmp_parent = f"/tmp/sentinel-publish-v{version}-{int(time.time())}"
 
     # Sanity check: the agent expects /releases/<platform>/manifest.json relative to
-    # the server URL. Keep the platform directories as real directories (not symlinks)
-    # so that a symlink at /opt/sentinel/releases/<platform> works as a swap target.
+    # the server URL. The live platform paths are symlinks that we atomically swap.
 
     # 1. Create a versioned staging directory on the host.
     _run(ssh_base + [f"--command=sudo mkdir -p {target_parent} && sudo chown root:docker {target_parent} && sudo chmod 750 {target_parent}"])
@@ -170,13 +169,14 @@ def _publish_to_host(
             f"sudo chmod -R 750 {final_dir}",
         ])
 
-    # 3. Atomically swap the live platform symlinks.
+    # 3. Atomically swap the live platform symlinks. Avoid 'cd' into a
+    # directory that the unprivileged SSH user cannot read; use absolute paths.
     _run(ssh_base + [
         f"--command="
-        f"cd /opt/sentinel/releases && "
+        f"cd /tmp && "
         f"for plat in {' '.join(_PLATFORMS)}; do "
-        f"  sudo ln -sfn {target_parent}/$plat $plat.new && "
-        f"  sudo mv -Tf $plat.new $plat; "
+        f"  sudo ln -sfn {target_parent}/$plat /opt/sentinel/releases/$plat.new && "
+        f"  sudo mv -Tf /opt/sentinel/releases/$plat.new /opt/sentinel/releases/$plat; "
         f"done && "
         f"echo 'Live release now points to v{version}'",
     ])
