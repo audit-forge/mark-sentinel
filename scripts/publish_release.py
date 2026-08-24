@@ -76,7 +76,12 @@ def _gh_release_assets(tag: str, tmp: Path) -> dict[str, Path]:
     version = tag.lstrip("v")
     assets: dict[str, Path] = {}
     for plat in _PLATFORMS:
-        artifact_name = f"arckon-agent-{version}-{plat}.tar.gz"
+        # Linux artifact uses the `-linux-amd64` suffix; macOS/Windows do not.
+        artifact_name = (
+            f"arckon-agent-{version}-linux-amd64.tar.gz"
+            if plat == "linux"
+            else f"arckon-agent-{version}-{plat}.tar.gz"
+        )
         manifest_name = f"{plat}-manifest.json"
         sig_name = f"{plat}-manifest.sig"
         for name in (artifact_name, manifest_name, sig_name):
@@ -206,7 +211,10 @@ def _main() -> int:
             plat_dir.mkdir()
             version = args.tag.lstrip("v")
             artifact = f"arckon-agent-{version}-{plat}.tar.gz"
-            shutil.move(str(assets[artifact]), str(plat_dir / artifact))
+            # Linux artifact name includes -amd64; rename to the canonical manifest artifact
+            # name so the uploaded tarball matches the manifest exactly.
+            canonical_artifact = f"arckon-agent-{version}-{plat}.tar.gz"
+            shutil.move(str(assets[artifact]), str(plat_dir / canonical_artifact))
             shutil.move(str(assets[f"{plat}-manifest.json"]), str(plat_dir / "manifest.json"))
             shutil.move(str(assets[f"{plat}-manifest.sig"]), str(plat_dir / "manifest.sig"))
 
