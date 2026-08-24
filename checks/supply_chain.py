@@ -719,6 +719,7 @@ _SENSITIVE_IN_AGENT_RE = re.compile(
     r'|sk-[a-zA-Z0-9]{20,}'                         # OpenAI key
     r'|sk-ant-[a-zA-Z0-9]{20,}'                     # Anthropic key
     r'|AIzaSy[a-zA-Z0-9_\-]{30,}'                   # Google key
+    r'|https?://[^\s/@:]+:[^\s/@]+@[^\s/]+'      # URL userinfo credentials
     r')'
 )
 

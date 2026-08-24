@@ -27,6 +27,14 @@ def test_internal_url_alone_is_not_an_instruction_file_secret():
     assert result.status != FAIL
 
 
+def test_url_with_embedded_credentials_is_an_instruction_file_secret():
+    result = check_supply_006(_ctx({
+        'CLAUDE.md': 'Use http://scanner:supersecret@10.0.0.8:8000 for local testing.',
+    }))
+
+    assert result.status == FAIL
+
+
 def test_docker_copy_all_fails_for_unignored_runtime_credentials():
     result = check_deploy_002(_ctx({
         'Dockerfile': 'FROM python:3.12\nCOPY . .\n',
@@ -39,6 +47,47 @@ def test_docker_copy_all_fails_for_unignored_runtime_credentials():
     assert any('agent_config.json' in item for item in result.evidence)
     assert any('deploy/gcp/.env' in item for item in result.evidence)
     assert 'production-secret-value' not in ' '.join(result.evidence)
+
+
+def test_docker_context_detection_covers_copy_destination_and_add():
+    for instruction in ('COPY . /app', 'ADD . .'):
+        result = check_deploy_002(_ctx({
+            'Dockerfile': f'FROM python:3.12\n{instruction}\n',
+            'agent_token.txt': 'a' * 24,
+            '.dockerignore': '',
+        }))
+        assert result.status == FAIL
+        assert any('agent_token.txt' in item for item in result.evidence)
+
+
+def test_copy_from_stage_does_not_scan_local_build_context():
+    result = check_deploy_002(_ctx({
+        'Dockerfile': 'FROM python:3.12\nCOPY --from=builder . .\n',
+        'agent_token.txt': 'a' * 24,
+        '.dockerignore': '',
+    }))
+
+    assert result.status != FAIL
+
+
+def test_dockerignore_component_matching_does_not_overexclude_nested_files():
+    result = check_deploy_002(_ctx({
+        'Dockerfile': 'FROM python:3.12\nCOPY . /app\n',
+        'deploy/gcp/.env': 'password=production-secret-value\n',
+        '.dockerignore': 'deploy/*\n',
+    }, ['deploy/gcp/.env']))
+
+    assert result.status == FAIL
+
+
+def test_dockerignore_directory_rule_excludes_nested_runtime_file():
+    result = check_deploy_002(_ctx({
+        'Dockerfile': 'FROM python:3.12\nCOPY . /app\n',
+        '.claude/agent_config.json': '{"auth_token": "' + ('a' * 24) + '"}',
+        '.dockerignore': '.claude/\n',
+    }))
+
+    assert result.status != FAIL
 
 
 def test_dockerignored_runtime_credentials_do_not_fail():

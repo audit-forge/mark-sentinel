@@ -3,6 +3,7 @@ AI-DEPLOY checks — Deployment Security
 Checks: AI-DEPLOY-001 through AI-DEPLOY-006
 """
 import re
+import shlex
 from fnmatch import fnmatch
 from pathlib import PurePosixPath
 from . import CheckResult, PASS, FAIL, WARN
@@ -40,11 +41,10 @@ _CRED_RE = [
     (re.compile(r'(?i)"password"\s*:\s*"(?!\$\{)([^"$]{4,})"'), 'Password in JSON'),
 ]
 
-_DOCKER_COPY_ALL_RE = re.compile(r'(?im)^\s*copy(?:\s+--[^\s]+)*\s+\.\s+\.\s*$')
 _RUNTIME_ENV_CRED_RE = re.compile(
-    r'(?im)^\s*(?:export\s+)?([A-Z][A-Z0-9_]*(?:PASSWORD|SECRET|TOKEN|API_KEY)[A-Z0-9_]*)\s*=\s*(.+)$'
+    r'(?im)^\s*(?:export\s+)?([A-Z0-9_]*(?:PASSWORD|SECRET|TOKEN|API_KEY)[A-Z0-9_]*)\s*=\s*(.+)$'
 )
-_AGENT_JSON_TOKEN_RE = re.compile(r'(?i)"(?:agent_)?token"\s*:\s*"([^"]+)"')
+_AGENT_JSON_TOKEN_RE = re.compile(r'(?i)"[a-z0-9_-]*token"\s*:\s*"([^"]+)"')
 
 _AUTH_POSITIVE_RE = [
     re.compile(r'(?i)auth(?:entication)?[_-]?(?:required|enabled)\s*[=:]\s*(?:true|yes|1)'),
@@ -358,25 +358,75 @@ def check_deploy_002(ctx: ScanContext) -> CheckResult:
 
 
 def _dockerignore_excludes(path: str, dockerignore: str) -> bool:
-    """Apply the small Dockerignore subset needed for runtime credential files."""
+    """Evaluate Dockerignore patterns for a normalized relative file path."""
     excluded = False
-    name = PurePosixPath(path).name
     for raw in dockerignore.splitlines():
         pattern = raw.strip()
         if not pattern or pattern.startswith('#'):
             continue
         negated = pattern.startswith('!')
         pattern = pattern[1:] if negated else pattern
-        pattern = pattern.lstrip('/')
-        if fnmatch(path, pattern) or fnmatch(name, pattern):
+        if _dockerignore_matches(path, pattern):
             excluded = not negated
     return excluded
+
+
+def _dockerignore_matches(path: str, pattern: str) -> bool:
+    """Match the Dockerignore path subset needed for file and directory rules."""
+    path_parts = tuple(part for part in path.strip('/').split('/') if part)
+    pattern = pattern.strip()
+    if not pattern:
+        return False
+    directory_rule = pattern.endswith('/')
+    pattern_parts = tuple(part for part in pattern.strip('/').split('/') if part)
+    if not pattern_parts:
+        return False
+    if directory_rule:
+        candidates = path_parts[:-1]
+        if len(pattern_parts) == 1:
+            return any(fnmatch(part, pattern_parts[0]) for part in candidates)
+        return _dockerignore_parts_match(candidates, pattern_parts)
+    if len(pattern_parts) == 1:
+        return bool(path_parts) and fnmatch(path_parts[-1], pattern_parts[0])
+    return _dockerignore_parts_match(path_parts, pattern_parts)
+
+
+def _dockerignore_parts_match(path_parts: tuple[str, ...], pattern_parts: tuple[str, ...]) -> bool:
+    """Match path components so * never crosses a directory boundary; ** can."""
+    if not pattern_parts:
+        return not path_parts
+    head, *tail = pattern_parts
+    if head == '**':
+        return any(_dockerignore_parts_match(path_parts[index:], tuple(tail))
+                   for index in range(len(path_parts) + 1))
+    return bool(path_parts) and fnmatch(path_parts[0], head) and _dockerignore_parts_match(
+        path_parts[1:], tuple(tail))
+
+
+def _dockerfile_copies_build_context(content: str) -> bool:
+    """Return True when COPY/ADD uses the local build context as a source."""
+    for raw_line in content.splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith('#'):
+            continue
+        try:
+            parts = shlex.split(line, comments=True)
+        except ValueError:
+            continue
+        if not parts or parts[0].lower() not in ('copy', 'add'):
+            continue
+        if any(part == '--from' or part.startswith('--from=') for part in parts[1:]):
+            continue
+        operands = [part for part in parts[1:] if not part.startswith('--')]
+        if len(operands) >= 2 and '.' in operands[:-1]:
+            return True
+    return False
 
 
 def _docker_context_credential_findings(ctx: ScanContext) -> list[tuple[str, int, str, bool, str]]:
     """Find runtime credentials that COPY . . would bake into a Docker image."""
     if not any(
-        PurePosixPath(path).name.lower().startswith('dockerfile') and _DOCKER_COPY_ALL_RE.search(content)
+        PurePosixPath(path).name.lower().startswith('dockerfile') and _dockerfile_copies_build_context(content)
         for path, content in ctx.files.items()
     ):
         return []
@@ -386,8 +436,11 @@ def _docker_context_credential_findings(ctx: ScanContext) -> list[tuple[str, int
     for path, content in ctx.files.items():
         is_env = path in ctx.env_files
         is_agent_config = PurePosixPath(path).name == 'agent_config.json'
-        if not (is_env or is_agent_config) or _dockerignore_excludes(path, dockerignore):
+        is_agent_token = PurePosixPath(path).name == 'agent_token.txt'
+        if not (is_env or is_agent_config or is_agent_token) or _dockerignore_excludes(path, dockerignore):
             continue
+        if is_agent_token and content.strip() and not _is_placeholder(content.strip()):
+            findings.append((path, 1, 'Agent authentication token baked into Docker image', False, ''))
         for lineno, line in enumerate(content.splitlines(), 1):
             match = _RUNTIME_ENV_CRED_RE.match(line)
             if match and not _is_placeholder(match.group(2).strip()):
