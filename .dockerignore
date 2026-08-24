@@ -1,6 +1,14 @@
 # Never bake per-install license into the image — mounted per-customer at runtime
 license.json
 
+# Runtime credentials are mounted or injected at deploy time, never copied into images.
+agent_config.json
+agent_token.txt
+.env
+.env.*
+*.env
+deploy/gcp/.env
+
 # Ignore agent/dev files
 CLAUDE.md
 .claude/

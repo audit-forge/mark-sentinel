@@ -3,6 +3,8 @@ AI-DEPLOY checks — Deployment Security
 Checks: AI-DEPLOY-001 through AI-DEPLOY-006
 """
 import re
+from fnmatch import fnmatch
+from pathlib import PurePosixPath
 from . import CheckResult, PASS, FAIL, WARN
 from connectors.config_connector import ScanContext
 
@@ -37,6 +39,12 @@ _CRED_RE = [
     (re.compile(r'(?i)mongodb://[^:\s]+:(?!\$\{)(?!\$\()([^@\s]{4,})@'), 'MongoDB URL with password'),
     (re.compile(r'(?i)"password"\s*:\s*"(?!\$\{)([^"$]{4,})"'), 'Password in JSON'),
 ]
+
+_DOCKER_COPY_ALL_RE = re.compile(r'(?im)^\s*copy(?:\s+--[^\s]+)*\s+\.\s+\.\s*$')
+_RUNTIME_ENV_CRED_RE = re.compile(
+    r'(?im)^\s*(?:export\s+)?([A-Z][A-Z0-9_]*(?:PASSWORD|SECRET|TOKEN|API_KEY)[A-Z0-9_]*)\s*=\s*(.+)$'
+)
+_AGENT_JSON_TOKEN_RE = re.compile(r'(?i)"(?:agent_)?token"\s*:\s*"([^"]+)"')
 
 _AUTH_POSITIVE_RE = [
     re.compile(r'(?i)auth(?:entication)?[_-]?(?:required|enabled)\s*[=:]\s*(?:true|yes|1)'),
@@ -280,6 +288,8 @@ def check_deploy_002(ctx: ScanContext) -> CheckResult:
             if not _is_placeholder(captured):
                 findings.append((path, lineno, desc, False, ''))
 
+    findings.extend(_docker_context_credential_findings(ctx))
+
     hits = [f"{p}:{n} — {d}" for p, n, d, _, _ in findings]
     ci_findings = [f for f in findings if f[3]]
 
@@ -345,6 +355,48 @@ def check_deploy_002(ctx: ScanContext) -> CheckResult:
             evidence=ev,
             frameworks={"OWASP LLM": "LLM07", "FedRAMP": "IA-5, CM-6", "NIST AI RMF": "MANAGE 2.2"},
         )
+
+
+def _dockerignore_excludes(path: str, dockerignore: str) -> bool:
+    """Apply the small Dockerignore subset needed for runtime credential files."""
+    excluded = False
+    name = PurePosixPath(path).name
+    for raw in dockerignore.splitlines():
+        pattern = raw.strip()
+        if not pattern or pattern.startswith('#'):
+            continue
+        negated = pattern.startswith('!')
+        pattern = pattern[1:] if negated else pattern
+        pattern = pattern.lstrip('/')
+        if fnmatch(path, pattern) or fnmatch(name, pattern):
+            excluded = not negated
+    return excluded
+
+
+def _docker_context_credential_findings(ctx: ScanContext) -> list[tuple[str, int, str, bool, str]]:
+    """Find runtime credentials that COPY . . would bake into a Docker image."""
+    if not any(
+        PurePosixPath(path).name.lower().startswith('dockerfile') and _DOCKER_COPY_ALL_RE.search(content)
+        for path, content in ctx.files.items()
+    ):
+        return []
+
+    dockerignore = ctx.files.get('.dockerignore', '')
+    findings = []
+    for path, content in ctx.files.items():
+        is_env = path in ctx.env_files
+        is_agent_config = PurePosixPath(path).name == 'agent_config.json'
+        if not (is_env or is_agent_config) or _dockerignore_excludes(path, dockerignore):
+            continue
+        for lineno, line in enumerate(content.splitlines(), 1):
+            match = _RUNTIME_ENV_CRED_RE.match(line)
+            if match and not _is_placeholder(match.group(2).strip()):
+                findings.append((path, lineno, f'{match.group(1)} baked into Docker image', False, ''))
+            if is_agent_config:
+                match = _AGENT_JSON_TOKEN_RE.search(line)
+                if match and len(match.group(1)) >= 16 and not _is_placeholder(match.group(1)):
+                    findings.append((path, lineno, 'Agent authentication token baked into Docker image', False, ''))
+    return findings
 
 
 def check_deploy_003(ctx: ScanContext) -> CheckResult:

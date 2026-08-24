@@ -598,7 +598,6 @@ _AGENT_INSTRUCTION_FILES: dict[str, tuple[str, list[str]]] = {
         "Claude / Claude Code (Anthropic)",
         [
             "CLAUDE.md", "claude.md",
-            ".claude/settings.json", ".claude/settings.local.json",
             ".claude/commands",                 # directory marker
         ],
     ),
@@ -711,14 +710,15 @@ _ARTIFACT_DIRS = frozenset([
     "artifacts/",
 ])
 
-# Sensitive content patterns inside instruction files
+# Sensitive content patterns inside instruction files. Internal URLs may be
+# proprietary architecture, but are not credentials and must not create a
+# credential-exposure finding on their own.
 _SENSITIVE_IN_AGENT_RE = re.compile(
     r'(?i)(?:'
     r'(?:api[_-]?key|apikey|api[_-]?secret|token|password|passwd|secret)\s*[=:]\s*["\']?[A-Za-z0-9+/._\-]{16,}'
     r'|sk-[a-zA-Z0-9]{20,}'                         # OpenAI key
     r'|sk-ant-[a-zA-Z0-9]{20,}'                     # Anthropic key
     r'|AIzaSy[a-zA-Z0-9_\-]{30,}'                   # Google key
-    r'|https?://(?:10\.|192\.168\.|172\.(?:1[6-9]|2\d|3[01])\.|localhost|internal[.\-])'  # internal URLs
     r')'
 )
 

@@ -35,10 +35,10 @@ RUN apt-get update && \
     rm -rf /var/lib/apt/lists/*
 
 # Copy pre-built Linux binaries compiled locally via scripts/build_binaries.sh
-# If dist/ doesn't exist, the COPY is skipped and the server falls back to
-# serving Python source (dev mode — source is still present in /app).
-COPY dist/audit* /app/audit
-COPY dist/agent* /app/agent
+# Copy only the packaged executables. Wildcards also match Nuitka's .build,
+# .dist, and .onefile-build directories, which makes Docker reject the target.
+COPY dist/audit /app/audit
+COPY dist/agent /app/agent
 RUN chmod +x /app/audit /app/agent 2>/dev/null || true
 
 RUN chown -R sentinel:sentinel /app
