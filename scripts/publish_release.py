@@ -210,11 +210,14 @@ def _main() -> int:
             plat_dir = tmp / plat
             plat_dir.mkdir()
             version = args.tag.lstrip("v")
-            artifact = f"arckon-agent-{version}-{plat}.tar.gz"
-            # Linux artifact name includes -amd64; rename to the canonical manifest artifact
-            # name so the uploaded tarball matches the manifest exactly.
-            canonical_artifact = f"arckon-agent-{version}-{plat}.tar.gz"
-            shutil.move(str(assets[artifact]), str(plat_dir / canonical_artifact))
+            # Linux artifact name includes -amd64; the manifest already names the
+            # exact artifact, so keep the downloaded filename and just move it.
+            artifact = (
+                f"arckon-agent-{version}-linux-amd64.tar.gz"
+                if plat == "linux"
+                else f"arckon-agent-{version}-{plat}.tar.gz"
+            )
+            shutil.move(str(assets[artifact]), str(plat_dir / artifact))
             shutil.move(str(assets[f"{plat}-manifest.json"]), str(plat_dir / "manifest.json"))
             shutil.move(str(assets[f"{plat}-manifest.sig"]), str(plat_dir / "manifest.sig"))
 
