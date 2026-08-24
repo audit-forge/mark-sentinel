@@ -147,10 +147,14 @@ def _publish_to_host(
     # 2. Push each platform directory separately with correct permissions.
     for plat in _PLATFORMS:
         local_dir = assets["dir"] / plat
-        staging_dir = f"{tmp_parent}/{plat}"
+        # The local directory already contains the platform files. scp --recurse
+        # will create a sub-directory named after the source, so stage into a
+        # sibling temp path and then move its contents up one level.
+        staging_parent = f"{tmp_parent}/{plat}-src"
+        staging_dir = f"{staging_parent}/{plat}"
         final_dir = f"{target_parent}/{plat}"
 
-        _run(ssh_base + [f"--command=sudo mkdir -p {staging_dir} && sudo chown $(whoami):docker {staging_dir}"])
+        _run(ssh_base + [f"--command=sudo mkdir -p {staging_parent} && sudo chown $(whoami):docker {staging_parent}"])
         scp_cmd = [
             "gcloud", "compute", "scp",
             "--project", project,
@@ -158,13 +162,14 @@ def _publish_to_host(
             "--tunnel-through-iap",
             "--recurse",
             str(local_dir),
-            f"{host}:{staging_dir}",
+            f"{host}:{staging_parent}",
         ]
         if user:
             scp_cmd[1:1] = [f"--account={user}"]
         _run(scp_cmd)
         _run(ssh_base + [
             f"--command=sudo mv {staging_dir} {final_dir} && "
+            f"sudo rm -rf {staging_parent} && "
             f"sudo chown -R root:docker {final_dir} && "
             f"sudo chmod -R 750 {final_dir}",
         ])
