@@ -224,11 +224,17 @@ def _main() -> int:
         print("Verifying signed manifests and artifact hashes...")
         for plat in _PLATFORMS:
             plat_dir = tmp / plat
+            version = args.tag.lstrip("v")
+            artifact_name = (
+                f"arckon-agent-{version}-linux-amd64.tar.gz"
+                if plat == "linux"
+                else f"arckon-agent-{version}-{plat}.tar.gz"
+            )
             manifest = _verify_manifest(
                 pub,
                 plat_dir / "manifest.json",
                 plat_dir / "manifest.sig",
-                plat_dir / f"arckon-agent-{args.tag.lstrip('v')}-{plat}.tar.gz",
+                plat_dir / artifact_name,
             )
             print(f"  {plat}: OK (artifact={manifest['artifact']}, sha256={manifest['sha256'][:16]}...)")
 
