@@ -19,7 +19,7 @@ else
   CUSTOMER_DASHBOARD_URL="http://${PUBLIC_IP}:${PORT}"
 fi
 CONTAINER_NAME="sentinel-${CUSTOMER_ID}"
-NGINX_CONF_DIR="${NGINX_CONF_DIR:-/opt/sentinel/deploy/gcp/nginx}"
+NGINX_CONF_DIR="${NGINX_CONF_DIR:-/opt/sentinel-nginx/conf.d}"
 NGINX_PROXY_TOKEN_DIR="${NGINX_PROXY_TOKEN_DIR:-/opt/sentinel-nginx/proxy-tokens}"
 HOST_LICENSES_DIR="${HOST_LICENSES_DIR:-/opt/licenses}"
 LICENSE_FILE="${HOST_LICENSES_DIR}/${CUSTOMER_ID}/license.json"

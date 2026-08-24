@@ -9,7 +9,7 @@ services:
       # while hostname/TLS ingress is introduced in a separate migration.
       - "7001-7100:7001-7100"
     volumes:
-      - ./nginx:/etc/nginx/conf.d:ro
+      - /opt/sentinel-nginx/conf.d:/etc/nginx/conf.d:ro
       - /opt/sentinel-nginx/proxy-tokens:/etc/nginx/proxy-tokens:ro
     networks:
       - sentinel-net

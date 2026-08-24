@@ -48,10 +48,17 @@ def test_deployed_workloads_do_not_mount_the_host_docker_socket():
 def test_proxy_capabilities_are_mounted_outside_the_source_tree():
     compose = yaml.safe_load((REPO / 'deploy' / 'gcp' / 'docker-compose.yml').read_text())
     assert '/opt/sentinel-nginx/proxy-tokens:/etc/nginx/proxy-tokens:ro' in compose['services']['nginx']['volumes']
+    assert '/opt/sentinel-nginx/conf.d:/etc/nginx/conf.d:ro' in compose['services']['nginx']['volumes']
     for script in ('provision_customer.sh', 'restart_customer.sh'):
         source = (REPO / 'deploy' / 'gcp' / script).read_text()
         assert 'NGINX_PROXY_TOKEN_DIR' in source
         assert '/etc/nginx/proxy-tokens/' in source or 'proxy-tokens' in source
+
+
+def test_customer_vhosts_are_generated_outside_the_git_checkout():
+    source = (REPO / 'deploy' / 'gcp' / 'provision_customer.sh').read_text()
+    assert 'NGINX_CONF_DIR="${NGINX_CONF_DIR:-/opt/sentinel-nginx/conf.d}"' in source
+    assert '/opt/sentinel/deploy/gcp/nginx' not in source
 
 
 def test_customer_containers_receive_the_central_logout_url():

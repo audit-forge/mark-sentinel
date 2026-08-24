@@ -5,7 +5,7 @@ set -euo pipefail
 CUSTOMER_ID="${1:?usage: $0 <customer_id> <app-host> <admin-host>}"
 APP_HOST="${2:?usage: $0 <customer_id> <app-host> <admin-host>}"
 ADMIN_HOST="${3:?usage: $0 <customer_id> <app-host> <admin-host>}"
-CONFIG="/opt/sentinel/deploy/gcp/nginx/${CUSTOMER_ID}.conf"
+CONFIG="/opt/sentinel-nginx/conf.d/${CUSTOMER_ID}.conf"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 test -f "$CONFIG"
