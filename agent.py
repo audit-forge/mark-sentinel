@@ -77,6 +77,7 @@ PINNED_UPDATE_PUBLIC_KEY_DER_B64 = 'MCowBQYDK2VwAyEAxQSQJT9gaFKKcPEy7nPM7Bdk0fT8
 _UPDATE_MANIFEST_KEYS = frozenset({'product', 'version', 'artifact', 'sha256', 'size', 'platform'})
 _VERSION_RE = re.compile(r'^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$')
 _HTTPS_CONTEXT = ssl.create_default_context(cafile=certifi.where())
+_UPDATE_CHECK_INTERVAL = 3600
 
 
 def _urlopen(request, timeout: int):
@@ -664,6 +665,11 @@ def self_update(config: dict) -> bool:
     except Exception as e:
         log.error('self_update failed: %s', e)
         return False
+
+
+def _update_check_due(last_check: float, now: float) -> bool:
+    """Check releases once at daemon startup and then no more than hourly."""
+    return last_check <= 0 or now - last_check >= _UPDATE_CHECK_INTERVAL
 
 
 def _restart_windows_service_after_update(staged: Path | None, live: Path | None) -> bool:
@@ -1550,8 +1556,16 @@ def main() -> None:
 
         last_scan = time.time() - interval + startup_delay  # first scan fires after delay
         last_success = 0.0
+        last_update_check = 0.0
         while True:
             now = time.time()
+            if _update_check_due(last_update_check, now):
+                last_update_check = now
+                try:
+                    self_update(cfg)
+                except Exception as e:
+                    # A failed update check must never stop local security scans.
+                    log.warning('Scheduled update check failed: %s', e)
             # Apply per-scan jitter so the effective interval drifts ± SCAN_JITTER
             effective_interval = interval + _random.uniform(-SCAN_JITTER, SCAN_JITTER)
             due = (now - last_scan >= effective_interval) or (last_success < last_scan and now - last_scan >= RETRY_INTERVAL)
