@@ -352,7 +352,7 @@ Service:  arckon-agent  (systemd unit)</pre>
 <script>
 function openDeploy(cid, name, server, token) {
   var ip   = '{{ ip }}';
-  var srv  = server || ('http://' + ip + ':7001');
+  var srv  = server || ('http://' + ip + ':80');
   var base = srv;
 
   document.getElementById('dm-name').textContent = name;

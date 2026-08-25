@@ -42,7 +42,7 @@ fi
 echo ""
 echo "[ 3/4 ] Unauthenticated endpoint probe (via nginx)"
 SENTINEL_PORT=$(docker inspect sentinel-nginx --format '{{json .HostConfig.PortBindings}}' 2>/dev/null \
-  | python3 -c "import json,sys; p=json.load(sys.stdin); print(list(p.keys())[0].split('/')[0])" 2>/dev/null || echo "7001")
+  | python3 -c "import json,sys; p=json.load(sys.stdin); print(list(p.keys())[0].split('/')[0])" 2>/dev/null || echo "80")
 
 for EP in / /login /api/devices /api/fleet/shadow /api/fleet/inventory /api/scan \
            /api/config /api/users /api/system/update /api/system/restart-server; do

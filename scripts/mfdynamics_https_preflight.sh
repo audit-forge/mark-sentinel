@@ -37,8 +37,8 @@ while (($#)); do
 done
 
 [[ -f "$repo_root/deploy/gcp/docker-compose.yml" ]] || fail "run from a Sentinel checkout"
-grep -q '"7001-7100:7001-7100"' "$repo_root/deploy/gcp/docker-compose.yml" || fail "current direct-port range was not found"
-grep -q '"80:80"' "$repo_root/deploy/gcp/docker-compose.yml" || fail "current port 80 listener was not found"
+grep -q '"80:80"' "$repo_root/deploy/gcp/docker-compose.yml" || fail "port 80 listener was not found"
+grep -q '7001' "$repo_root/deploy/gcp/docker-compose.yml" && fail "stale port 7001 reference still present" || true
 grep -q "RELEASE_DIR = ROOT / 'releases' / 'current'" "$repo_root/server.py" || fail "release serving root was not found"
 grep -q "refusing non-HTTPS" "$repo_root/agent.py" || fail "agent HTTPS refusal was not found"
 grep -q "_validate_update_manifest" "$repo_root/agent.py" || fail "agent signed-manifest validation was not found"
@@ -90,7 +90,7 @@ $actual
 EOF
 if [ -n "$2" ]; then test "$actual_count" = "$2" && test "$actual_digest" = "$3"; fi
 printf "PASS: remote TLS, nginx, release metadata, and token-presence checks (customers=%s tokens=%s)\n" "$actual_count" "$token_count"
-ss -ltn | grep -Eq ":(80|7001|7100)[[:space:]]"'
+ss -ltn | grep -Eq ":(80)[[:space:]]"'
 
 gcloud compute ssh "$instance" --project="$project" --zone="$zone" --tunnel-through-iap \
   --command="bash -s -- '$https_host' '${cohort_count:-}' '${cohort_digest:-}'" <<< "$remote_command"

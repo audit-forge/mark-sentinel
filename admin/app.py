@@ -74,7 +74,7 @@ DEPLOY_TOKEN = _load_deploy_token()
 PUBLIC_IP = os.environ.get("PUBLIC_IP", "34.58.90.147")
 PUBLIC_ADMIN_URL = os.environ.get("PUBLIC_ADMIN_URL", "").rstrip("/") or f"http://admin.{PUBLIC_IP}.nip.io"
 PUBLIC_DASHBOARD_URL = os.environ.get("PUBLIC_DASHBOARD_URL", "").rstrip("/")
-PUBLIC_DASHBOARD_PORT = int(os.environ.get("PUBLIC_DASHBOARD_PORT", "7001"))
+PUBLIC_DASHBOARD_PORT = int(os.environ.get("PUBLIC_DASHBOARD_PORT", "80"))
 AUTH_COOKIE_DOMAIN = os.environ.get("AUTH_COOKIE_DOMAIN", "").strip() or None
 
 
@@ -510,10 +510,7 @@ async def add_customer(
             ).fetchone()
             if not parent:
                 return RedirectResponse("/customers?error=badparent", status_code=303)
-        max_port = conn.execute("SELECT MAX(port) FROM customers").fetchone()[0]
-        port = (max_port or 7000) + 1
-        if port > 7100:
-            return RedirectResponse("/customers?error=port_capacity", status_code=303)
+        port = PUBLIC_DASHBOARD_PORT
         conn.execute(
             "INSERT INTO customers (id, name, created_at, active, tier, license_expires_at, max_seats, port, agent_token, parent_customer_id, baseline_profile) "
             "VALUES (?,?,?,1,?,?,?,?,?,?,?)",
@@ -739,8 +736,7 @@ async def rotate_customer_token(request: Request):
 
     # Tell the Sentinel server for this customer to push set_config to all known devices
     push_count = 0
-    port = row["port"] if row["port"] else 7001
-    sentinel_url = f"http://127.0.0.1:{port}/api/fleet/push-token"
+    sentinel_url = f"http://sentinel-{customer_id}:7331/api/fleet/push-token"
     try:
         import httpx
         async with httpx.AsyncClient(timeout=5) as client:
@@ -778,7 +774,7 @@ async def rotate_customer_token(request: Request):
 
 async def _push_customer_update_all(customer_id: str, port: int, actor_email: str) -> dict:
     import httpx
-    url = f"http://127.0.0.1:{port}/api/fleet/update/all"
+    url = f"http://sentinel-{customer_id}:7331/api/fleet/update/all"
     try:
         async with httpx.AsyncClient(timeout=10) as client:
             r = await client.post(url, headers={
@@ -811,8 +807,7 @@ async def push_agent_updates_all_customers(request: Request):
 
     results = []
     for cust in customers:
-        port = cust["port"] or 7001
-        results.append(await _push_customer_update_all(cust["id"], port, user.get("email", "")))
+        results.append(await _push_customer_update_all(cust["id"], cust["port"] or 80, user.get("email", "")))
 
     total_devices = sum(r.get("device_count", 0) for r in results if r["ok"])
     return JSONResponse({

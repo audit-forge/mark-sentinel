@@ -3,7 +3,7 @@
 # Works with AWS, GCP, Azure, and any cloud that supports cloud-init user_data.
 
 variable "arckon_server" {
-  description = "Arckon server URL (e.g., http://34.58.90.147:7001)"
+  description = "Arckon server URL (e.g., https://arckon.riskraven.ai)"
   type        = string
 }
 
@@ -41,7 +41,7 @@ EOF
 # Example usage with AWS:
 # module "arckon_agent" {
 #   source = "./deploy/terraform"
-#   arckon_server = "http://34.58.90.147:7001"
+#   arckon_server = "https://arckon.riskraven.ai"
 #   arckon_token  = var.arckon_token
 # }
 #

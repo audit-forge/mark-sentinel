@@ -27,7 +27,7 @@ import pytest
 
 REPO = Path(__file__).resolve().parents[1]
 ADMIN_APP = REPO / "admin" / "app.py"
-LIVE_CONF = REPO / "deploy" / "gcp" / "nginx" / "mfdynamicsllc.conf"
+LIVE_CONF = REPO / "deploy" / "gcp" / "nginx" / "arckon.conf"
 PROVISION = REPO / "deploy" / "gcp" / "provision_customer.sh"
 
 
@@ -105,12 +105,12 @@ def _assert_unauthenticated_locations_strip_identity(conf: str, label: str):
 
 
 def test_live_vhost_propagates_client_org_id():
-    _assert_identity_propagated(LIVE_CONF.read_text(), "mfdynamicsllc.conf")
+    _assert_identity_propagated(LIVE_CONF.read_text(), "arckon.conf")
 
 
 def test_live_vhost_strips_spoofed_identity_on_unauthenticated_routes():
     _assert_unauthenticated_locations_strip_identity(
-        LIVE_CONF.read_text(), "mfdynamicsllc.conf")
+        LIVE_CONF.read_text(), "arckon.conf")
 
 
 def _render_provisioned_conf(tmp_path: Path, *, port: str = "7002") -> str:
@@ -121,7 +121,7 @@ def _render_provisioned_conf(tmp_path: Path, *, port: str = "7002") -> str:
     assert m, "could not locate the vhost heredoc in provision_customer.sh"
     script = tmp_path / "render.sh"
     dashboard_url = (
-        "https://dashboard.example.test" if port == "7001"
+        "https://dashboard.example.test" if port == "80"
         else f"http://203.0.113.9:{port}"
     )
     script.write_text(
@@ -132,7 +132,7 @@ def _render_provisioned_conf(tmp_path: Path, *, port: str = "7002") -> str:
         'PUBLIC_IP="203.0.113.9"\n'
         'PUBLIC_ADMIN_URL="https://admin.example.test"\n'
         'PUBLIC_DASHBOARD_URL="https://dashboard.example.test"\n'
-        'PUBLIC_DASHBOARD_PORT="7001"\n'
+        'PUBLIC_DASHBOARD_PORT="80"\n'
         f'CUSTOMER_DASHBOARD_URL="{dashboard_url}"\n'
         'PROXY_TOKEN="test-proxy-token"\n'
         "cat <<EOF\n" + m.group(1) + "\nEOF\n"
@@ -157,7 +157,7 @@ def test_provisioner_renders_vhost_that_strips_spoofed_identity(tmp_path):
 @pytest.mark.skipif(shutil.which("bash") is None, reason="bash not available")
 def test_provisioner_uses_port_specific_login_redirect(tmp_path):
     noncanonical = _render_provisioned_conf(tmp_path, port="7002")
-    canonical = _render_provisioned_conf(tmp_path, port="7001")
+    canonical = _render_provisioned_conf(tmp_path, port="80")
 
     assert (
         "return 302 https://admin.example.test/login?next=http://203.0.113.9:7002$request_uri;"

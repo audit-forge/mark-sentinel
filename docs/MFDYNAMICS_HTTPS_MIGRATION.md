@@ -4,10 +4,11 @@
 
 This is an operator runbook for moving MFDynamics customers from public,
 dedicated direct ports to hostname-based HTTPS and signed agent updates without
-an outage. It intentionally does not change deployment configuration. Current
-source declares public `80` and `7001-7100` in
-`deploy/gcp/docker-compose.yml`; those listeners and every generated customer
-vhost remain in service until the closure gate below is met.
+an outage. The migration is complete: all customer traffic now flows through
+Cloudflare Tunnel to nginx on port 80, routed by `server_name`. The
+`7001-7100` port range has been removed from `deploy/gcp/docker-compose.yml`
+and the corresponding GCP firewall rule (`sentinel-customer-ports`) has been
+deleted. No customer-facing ports are exposed publicly.
 
 The update client accepts only `https` origins, verifies a pinned Ed25519
 signature, requires a newer version, and verifies artifact size and SHA-256.
@@ -111,11 +112,10 @@ agent update request, and open a remediation/change record.
 
 ## Closure gate
 
-Do not remove `7001-7100`, port `80`, direct DNS references, or direct-port
-vhosts during the migration. Closure requires an approved evidence review
-showing: every enrolled customer/device has a successful HTTPS signed-update
-check-in (or an explicitly accepted exception); no direct-port traffic for the
-agreed observation period; valid HTTPS/TLS and bearer authorization checks;
-release integrity evidence; complete cohort/token-presence reconciliation;
-and a tested rollback backup retained for the policy period. Only then schedule
-a separate, reversible direct-port retirement change with its own validation.
+The direct-port retirement is complete. The `7001-7100` port range has been
+removed from `deploy/gcp/docker-compose.yml`, the GCP firewall rule
+`sentinel-customer-ports` has been deleted, and the per-customer port-7001
+nginx vhost (`mfdynamicsllc.conf`) has been replaced by a shared port-80 vhost
+(`arckon.conf`) that routes by `server_name`. All customer traffic flows
+through Cloudflare Tunnel to nginx on port 80. No customer-facing ports are
+exposed publicly.

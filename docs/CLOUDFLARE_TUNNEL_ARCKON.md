@@ -31,19 +31,21 @@ After the connector is healthy, add these public hostnames to the tunnel:
 
 | Hostname | Service |
 | --- | --- |
-| `arckon.riskraven.ai` | `http://sentinel-nginx:7001` |
+| `arckon.riskraven.ai` | `http://sentinel-nginx:80` |
 | `admin.riskraven.ai` | `http://sentinel-nginx:80` |
 
-Cloudflare creates the required proxied DNS records. Remove the existing
-proxied `A` record for `arckon.riskraven.ai`; it must not point directly at the
-VM after the tunnel route is active.
+Cloudflare creates the required proxied DNS records. Both hostnames route to
+the same nginx container on port 80; nginx distinguishes them by `server_name`
+(`arckon.riskraven.ai` serves the customer dashboard, `admin.riskraven.ai`
+serves the admin dashboard). No customer-facing ports are exposed publicly.
 
 ## Cloudflare settings
 
 1. In **SSL/TLS**, use **Full (strict)**. The tunnel terminates the public TLS
    connection; do not select Flexible.
 2. Leave the Cloudflare proxy enabled for both hostnames.
-3. Do not expose port `7001` publicly after the tunnel has been verified.
+3. No customer-facing ports are exposed publicly; all traffic flows through
+   the tunnel to nginx on port 80.
 
 ## Verify
 
