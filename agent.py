@@ -392,7 +392,7 @@ def report_network_assets(results: list, config: dict, device_id: str, hostname:
 def _apply_token_update(config: dict, new_token: str) -> None:
     """Persist a new agent token to disk and update the live config dict.
     Called when the server signals a token rotation via check-in response or set_config."""
-    config_path = DEFAULT_CONFIG
+    config_path = Path(config.get('_config_path', DEFAULT_CONFIG))
     try:
         existing: dict = {}
         if config_path.exists():
