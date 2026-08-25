@@ -22,3 +22,8 @@ def test_token_rotation_updates_the_explicit_config_path(tmp_path):
 
     assert json.loads(config_path.read_text())['token'] == 'new-token'
     assert config['token'] == 'new-token'
+
+
+def test_set_config_log_label_redacts_token_payload():
+    assert agent._command_log_label('set_config:{"token":"secret"}') == 'set_config:[redacted]'
+    assert agent._command_log_label('update_self') == 'update_self'

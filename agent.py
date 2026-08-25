@@ -477,6 +477,11 @@ def report_to_server(report: dict, config: dict,
 
 # ── Command polling ────────────────────────────────────────────────────────────
 
+def _command_log_label(command: str) -> str:
+    """Return a safe command label that never logs set_config secrets."""
+    return 'set_config:[redacted]' if command.startswith('set_config:') else command
+
+
 def poll_for_command(config: dict, device_id: str) -> str | None:
     """Check the server for a pending on-demand command. Returns command string or None."""
     server = config.get('server', '').rstrip('/')
@@ -493,7 +498,8 @@ def poll_for_command(config: dict, device_id: str) -> str | None:
             data = json.loads(resp.read())
             cmd = data.get('command')
             if cmd:
-                log.info('Command received from server: %s', cmd)
+                # set_config can carry a replacement bearer token; never write it to logs.
+                log.info('Command received from server: %s', _command_log_label(cmd))
             return cmd
     except _urlerr.HTTPError as e:
         log.warning('Command poll HTTP %s from %s', e.code, server)
