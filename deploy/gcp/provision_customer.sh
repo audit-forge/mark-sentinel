@@ -1,5 +1,10 @@
 #!/usr/bin/env bash
-# Provision a new customer container + nginx vhost.
+# Provision a new customer container for the shared-hostname gateway.
+#
+# All customers share arckon.riskraven.ai on port 80. This script creates the
+# customer's Docker container, writes its proxy token, regenerates the gateway
+# proxy-token map, and reloads nginx. No dedicated nginx vhost is needed.
+#
 # Usage: provision_customer.sh <customer_id> [public_ip] [tier] [expires] [max_seats] [customer_name] [port] [agent_token] [baseline_profile]
 set -euo pipefail
 
@@ -25,6 +30,7 @@ HOST_LICENSES_DIR="${HOST_LICENSES_DIR:-/opt/licenses}"
 LICENSE_FILE="${HOST_LICENSES_DIR}/${CUSTOMER_ID}/license.json"
 DATA_DIR="${SENTINEL_DATA_ROOT:-/opt/sentinel-data}/${CUSTOMER_ID}"
 SPEND_SECRET_DIR="${SENTINEL_SPEND_SECRET_ROOT:-${SENTINEL_DATA_ROOT:-/opt/sentinel-data}/.spend-secrets}/${CUSTOMER_ID}/spend"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 mkdir -p "$DATA_DIR"
 chown -R 999:999 "$DATA_DIR"
@@ -53,6 +59,7 @@ else
 fi
 install -d -m 0750 "$NGINX_PROXY_TOKEN_DIR"
 umask 077
+# Keep the per-customer file for restart_customer.sh and migrate scripts.
 printf 'proxy_set_header X-Sentinel-Proxy-Token %s;\n' "$PROXY_TOKEN" \
   > "${NGINX_PROXY_TOKEN_DIR}/${CUSTOMER_ID}.conf"
 if [ -z "$AGENT_TOKEN" ]; then
@@ -85,208 +92,12 @@ docker run -d \
 # Connect to arckon-net so nginx can reach sentinel-admin for auth_request
 docker network connect arckon-net "$CONTAINER_NAME"
 
-mkdir -p "$NGINX_CONF_DIR"
-cat > "${NGINX_CONF_DIR}/${CUSTOMER_ID}.conf" <<EOF
-server {
-    listen ${PORT};
-    server_name _;
+# Regenerate the gateway proxy-token map so nginx can route to this customer.
+bash "$SCRIPT_DIR/regenerate_proxy_token_map.sh"
 
-    location = /_auth {
-        internal;
-        proxy_pass http://user-manager:8000/auth/verify;
-        proxy_pass_request_body off;
-        proxy_set_header Content-Length "";
-        proxy_set_header X-Customer-ID ${CUSTOMER_ID};
-        proxy_set_header Cookie \$http_cookie;
-        proxy_set_header X-Arckon-User-Email "";
-        proxy_set_header X-Arckon-User-Role "";
-        proxy_set_header X-Arckon-Customer-ID "";
-        proxy_set_header X-Arckon-Client-Org-ID "";
-        proxy_set_header X-Sentinel-User-Email "";
-        proxy_set_header X-Sentinel-User-Role "";
-        proxy_set_header X-Sentinel-Customer-ID "";
-        proxy_set_header X-Sentinel-Client-Org-ID "";
-    }
+# Remove any stale per-customer vhost from the old dedicated-port architecture.
+rm -f "${NGINX_CONF_DIR}/${CUSTOMER_ID}.conf"
 
-    # Agent/bundle/install routes bypass auth_request, so nothing here has
-    # been vetted by /auth/verify. The upstream runs with
-    # SENTINEL_TRUSTED_PROXY=1 and believes any X-Sentinel-* header it is
-    # handed, so every one of them must be blanked out on these paths or a
-    # caller could mint their own admin (or cross-tenant) identity.
-    location /api/agent/ {
-        proxy_pass http://${CONTAINER_NAME}:7331;
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Sentinel-Proxy-Token "";
-        proxy_set_header X-Arckon-User-Email "";
-        proxy_set_header X-Arckon-User-Role "";
-        proxy_set_header X-Arckon-Customer-ID "";
-        proxy_set_header X-Arckon-Client-Org-ID "";
-        proxy_set_header X-Arckon-Is-Reseller "";
-        proxy_set_header X-Arckon-Is-MSP "";
-        proxy_set_header X-Sentinel-User-Email "";
-        proxy_set_header X-Sentinel-User-Role "";
-        proxy_set_header X-Sentinel-Customer-ID "";
-        proxy_set_header X-Sentinel-Client-Org-ID "";
-        proxy_set_header X-Sentinel-Is-Reseller     "";
-        proxy_set_header X-Sentinel-Is-MSP          "";
-        proxy_set_header X-Sentinel-Impersonated-By "";
-        proxy_read_timeout 300;
-        proxy_buffering off;
-    }
-
-    location ~ ^/(bundle\.tar\.gz|agent\.py)$ {
-        proxy_pass http://${CONTAINER_NAME}:7331;
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header Authorization \$http_authorization;
-        proxy_set_header X-Sentinel-Proxy-Token "";
-        proxy_set_header X-Arckon-User-Email "";
-        proxy_set_header X-Arckon-User-Role "";
-        proxy_set_header X-Arckon-Customer-ID "";
-        proxy_set_header X-Arckon-Client-Org-ID "";
-        proxy_set_header X-Arckon-Is-Reseller "";
-        proxy_set_header X-Arckon-Is-MSP "";
-        proxy_set_header X-Sentinel-User-Email "";
-        proxy_set_header X-Sentinel-User-Role "";
-        proxy_set_header X-Sentinel-Customer-ID "";
-        proxy_set_header X-Sentinel-Client-Org-ID "";
-        proxy_set_header X-Sentinel-Is-Reseller     "";
-        proxy_set_header X-Sentinel-Is-MSP          "";
-        proxy_set_header X-Sentinel-Impersonated-By "";
-        proxy_read_timeout 300;
-    }
-
-    location /releases/ {
-        proxy_pass http://${CONTAINER_NAME}:7331;
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header Authorization \$http_authorization;
-        proxy_set_header X-Sentinel-Proxy-Token "";
-        proxy_set_header X-Arckon-User-Email "";
-        proxy_set_header X-Arckon-User-Role "";
-        proxy_set_header X-Arckon-Customer-ID "";
-        proxy_set_header X-Arckon-Client-Org-ID "";
-        proxy_set_header X-Arckon-Is-Reseller "";
-        proxy_set_header X-Arckon-Is-MSP "";
-        proxy_set_header X-Sentinel-User-Email "";
-        proxy_set_header X-Sentinel-User-Role "";
-        proxy_set_header X-Sentinel-Customer-ID "";
-        proxy_set_header X-Sentinel-Client-Org-ID "";
-        proxy_set_header X-Sentinel-Is-Reseller     "";
-        proxy_set_header X-Sentinel-Is-MSP          "";
-        proxy_set_header X-Sentinel-Impersonated-By "";
-        proxy_read_timeout 300;
-    }
-
-    location /install/ {
-        proxy_pass http://sentinel-admin:8000;
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Sentinel-Proxy-Token "";
-        proxy_set_header X-Arckon-User-Email "";
-        proxy_set_header X-Arckon-User-Role "";
-        proxy_set_header X-Arckon-Customer-ID "";
-        proxy_set_header X-Arckon-Client-Org-ID "";
-        proxy_set_header X-Arckon-Is-Reseller "";
-        proxy_set_header X-Arckon-Is-MSP "";
-        proxy_set_header X-Sentinel-User-Email "";
-        proxy_set_header X-Sentinel-User-Role "";
-        proxy_set_header X-Sentinel-Customer-ID "";
-        proxy_set_header X-Sentinel-Client-Org-ID "";
-        proxy_set_header X-Sentinel-Is-Reseller     "";
-        proxy_set_header X-Sentinel-Is-MSP          "";
-        proxy_set_header X-Sentinel-Impersonated-By "";
-    }
-
-    # API callers must receive an HTTP authentication error, not a redirect to
-    # the port-80 login site. A fetch redirect across ports becomes an opaque
-    # browser network error and hides the real expired-session condition.
-    location /api/ {
-        auth_request /_auth;
-        auth_request_set \$sentinel_user_email      \$upstream_http_x_arckon_user_email;
-        auth_request_set \$sentinel_user_role       \$upstream_http_x_arckon_user_role;
-        auth_request_set \$sentinel_client_org_id   \$upstream_http_x_arckon_client_org_id;
-        auth_request_set \$sentinel_is_reseller     \$upstream_http_x_arckon_is_reseller;
-        auth_request_set \$sentinel_is_msp          \$upstream_http_x_arckon_is_msp;
-        auth_request_set \$sentinel_verified_user_email      \$upstream_http_x_sentinel_user_email;
-        auth_request_set \$sentinel_verified_user_role       \$upstream_http_x_sentinel_user_role;
-        auth_request_set \$sentinel_verified_client_org_id   \$upstream_http_x_sentinel_client_org_id;
-        auth_request_set \$sentinel_verified_is_reseller     \$upstream_http_x_sentinel_is_reseller;
-        auth_request_set \$sentinel_verified_is_msp          \$upstream_http_x_sentinel_is_msp;
-        auth_request_set \$sentinel_impersonated_by \$upstream_http_x_sentinel_impersonated_by;
-
-        proxy_pass http://${CONTAINER_NAME}:7331;
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        include /etc/nginx/proxy-tokens/${CUSTOMER_ID}.conf;
-        proxy_set_header X-Arckon-User-Email      \$sentinel_user_email;
-        proxy_set_header X-Arckon-User-Role       \$sentinel_user_role;
-        proxy_set_header X-Arckon-Customer-ID     ${CUSTOMER_ID};
-        proxy_set_header X-Arckon-Client-Org-ID   \$sentinel_client_org_id;
-        proxy_set_header X-Arckon-Is-Reseller     \$sentinel_is_reseller;
-        proxy_set_header X-Arckon-Is-MSP          \$sentinel_is_msp;
-        proxy_set_header X-Sentinel-User-Email      \$sentinel_verified_user_email;
-        proxy_set_header X-Sentinel-User-Role       \$sentinel_verified_user_role;
-        proxy_set_header X-Sentinel-Customer-ID     ${CUSTOMER_ID};
-        proxy_set_header X-Sentinel-Client-Org-ID   \$sentinel_verified_client_org_id;
-        proxy_set_header X-Sentinel-Is-Reseller     \$sentinel_verified_is_reseller;
-        proxy_set_header X-Sentinel-Is-MSP          \$sentinel_verified_is_msp;
-        proxy_set_header X-Sentinel-Impersonated-By \$sentinel_impersonated_by;
-        proxy_read_timeout 300;
-        proxy_buffering off;
-    }
-
-    location / {
-        auth_request /_auth;
-        error_page 401 403 = @login_redirect;
-        # Every identity header /auth/verify emits is captured and re-set below.
-        # A header that is captured but not proxy_set_header'd
-        # is silently replaced by whatever the browser sent; a client_viewer
-        # whose Client-Org-ID never arrives is what let one tenant read the
-        # whole MSP fleet.
-        auth_request_set \$sentinel_user_email      \$upstream_http_x_arckon_user_email;
-        auth_request_set \$sentinel_user_role       \$upstream_http_x_arckon_user_role;
-        auth_request_set \$sentinel_client_org_id   \$upstream_http_x_arckon_client_org_id;
-        auth_request_set \$sentinel_is_reseller     \$upstream_http_x_arckon_is_reseller;
-        auth_request_set \$sentinel_is_msp          \$upstream_http_x_arckon_is_msp;
-        auth_request_set \$sentinel_verified_user_email      \$upstream_http_x_sentinel_user_email;
-        auth_request_set \$sentinel_verified_user_role       \$upstream_http_x_sentinel_user_role;
-        auth_request_set \$sentinel_verified_client_org_id   \$upstream_http_x_sentinel_client_org_id;
-        auth_request_set \$sentinel_verified_is_reseller     \$upstream_http_x_sentinel_is_reseller;
-        auth_request_set \$sentinel_verified_is_msp          \$upstream_http_x_sentinel_is_msp;
-        auth_request_set \$sentinel_impersonated_by \$upstream_http_x_sentinel_impersonated_by;
-
-        proxy_pass http://${CONTAINER_NAME}:7331;
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        include /etc/nginx/proxy-tokens/${CUSTOMER_ID}.conf;
-        proxy_set_header X-Arckon-User-Email      \$sentinel_user_email;
-        proxy_set_header X-Arckon-User-Role       \$sentinel_user_role;
-        proxy_set_header X-Arckon-Customer-ID     ${CUSTOMER_ID};
-        proxy_set_header X-Arckon-Client-Org-ID   \$sentinel_client_org_id;
-        proxy_set_header X-Arckon-Is-Reseller     \$sentinel_is_reseller;
-        proxy_set_header X-Arckon-Is-MSP          \$sentinel_is_msp;
-        proxy_set_header X-Sentinel-User-Email      \$sentinel_verified_user_email;
-        proxy_set_header X-Sentinel-User-Role       \$sentinel_verified_user_role;
-        proxy_set_header X-Sentinel-Customer-ID     ${CUSTOMER_ID};
-        proxy_set_header X-Sentinel-Client-Org-ID   \$sentinel_verified_client_org_id;
-        proxy_set_header X-Sentinel-Is-Reseller     \$sentinel_verified_is_reseller;
-        proxy_set_header X-Sentinel-Is-MSP          \$sentinel_verified_is_msp;
-        proxy_set_header X-Sentinel-Impersonated-By \$sentinel_impersonated_by;
-        proxy_read_timeout 300;
-        proxy_buffering off;
-    }
-
-    location @login_redirect {
-        return 302 ${PUBLIC_ADMIN_URL}/login?next=${CUSTOMER_DASHBOARD_URL}\$request_uri;
-    }
-}
-EOF
-chmod 600 "${NGINX_CONF_DIR}/${CUSTOMER_ID}.conf"
-
+docker exec sentinel-nginx nginx -t
 docker exec sentinel-nginx nginx -s reload
-echo "Provisioned: ${CUSTOMER_ID} at http://${PUBLIC_IP}:${PORT} (${TIER})"
+echo "Provisioned: ${CUSTOMER_ID} on ${PUBLIC_DASHBOARD_URL} (${TIER})"

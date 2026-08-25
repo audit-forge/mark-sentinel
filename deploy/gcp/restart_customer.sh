@@ -12,6 +12,7 @@ PUBLIC_ADMIN_URL="${PUBLIC_ADMIN_URL:-https://admin.riskraven.ai}"
 SPEND_SECRET_DIR="${SENTINEL_SPEND_SECRET_ROOT:-/opt/sentinel-data/.spend-secrets}/${CUSTOMER_ID}/spend"
 HOST_LICENSES_DIR="${HOST_LICENSES_DIR:-/opt/licenses}"
 LICENSE_FILE="${HOST_LICENSES_DIR}/${CUSTOMER_ID}/license.json"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 if [ ! -d "$DATA_DIR" ]; then
   echo "ERROR: data dir $DATA_DIR not found" >&2
@@ -86,5 +87,9 @@ except Exception:
   sleep 1
 done
 
+# Regenerate the gateway proxy-token map (in case the token changed).
+bash "$SCRIPT_DIR/regenerate_proxy_token_map.sh"
+
+docker exec sentinel-nginx nginx -t
 docker exec sentinel-nginx nginx -s reload
 echo "Done: ${CONTAINER_NAME} restarted and nginx reloaded."

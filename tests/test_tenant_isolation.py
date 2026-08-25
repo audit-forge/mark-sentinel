@@ -91,17 +91,27 @@ def _assert_identity_propagated(conf: str, label: str):
 
 
 def _assert_unauthenticated_locations_strip_identity(conf: str, label: str):
-    """Locations that bypass auth_request must blank every X-Sentinel-*
-    header. The upstream requires a proxy capability in addition to authenticated
-    identity, so unauthenticated routes must not receive either value."""
+    """Agent routes (api/agent, bundle, releases) authenticate via
+    /_agent_auth (agent bearer token) but must blank all user-identity
+    headers — the agent-token lookup only returns a customer_id, never a
+    user identity. The install route is truly unauthenticated (public install
+    scripts) and must also blank all.
+
+    Dashboard routes (/api/ and /) use /_auth and PROPAGATE identity — those
+    are tested by _assert_identity_propagated, not here."""
     headers = _auth_verify_headers()
-    for spec, body in _location_blocks(conf).items():
-        if "proxy_pass" not in body or "auth_request" in body or "internal;" in body:
+    blocks = _location_blocks(conf)
+    # Only check agent-auth and install routes — NOT the dashboard /api/ or /
+    agent_specs = {"/api/agent/", "~ ^/(bundle\\.tar\\.gz|agent\\.py)$", "/releases/", "/install/"}
+    for spec, body in blocks.items():
+        if spec not in agent_specs:
+            continue
+        if "proxy_pass" not in body or "internal;" in body:
             continue
         for header in sorted(headers):
             assert re.search(
                 r"proxy_set_header\s+" + re.escape(header) + r'\s+""\s*;', body, re.I
-            ), label + ": `location " + spec + "` bypasses auth but does not blank " + header
+            ), label + ": `location " + spec + "` does not blank " + header
 
 
 def test_live_vhost_propagates_client_org_id():
@@ -113,63 +123,30 @@ def test_live_vhost_strips_spoofed_identity_on_unauthenticated_routes():
         LIVE_CONF.read_text(), "arckon.conf")
 
 
-def _render_provisioned_conf(tmp_path: Path, *, port: str = "7002") -> str:
-    """Render provision_customer.sh's vhost heredoc with real bash, so the
-    test exercises the same expansion and escaping the provisioner does."""
-    src = PROVISION.read_text()
-    m = re.search(r"^cat > .*? <<EOF\n(.*?)\n^EOF$", src, re.S | re.M)
-    assert m, "could not locate the vhost heredoc in provision_customer.sh"
-    script = tmp_path / "render.sh"
-    dashboard_url = (
-        "https://dashboard.example.test" if port == "80"
-        else f"http://203.0.113.9:{port}"
-    )
-    script.write_text(
-        "set -euo pipefail\n"
-        'CUSTOMER_ID="acme"\n'
-        'CONTAINER_NAME="sentinel-acme"\n'
-        f'PORT="{port}"\n'
-        'PUBLIC_IP="203.0.113.9"\n'
-        'PUBLIC_ADMIN_URL="https://admin.example.test"\n'
-        'PUBLIC_DASHBOARD_URL="https://dashboard.example.test"\n'
-        'PUBLIC_DASHBOARD_PORT="80"\n'
-        f'CUSTOMER_DASHBOARD_URL="{dashboard_url}"\n'
-        'PROXY_TOKEN="test-proxy-token"\n'
-        "cat <<EOF\n" + m.group(1) + "\nEOF\n"
-    )
-    return subprocess.run(["bash", str(script)], capture_output=True,
-                          text=True, check=True).stdout
+def test_provisioner_uses_shared_gateway_not_dedicated_vhost():
+    """The provisioner must not generate a per-customer nginx vhost.
+    All customers share arckon.riskraven.ai via the shared gateway."""
+    source = PROVISION.read_text()
+    assert "cat >" not in source or "nginx" not in source.split("cat >")[1].split("\n")[0], \
+        "provision_customer.sh still generates an nginx vhost"
+    assert "regenerate_proxy_token_map" in source, \
+        "provision_customer.sh must regenerate the gateway proxy-token map"
+    assert "rm -f" in source and ".conf" in source, \
+        "provision_customer.sh must remove stale per-customer vhosts"
 
 
-@pytest.mark.skipif(shutil.which("bash") is None, reason="bash not available")
-def test_provisioner_renders_vhost_that_propagates_client_org_id(tmp_path):
-    conf = _render_provisioned_conf(tmp_path)
-    assert "sentinel-acme:7331" in conf, "heredoc did not expand as expected"
-    _assert_identity_propagated(conf, "provision_customer.sh")
-
-
-@pytest.mark.skipif(shutil.which("bash") is None, reason="bash not available")
-def test_provisioner_renders_vhost_that_strips_spoofed_identity(tmp_path):
-    _assert_unauthenticated_locations_strip_identity(
-        _render_provisioned_conf(tmp_path), "provision_customer.sh")
-
-
-@pytest.mark.skipif(shutil.which("bash") is None, reason="bash not available")
-def test_provisioner_uses_port_specific_login_redirect(tmp_path):
-    noncanonical = _render_provisioned_conf(tmp_path, port="7002")
-    canonical = _render_provisioned_conf(tmp_path, port="80")
-
-    assert (
-        "return 302 https://admin.example.test/login?next=http://203.0.113.9:7002$request_uri;"
-        in noncanonical
-    )
-    assert (
-        "return 302 https://admin.example.test/login?next=https://dashboard.example.test$request_uri;"
-        in canonical
-    )
+def test_provisioner_dashboard_url_logic():
+    """The provisioner must still compute CUSTOMER_DASHBOARD_URL for the
+    login redirect, defaulting to the shared public dashboard URL."""
     source = PROVISION.read_text()
     assert 'if [ "$PORT" = "$PUBLIC_DASHBOARD_PORT" ]; then' in source
     assert 'CUSTOMER_DASHBOARD_URL="http://${PUBLIC_IP}:${PORT}"' in source
+
+
+def test_regenerate_proxy_token_map_exists():
+    """The gateway proxy-token map regeneration script must exist."""
+    assert (REPO / "deploy" / "gcp" / "regenerate_proxy_token_map.sh").exists(), \
+        "regenerate_proxy_token_map.sh not found"
 
 
 # -- server: authorization boundary -------------------------------------------

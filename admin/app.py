@@ -170,14 +170,16 @@ def _sentinel_url(customer_id: str | None) -> str:
     """Return the Sentinel dashboard URL for a given customer_id."""
     if not customer_id:
         return "/login"
+    # All customers share arckon.riskraven.ai via the shared-hostname gateway.
+    # nginx routes to the correct container based on the authenticated
+    # customer_id, so the URL is the same for every tenant.
+    if PUBLIC_DASHBOARD_URL:
+        return PUBLIC_DASHBOARD_URL
     with get_conn() as conn:
         row = conn.execute("SELECT port FROM customers WHERE id=?", (customer_id,)).fetchone()
     if not row or not row["port"]:
         return "/login"
-    port = int(row["port"])
-    if PUBLIC_DASHBOARD_URL and port == PUBLIC_DASHBOARD_PORT:
-        return PUBLIC_DASHBOARD_URL
-    return f"http://{PUBLIC_IP}:{port}"
+    return f"http://{PUBLIC_IP}:{int(row['port'])}"
 
 
 # ── Auth ──────────────────────────────────────────────────────────────────────
@@ -288,6 +290,41 @@ async def auth_verify(request: Request):
         "X-Sentinel-Is-Reseller":   "1" if is_reseller else "",
         "X-Sentinel-Is-MSP":        "1" if is_msp else "",
         "X-Sentinel-Impersonated-By": user.get("impersonated_by") or "",
+    })
+
+
+@app.get("/auth/agent-lookup")
+async def agent_lookup(request: Request):
+    """Resolve an agent bearer token to a customer_id for nginx routing.
+
+    Used by the shared-hostname gateway's unauthenticated agent/bundle/releases
+    locations to route to the correct customer container. Returns 200 with
+    X-Sentinel-Customer-ID if the token maps to an active customer, 401
+    otherwise. Never returns the token itself or any secret."""
+    from fastapi.responses import Response
+    auth = request.headers.get("Authorization", "")
+    if auth.startswith("Bearer "):
+        token = auth[len("Bearer "):]
+    else:
+        return Response(status_code=401)
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT id FROM customers WHERE agent_token=? AND active=1",
+            (token,),
+        ).fetchone()
+        if not row:
+            # Try previous token within rollover window, if the column exists.
+            existing_cols = {r[1] for r in conn.execute("PRAGMA table_info(customers)").fetchall()}
+            if "agent_token_prev" in existing_cols:
+                now = int(__import__("time").time())
+                row = conn.execute(
+                    "SELECT id FROM customers WHERE agent_token_prev=? AND active=1 AND token_prev_expires>?",
+                    (token, now),
+                ).fetchone()
+    if not row:
+        return Response(status_code=401)
+    return Response(status_code=200, headers={
+        "X-Sentinel-Customer-ID": row["id"],
     })
 
 

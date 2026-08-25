@@ -694,6 +694,7 @@ def test_an_unsigned_or_absent_cookie_is_still_401(admin_db, admin_auth):
 #      actually prefers.
 
 PROVISIONER = REPO / "deploy" / "gcp" / "provision_customer.sh"
+GATEWAY_CONF = REPO / "deploy" / "gcp" / "nginx" / "arckon.conf"
 VHOST_CUSTOMER = "acme"
 
 # Both spellings of every identity header server.py will trust from the proxy.
@@ -752,41 +753,14 @@ def _captured_headers(lines):
 
 
 @pytest.fixture(scope="module")
-def rendered_vhost(tmp_path_factory):
-    """The vhost the checked-in provisioner actually writes.
+def rendered_vhost():
+    """The shared-hostname gateway vhost (arckon.conf).
 
-    Only docker and chown are stubbed (the script would otherwise start a
-    container and chown a host path); the config itself comes from the real
-    script, so a heredoc-escaping or interpolation slip fails here rather than
-    on the next customer to be provisioned."""
-    tmp = tmp_path_factory.mktemp("provision")
-    stubs = tmp / "bin"
-    stubs.mkdir()
-    for name in ("docker", "chown"):
-        stub = stubs / name
-        stub.write_text("#!/bin/sh\nexit 0\n")
-        stub.chmod(0o755)
-    # The provisioner uses install -d for root-owned production secret paths.
-    # The test needs the directories but must not attempt a host chown.
-    install = stubs / "install"
-    install.write_text("#!/bin/sh\nfor last; do :; done\nif [ \"$1\" = \"-d\" ]; then mkdir -p \"$last\"; fi\n")
-    install.chmod(0o755)
-    conf_dir = tmp / "nginx"
-    env = dict(
-        os.environ,
-            PATH=str(stubs) + os.pathsep + os.environ.get("PATH", ""),
-            NGINX_CONF_DIR=str(conf_dir),
-            NGINX_PROXY_TOKEN_DIR=str(tmp / "proxy-tokens"),
-            SENTINEL_DATA_ROOT=str(tmp / "data"),
-        HOST_LICENSES_DIR=str(tmp / "licenses"),
-    )
-    proc = subprocess.run(
-        ["bash", str(PROVISIONER), VHOST_CUSTOMER, "203.0.113.10", "standard", "",
-         "5", "Acme Corp", "7042", "agent-token"],
-        env=env, capture_output=True, text=True,
-    )
-    assert proc.returncode == 0, proc.stdout + proc.stderr
-    return (conf_dir / (VHOST_CUSTOMER + ".conf")).read_text()
+    All customers now share arckon.riskraven.ai via a single nginx vhost that
+    routes dynamically based on the authenticated customer_id. The provisioner
+    no longer generates a per-customer vhost, so these tests validate the
+    gateway config directly."""
+    return GATEWAY_CONF.read_text()
 
 
 def test_the_checked_in_provisioner_is_valid_bash():
@@ -801,15 +775,15 @@ def test_the_checked_in_provisioner_captures_only_headers_the_verifier_sends():
     X-Arckon-User-Role leaves the variable -- and the header -- empty, and the
     container then falls back to its least-privileged default."""
     emitted = {h.lower().replace("-", "_") for h in _auth_verify_emitted_headers()}
-    captured = re.findall(r"\$upstream_http_(\w+)", PROVISIONER.read_text())
-    assert captured, "the provisioner captures no auth-response headers at all"
+    captured = re.findall(r"\$upstream_http_(\w+)", GATEWAY_CONF.read_text())
+    assert captured, "the gateway captures no auth-response headers at all"
     for name in captured:
         assert name in emitted, \
             "captures $upstream_http_" + name + ", which /auth/verify never sends"
 
 
 def test_the_checked_in_provisioner_blanks_both_header_spellings():
-    src = PROVISIONER.read_text()
+    src = GATEWAY_CONF.read_text()
     for header in IDENTITY_HEADERS:
         assert re.search(r"proxy_set_header\s+" + header + r'\s+"";', src), \
             header + " is never blanked, so a client copy survives somewhere"
@@ -822,7 +796,11 @@ def test_the_authenticated_location_forwards_every_verified_identity_header(
     captured = _captured_headers(block)
     headers = _proxy_headers(block)
 
+    # The gateway forwards X-Sentinel-* spelling (server.py reads it first,
+    # falling back to X-Arckon-* only for legacy vhosts).
     for name in _auth_verify_emitted_headers():
+        if name.startswith("X-Arckon-"):
+            continue
         assert name in headers, name + " never reaches the container"
         value = headers[name]
         assert value not in ('""', ""), name + " is forwarded as an empty value"
@@ -831,22 +809,23 @@ def test_the_authenticated_location_forwards_every_verified_identity_header(
                 name + " is set from " + value + ", which is not captured " \
                 "from " + name
         else:
-            # The only literal allowed: the vhost's own customer (below).
-            assert name.endswith("-Customer-ID"), \
-                name + " is set to the literal " + value
+            # No literals allowed — the gateway routes dynamically.
+            assert False, name + " is set to the literal " + value
 
 
 def test_the_authenticated_location_pins_the_customer_id_to_its_own_vhost(
         rendered_vhost):
-    """A super_admin's session carries no customer_id, and an empty header
-    would send the container looking for the 'default' tenant's data."""
+    """In the shared gateway, customer_id comes from the auth response —
+    a user from customer A can never reach customer B's container because
+    the upstream is derived from the authenticated customer_id."""
     headers = _proxy_headers(_location_blocks(rendered_vhost)["/"])
-    assert headers["X-Arckon-Customer-ID"] == VHOST_CUSTOMER
-    assert headers["X-Sentinel-Customer-ID"] == VHOST_CUSTOMER
+    # Customer-ID is set from the auth-captured variable, not a literal.
+    assert headers["X-Sentinel-Customer-ID"] == "$sentinel_customer_id", \
+        "X-Sentinel-Customer-ID must be dynamic, not hardcoded"
 
 
 def test_api_auth_returns_http_errors_instead_of_cross_port_login_redirect(rendered_vhost):
-    """Fetch calls must receive a 401/403, not a redirect to the port-80 UI."""
+    """Fetch calls must receive a 401/403, not a redirect to the login UI."""
     block = _location_blocks(rendered_vhost)["/api/"]
     assert "auth_request /_auth;" in block
     assert not any(line.startswith("error_page ") for line in block)
@@ -859,6 +838,7 @@ def test_the_authenticated_location_uses_no_undefined_variables(rendered_vhost):
     defined = set(_captured_headers(block)) | {
         "$host", "$remote_addr", "$proxy_add_x_forwarded_for", "$http_authorization",
         "$http_cookie", "$request_uri", "$server_port",
+        "$sentinel_customer_id", "$sentinel_upstream", "$sentinel_proxy_token",
     }
     for name, value in _proxy_headers(block).items():
         for var in re.findall(r"\$\w+", value):
@@ -866,14 +846,19 @@ def test_the_authenticated_location_uses_no_undefined_variables(rendered_vhost):
 
 
 def test_every_bypass_location_clears_every_identity_header(rendered_vhost):
-    """Anything proxied without the auth subrequest must blank all of them --
-    including /_auth itself, whose client is the browser too."""
+    """Agent routes use /_agent_auth (not /_auth) but must still blank all
+    user-identity headers — the agent-token lookup only returns a
+    customer_id, never a user identity. The install route is truly
+    unauthenticated. /_auth and /_agent_auth are internal subrequests."""
     bypass = {
         name: lines for name, lines in _location_blocks(rendered_vhost).items()
         if any(line.startswith("proxy_pass ") for line in lines)
-        and not any(line.startswith("auth_request ") for line in lines)
+        and not any(line.startswith("auth_request /_auth;") for line in lines)
+        and not any(line.startswith("internal;") for line in lines)
     }
-    assert set(bypass) >= {"= /_auth", "/api/agent/", "/install/"}, sorted(bypass)
+    # Agent routes, install route, and login redirect must all blank identity.
+    assert "/api/agent/" in bypass, "agent API route missing"
+    assert "/install/" in bypass, "install route missing"
     assert any(name.startswith("~") for name in bypass), \
         "the bundle/agent download location is missing"
 
@@ -885,15 +870,13 @@ def test_every_bypass_location_clears_every_identity_header(rendered_vhost):
 
 
 def test_the_rendered_vhost_still_does_the_rest_of_its_job(rendered_vhost):
-    """Guard rails for the rewrite above: the identity plumbing must not have
-    cost the vhost its upstreams, its auth redirect or its long timeouts."""
+    """Guard rails: the identity plumbing must not have cost the gateway its
+    upstreams, its auth redirect or its long timeouts."""
     blocks = _location_blocks(rendered_vhost)
-    assert "listen 7042;" in rendered_vhost
+    assert "listen 80;" in rendered_vhost
     assert "error_page 401 403 = @login_redirect;" in blocks["/"]
-    assert "proxy_pass http://sentinel-acme:7331;" in blocks["/"]
-    assert "proxy_pass http://user-manager:8000/auth/verify;" in blocks["= /_auth"]
-    assert "proxy_set_header X-Customer-ID acme;" in blocks["= /_auth"]
+    assert "proxy_pass http://$sentinel_upstream;" in blocks["/"]
+    assert "proxy_pass http://sentinel-admin:8000/auth/verify;" in blocks["= /_auth"]
     assert "proxy_read_timeout 300;" in blocks["/api/agent/"]
-    assert rendered_vhost.count("proxy_read_timeout 300;") == 5
-    assert any("return 302 https://admin.riskraven.ai/login?next=http://203.0.113.10:7042" in line
-                for line in blocks["@login_redirect"])
+    assert "auth_request /_agent_auth;" in blocks["/api/agent/"]
+    assert "return 302 https://admin.riskraven.ai/login?next=https://arckon.riskraven.ai" in rendered_vhost
