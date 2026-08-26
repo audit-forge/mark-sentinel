@@ -124,50 +124,72 @@ def _all_text(ctx: ScanContext) -> str:
 # Patterns that indicate the scan target actually uses AI/LLM services.
 # If none of these match, the runtime monitoring checks are not applicable —
 # a system with no AI calls has nothing to log, budget, or audit.
+# These patterns are intentionally specific to avoid false positives from
+# system packages (botocore AWS SDK definitions, Google Ops Agent, etc.).
 _AI_PROVIDER_RE = re.compile(
     r'(?i)('
-    # Provider SDK imports
+    # Provider SDK imports (anchored to line start for code files)
     r'^(?:from|import)\s+(?:openai|anthropic|langchain|langsmith|llama_index|'
     r'litellm|vertexai|google\.generativeai|haystack|autogen|crewai|'
-    r'dspy|semantic_kernel|guidance|instructor|marvin|panel|chatacter)\b'
-    # Provider env vars / config keys
-    r'|OPENAI_API_KEY|ANTHROPIC_API_KEY|GEMINI_API_KEY|GOOGLE_API_KEY|'
-    r'COHERE_API_KEY|MISTRAL_API_KEY|GROQ_API_KEY|TOGETHER_API_KEY|'
-    r'HF_TOKEN|HUGGINGFACE_TOKEN|VERTEX.*PROJECT|BEDROCK'
-    # Provider API endpoints
+    r'dspy|semantic_kernel|guidance|instructor|marvin|chatacter)\b'
+    # Provider API key env vars (require _API_KEY or _TOKEN suffix — bare
+    # service names like "bedrock" or "vertex" match AWS SDK schema files)
+    r'|OPENAI_API_KEY|ANTHROPIC_API_KEY|GEMINI_API_KEY|GOOGLE_API_KEY'
+    r'|COHERE_API_KEY|MISTRAL_API_KEY|GROQ_API_KEY|TOGETHER_API_KEY'
+    r'|HF_TOKEN|HUGGINGFACE_TOKEN'
+    # Provider API endpoints (specific hostnames, not bare service names)
     r'|api\.openai\.com|api\.anthropic\.com|generativelanguage\.googleapis\.com'
     r'|api\.cohere\.com|api\.mistral\.ai|api\.groq\.com|api\.together\.xyz'
     r'|api-inference\.huggingface\.co'
-    # AI config file names / keys
-    r'|ai_runtime_config|ai_config|llm_config|model_config|providers.*model'
-    r'|"model"\s*:\s*"(?:gpt|claude|gemini|llama|mistral|command|phi|mixtral)'
-    # AI framework config keys
-    r'|LANGCHAIN_TRACING|LANGFUSE_|HELICONE_|OTEL_EXPORTER.*AI|DD_APM.*AI'
+    # AI model references in config context (require "model": "gpt-..." pattern)
+    r'"model"\s*:\s*"(?:gpt|claude|gemini|llama|mistral|command|phi|mixtral)'
+    # AI framework tracing/observability env vars (specific prefixes only)
+    r'|LANGCHAIN_TRACING|LANGFUSE_PUBLIC_KEY|LANGFUSE_SECRET_KEY|HELICONE_API_KEY'
     r')',
     re.MULTILINE
 )
 
 # Config files that, if present, explicitly declare AI usage status.
+# Only ai_inference_enabled=true counts as "AI in use" — a file that says
+# false is an explicit declaration that AI is NOT in use, and the runtime
+# checks should be N/A.
 _AI_CONFIG_FILES = (
     'ai_runtime_config.json',
     'ai_config.json',
     'llm_config.json',
 )
 
+# System package directories to exclude from AI detection — installed packages
+# (botocore, AWS SDKs, Google Ops Agent) contain service schemas and example
+# JSON that reference AI services but are not actual AI usage declarations.
+_SYSTEM_PATH_PREFIXES = (
+    'usr/lib/', 'usr/share/', 'usr/local/lib/', 'usr/local/share/',
+    'lib/python', 'site-packages/', 'dist-packages/', 'node_modules/',
+    'Library/Python/', '.cache/pip/', '/opt/homebrew/',
+    'google-cloud-ops-agent', 'opt/google',
+)
+
 
 def _ai_in_use(ctx: ScanContext) -> bool:
     """Return True if any AI/LLM provider, SDK, or config is detected."""
-    all_text = _all_text(ctx)
-    if _AI_PROVIDER_RE.search(all_text):
-        return True
     # An ai_runtime_config.json with ai_inference_enabled=true counts as
-    # explicit declaration that AI is in use.
+    # explicit declaration that AI is in use. Explicit false means NOT in use.
     for rel_path in ctx.files:
         basename = rel_path.rsplit('/', 1)[-1].rsplit('\\', 1)[-1]
         if basename in _AI_CONFIG_FILES:
             content = ctx.files[rel_path]
             if re.search(r'"ai_inference_enabled"\s*:\s*true', content, re.IGNORECASE):
                 return True
+            if re.search(r'"ai_inference_enabled"\s*:\s*false', content, re.IGNORECASE):
+                # Explicit declaration that AI is NOT in use — don't let
+                # other system-file false positives override this.
+                return False
+    # Scan non-system files for AI provider references
+    for rel_path, content in ctx.files.items():
+        if any(p in rel_path for p in _SYSTEM_PATH_PREFIXES):
+            continue
+        if _AI_PROVIDER_RE.search(content):
+            return True
     return False
 
 
