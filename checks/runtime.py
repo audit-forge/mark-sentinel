@@ -5,9 +5,13 @@ Checks: AI-RUNTIME-001 through AI-RUNTIME-005
 Platform-agnostic: detects monitoring signals across LangSmith, OpenTelemetry,
 Datadog, Helicone, Langfuse, Sentry, Arize, MLflow, W&B, Hash, and generic
 config/env patterns. Checks 003-005 also work across platforms.
+
+When no AI/LLM provider, SDK, or configuration is detected anywhere in the
+scan target, all checks return N/A — runtime monitoring requirements do not
+apply to systems that do not use AI.
 """
 import re
-from . import CheckResult, PASS, FAIL, WARN
+from . import CheckResult, PASS, FAIL, WARN, SKIP, NA
 from connectors.config_connector import ScanContext
 
 CATEGORY = "AI-RUNTIME"
@@ -117,6 +121,77 @@ def _all_text(ctx: ScanContext) -> str:
     return "\n".join(ctx.files.values())
 
 
+# Patterns that indicate the scan target actually uses AI/LLM services.
+# If none of these match, the runtime monitoring checks are not applicable —
+# a system with no AI calls has nothing to log, budget, or audit.
+_AI_PROVIDER_RE = re.compile(
+    r'(?i)('
+    # Provider SDK imports
+    r'^(?:from|import)\s+(?:openai|anthropic|langchain|langsmith|llama_index|'
+    r'litellm|vertexai|google\.generativeai|haystack|autogen|crewai|'
+    r'dspy|semantic_kernel|guidance|instructor|marvin|panel|chatacter)\b'
+    # Provider env vars / config keys
+    r'|OPENAI_API_KEY|ANTHROPIC_API_KEY|GEMINI_API_KEY|GOOGLE_API_KEY|'
+    r'COHERE_API_KEY|MISTRAL_API_KEY|GROQ_API_KEY|TOGETHER_API_KEY|'
+    r'HF_TOKEN|HUGGINGFACE_TOKEN|VERTEX.*PROJECT|BEDROCK'
+    # Provider API endpoints
+    r'|api\.openai\.com|api\.anthropic\.com|generativelanguage\.googleapis\.com'
+    r'|api\.cohere\.com|api\.mistral\.ai|api\.groq\.com|api\.together\.xyz'
+    r'|api-inference\.huggingface\.co'
+    # AI config file names / keys
+    r'|ai_runtime_config|ai_config|llm_config|model_config|providers.*model'
+    r'|"model"\s*:\s*"(?:gpt|claude|gemini|llama|mistral|command|phi|mixtral)'
+    # AI framework config keys
+    r'|LANGCHAIN_TRACING|LANGFUSE_|HELICONE_|OTEL_EXPORTER.*AI|DD_APM.*AI'
+    r')',
+    re.MULTILINE
+)
+
+# Config files that, if present, explicitly declare AI usage status.
+_AI_CONFIG_FILES = (
+    'ai_runtime_config.json',
+    'ai_config.json',
+    'llm_config.json',
+)
+
+
+def _ai_in_use(ctx: ScanContext) -> bool:
+    """Return True if any AI/LLM provider, SDK, or config is detected."""
+    all_text = _all_text(ctx)
+    if _AI_PROVIDER_RE.search(all_text):
+        return True
+    # An ai_runtime_config.json with ai_inference_enabled=true counts as
+    # explicit declaration that AI is in use.
+    for rel_path in ctx.files:
+        basename = rel_path.rsplit('/', 1)[-1].rsplit('\\', 1)[-1]
+        if basename in _AI_CONFIG_FILES:
+            content = ctx.files[rel_path]
+            if re.search(r'"ai_inference_enabled"\s*:\s*true', content, re.IGNORECASE):
+                return True
+    return False
+
+
+def _na(check_id: str, title: str, severity: str) -> CheckResult:
+    """Return N/A for a runtime check when no AI is in use."""
+    return CheckResult(
+        check_id=check_id,
+        title=title,
+        status=NA,
+        severity=severity,
+        category=CATEGORY,
+        details=(
+            "No AI/LLM provider, SDK, or configuration detected in the scan "
+            "target. Runtime monitoring checks are not applicable when the "
+            "system does not make AI inference calls."
+        ),
+        remediation=(
+            "If AI/LLM services are introduced, add the relevant provider "
+            "config or SDK and re-run the scan — these checks will then "
+            "evaluate the runtime monitoring posture."
+        ),
+    )
+
+
 def _detect(
     all_text: str,
     signals: list[tuple[str, str, bool]],
@@ -142,6 +217,8 @@ def _detect(
 
 def check_runtime_001(ctx: ScanContext) -> CheckResult:
     """AI-RUNTIME-001 — Inference activity logging enabled."""
+    if not _ai_in_use(ctx):
+        return _na("AI-RUNTIME-001", "Inference logging — no AI in use", "CRITICAL")
     all_text = _all_text(ctx)
     strong, weak = _detect(all_text, _001_SIGNALS, _001_IMPORTS)
 
@@ -226,6 +303,8 @@ def check_runtime_001(ctx: ScanContext) -> CheckResult:
 
 def check_runtime_002(ctx: ScanContext) -> CheckResult:
     """AI-RUNTIME-002 — Anomaly detection or alerting configured."""
+    if not _ai_in_use(ctx):
+        return _na("AI-RUNTIME-002", "Anomaly detection — no AI in use", "HIGH")
     all_text = _all_text(ctx)
     strong_002, weak_002 = _detect(all_text, _002_SIGNALS, _002_IMPORTS)
 
@@ -318,6 +397,8 @@ def check_runtime_002(ctx: ScanContext) -> CheckResult:
 
 def check_runtime_003(ctx: ScanContext) -> CheckResult:
     """AI-RUNTIME-003 — Human oversight checkpoint for autonomous agent tasks."""
+    if not _ai_in_use(ctx):
+        return _na("AI-RUNTIME-003", "Human oversight — no AI in use", "HIGH")
     all_text = _all_text(ctx)
 
     if _HUMAN_LOOP_RE.search(all_text):
@@ -368,6 +449,8 @@ def check_runtime_003(ctx: ScanContext) -> CheckResult:
 
 def check_runtime_004(ctx: ScanContext) -> CheckResult:
     """AI-RUNTIME-004 — Token budget limits enforced."""
+    if not _ai_in_use(ctx):
+        return _na("AI-RUNTIME-004", "Token budget — no AI in use", "HIGH")
     all_text = _all_text(ctx)
 
     matches = _BUDGET_RE.findall(all_text)
@@ -408,6 +491,8 @@ def check_runtime_004(ctx: ScanContext) -> CheckResult:
 
 def check_runtime_005(ctx: ScanContext) -> CheckResult:
     """AI-RUNTIME-005 — Prompt audit trail retained."""
+    if not _ai_in_use(ctx):
+        return _na("AI-RUNTIME-005", "Prompt audit trail — no AI in use", "HIGH")
     all_text = _all_text(ctx)
 
     if _AUDIT_TRAIL_RE.search(all_text):

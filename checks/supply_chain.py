@@ -528,8 +528,18 @@ def check_supply_005(ctx: ScanContext) -> CheckResult:
     # Also check for :latest in actual config files
     latest_hits: list[str] = []
     _config_exts = ('.json', '.yml', '.yaml', '.toml', '.cfg', '.ini', '.env', '.conf')
+    # Exclude system package directories — installed packages (botocore, AWS SDKs,
+    # pip packages) contain schema/example JSON with ":latest" that is not a
+    # user-declared model version. These are false positives.
+    _SYSTEM_PATH_PREFIXES = (
+        'usr/lib/', 'usr/share/', 'usr/local/lib/', 'usr/local/share/',
+        'lib/python', 'site-packages/', 'dist-packages/', 'node_modules/',
+        'Library/Python/', '.cache/pip/', '/opt/homebrew/',
+    )
     for path, content in ctx.files.items():
         if not any(path.endswith(ext) for ext in _config_exts):
+            continue
+        if any(path.startswith(p) or ('/' + p) in path for p in _SYSTEM_PATH_PREFIXES):
             continue
         if _LATEST_TAG_RE.search(content):
             latest_hits.append(f"{path} — uses ':latest' tag")
