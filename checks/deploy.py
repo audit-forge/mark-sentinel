@@ -167,8 +167,18 @@ def _is_placeholder(val: str) -> bool:
 
 def _scan(ctx: ScanContext, patterns: list, skip_env: bool = True) -> list:
     """Return list of (path, lineno, line) for matching lines."""
+    # Exclude system package directories — installed packages (botocore, AWS SDKs,
+    # Google Ops Agent) contain schema/example JSON with credential-like patterns
+    # that are not user-declared secrets. These are false positives.
+    _SYSTEM_PATH_PREFIXES = (
+        'usr/lib/', 'usr/share/', 'usr/local/lib/', 'usr/local/share/',
+        'lib/python', 'site-packages/', 'dist-packages/', 'node_modules/',
+        'google-cloud-ops-agent', 'opt/google',
+    )
     hits = []
     for path, content in ctx.files.items():
+        if any(p in path for p in _SYSTEM_PATH_PREFIXES):
+            continue
         if skip_env and _is_env_path(path):
             continue
         for i, line in enumerate(content.splitlines(), 1):
