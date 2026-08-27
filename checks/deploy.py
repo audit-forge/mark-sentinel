@@ -44,6 +44,8 @@ _CRED_RE = [
 _RUNTIME_ENV_CRED_RE = re.compile(
     r'(?im)^\s*(?:export\s+)?([A-Z0-9_]*(?:PASSWORD|SECRET|TOKEN|API_KEY)[A-Z0-9_]*)\s*=\s*(.+)$'
 )
+# *_FILE variables point at secret files (Docker secrets, 12-factor) — not hardcoded values.
+_RUNTIME_ENV_FILE_RE = re.compile(r'(?im)^\s*(?:export\s+)?([A-Z0-9_]+_FILE)\s*=')
 _AGENT_JSON_TOKEN_RE = re.compile(r'(?i)"[a-z0-9_-]*token"\s*:\s*"([^"]+)"')
 
 _AUTH_POSITIVE_RE = [
@@ -481,6 +483,9 @@ def _docker_context_credential_findings(ctx: ScanContext) -> list[tuple[str, int
         if is_agent_token and content.strip() and not _is_placeholder(content.strip()):
             findings.append((path, 1, 'Agent authentication token baked into Docker image', False, ''))
         for lineno, line in enumerate(content.splitlines(), 1):
+            # *_FILE= references are secret-file pointers, not hardcoded credentials.
+            if _RUNTIME_ENV_FILE_RE.match(line):
+                continue
             match = _RUNTIME_ENV_CRED_RE.match(line)
             if match and not _is_placeholder(match.group(2).strip()):
                 findings.append((path, lineno, f'{match.group(1)} baked into Docker image', False, ''))

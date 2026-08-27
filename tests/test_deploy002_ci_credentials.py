@@ -137,3 +137,31 @@ def test_mixed_ci_and_external_stays_fail_high():
     assert res.title == STRICT_TITLE
     assert any(COMPOSE_PATH in e for e in res.evidence)
     assert _no_credential_values(res)
+
+
+def test_env_file_secret_references_are_not_hardcoded_credentials():
+    """Variables ending in _FILE point at secret files, not baked-in values."""
+    env_example = """
+DATABASE_URL_FILE=./secrets/database-url
+MIGRATION_DATABASE_URL_FILE=./secrets/migration-database-url
+RAVENOPS_APP_PASSWORD_FILE=./secrets/ravenops-app-password
+SEED_ADMIN_PASSWORD_FILE=./secrets/admin-password
+GOOGLE_OAUTH_CLIENT_FILE=./secrets/google-oauth-client.json
+GOOGLE_TOKEN_ENCRYPTION_KEY_FILE=./secrets/google-token-encryption-key
+"""
+    compose = """
+services:
+  api:
+    build: .
+    env_file: .env.example
+"""
+    dockerfile = """
+FROM node:20
+COPY . .
+"""
+    res = check_deploy_002(make_ctx({
+        "Dockerfile": dockerfile,
+        "docker-compose.yml": compose,
+        ".env.example": env_example,
+    }))
+    assert res.status != FAIL
