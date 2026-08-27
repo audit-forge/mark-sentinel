@@ -4,7 +4,8 @@ Checks: AI-GOV-001 through AI-GOV-005
 All checks are evaluable in config mode via documentation audit.
 """
 import re
-from . import CheckResult, PASS, FAIL, WARN
+from . import CheckResult, PASS, FAIL, WARN, NA
+from .runtime import _ai_in_use
 from connectors.config_connector import ScanContext
 
 CATEGORY = "AI-GOV"
@@ -350,6 +351,18 @@ def check_gov_004(ctx: ScanContext) -> CheckResult:
 
 def check_gov_005(ctx: ScanContext) -> CheckResult:
     """AI-GOV-005: AI System Documented in Asset Inventory"""
+    if not _ai_in_use(ctx):
+        return CheckResult(
+            check_id="AI-GOV-005",
+            title="AI System Documented in Asset Inventory",
+            status=NA,
+            severity="MEDIUM",
+            category=CATEGORY,
+            details="No AI/LLM systems detected. Asset inventory checks are not applicable.",
+            evidence=["No AI provider, SDK, model reference, or ai_inference_enabled=true found"],
+            remediation="If AI systems are deployed, create an AI asset inventory and re-run the scan.",
+            frameworks={"OWASP LLM": "LLM10", "FedRAMP": "CM-8", "NIST AI RMF": "GOVERN 2.2", "EU AI Act": "Article 60"},
+        )
     if not ctx.inventory_files:
         return CheckResult(
             check_id="AI-GOV-005",

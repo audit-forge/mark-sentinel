@@ -126,6 +126,16 @@ def _all_text(ctx: ScanContext) -> str:
 # a system with no AI calls has nothing to log, budget, or audit.
 # These patterns are intentionally specific to avoid false positives from
 # system packages (botocore AWS SDK definitions, Google Ops Agent, etc.).
+
+# AI package names as bare requirements (e.g. "openai==1.0", "langchain>=0.3").
+_AI_PACKAGE_RE = re.compile(
+    r'(?im)^\s*(?:openai|anthropic|langchain|langsmith|llama[-_]?index|litellm|'
+    r'vertexai|google[-_]generativeai|haystack|autogen|crewai|dspy|'
+    r'semantic[-_]?kernel|guidance|instructor|marvin|chatacter|transformers|'
+    r'torch|tensorflow|huggingface[-_]hub|chromadb|pinecone|weaviate|'
+    r'qdrant[-_]?client|faiss[-_]cpu|vllm|ollama|deepseek|zhipuai|moonshotai|'
+    r'dashscope)\b'
+)
 _AI_PROVIDER_RE = re.compile(
     r'(?i)('
     # Provider SDK imports (anchored to line start for code files)
@@ -142,7 +152,7 @@ _AI_PROVIDER_RE = re.compile(
     r'|api\.cohere\.com|api\.mistral\.ai|api\.groq\.com|api\.together\.xyz'
     r'|api-inference\.huggingface\.co'
     # AI model references in config context (require "model": "gpt-..." pattern)
-    r'"model"\s*:\s*"(?:gpt|claude|gemini|llama|mistral|command|phi|mixtral)'
+    r'|"model"\s*:\s*"(?:gpt|claude|gemini|llama|mistral|command|phi|mixtral)'
     # AI framework tracing/observability env vars (specific prefixes only)
     r'|LANGCHAIN_TRACING|LANGFUSE_PUBLIC_KEY|LANGFUSE_SECRET_KEY|HELICONE_API_KEY'
     r')',
@@ -171,10 +181,25 @@ _SYSTEM_PATH_PREFIXES = (
 
 
 def _ai_in_use(ctx: ScanContext) -> bool:
-    """Return True if any AI/LLM provider, SDK, or config is detected."""
+    """Return True if any AI/LLM provider, SDK, or config is detected.
+
+    Tolerates test contexts that only expose a subset of ScanContext attributes.
+    """
+    files = getattr(ctx, 'files', {})
+    if not files:
+        # If we have no file content at all, fall back to AI-specific signals
+        # that may be present directly on the context (e.g. requirements_txt).
+        all_text = ""
+        for attr in ('requirements_txt', 'docker_compose_raw'):
+            val = getattr(ctx, attr, None)
+            if val:
+                all_text += "\n" + val
+        if all_text and (_AI_PROVIDER_RE.search(all_text) or _AI_PACKAGE_RE.search(all_text)):
+            return True
+        return False
     # An ai_runtime_config.json with ai_inference_enabled=true counts as
     # explicit declaration that AI is in use. Explicit false means NOT in use.
-    for rel_path in ctx.files:
+    for rel_path in files:
         basename = rel_path.rsplit('/', 1)[-1].rsplit('\\', 1)[-1]
         if basename in _AI_CONFIG_FILES:
             content = ctx.files[rel_path]
@@ -184,11 +209,11 @@ def _ai_in_use(ctx: ScanContext) -> bool:
                 # Explicit declaration that AI is NOT in use — don't let
                 # other system-file false positives override this.
                 return False
-    # Scan non-system files for AI provider references
-    for rel_path, content in ctx.files.items():
+    # Scan non-system files for AI provider references and AI package names.
+    for rel_path, content in files.items():
         if any(p in rel_path for p in _SYSTEM_PATH_PREFIXES):
             continue
-        if _AI_PROVIDER_RE.search(content):
+        if _AI_PROVIDER_RE.search(content) or _AI_PACKAGE_RE.search(content):
             return True
     return False
 

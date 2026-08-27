@@ -6,7 +6,8 @@ import re
 import shlex
 from fnmatch import fnmatch
 from pathlib import PurePosixPath
-from . import CheckResult, PASS, FAIL, WARN
+from . import CheckResult, PASS, FAIL, WARN, NA
+from .runtime import _ai_in_use
 from connectors.config_connector import ScanContext
 
 CATEGORY = "AI-DEPLOY"
@@ -551,6 +552,18 @@ def check_deploy_003(ctx: ScanContext) -> CheckResult:
 
 
 def check_deploy_004(ctx: ScanContext) -> CheckResult:
+    if not _ai_in_use(ctx):
+        return CheckResult(
+            check_id="AI-DEPLOY-004",
+            title="Access Controls on AI Endpoint",
+            status=NA,
+            severity="CRITICAL",
+            category=CATEGORY,
+            details="No AI/LLM endpoint detected. Access-control checks are not applicable to non-AI systems.",
+            evidence=["No AI provider, SDK, model reference, or ai_inference_enabled=true found"],
+            remediation="If AI endpoints are added, configure authentication and re-run the scan.",
+            frameworks={"OWASP LLM": "LLM07", "FedRAMP": "AC-3", "NIST AI RMF": "GOVERN 1.1"},
+        )
     all_text = '\n'.join(ctx.files.values())
     has_auth = any(r.search(all_text) for r in _AUTH_POSITIVE_RE)
 

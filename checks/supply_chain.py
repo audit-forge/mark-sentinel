@@ -8,7 +8,8 @@ import re
 
 import yaml
 
-from . import CheckResult, PASS, FAIL, WARN, SKIP
+from . import CheckResult, PASS, FAIL, WARN, SKIP, NA
+from .runtime import _ai_in_use
 from connectors.config_connector import ScanContext
 
 CATEGORY = "AI-SUPPLY"
@@ -276,6 +277,18 @@ def check_supply_002(ctx: ScanContext) -> CheckResult:
 
 def check_supply_003(ctx: ScanContext) -> CheckResult:
     """AI-SUPPLY-003: Dependencies and Plugins from Approved Sources Only"""
+    if not _ai_in_use(ctx):
+        return CheckResult(
+            check_id="AI-SUPPLY-003",
+            title="Dependencies from Approved Sources Only",
+            status=NA,
+            severity="HIGH",
+            category=CATEGORY,
+            details="No AI/LLM usage detected. Dependency pinning checks for AI packages are not applicable.",
+            evidence=["No AI provider, SDK, model reference, or ai_inference_enabled=true found"],
+            remediation="If AI packages are added, pin them to specific versions and re-run the scan.",
+            frameworks={"OWASP LLM": "LLM03", "FedRAMP": "SA-12, CM-7", "NIST AI RMF": "GOVERN 2.2"},
+        )
     if not ctx.requirements_txt:
         return CheckResult(
             check_id="AI-SUPPLY-003",
@@ -498,6 +511,18 @@ def _model_hit_kind(text: str) -> str | None:
 
 def check_supply_005(ctx: ScanContext) -> CheckResult:
     """AI-SUPPLY-005: Model Version Pinned (Not Floating Latest)"""
+    if not _ai_in_use(ctx):
+        return CheckResult(
+            check_id="AI-SUPPLY-005",
+            title="Model Version Pinned (Not Floating Latest)",
+            status=NA,
+            severity="MEDIUM",
+            category=CATEGORY,
+            details="No AI/LLM usage detected. Model version pinning checks are not applicable.",
+            evidence=["No AI provider, SDK, model reference, or ai_inference_enabled=true found"],
+            remediation="If AI models are deployed, pin to specific versions and re-run the scan.",
+            frameworks={"OWASP LLM": "LLM03", "FedRAMP": "CM-6", "NIST AI RMF": "GOVERN 2.2"},
+        )
     floating_hits: list[str] = []
     pinned_hits: list[str] = []
     detected_models: dict[str, str] = {}  # model name -> kind ('floating' or 'pinned')
