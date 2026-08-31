@@ -5,11 +5,12 @@ from datetime import datetime, timezone
 
 
 from db import get_conn
-from mailer import send_alert
+from mailer import send_alert, send_renewal_reminder
 
 MONITOR_INTERVAL = int(os.environ.get("MONITOR_INTERVAL_H", "1")) * 3600
 ALERT_TO         = os.environ.get("ALERT_TO", "")
 _SENTINEL_TIMEOUT = 5
+_RENEWAL_REMINDER_DAYS = (90, 60, 30, 14, 7, 1)
 
 
 def start_monitor():
@@ -30,16 +31,90 @@ def _loop():
 def _check_all_customers():
     with get_conn() as conn:
         customers = conn.execute(
-            "SELECT id, name, max_seats, tier FROM customers WHERE active=1"
+            "SELECT id, name, max_seats, tier, license_expires_at FROM customers WHERE active=1"
         ).fetchall()
 
     for c in customers:
+        _handle_renewal_reminder(dict(c))
         agent_count = _query_agent_count(c["id"])
         if agent_count is None:
             continue
         _store_agent_count(c["id"], agent_count)
         if agent_count > c["max_seats"]:
             _handle_overage(dict(c), agent_count)
+
+
+def _renewal_milestone(days_remaining: int) -> int | None:
+    """Return the current reminder window, catching up after short downtime."""
+    if days_remaining < 0:
+        return None
+    return min((days for days in _RENEWAL_REMINDER_DAYS if days_remaining <= days), default=None)
+
+
+def _handle_renewal_reminder(customer: dict) -> None:
+    """Send a once-per-window renewal reminder without changing service state."""
+    try:
+        expires_on = datetime.fromisoformat(customer["license_expires_at"]).date()
+    except (TypeError, ValueError):
+        return
+    days_remaining = (expires_on - datetime.now(timezone.utc).date()).days
+    milestone = _renewal_milestone(days_remaining)
+    if milestone is None:
+        return
+
+    with get_conn() as conn:
+        customer_contacts = [r[0] for r in conn.execute(
+            "SELECT email FROM users WHERE customer_id=? AND role='customer_admin' AND active=1",
+            (customer["id"],),
+        ).fetchall()]
+
+    recipients = [("customer", email) for email in customer_contacts]
+    if ALERT_TO:
+        recipients.append(("internal", ALERT_TO))
+    if not recipients:
+        print(f"[monitor] renewal reminder skipped for {customer['id']}: no recipients", flush=True)
+        return
+
+    subject = f"[Arckon] Renewal reminder - {customer['name']} expires in {days_remaining} day(s)"
+    body_text = (
+        f"Arckon service renewal reminder\n\n"
+        f"Customer: {customer['name']}\n"
+        f"License expiry: {expires_on.isoformat()}\n"
+        f"Days remaining: {days_remaining}\n\n"
+        "This is a renewal planning reminder only. Service remains active and will not be interrupted by this notification. "
+        "Please contact RiskRaven or renew in the admin panel before the license expiry date."
+    )
+    body_html = f"""
+<div style="font-family:'Segoe UI',system-ui,sans-serif;max-width:560px;color:#172554">
+  <h2 style="margin-bottom:8px">Arckon Renewal Reminder</h2>
+  <p>Your Arckon subscription renewal is approaching.</p>
+  <table style="border-collapse:collapse">
+    <tr><td style="padding:5px 20px 5px 0;color:#64748B">Customer</td><td><strong>{customer['name']}</strong></td></tr>
+    <tr><td style="padding:5px 20px 5px 0;color:#64748B">License expiry</td><td><strong>{expires_on.isoformat()}</strong></td></tr>
+    <tr><td style="padding:5px 20px 5px 0;color:#64748B">Days remaining</td><td><strong>{days_remaining}</strong></td></tr>
+  </table>
+  <p>This is a planning reminder only. Service remains active and is not interrupted by this notification.</p>
+  <p>Please contact RiskRaven or renew in the admin panel before the license expiry date.</p>
+</div>
+"""
+
+    for recipient_type, recipient in recipients:
+        with get_conn() as conn:
+            already_sent = conn.execute(
+                "SELECT 1 FROM renewal_reminders WHERE customer_id=? AND days_before=? AND recipient=?",
+                (customer["id"], milestone, recipient),
+            ).fetchone()
+        if already_sent:
+            continue
+        if send_renewal_reminder(recipient, subject, body_text, body_html):
+            with get_conn() as conn:
+                conn.execute(
+                    "INSERT OR IGNORE INTO renewal_reminders "
+                    "(customer_id, days_before, recipient, recipient_type, sent_at) VALUES (?,?,?,?,?)",
+                    (customer["id"], milestone, recipient, recipient_type,
+                     datetime.now(timezone.utc).isoformat()),
+                )
+    print(f"[monitor] renewal reminder processed for {customer['id']}: {days_remaining} day(s) remaining", flush=True)
 
 
 def _query_agent_count(customer_id: str) -> int | None:

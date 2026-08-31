@@ -41,6 +41,11 @@ def send_alert(subject: str, body_text: str, body_html: str | None = None) -> bo
     return _send(ALERT_TO, subject, body_text, body_html)
 
 
+def send_renewal_reminder(to: str, subject: str, body_text: str, body_html: str | None = None) -> bool:
+    """Send a renewal reminder to an internal or customer recipient."""
+    return _send(to, subject, body_text, body_html)
+
+
 def send_password_reset_email(to: str, reset_url: str) -> bool:
     subject = "[RiskRaven Arckon] Password reset request"
     body_text = f"""Someone requested a password reset for your RiskRaven Arckon account.

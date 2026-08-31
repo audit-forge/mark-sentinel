@@ -37,6 +37,15 @@ def init_db():
                 max_seats INTEGER NOT NULL,
                 created_at TEXT NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS renewal_reminders (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                customer_id TEXT NOT NULL REFERENCES customers(id),
+                days_before INTEGER NOT NULL,
+                recipient TEXT NOT NULL,
+                recipient_type TEXT NOT NULL,
+                sent_at TEXT NOT NULL,
+                UNIQUE(customer_id, days_before, recipient)
+            );
             CREATE TABLE IF NOT EXISTS password_resets (
                 id TEXT PRIMARY KEY,
                 user_id TEXT NOT NULL,
