@@ -8,6 +8,10 @@
 <div class="error" style="background:#4F46E518;border-color:#4F46E540;color:#4F46E5">&#10003; Plan updated successfully</div>
 {% elif request.query_params.get('msp_updated') %}
 <div class="error" style="background:#4F46E518;border-color:#4F46E540;color:#4F46E5">&#10003; MSP flag updated</div>
+{% elif request.query_params.get('service_suspended') %}
+<div class="error" style="background:#FEF2F2;border-color:#FECACA;color:#B91C1C">&#10003; Agent service suspended. Existing agents are blocked at the gateway; customer data is preserved.</div>
+{% elif request.query_params.get('service_resumed') %}
+<div class="error" style="background:#ECFDF5;border-color:#A7F3D0;color:#047857">&#10003; Agent service resumed. Existing agents can check in normally.</div>
 {% elif request.query_params.get('error') == 'invalid_seats' %}
 <div class="error">License count must be at least 1.</div>
 {% elif request.query_params.get('error') == 'badparent' %}
@@ -182,6 +186,8 @@
       <td>
         {% if not c.active %}
           <span class="badge badge-red">archived</span>
+        {% elif c.service_suspended %}
+          <span class="badge badge-red">agents suspended</span>
         {% elif days is not none and days < 0 %}
           <span class="badge badge-red">expired</span>
         {% elif days is not none and days <= 30 %}
@@ -198,9 +204,22 @@
           <button type="button" class="btn btn-sm"
                   onclick="openRotate('{{ c.id }}','{{ c.name | replace("'","\\x27") }}')"
                   style="background:#F9FAFB;color:#DC2626;border:1px solid #DC262640">Rotate Token</button>
-          <button type="button" class="btn btn-sm" id="repush-btn-{{ c.id }}"
-                  onclick="repushAgents('{{ c.id }}','{{ c.name | replace("'","\\x27") }}')"
-                  style="background:#F9FAFB;color:#059669;border:1px solid #05966940">Push Agent Update</button>
+           {% if not c.service_suspended %}
+           <button type="button" class="btn btn-sm" id="repush-btn-{{ c.id }}"
+                   onclick="repushAgents('{{ c.id }}','{{ c.name | replace("'","\\x27") }}')"
+                   style="background:#F9FAFB;color:#059669;border:1px solid #05966940">Push Agent Update</button>
+           {% endif %}
+           {% if c.service_suspended %}
+           <form method="post" action="/customers/resume-service" style="display:inline" onsubmit="return confirm('Resume all agents for {{ c.name }}?')">
+             <input type="hidden" name="customer_id" value="{{ c.id }}">
+             <button type="submit" class="btn btn-sm" style="background:#ECFDF5;color:#047857;border:1px solid #A7F3D0">Resume Agents</button>
+           </form>
+           {% else %}
+           <form method="post" action="/customers/suspend" style="display:inline" onsubmit="return confirm('Suspend all agents for {{ c.name }}? They will be blocked from reporting, polling, updating, and downloading releases until resumed. Customer data and dashboard access stay available.')">
+             <input type="hidden" name="customer_id" value="{{ c.id }}">
+             <button type="submit" class="btn btn-sm" style="background:#FEF2F2;color:#B91C1C;border:1px solid #FECACA">Suspend Agents</button>
+           </form>
+           {% endif %}
           <form method="post" action="/customers/renew" style="display:inline">
             <input type="hidden" name="customer_id" value="{{ c.id }}">
             <button type="submit" class="btn btn-sm" style="background:#F9FAFB;color:#4F46E5;border:1px solid #4F46E540">Renew</button>

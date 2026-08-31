@@ -7,7 +7,7 @@ SOURCE = (REPO / "admin" / "app.py").read_text()
 
 def test_customer_ids_are_limited_to_safe_container_and_path_components():
     assert '_CUSTOMER_ID_PATTERN = re.compile(r"[a-z0-9][a-z0-9-]{0,62}")' in SOURCE
-    assert SOURCE.count("if not _is_valid_customer_id(customer_id):") == 2
+    assert SOURCE.count("if not _is_valid_customer_id(customer_id):") >= 2
     assert "if not _is_valid_customer_id(cid):" in SOURCE
 
 

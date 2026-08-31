@@ -309,7 +309,7 @@ async def agent_lookup(request: Request):
         return Response(status_code=401)
     with get_conn() as conn:
         row = conn.execute(
-            "SELECT id FROM customers WHERE agent_token=? AND active=1",
+            "SELECT id FROM customers WHERE agent_token=? AND active=1 AND COALESCE(service_suspended,0)=0",
             (token,),
         ).fetchone()
         if not row:
@@ -318,7 +318,7 @@ async def agent_lookup(request: Request):
             if "agent_token_prev" in existing_cols:
                 now = int(__import__("time").time())
                 row = conn.execute(
-                    "SELECT id FROM customers WHERE agent_token_prev=? AND active=1 AND token_prev_expires>?",
+                    "SELECT id FROM customers WHERE agent_token_prev=? AND active=1 AND COALESCE(service_suspended,0)=0 AND token_prev_expires>?",
                     (token, now),
                 ).fetchone()
     if not row:
@@ -692,6 +692,60 @@ async def remove_customer(request: Request, customer_id: str = Form(...)):
         conn.execute("UPDATE users SET active=0 WHERE customer_id=?", (customer_id,))
     _run_script("remove_customer.sh", customer_id)
     return RedirectResponse("/customers", status_code=303)
+
+
+@app.post("/customers/suspend")
+async def suspend_customer_service(request: Request, customer_id: str = Form(...)):
+    """Temporarily block every agent for one customer at the gateway."""
+    try:
+        user = require_super_admin(request)
+    except HTTPException:
+        return RedirectResponse("/login")
+    if not _is_valid_customer_id(customer_id):
+        return RedirectResponse("/customers?error=invalid_id", status_code=303)
+    with get_conn() as conn:
+        row = conn.execute("SELECT name FROM customers WHERE id=? AND active=1", (customer_id,)).fetchone()
+        if not row:
+            return RedirectResponse("/customers?error=notfound", status_code=303)
+        conn.execute(
+            "UPDATE customers SET service_suspended=1, service_suspended_at=?, service_suspended_by=? WHERE id=?",
+            (datetime.now(timezone.utc).isoformat(), user.get("email", ""), customer_id),
+        )
+        conn.execute(
+            "INSERT INTO audit_log (occurred_at, actor_name, actor_role, customer_id, action, target, details, ip_address) "
+            "VALUES (?,?,?,?,?,?,?,?)",
+            (datetime.now(timezone.utc).isoformat(), user.get("email", ""), "super_admin", customer_id,
+             "customer_service_suspended", customer_id,
+             f"Suspended agent service for {row['name']}", request.client.host if request.client else ""),
+        )
+    return RedirectResponse("/customers?service_suspended=" + customer_id, status_code=303)
+
+
+@app.post("/customers/resume-service")
+async def resume_customer_service(request: Request, customer_id: str = Form(...)):
+    """Restore a customer's existing agents without reprovisioning them."""
+    try:
+        user = require_super_admin(request)
+    except HTTPException:
+        return RedirectResponse("/login")
+    if not _is_valid_customer_id(customer_id):
+        return RedirectResponse("/customers?error=invalid_id", status_code=303)
+    with get_conn() as conn:
+        row = conn.execute("SELECT name FROM customers WHERE id=? AND active=1", (customer_id,)).fetchone()
+        if not row:
+            return RedirectResponse("/customers?error=notfound", status_code=303)
+        conn.execute(
+            "UPDATE customers SET service_suspended=0, service_suspended_at=NULL, service_suspended_by=NULL WHERE id=?",
+            (customer_id,),
+        )
+        conn.execute(
+            "INSERT INTO audit_log (occurred_at, actor_name, actor_role, customer_id, action, target, details, ip_address) "
+            "VALUES (?,?,?,?,?,?,?,?)",
+            (datetime.now(timezone.utc).isoformat(), user.get("email", ""), "super_admin", customer_id,
+             "customer_service_resumed", customer_id,
+             f"Resumed agent service for {row['name']}", request.client.host if request.client else ""),
+        )
+    return RedirectResponse("/customers?service_resumed=" + customer_id, status_code=303)
 
 
 @app.post("/customers/restore")

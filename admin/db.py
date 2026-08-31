@@ -76,6 +76,11 @@ def init_db():
             ('is_reseller',         "INTEGER NOT NULL DEFAULT 0"),
             ('is_msp',              "INTEGER NOT NULL DEFAULT 0"),
             ('baseline_profile',    "TEXT NOT NULL DEFAULT 'default'"),
+            # Suspension is a reversible service hold. It blocks agent tokens
+            # at the shared gateway but preserves dashboards, data, and agents.
+            ('service_suspended',   "INTEGER NOT NULL DEFAULT 0"),
+            ('service_suspended_at', "TEXT"),
+            ('service_suspended_by', "TEXT"),
         ]:
             try:
                 conn.execute(f"ALTER TABLE customers ADD COLUMN {col} {defn}")
