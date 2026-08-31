@@ -439,6 +439,101 @@ async def test_email(request: Request):
     return RedirectResponse(f"/dashboard?email_test={result}", status_code=303)
 
 
+# ── Customer communications ──────────────────────────────────────────────────
+
+@app.get("/communications", response_class=HTMLResponse)
+async def communications_page(request: Request):
+    try:
+        user = require_super_admin(request)
+    except HTTPException:
+        return RedirectResponse("/login")
+    with get_conn() as conn:
+        customers = [dict(r) for r in conn.execute(
+            "SELECT id, name, license_expires_at FROM customers WHERE active=1 ORDER BY name"
+        ).fetchall()]
+    return templates.TemplateResponse("communications.html", {
+        "request": request, "user": user, "customers": customers,
+    })
+
+
+def _communication_recipients(customer_id: str) -> list[str]:
+    """Return active customer-admin addresses without exposing addresses to the UI."""
+    with get_conn() as conn:
+        if customer_id == "all":
+            rows = conn.execute(
+                "SELECT DISTINCT email FROM users WHERE role='customer_admin' AND active=1 ORDER BY email"
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT DISTINCT email FROM users WHERE customer_id=? AND role='customer_admin' AND active=1 ORDER BY email",
+                (customer_id,),
+            ).fetchall()
+    return [row["email"] for row in rows]
+
+
+@app.post("/communications/send")
+async def send_customer_communication(
+    request: Request,
+    customer_id: str = Form(...),
+    template: str = Form("general"),
+    subject: str = Form(...),
+    message: str = Form(...),
+    copy_internal: str = Form(""),
+):
+    try:
+        user = require_super_admin(request)
+    except HTTPException:
+        return RedirectResponse("/login")
+    customer_id = customer_id.strip()
+    subject = subject.strip()
+    message = message.strip()
+    if customer_id != "all" and not _is_valid_customer_id(customer_id):
+        return RedirectResponse("/communications?error=invalid_customer", status_code=303)
+    if template not in {"general", "maintenance", "renewal"}:
+        return RedirectResponse("/communications?error=invalid_template", status_code=303)
+    if not subject or not message or len(subject) > 200 or len(message) > 10_000 or "\n" in subject or "\r" in subject:
+        return RedirectResponse("/communications?error=invalid_message", status_code=303)
+    if customer_id != "all":
+        with get_conn() as conn:
+            exists = conn.execute("SELECT 1 FROM customers WHERE id=? AND active=1", (customer_id,)).fetchone()
+        if not exists:
+            return RedirectResponse("/communications?error=invalid_customer", status_code=303)
+
+    from mailer import ALERT_TO, send_communication
+    recipients = _communication_recipients(customer_id)
+    if copy_internal and ALERT_TO and ALERT_TO not in recipients:
+        recipients.append(ALERT_TO)
+    if not recipients:
+        return RedirectResponse("/communications?error=no_recipients", status_code=303)
+
+    sent = sum(1 for recipient in recipients if send_communication(recipient, subject, message))
+    client_ip = request.client.host if request.client else ""
+    target = "all customers" if customer_id == "all" else customer_id
+    with get_conn() as conn:
+        conn.execute(
+            "INSERT INTO audit_log (occurred_at, actor_name, actor_role, customer_id, action, target, details, ip_address) "
+            "VALUES (?,?,?,?,?,?,?,?)",
+            (datetime.now(timezone.utc).isoformat(), user.get("email", ""), "super_admin", None,
+             "customer_communication_sent", target,
+             f"template={template}; subject={subject!r}; delivered={sent}/{len(recipients)}", client_ip),
+        )
+    return RedirectResponse(f"/communications?sent={sent}&total={len(recipients)}", status_code=303)
+
+
+@app.post("/communications/test-email")
+async def communications_test_email(request: Request):
+    try:
+        require_super_admin(request)
+    except HTTPException:
+        return RedirectResponse("/login")
+    from mailer import send_alert
+    ok = send_alert(
+        subject="[Arckon] Test email - outbound mail is working",
+        body_text="This is a test email from the RiskRaven Arckon Communications page.",
+    )
+    return RedirectResponse("/communications?test=" + ("ok" if ok else "fail"), status_code=303)
+
+
 # ── Installer scripts (served publicly — no secrets embedded) ─────────────────
 
 @app.get("/install/{filename}")

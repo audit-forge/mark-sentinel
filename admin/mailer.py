@@ -1,5 +1,6 @@
 import os
 import smtplib
+from html import escape
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
@@ -43,6 +44,20 @@ def send_alert(subject: str, body_text: str, body_html: str | None = None) -> bo
 
 def send_renewal_reminder(to: str, subject: str, body_text: str, body_html: str | None = None) -> bool:
     """Send a renewal reminder to an internal or customer recipient."""
+    return _send(to, subject, body_text, body_html)
+
+
+def send_communication(to: str, subject: str, body_text: str) -> bool:
+    """Send a branded customer communication without exposing recipient lists."""
+    body_html = f"""
+<div style="font-family:'Segoe UI',system-ui,sans-serif;background:#F8FAFC;padding:32px 12px;color:#172554">
+  <div style="max-width:600px;margin:auto;background:#fff;border:1px solid #E2E8F0;border-radius:10px;overflow:hidden">
+    <div style="padding:20px 28px;background:#111827;color:#fff;font-size:18px;font-weight:800;letter-spacing:1px">RISKRAVEN ARCKON</div>
+    <div style="padding:28px;line-height:1.6;font-size:15px">{escape(body_text).replace(chr(10), '<br>')}</div>
+    <div style="padding:16px 28px;border-top:1px solid #E2E8F0;color:#64748B;font-size:12px">RiskRaven Arckon customer communication</div>
+  </div>
+</div>
+"""
     return _send(to, subject, body_text, body_html)
 
 

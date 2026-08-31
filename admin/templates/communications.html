@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>COMMUNICATIONS</h1>
+
+{% if request.query_params.get('sent') %}
+<div class="error" style="background:#ECFDF5;border-color:#A7F3D0;color:#047857">&#10003; Sent to {{ request.query_params.get('sent') }} of {{ request.query_params.get('total') }} recipient(s).</div>
+{% elif request.query_params.get('test') == 'ok' %}
+<div class="error" style="background:#ECFDF5;border-color:#A7F3D0;color:#047857">&#10003; Test email sent to the internal alert recipient.</div>
+{% elif request.query_params.get('test') == 'fail' %}
+<div class="error">Test email failed. Verify SMTP and Send As settings.</div>
+{% elif request.query_params.get('error') == 'no_recipients' %}
+<div class="error">No active customer-admin email addresses were found for this selection.</div>
+{% elif request.query_params.get('error') %}
+<div class="error">Unable to send this communication. Verify the customer, template, subject, and message.</div>
+{% endif %}
+
+<div class="card">
+  <div class="card-title">Send Customer Communication</div>
+  <p style="color:#6B7280;font-size:13px;margin-top:-8px;margin-bottom:20px">Each recipient receives an individual email. Customer addresses are never disclosed to other recipients.</p>
+  <form method="post" action="/communications/send" onsubmit="return confirm('Send this communication to the selected recipient(s)?')">
+    <div class="form-row">
+      <div class="form-group" style="max-width:300px">
+        <label>Recipients</label>
+        <select name="customer_id" required>
+          <option value="all">All active customer admins</option>
+          {% for c in customers %}
+          <option value="{{ c.id }}">{{ c.name }}{% if c.license_expires_at %} (expires {{ c.license_expires_at[:10] }}){% endif %}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="form-group" style="max-width:200px">
+        <label>Template</label>
+        <select name="template" id="template" onchange="applyTemplate()">
+          <option value="general">General update</option>
+          <option value="maintenance">Maintenance notice</option>
+          <option value="renewal">Renewal reminder</option>
+        </select>
+      </div>
+      <label style="display:flex;align-items:center;gap:8px;padding-bottom:9px;font-weight:500"><input type="checkbox" name="copy_internal" value="1" checked style="width:auto"> Copy internal alerts inbox</label>
+    </div>
+    <div class="form-group" style="margin-top:16px">
+      <label>Subject</label>
+      <input id="subject" type="text" name="subject" maxlength="200" required>
+    </div>
+    <div class="form-group" style="margin-top:16px">
+      <label>Message</label>
+      <textarea id="message" name="message" rows="12" maxlength="10000" required style="resize:vertical;background:#fff;border:1px solid #D1D5DB;color:#111827;padding:10px 12px;border-radius:6px;font-family:inherit;font-size:14px"></textarea>
+    </div>
+    <div style="margin-top:16px;display:flex;gap:10px;align-items:center">
+      <button type="submit" class="btn btn-primary">Send Communication</button>
+      <span style="font-size:12px;color:#6B7280">Every send is recorded in the audit log.</span>
+    </div>
+  </form>
+</div>
+
+<div class="card">
+  <div class="card-title">SMTP Test</div>
+  <p style="color:#6B7280;font-size:13px;margin-top:-8px;margin-bottom:14px">Send a test email to the configured internal alert recipient before communicating with customers.</p>
+  <form method="post" action="/communications/test-email"><button type="submit" class="btn btn-sm" style="background:#F9FAFB;color:#4F46E5;border:1px solid #C7D2FE">Send Test Email</button></form>
+</div>
+
+<script>
+const templates = {
+  general: {
+    subject: '[RiskRaven Arckon] Service update',
+    message: 'Hello,\n\nWe are writing to share an update regarding your RiskRaven Arckon service.\n\n[Add your update here]\n\nIf you have questions, please contact support@riskraven.ai.\n\nRiskRaven Support'
+  },
+  maintenance: {
+    subject: '[RiskRaven Arckon] Scheduled maintenance notice',
+    message: 'Hello,\n\nRiskRaven will perform scheduled maintenance on the Arckon platform.\n\nMaintenance window: [Date and time, including timezone]\nExpected impact: [Describe expected impact or confirm no interruption]\n\nWe will notify you when maintenance is complete. If you have questions, contact support@riskraven.ai.\n\nRiskRaven Support'
+  },
+  renewal: {
+    subject: '[RiskRaven Arckon] Renewal reminder',
+    message: 'Hello,\n\nYour RiskRaven Arckon subscription renewal is approaching.\n\nRenewal date: [Date]\n\nThis is a planning reminder only. Your service remains active and will not be interrupted by this notification.\n\nPlease contact support@riskraven.ai to review or renew your subscription.\n\nRiskRaven Support'
+  }
+};
+function applyTemplate() {
+  const t = templates[document.getElementById('template').value];
+  document.getElementById('subject').value = t.subject;
+  document.getElementById('message').value = t.message;
+}
+applyTemplate();
+</script>
+{% endblock %}
