@@ -13,8 +13,11 @@ ALERT_TO   = os.environ.get("ALERT_TO", "")
 
 
 def _send(to: str, subject: str, body_text: str, body_html: str | None = None) -> bool:
-    if not all([SMTP_HOST, SMTP_USER, SMTP_PASS, to]):
+    if not all([SMTP_HOST, to]):
         print(f"[mailer] SMTP not configured — skipping: {subject}", flush=True)
+        return False
+    if bool(SMTP_USER) != bool(SMTP_PASS):
+        print(f"[mailer] SMTP credentials incomplete — skipping: {subject}", flush=True)
         return False
     try:
         if body_html:
@@ -29,7 +32,8 @@ def _send(to: str, subject: str, body_text: str, body_html: str | None = None) -
         with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=15) as s:
             s.ehlo()
             s.starttls()
-            s.login(SMTP_USER, SMTP_PASS)
+            if SMTP_USER:
+                s.login(SMTP_USER, SMTP_PASS)
             s.send_message(msg)
         print(f"[mailer] sent to {to}: {subject}", flush=True)
         return True

@@ -25,3 +25,9 @@ def test_communications_include_prebuilt_renewal_and_maintenance_templates():
     assert "Renewal reminder" in TEMPLATE_SOURCE
     assert "Scheduled maintenance notice" in TEMPLATE_SOURCE
     assert "Send Test Email" in TEMPLATE_SOURCE
+
+
+def test_mailer_supports_passwordless_workspace_smtp_relay():
+    source = (REPO / "admin" / "mailer.py").read_text()
+    assert 'if bool(SMTP_USER) != bool(SMTP_PASS):' in source
+    assert 'if SMTP_USER:\n                s.login(SMTP_USER, SMTP_PASS)' in source
