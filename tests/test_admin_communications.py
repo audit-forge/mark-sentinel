@@ -18,6 +18,7 @@ def test_communications_validate_and_audit_each_send():
     assert '"\\n" in subject or "\\r" in subject' in APP_SOURCE
     assert '"customer_communication_sent"' in APP_SOURCE
     assert "send_communication(recipient, subject, message)" in APP_SOURCE
+    assert 'audit_customer_id = "all" if customer_id == "all" else customer_id' in APP_SOURCE
 
 
 def test_communications_include_prebuilt_renewal_and_maintenance_templates():

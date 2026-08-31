@@ -508,12 +508,15 @@ async def send_customer_communication(
 
     sent = sum(1 for recipient in recipients if send_communication(recipient, subject, message))
     client_ip = request.client.host if request.client else ""
+    # Older production databases require audit_log.customer_id to be non-null.
+    # Store a stable scope marker for fleet-wide communications.
     target = "all customers" if customer_id == "all" else customer_id
+    audit_customer_id = "all" if customer_id == "all" else customer_id
     with get_conn() as conn:
         conn.execute(
             "INSERT INTO audit_log (occurred_at, actor_name, actor_role, customer_id, action, target, details, ip_address) "
             "VALUES (?,?,?,?,?,?,?,?)",
-            (datetime.now(timezone.utc).isoformat(), user.get("email", ""), "super_admin", None,
+            (datetime.now(timezone.utc).isoformat(), user.get("email", ""), "super_admin", audit_customer_id,
              "customer_communication_sent", target,
              f"template={template}; subject={subject!r}; delivered={sent}/{len(recipients)}", client_ip),
         )
