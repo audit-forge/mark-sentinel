@@ -1,5 +1,5 @@
 """
-M.A.R.K. Sentinel — Fleet Report Generator
+RiskRaven Arckon — Fleet Report Generator
 Produces consolidated PDF reports across all devices in three tiers:
   executive  — 1-2 pages, fleet health score, top risks, trend
   ciso       — per-device breakdown, compliance mapping, remediation priorities
@@ -57,7 +57,7 @@ def _bar_ascii(score: int, width: int = 20) -> str:
 
 class _PDF(FPDF):
     def header(self):
-        msp_name = getattr(self, '_msp_name', None) or 'M.A.R.K. Sentinel'
+        msp_name = getattr(self, '_msp_name', None) or 'RiskRaven Arckon'
         self.set_font('Helvetica', 'B', 9)
         if getattr(self, '_demo', False):
             self.set_text_color(240, 165, 0)
@@ -70,11 +70,11 @@ class _PDF(FPDF):
     def footer(self):
         self.set_y(-13)
         self.set_font('Helvetica', size=8)
-        msp_name = getattr(self, '_msp_name', None) or 'M.A.R.K. Sentinel'
+        msp_name = getattr(self, '_msp_name', None) or 'RiskRaven Arckon'
         custom_footer = getattr(self, '_footer_text', None)
         if getattr(self, '_demo', False):
             self.set_text_color(240, 165, 0)
-            self.cell(0, 5, 'DEMO - M.A.R.K. Sentinel Evaluation Copy - Not for distribution  |  Contact sales@markai.io', align='L')
+            self.cell(0, 5, 'DEMO - RiskRaven Arckon Evaluation Copy - Not for distribution  |  Contact sales@markai.io', align='L')
         elif custom_footer:
             self.set_text_color(110, 118, 129)
             sig_text = f'  |  Report ID: {self._report_id}' if getattr(self, '_report_id', None) else ''
@@ -82,7 +82,7 @@ class _PDF(FPDF):
         else:
             self.set_text_color(110, 118, 129)
             sig_text = f'  |  Report ID: {self._report_id}  |  Signed by {msp_name}' if getattr(self, '_report_id', None) else ''
-            self.cell(0, 5, f'Generated {datetime.now(tz=timezone.utc).strftime("%Y-%m-%d %H:%M UTC")}  |  © 2026 M.A.R.K. AI Systems. Patent Pending.{sig_text}', align='L')
+            self.cell(0, 5, f'Generated {datetime.now(tz=timezone.utc).strftime("%Y-%m-%d %H:%M UTC")}  |  © 2026 RiskRaven AI. Patent Pending.{sig_text}', align='L')
         self.cell(0, 5, f'Page {self.page_no()}', align='R')
 
 
@@ -131,7 +131,7 @@ def generate_fleet_pdf(devices: list, tier: str = 'ciso', report_id: str = '', d
     client_name: when set (MSP white-label delivery to one client org), shown
         as a subtitle on the cover page — "Prepared for <client_name>"
     branding: optional {'msp_name', 'footer_text'} from data/branding.json —
-        replaces the default "M.A.R.K. Sentinel" header/footer text with the
+        replaces the default "RiskRaven Arckon" header/footer text with the
         MSP's own identity. None/{} preserves the exact previous output.
     """
     branding = branding or {}
@@ -152,7 +152,7 @@ def generate_fleet_pdf(devices: list, tier: str = 'ciso', report_id: str = '', d
     pdf.set_text_color(201, 209, 217)
 
     tier_label = {'executive': 'Executive Summary', 'ciso': 'CISO Report', 'technical': 'Technical Findings'}.get(tier, 'Fleet Report')
-    pdf.cell(0, 10, _safe(pdf._msp_name or 'M.A.R.K. Sentinel'), ln=True, align='C')
+    pdf.cell(0, 10, _safe(pdf._msp_name or 'RiskRaven Arckon'), ln=True, align='C')
     pdf.set_font('Helvetica', size=12)
     pdf.set_text_color(88, 166, 255)
     pdf.cell(0, 7, f'Fleet {tier_label}', ln=True, align='C')
@@ -484,7 +484,7 @@ class _MCPPDF(_PDF):
             self.cell(0, 6, 'DEMO REPORT - FOR EVALUATION ONLY - NOT FOR DISTRIBUTION', align='C')
         else:
             self.set_text_color(110, 118, 129)
-            self.cell(0, 6, 'M.A.R.K. Sentinel - MCP & Agent Governance Report  |  CONFIDENTIAL', align='R')
+            self.cell(0, 6, 'RiskRaven Arckon - MCP & Agent Governance Report  |  CONFIDENTIAL', align='R')
         self.ln(4)
 
 
@@ -515,7 +515,7 @@ def generate_mcp_pdf(servers: list, tier: str = 'ciso', demo: bool = False) -> b
     pdf.set_y(10)
     pdf.set_font('Helvetica', 'B', 20)
     pdf.set_text_color(201, 209, 217)
-    pdf.cell(0, 10, 'M.A.R.K. Sentinel', ln=True, align='C')
+    pdf.cell(0, 10, 'RiskRaven Arckon', ln=True, align='C')
     pdf.set_font('Helvetica', size=12)
     pdf.set_text_color(79, 70, 229)
     pdf.cell(0, 7, f'MCP & Agent Governance - {tier_label}', ln=True, align='C')

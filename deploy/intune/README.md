@@ -1,4 +1,4 @@
-# M.A.R.K. Sentinel — Intune Deployment Guide (Windows)
+# RiskRaven Arckon — Intune Deployment Guide (Windows)
 
 Deploy the Sentinel agent to Windows endpoints via Microsoft Intune as a Win32 app.
 
@@ -41,8 +41,8 @@ This produces `install.intunewin` in the `output` folder. Upload that file to In
 
 | Field | Value |
 |---|---|
-| Name | M.A.R.K. Sentinel Agent |
-| Publisher | Hash / M.A.R.K. |
+| Name | RiskRaven Arckon Agent |
+| Publisher | Hash / RiskRaven |
 | Version | (your release tag) |
 
 ### Program

@@ -1,5 +1,5 @@
 @echo off
-REM M.A.R.K. Sentinel -- Windows Installer (Batch)
+REM RiskRaven Arckon -- Windows Installer (Batch)
 REM Requires Python 3.9+ with python.exe in PATH.
 REM Run from the repository root:  scripts\install.bat
 REM
@@ -9,7 +9,7 @@ REM   powershell -ExecutionPolicy Bypass -File scripts\install.ps1
 setlocal EnableDelayedExpansion
 
 echo.
-echo   M.A.R.K. Sentinel -- Windows Installer
+echo   RiskRaven Arckon -- Windows Installer
 echo   =======================================
 echo.
 

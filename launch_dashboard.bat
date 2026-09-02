@@ -1,5 +1,5 @@
 @echo off
-:: M.A.R.K. Sentinel — Dashboard Launcher (Windows)
+:: RiskRaven Arckon — Dashboard Launcher (Windows)
 :: Double-click this file to start the dashboard server and open your browser.
 
 cd /d "%~dp0"
@@ -11,7 +11,7 @@ if errorlevel 1 (
   exit /b 1
 )
 
-echo   M.A.R.K. Sentinel — starting dashboard server...
+echo   RiskRaven Arckon — starting dashboard server...
 echo   Open: http://localhost:7331
 echo   Press Ctrl+C to stop
 echo.

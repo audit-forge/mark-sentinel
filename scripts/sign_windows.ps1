@@ -1,7 +1,7 @@
 #Requires -RunAsAdministrator
 <#
 .SYNOPSIS
-    M.A.R.K. Sentinel — Windows Code Signing Pipeline
+    RiskRaven Arckon — Windows Code Signing Pipeline
 
 .DESCRIPTION
     Signs the PowerShell installer and optionally a PyInstaller-built .exe
@@ -48,7 +48,7 @@ function Write-OK   { param([string]$Msg) Write-Host "  [OK] $Msg" -ForegroundCo
 function Write-Warn { param([string]$Msg) Write-Host "  [WARN] $Msg" -ForegroundColor Yellow }
 
 Write-Host ""
-Write-Host "M.A.R.K. Sentinel — Windows Signing Pipeline" -ForegroundColor White
+Write-Host "RiskRaven Arckon — Windows Signing Pipeline" -ForegroundColor White
 Write-Host "─────────────────────────────────────────────" -ForegroundColor DarkGray
 Write-Host ""
 
@@ -149,7 +149,7 @@ if (-not $SkipExe) {
             /fd        sha256 `
             /tr        $TimestampUrl `
             /td        sha256 `
-            /d         "M.A.R.K. Sentinel Agent" `
+            /d         "RiskRaven Arckon Agent" `
             /du        "https://mark-sentinel.com" `
             $ExePath
 

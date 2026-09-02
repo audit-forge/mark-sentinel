@@ -1,5 +1,5 @@
 """
-M.A.R.K. Sentinel — Presidio PII Connector
+RiskRaven Arckon — Presidio PII Connector
 Optional enhancement for AI-OUT-002 (PII detection in config files and live responses).
 
 Install:

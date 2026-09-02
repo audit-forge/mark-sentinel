@@ -1,5 +1,5 @@
 """
-M.A.R.K. Sentinel — Hash Connector
+RiskRaven Arckon — Hash Connector
 Connects to a local Hash-AI runtime via its /chat endpoint.
 
 hash manages its own system prompt (set in system.md / hash.json) — probes that

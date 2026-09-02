@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-M.A.R.K. Sentinel — AI Security Audit Tool
+RiskRaven Arckon — AI Security Audit Tool
 Powered by Hash
 
 Usage:
@@ -12,7 +12,7 @@ Usage:
 import sys
 if sys.version_info < (3, 10):
     sys.exit(
-        "M.A.R.K. Sentinel requires Python 3.10 or later.\n"
+        "RiskRaven Arckon requires Python 3.10 or later.\n"
         f"Running: Python {sys.version.split()[0]}\n"
         "Install: https://python.org/downloads/"
     )
@@ -46,7 +46,7 @@ log = logging.getLogger(__name__)
 
 BANNER = """
 ╔══════════════════════════════════════════════════╗
-║  M.A.R.K. Sentinel — AI Security Audit Tool     ║
+║  RiskRaven Arckon — AI Security Audit Tool     ║
 ║  Powered by Hash                                 ║
 ╚══════════════════════════════════════════════════╝"""
 
@@ -208,7 +208,7 @@ def build_scan_context(args):
 
 def main():
     parser = argparse.ArgumentParser(
-        description='M.A.R.K. Sentinel — AI Security Audit Tool',
+        description='RiskRaven Arckon — AI Security Audit Tool',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 examples:
@@ -366,7 +366,7 @@ examples:
         '--defectdojo-product',
         default=None,
         metavar='NAME',
-        help='DefectDojo product name (default: "M.A.R.K. Sentinel — <target>")',
+        help='DefectDojo product name (default: "RiskRaven Arckon — <target>")',
     )
     parser.add_argument(
         '--defectdojo-engagement',

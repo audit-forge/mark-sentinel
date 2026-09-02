@@ -1,5 +1,5 @@
 """
-M.A.R.K. Sentinel — JSON output formatter
+RiskRaven Arckon — JSON output formatter
 Produces structured JSON audit report.
 """
 import json

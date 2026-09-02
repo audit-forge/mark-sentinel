@@ -2,7 +2,7 @@
 import sys
 if sys.version_info < (3, 11):
     sys.exit(
-        "M.A.R.K. Sentinel requires Python 3.11 or later.\n"
+        "RiskRaven Arckon requires Python 3.11 or later.\n"
         f"Running: Python {sys.version.split()[0]}\n"
         "Install: https://python.org/downloads/"
     )
@@ -158,7 +158,7 @@ def cmd_summary(args: argparse.Namespace) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(
         prog='audit_history',
-        description='M.A.R.K. Sentinel — query historical scan data',
+        description='RiskRaven Arckon — query historical scan data',
     )
     parser.add_argument('--db', default=str(DEFAULT_DB), metavar='PATH',
                         help='Path to agents.db (default: output/agents.db)')

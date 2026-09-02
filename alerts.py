@@ -1,5 +1,5 @@
 """
-M.A.R.K. Sentinel — Alert delivery module.
+RiskRaven Arckon — Alert delivery module.
 
 Delivers alerts to Slack, Google Chat, Microsoft Teams, email (SMTP),
 and generic webhooks. Zero external dependencies — Python stdlib only.
@@ -405,7 +405,7 @@ def send_test_alert(alert_cfg: dict, channel: str) -> tuple[bool, str]:
         'severity': 'INFO',
         'device':   'sentinel-test',
         'check_id': 'TEST-001',
-        'title':    'Alert configuration test — M.A.R.K. Sentinel alerts are working.',
+        'title':    'Alert configuration test — RiskRaven Arckon alerts are working.',
     }
     if channel == 'slack':
         url = alert_cfg.get('slack_webhook', '').strip()

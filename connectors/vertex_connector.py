@@ -1,5 +1,5 @@
 """
-M.A.R.K. Sentinel — Google Cloud Vertex AI Connector
+RiskRaven Arckon — Google Cloud Vertex AI Connector
 Connects to Gemini via Vertex AI using a service account JSON key.
 
 Setup:

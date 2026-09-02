@@ -15,7 +15,7 @@ used within [YOUR ORGANISATION], so that AI use is safe, compliant, and auditabl
 The following AI tools are approved for business use:
 - **HASH** — local AI agent (Ollama / qwen3, with escalation to Anthropic Claude for hard tasks).
 - **Anthropic Claude** (Opus / Sonnet) — via API, for escalated reasoning and coding.
-- **Arckon (M.A.R.K. Sentinel)** — AI security & compliance auditing.
+- **Arckon (RiskRaven Arckon)** — AI security & compliance auditing.
 
 Any AI tool not on this approved list must be reviewed and authorised by the
 responsible party before use.

@@ -1,5 +1,5 @@
 """
-M.A.R.K. Sentinel — Notion Connector
+RiskRaven Arckon — Notion Connector
 Creates a page (in a database or under a parent page) for each CRITICAL
 or HIGH finding, using the same canned-response content shared with
 chat alerts and PSA tickets (see alerts.py's _build_canned_response).

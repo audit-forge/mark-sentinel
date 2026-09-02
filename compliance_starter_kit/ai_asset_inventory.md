@@ -32,9 +32,9 @@ This inventory documents every AI system, service, and tool in use on [THIS DEVI
 - **API key id:** ANTHROPIC_API_KEY
 - **Last reviewed:** [EFFECTIVE DATE YYYY-MM-DD]
 
-## AI System 3 — Arckon / M.A.R.K. Sentinel
+## AI System 3 — Arckon / RiskRaven Arckon
 
-- **AI system name:** Arckon (M.A.R.K. Sentinel)
+- **AI system name:** Arckon (RiskRaven Arckon)
 - **System owner:** [RESPONSIBLE PARTY NAME]
 - **Model name / id / version:** Sentinel scan engine (rule + AI checks)
 - **Provider:** [YOUR ORGANISATION] (in-house)

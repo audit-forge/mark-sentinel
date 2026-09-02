@@ -1,5 +1,5 @@
 """
-M.A.R.K. Sentinel — Ollama Connector
+RiskRaven Arckon — Ollama Connector
 Connects to a local Ollama instance via its OpenAI-compatible /v1 endpoint.
 """
 from connectors.config_connector import ScanContext

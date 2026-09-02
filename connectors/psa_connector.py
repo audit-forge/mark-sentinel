@@ -1,5 +1,5 @@
 """
-M.A.R.K. Sentinel — PSA Connector
+RiskRaven Arckon — PSA Connector
 Creates service tickets in ConnectWise Manage, Autotask PSA, and HaloPSA
 when CRITICAL or HIGH findings are detected.
 

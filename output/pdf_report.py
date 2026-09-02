@@ -10,7 +10,7 @@ class _ReportPDF(FPDF):
         # Position at 15 mm from bottom
         self.set_y(-15)
         self.set_font('Helvetica', size=9)
-        footer_text = 'M.A.R.K. Sentinel  |  © 2026 M.A.R.K. AI Systems. All rights reserved. Patent Pending.'
+        footer_text = 'RiskRaven Arckon  |  © 2026 RiskRaven AI. All rights reserved. Patent Pending.'
         self.cell(0, 6, footer_text, align='L')
         # page number
         self.cell(0, 6, f'Page {self.page_no()}', align='R')
@@ -61,7 +61,7 @@ def format_pdf(results: List, profile: dict, target: str, mode: str = 'config', 
 
     # Header
     pdf.set_font('Helvetica', 'B', 14)
-    pdf.cell(0, 8, _safe_text('M.A.R.K. Sentinel - AI Security Audit Report'), ln=1)
+    pdf.cell(0, 8, _safe_text('RiskRaven Arckon - AI Security Audit Report'), ln=1)
     pdf.set_font('Helvetica', size=10)
     pdf.cell(0, 6, _safe_text(f'Target: {target}'), ln=1)
     pdf.cell(0, 6, _safe_text(f'Profile: {profile.get("name", "")}'), ln=1)

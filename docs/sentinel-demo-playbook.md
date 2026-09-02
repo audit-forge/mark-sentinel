@@ -1,10 +1,10 @@
-# M.A.R.K. Sentinel — Complete Demo Playbook & Learning Guide
+# RiskRaven Arckon — Complete Demo Playbook & Learning Guide
 
 ---
 
-## PART 1: WHAT IS M.A.R.K. SENTINEL?
+## PART 1: WHAT IS RISKRAVEN ARCKON?
 
-M.A.R.K. Sentinel is a self-hosted AI security audit platform. It discovers, scores, and reports on AI services running in a customer's environment — whether they know about them or not.
+RiskRaven Arckon is a self-hosted AI security audit platform. It discovers, scores, and reports on AI services running in a customer's environment — whether they know about them or not.
 
 **The core problem Sentinel solves:**
 Most organizations have no idea how many AI tools are running across their teams. Employees are using ChatGPT, Copilot, custom agents, and dozens of SaaS tools with AI baked in — without security review, without governance, and without any visibility. Sentinel finds them all, audits them against industry frameworks (NIST AI RMF, OWASP LLM Top 10, FedRAMP, CMMC), and gives the organization a clear risk picture with actionable remediation steps.
@@ -354,4 +354,4 @@ A: The dashboard flags it as stale after a configurable threshold. Alerts can be
 
 ---
 
-*Document maintained by M.A.R.K. AI Systems | Updated June 2026*
+*Document maintained by RiskRaven AI | Updated June 2026*

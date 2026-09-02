@@ -1,5 +1,5 @@
 """
-M.A.R.K. Sentinel — Dashboard Generator
+RiskRaven Arckon — Dashboard Generator
 Produces a self-contained single-file HTML dashboard from one or more JSON scan reports.
 Open the output HTML in any browser — no server required.
 """
@@ -877,10 +877,10 @@ function buildExecReport(p){
     return`<tr><td><strong>${esc(f.title)}</strong><br><span style="color:#6b7280;font-size:12px">${esc(biz)}</span></td><td style="text-align:center"><span class="badge ${f.severity.toLowerCase()}">${esc(f.severity)}</span></td><td style="font-size:12px">${esc(step)}</td></tr>`;
   }).join('');
   const passing=p.findings.filter(f=>f.status==='PASS').map(f=>`<li>${esc(f.title)}</li>`).join('');
-  return`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Executive Report — M.A.R.K. Sentinel</title>${rptCSS()}</head><body>
+  return`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Executive Report — RiskRaven Arckon</title>${rptCSS()}</head><body>
 <div class="page">
   <div class="rpt-hdr">
-    <div><div class="rpt-brand">M.A.R.K. Sentinel</div><div class="rpt-brand-name">SENTINEL</div><div class="rpt-type">Executive Security Report</div></div>
+    <div><div class="rpt-brand">RiskRaven Arckon</div><div class="rpt-brand-name">ARCKON</div><div class="rpt-type">Executive Security Report</div></div>
     <div class="rpt-meta"><strong>Target:</strong> ${esc((d.target||'').split('/').pop()||d.target||'')}<br><strong>Provider:</strong> ${esc(p.label)}<br><strong>Date:</strong> ${esc(d.scan_date||new Date().toLocaleDateString())}<br><strong>Profile:</strong> ${esc(d.profile||'')}${d.profile_framework?` · ${esc({fedramp:'NIST 800-53',cmmc:'CMMC Level 2',financial:'NIST AI RMF',default:'NIST AI RMF',healthcare:'HIPAA',biotech:'FDA/GxP',lifesciences:'FDA/GxP',owasp_agentic:'OWASP Agentic',eu_ai_act:'EU AI Act'}[d.profile_framework]||d.profile_framework)}`:''}</div>
   </div>
   <h1>AI Security Assessment</h1>
@@ -905,7 +905,7 @@ function buildExecReport(p){
     <li><strong>Run a follow-up scan</strong> after fixing issues to confirm they are resolved.</li>
     <li><strong>Ensure AI governance policies are documented</strong> — usage policy, data retention, and an incident response plan.</li>
   </ol>
-  <div class="rpt-footer"><span>M.A.R.K. Sentinel — Powered by Hash</span><span>Generated ${new Date().toLocaleDateString()} · Confidential</span></div>
+  <div class="rpt-footer"><span>RiskRaven Arckon — Powered by RiskRaven</span><span>Generated ${new Date().toLocaleDateString()} · Confidential</span></div>
 </div></body></html>`;
 }
 
@@ -945,10 +945,10 @@ function buildCISOReport(p){
   const imm=p.findings.filter(f=>f.status==='FAIL'&&f.severity==='CRITICAL').map(f=>esc(f.title)).join('<br>')||'None';
   const sterm=p.findings.filter(f=>f.status==='FAIL'&&f.severity==='HIGH').map(f=>esc(f.title)).join('<br>')||'None';
   const mterm=p.findings.filter(f=>f.status==='FAIL'&&(f.severity==='MEDIUM'||f.severity==='LOW')).map(f=>esc(f.title)).join('<br>')||'None';
-  return`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>CISO Report — M.A.R.K. Sentinel</title>${rptCSS()}</head><body>
+  return`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>CISO Report — RiskRaven Arckon</title>${rptCSS()}</head><body>
 <div class="page">
   <div class="rpt-hdr">
-    <div><div class="rpt-brand">M.A.R.K. Sentinel</div><div class="rpt-brand-name">SENTINEL</div><div class="rpt-type">CISO Security Report</div></div>
+    <div><div class="rpt-brand">RiskRaven Arckon</div><div class="rpt-brand-name">ARCKON</div><div class="rpt-type">CISO Security Report</div></div>
     <div class="rpt-meta"><strong>Target:</strong> ${esc((d.target||'').split('/').pop()||d.target||'')}<br><strong>Provider:</strong> ${esc(p.label)}<br><strong>Date:</strong> ${esc(d.scan_date||new Date().toLocaleDateString())}<br><strong>Profile:</strong> ${esc(d.profile||'')}${d.profile_framework?` · ${esc({fedramp:'NIST 800-53',cmmc:'CMMC Level 2',financial:'NIST AI RMF',default:'NIST AI RMF',healthcare:'HIPAA',biotech:'FDA/GxP',lifesciences:'FDA/GxP',owasp_agentic:'OWASP Agentic',eu_ai_act:'EU AI Act'}[d.profile_framework]||d.profile_framework)}`:''}</div>
   </div>
   <h1>AI Security Posture Report</h1>
@@ -977,7 +977,7 @@ function buildCISOReport(p){
     <tr><td><strong style="color:#ca8a04">Medium-term</strong></td><td>30–90 days</td><td>${mterm}</td></tr>
     <tr><td><strong style="color:#16a34a">Ongoing</strong></td><td>Continuous</td><td>Scheduled re-scans · Governance policy reviews · Model version monitoring</td></tr>
   </tbody></table>
-  <div class="rpt-footer"><span>M.A.R.K. Sentinel — Powered by Hash</span><span>Generated ${new Date().toLocaleDateString()} · Confidential</span></div>
+  <div class="rpt-footer"><span>RiskRaven Arckon — Powered by RiskRaven</span><span>Generated ${new Date().toLocaleDateString()} · Confidential</span></div>
 </div></body></html>`;
 }
 
@@ -1011,10 +1011,10 @@ function buildAnalystReport(p){
     });
   }).join('');
   const skipRows=sorted.filter(f=>f.status==='SKIP').map(f=>`<tr><td style="font-family:monospace;font-size:12px">${esc(f.check_id)}</td><td>${esc(f.title)}</td><td style="font-size:12px;color:#6b7280">${esc(f.details||'Requires agent environment')}</td></tr>`).join('');
-  return`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Analyst Report — M.A.R.K. Sentinel</title>${rptCSS()}</head><body>
+  return`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Analyst Report — RiskRaven Arckon</title>${rptCSS()}</head><body>
 <div class="page">
   <div class="rpt-hdr">
-    <div><div class="rpt-brand">M.A.R.K. Sentinel</div><div class="rpt-brand-name">SENTINEL</div><div class="rpt-type">Technical Analyst Report</div></div>
+    <div><div class="rpt-brand">RiskRaven Arckon</div><div class="rpt-brand-name">ARCKON</div><div class="rpt-type">Technical Analyst Report</div></div>
     <div class="rpt-meta"><strong>Target:</strong> ${esc(d.target||'')}<br><strong>Provider:</strong> ${esc(p.label)}<br><strong>Mode:</strong> ${esc(p.mode||'')}<br><strong>Date:</strong> ${esc(d.scan_date||new Date().toLocaleDateString())}</div>
   </div>
   <h1>AI Security Audit — Technical Findings</h1>
@@ -1029,7 +1029,7 @@ function buildAnalystReport(p){
   ${blocks}
   ${probeRows?`<h2>Live Probe Results</h2><table><thead><tr><th>Check</th><th>Description</th><th style="text-align:center">Result</th><th>Evidence</th></tr></thead><tbody>${probeRows}</tbody></table>`:''}
   ${skipRows?`<h2>Not Evaluated — Requires Agent Environment</h2><p class="section-intro">These checks require a deployed AI agent with active tool access and cannot be evaluated against a raw API or config scan.</p><table><thead><tr><th>Control</th><th>Check</th><th>Reason</th></tr></thead><tbody>${skipRows}</tbody></table>`:''}
-  <div class="rpt-footer"><span>M.A.R.K. Sentinel — Powered by Hash</span><span>Generated ${new Date().toLocaleDateString()} · Confidential</span></div>
+  <div class="rpt-footer"><span>RiskRaven Arckon — Powered by RiskRaven</span><span>Generated ${new Date().toLocaleDateString()} · Confidential</span></div>
 </div></body></html>`;
 }
 
@@ -1481,7 +1481,7 @@ def _build_html(data: dict) -> str:
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
-<title>M.A.R.K. Sentinel — Security Dashboard</title>
+<title>RiskRaven Arckon — Security Dashboard</title>
 <style>{_CSS}</style>
     <style>@media print{{#sidebar,.scan-btn,.enterprise-link,button{{display:none!important}}body,#app,#main,#content{{height:auto!important;overflow:visible!important}}}}</style>
 </head>
@@ -1489,8 +1489,8 @@ def _build_html(data: dict) -> str:
 <div id="app">
   <aside id="sidebar">
     <div class="brand">
-      <div class="brand-mark">M.A.R.K.</div>
-      <div class="brand-name">SENTINEL</div>
+      <div class="brand-mark">RiskRaven</div>
+      <div class="brand-name">ARCKON</div>
       <div class="brand-sub">AI Security Audit</div>
     </div>
     <nav id="nav">
@@ -1506,7 +1506,7 @@ def _build_html(data: dict) -> str:
       <div class="nav-item" data-view="coverage"><span class="nav-icon">⊙</span> Control Coverage</div>
       <div class="nav-item" data-view="simulator"><span class="nav-icon">⚗</span> What-If Simulator</div>
     </nav>
-    <div class="sidebar-footer">Powered by Hash<br>M.A.R.K. Sentinel v1.0</div>
+    <div class="sidebar-footer">Powered by RiskRaven<br>RiskRaven Arckon v1.0</div>
   </aside>
   <div id="main">
     <div id="header">

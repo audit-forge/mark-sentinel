@@ -1,4 +1,4 @@
-# M.A.R.K. Sentinel — Local Docker fleet demo
+# RiskRaven Arckon — Local Docker fleet demo
 #
 # Spins up three agent containers and one Ollama instance.
 # Each agent reports to your central Sentinel server.

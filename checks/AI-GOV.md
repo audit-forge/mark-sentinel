@@ -44,7 +44,7 @@ A written AI policy is your rulebook for how AI gets used in your business. It a
 3. Communicate the policy to all employees via email + acknowledgment signature
 4. Publish in your internal wiki or intranet so it's easily accessible
 5. Set a 12-month review calendar reminder — policies go stale as the AI landscape changes rapidly
-6. M.A.R.K. Sentinel provides a policy template in `docs/SMB_GUIDE.md` as a starting point
+6. RiskRaven Arckon provides a policy template in `docs/SMB_GUIDE.md` as a starting point
 
 ### Framework Mappings
 | Framework | Control |

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-M.A.R.K. Sentinel — Multi-Provider Demo Runner
+RiskRaven Arckon — Multi-Provider Demo Runner
 
 Auto-detects available AI services and audits each in sequence.
 Generates a timestamped report bundle in output/demo_<timestamp>/
@@ -22,7 +22,7 @@ Keys are loaded automatically from ~/hash/.env if not set in the shell.
 import sys
 if sys.version_info < (3, 11):
     sys.exit(
-        "M.A.R.K. Sentinel requires Python 3.11 or later.\n"
+        "RiskRaven Arckon requires Python 3.11 or later.\n"
         f"Running: Python {sys.version.split()[0]}\n"
         "Install: https://python.org/downloads/"
     )
@@ -48,7 +48,7 @@ _SKIP_OLLAMA = frozenset({'nomic-embed-text:latest'})
 
 BANNER = """
 ╔══════════════════════════════════════════════════════════════╗
-║  M.A.R.K. Sentinel — Multi-Provider Security Demo           ║
+║  RiskRaven Arckon — Multi-Provider Security Demo           ║
 ║  Powered by Hash                                             ║
 ╚══════════════════════════════════════════════════════════════╝"""
 
@@ -335,7 +335,7 @@ def _audit(p: dict, target: str, profile: dict, out_dir: Path) -> dict | None:
 
 def main():
     parser = argparse.ArgumentParser(
-        description='M.A.R.K. Sentinel — Multi-Provider Demo Runner',
+        description='RiskRaven Arckon — Multi-Provider Demo Runner',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__,
     )

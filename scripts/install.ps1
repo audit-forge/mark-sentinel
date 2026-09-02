@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    M.A.R.K. Sentinel -- Windows installer (PowerShell)
+    RiskRaven Arckon -- Windows installer (PowerShell)
 .DESCRIPTION
     Creates a Python virtual environment and installs runtime dependencies.
     Requires Python 3.11+ (python.exe must be in PATH).
@@ -10,7 +10,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
 Write-Host ""
-Write-Host "  M.A.R.K. Sentinel -- Windows Installer (PowerShell)" -ForegroundColor Cyan
+Write-Host "  RiskRaven Arckon -- Windows Installer (PowerShell)" -ForegroundColor Cyan
 Write-Host "  ====================================================" -ForegroundColor Cyan
 Write-Host ""
 

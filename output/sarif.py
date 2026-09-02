@@ -1,5 +1,5 @@
 """
-M.A.R.K. Sentinel — SARIF 2.1.0 output formatter
+RiskRaven Arckon — SARIF 2.1.0 output formatter
 Compatible with GitHub Advanced Security, Wiz, Azure Defender, and any SARIF-consuming tool.
 """
 import json

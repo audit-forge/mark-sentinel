@@ -1,5 +1,5 @@
 """
-M.A.R.K. Sentinel — Report signing utilities.
+RiskRaven Arckon — Report signing utilities.
 
 Signs report content with HMAC-SHA256 using a server-local key.
 The signature proves the report came from this Sentinel instance

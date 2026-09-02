@@ -19,7 +19,7 @@ echo "Creating firewall rule..."
 gcloud compute firewall-rules create sentinel-allow-dashboard \
   --allow "tcp:$PORT" \
   --target-tags sentinel-server \
-  --description "M.A.R.K. Sentinel dashboard" \
+  --description "RiskRaven Arckon dashboard" \
   --project "$PROJECT" 2>/dev/null \
   || echo "Firewall rule already exists, skipping."
 

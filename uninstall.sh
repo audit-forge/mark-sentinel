@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# M.A.R.K. Sentinel Agent — Linux/macOS Uninstaller
+# RiskRaven Arckon Agent — Linux/macOS Uninstaller
 
 INSTALL_PREFIX="/opt/sentinel"
 CONFIG_DIR="/etc/sentinel"
@@ -89,4 +89,4 @@ if [[ "$OS" == "linux" ]]; then
 fi
 
 echo ""
-echo "M.A.R.K. Sentinel Agent has been uninstalled."
+echo "RiskRaven Arckon Agent has been uninstalled."

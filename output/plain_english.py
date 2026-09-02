@@ -1,5 +1,5 @@
 """
-M.A.R.K. Sentinel — Plain English output formatter
+RiskRaven Arckon — Plain English output formatter
 Produces human-readable terminal output with SMB-friendly language option.
 """
 from datetime import date
@@ -106,7 +106,7 @@ def format_report(results: list, profile: dict, target: str, mode: str = 'config
         mode_label = f"{mode_label}  [{model}]"
 
     lines.append("")
-    lines.append("M.A.R.K. Sentinel — AI Security Audit Results")
+    lines.append("RiskRaven Arckon — AI Security Audit Results")
     lines.append("=" * w)
     emphasis = profile.get('framework_emphasis')
     fw_label = _FW_LABELS.get(emphasis, '')

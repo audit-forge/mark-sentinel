@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-M.A.R.K. Sentinel — License Generator
+RiskRaven Arckon — License Generator
 
 Usage:
   python3 scripts/generate_license.py \
@@ -37,7 +37,7 @@ def main():
     ap.add_argument('--webhook',           default='',
                     help='Webhook URL for overage + stale-device alerts (Slack, Teams, etc.)')
     ap.add_argument('--telemetry-url',     default='',
-                    help='M.A.R.K. telemetry endpoint — receives rolling usage heartbeats')
+                    help='RiskRaven telemetry endpoint — receives rolling usage heartbeats')
     ap.add_argument('--telemetry-interval', type=float, default=24.0,
                     help='Hours between usage heartbeats (default: 24)')
     ap.add_argument('--stale-hours',       type=float, default=26.0,
@@ -66,7 +66,7 @@ def main():
         'grace_pct':            args.grace_pct,
         'expires_at':           expires,
         'issued_at':            date.today().isoformat(),
-        'issued_by':            'M.A.R.K. AI Systems',
+        'issued_by':            'RiskRaven AI',
         'plan':                 args.plan,
         'webhook_url':          args.webhook,
         'telemetry_url':        args.telemetry_url,

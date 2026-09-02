@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-M.A.R.K. Sentinel — Agent storage layer (SQLite dev / PostgreSQL prod)
+RiskRaven Arckon — Agent storage layer (SQLite dev / PostgreSQL prod)
 
 FedRAMP note: SQLite has no FIPS 140-2 validation. For FedRAMP Moderate
 production deployments replace this backend with PostgreSQL 14+ (which

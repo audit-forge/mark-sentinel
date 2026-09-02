@@ -1,5 +1,5 @@
 """
-M.A.R.K. Sentinel — DefectDojo Connector
+RiskRaven Arckon — DefectDojo Connector
 Pushes audit findings to a DefectDojo instance via the v2 REST API.
 """
 import json
@@ -30,7 +30,7 @@ def push_findings(
     engagement_name: str | None = None,
     push_passing: bool = False,
 ) -> dict:
-    """Push M.A.R.K. Sentinel findings to a DefectDojo instance.
+    """Push RiskRaven Arckon findings to a DefectDojo instance.
 
     Returns a summary dict with keys: product_id, engagement_id, test_id,
     pushed, skipped, errors, engagement_url.
@@ -42,7 +42,7 @@ def push_findings(
     }
 
     if not product_name:
-        product_name = f"M.A.R.K. Sentinel — {os.path.basename(target) or target}"
+        product_name = f"RiskRaven Arckon — {os.path.basename(target) or target}"
     if not engagement_name:
         engagement_name = f"{profile.get('name', 'default')} — {date.today()}"
 
@@ -126,7 +126,7 @@ def _get_or_create_product(base_url: str, headers: dict, name: str, prod_type_id
     result = _api_post(base_url, headers, "/api/v2/products/", {
         "name": name,
         "prod_type": prod_type_id,
-        "description": "AI security findings from M.A.R.K. Sentinel (powered by Hash).",
+        "description": "AI security findings from RiskRaven Arckon (powered by Hash).",
     })
     return result["id"]
 
@@ -149,7 +149,7 @@ def _create_engagement(
 
 
 def _get_or_create_test_type(base_url: str, headers: dict) -> int:
-    name = "M.A.R.K. Sentinel"
+    name = "RiskRaven Arckon"
     data = _api_get(base_url, headers, "/api/v2/test_types/", {"name": name})
     if data.get("count", 0) > 0:
         return data["results"][0]["id"]
@@ -169,7 +169,7 @@ def _create_test(
     result = _api_post(base_url, headers, "/api/v2/tests/", {
         "engagement": engagement_id,
         "test_type": test_type_id,
-        "title": f"M.A.R.K. Sentinel — {profile.get('name', 'default')} ({mode})",
+        "title": f"RiskRaven Arckon — {profile.get('name', 'default')} ({mode})",
         "target_start": today,
         "target_end": today,
         "scan_type": "Other",
@@ -186,7 +186,7 @@ def _create_finding(base_url: str, headers: dict, test_id: int, result) -> dict:
         severity = _SEVERITY_MAP.get(result.severity, "Medium")
 
     description = _build_description(result)
-    mitigation = result.remediation or "See M.A.R.K. Sentinel remediation guidance."
+    mitigation = result.remediation or "See RiskRaven Arckon remediation guidance."
     references = _build_references(result)
     steps = "\n".join(result.evidence) if result.evidence else "No specific evidence captured."
 

@@ -1,7 +1,7 @@
 #Requires -RunAsAdministrator
 <#
 .SYNOPSIS
-    M.A.R.K. Sentinel Agent - Windows Uninstaller
+    RiskRaven Arckon Agent - Windows Uninstaller
 
 .DESCRIPTION
     Stops and removes the Sentinel Windows Service, then deletes the install
@@ -18,7 +18,7 @@ $ConfigDir   = "C:\ProgramData\Sentinel"
 $ServiceName = "SentinelAgent"
 
 Write-Host ""
-Write-Host "M.A.R.K. Sentinel Agent - Windows Uninstaller" -ForegroundColor White
+Write-Host "RiskRaven Arckon Agent - Windows Uninstaller" -ForegroundColor White
 Write-Host "===============================================" -ForegroundColor DarkGray
 Write-Host ""
 Write-Host "This will remove:"
@@ -75,4 +75,4 @@ if (Test-Path $ConfigDir) {
 }
 
 Write-Host ""
-Write-Host "M.A.R.K. Sentinel Agent has been uninstalled." -ForegroundColor Green
+Write-Host "RiskRaven Arckon Agent has been uninstalled." -ForegroundColor Green

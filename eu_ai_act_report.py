@@ -1,5 +1,5 @@
 """
-M.A.R.K. Sentinel — EU AI Act Readiness Report Generator
+RiskRaven Arckon — EU AI Act Readiness Report Generator
 Produces a printable one-page HTML report mapping scan findings to EU AI Act articles.
 """
 import html

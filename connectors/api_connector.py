@@ -1,5 +1,5 @@
 """
-M.A.R.K. Sentinel — API Connector
+RiskRaven Arckon — API Connector
 Connects to any OpenAI-compatible endpoint for live adversarial probe checks.
 """
 import json

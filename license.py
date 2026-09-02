@@ -265,7 +265,7 @@ def start_monitors(store) -> None:
 
 
 def _telemetry_loop(store) -> None:
-    """Post a usage heartbeat to M.A.R.K.'s telemetry endpoint on a schedule."""
+    """Post a usage heartbeat to RiskRaven's telemetry endpoint on a schedule."""
     lic = get_license()
     interval = max(3600, lic.telemetry_interval_h * 3600)
 

@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# M.A.R.K. Sentinel — macOS Code Signing + Notarization Pipeline
+# RiskRaven Arckon — macOS Code Signing + Notarization Pipeline
 #
 # Prerequisites:
 #   1. Apple Developer Program membership ($99/yr) — developer.apple.com
 #   2. Two certificates in your Keychain:
-#        "Developer ID Application: M.A.R.K. AI Systems (XXXXXXXXXX)"
-#        "Developer ID Installer:   M.A.R.K. AI Systems (XXXXXXXXXX)"
+#        "Developer ID Application: RiskRaven AI (XXXXXXXXXX)"
+#        "Developer ID Installer:   RiskRaven AI (XXXXXXXXXX)"
 #   3. App-specific password for notarytool:
 #        appleid.apple.com → Sign-In and Security → App-Specific Passwords
 #   4. Xcode Command Line Tools: xcode-select --install
@@ -22,8 +22,8 @@ set -euo pipefail
 
 # ── Configuration (fill these in before running) ─────────────────────────────
 
-APP_IDENTITY="Developer ID Application: M.A.R.K. AI Systems (XXXXXXXXXX)"
-PKG_IDENTITY="Developer ID Installer: M.A.R.K. AI Systems (XXXXXXXXXX)"
+APP_IDENTITY="Developer ID Application: RiskRaven AI (XXXXXXXXXX)"
+PKG_IDENTITY="Developer ID Installer: RiskRaven AI (XXXXXXXXXX)"
 
 APPLE_ID="your-apple-id@example.com"
 APPLE_TEAM_ID="XXXXXXXXXX"
@@ -47,7 +47,7 @@ INSTALL_LOCATION="/Applications"
 mkdir -p "${DIST_DIR}"
 
 echo ""
-echo "M.A.R.K. Sentinel — macOS Signing Pipeline"
+echo "RiskRaven Arckon — macOS Signing Pipeline"
 echo "─────────────────────────────────────────────"
 
 # ── Step 1: Sign the .app bundle ──────────────────────────────────────────────

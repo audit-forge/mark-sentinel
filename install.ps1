@@ -473,7 +473,7 @@ if (-not $NoService) {
 }
 
 # -- Desktop shortcut -> opens fleet dashboard in browser ----------------------
-$ShortcutPath = [Environment]::GetFolderPath('Desktop') + '\Sentinel Dashboard.url'
+$ShortcutPath = [Environment]::GetFolderPath('Desktop') + '\Arckon Dashboard.url'
 $DashUrl = if ($Server) { $Server.TrimEnd('/') + '/fleet' } else { 'http://localhost:7331/fleet' }
 try {
     Set-Content -Path $ShortcutPath -Value "[InternetShortcut]`r`nURL=$DashUrl`r`nIconIndex=0`r`n" -Encoding ASCII

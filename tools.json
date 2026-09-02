@@ -1,5 +1,5 @@
 {
-  "agent_name": "M.A.R.K. Sentinel Audit Agent",
+  "agent_name": "RiskRaven Arckon Audit Agent",
   "version": "1.0",
   "human_in_the_loop": true,
   "require_confirmation": true,

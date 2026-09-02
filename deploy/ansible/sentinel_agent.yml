@@ -1,5 +1,5 @@
 ---
-- name: M.A.R.K. Sentinel Agent — Deploy and configure
+- name: RiskRaven Arckon Agent — Deploy and configure
   hosts: all
   become: true
   gather_facts: true
@@ -83,7 +83,7 @@
         system: true
         shell: /sbin/nologin
         create_home: false
-        comment: "M.A.R.K. Sentinel Agent"
+        comment: "RiskRaven Arckon Agent"
       when: ansible_facts['os_family'] != "Darwin"
 
     # ── Install files ─────────────────────────────────────────────────────────
@@ -178,7 +178,7 @@
         mode: "0644"
         content: |
           [Unit]
-          Description=M.A.R.K. Sentinel Agent
+          Description=RiskRaven Arckon Agent
           After=network-online.target
           Wants=network-online.target
 

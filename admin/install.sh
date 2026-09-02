@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# M.A.R.K. Sentinel Agent — Linux/macOS Installer
+# RiskRaven Arckon Agent — Linux/macOS Installer
 # Usage: sudo bash install.sh [--server URL] [--token TOKEN] [--no-service]
 
 INSTALL_PREFIX="/opt/sentinel"
@@ -218,7 +218,7 @@ install_systemd() {
     else
         cat > "$unit_dst" <<EOUNIT
 [Unit]
-Description=M.A.R.K. Sentinel Agent
+Description=RiskRaven Arckon Agent
 Documentation=https://github.com/hash-ai/sentinel
 After=network-online.target
 Wants=network-online.target
@@ -309,7 +309,7 @@ else
 fi
 
 echo ""
-echo "M.A.R.K. Sentinel Agent installed successfully."
+echo "RiskRaven Arckon Agent installed successfully."
 echo "  Install dir : ${INSTALL_PREFIX}"
 echo "  Config      : ${CONFIG_FILE}"
 echo ""

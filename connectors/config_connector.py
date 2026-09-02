@@ -1,5 +1,5 @@
 """
-M.A.R.K. Sentinel — Config Connector
+RiskRaven Arckon — Config Connector
 Scans a directory for AI deployment files and returns a structured ScanContext.
 """
 import os

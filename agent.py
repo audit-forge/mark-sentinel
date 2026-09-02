@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-M.A.R.K. Sentinel Agent — distributed device scanner
+RiskRaven Arckon Agent — distributed device scanner
 
 Runs local AI security checks on a schedule and reports results to a
 central Sentinel server. Designed to be installed as a system service
@@ -30,7 +30,7 @@ Environment overrides:
 import sys
 if sys.version_info < (3, 10):
     sys.exit(
-        "M.A.R.K. Sentinel requires Python 3.10 or later.\n"
+        "RiskRaven Arckon requires Python 3.10 or later.\n"
         f"Running: Python {sys.version.split()[0]}\n"
         "Install: https://python.org/downloads/"
     )
@@ -826,7 +826,7 @@ def _notify_critical_findings(report: dict) -> None:
             import subprocess
             script = (
                 f'display notification "{detail}" '
-                f'with title "M.A.R.K. Sentinel" '
+                f'with title "RiskRaven Arckon" '
                 f'subtitle "{summary_line}" '
                 f'sound name "Basso"'
             )
@@ -836,7 +836,7 @@ def _notify_critical_findings(report: dict) -> None:
             import subprocess
             subprocess.run(
                 ['notify-send', '--urgency=critical', '--icon=dialog-warning',
-                 'M.A.R.K. Sentinel', f'{summary_line}\n{detail}'],
+                 'RiskRaven Arckon', f'{summary_line}\n{detail}'],
                 timeout=5, capture_output=True, check=False,
             )
         elif sys.platform == 'win32':
@@ -846,7 +846,7 @@ def _notify_critical_findings(report: dict) -> None:
                 f'$n = New-Object System.Windows.Forms.NotifyIcon;'
                 f'$n.Icon = [System.Drawing.SystemIcons]::Warning;'
                 f'$n.Visible = $true;'
-                f'$n.ShowBalloonTip(8000, "M.A.R.K. Sentinel", '
+                f'$n.ShowBalloonTip(8000, "RiskRaven Arckon", '
                 f'"{summary_line}: {detail}", '
                 f'[System.Windows.Forms.ToolTipIcon]::Warning);'
                 f'Start-Sleep -s 9; $n.Dispose()'
@@ -1519,7 +1519,7 @@ def _install_systemd(cmd: list[str]) -> None:
 
     exec_start = ' '.join(cmd)
     unit_text = f"""[Unit]
-Description=M.A.R.K. Sentinel Agent
+Description=RiskRaven Arckon Agent
 After=network.target
 
 [Service]
@@ -1585,7 +1585,7 @@ def _uninstall_service() -> None:
 def main() -> None:
     _set_process_name()
     ap = argparse.ArgumentParser(
-        description='M.A.R.K. Sentinel Agent',
+        description='RiskRaven Arckon Agent',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__,
     )

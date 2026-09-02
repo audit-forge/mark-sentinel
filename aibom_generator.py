@@ -1,5 +1,5 @@
 """
-M.A.R.K. Sentinel — AI-BOM (AI Bill of Materials) Generator
+RiskRaven Arckon — AI-BOM (AI Bill of Materials) Generator
 Produces a structured inventory of all AI components detected across the fleet.
 Output: CycloneDX-AI-inspired JSON + printable HTML report.
 """

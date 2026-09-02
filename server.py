@@ -5278,7 +5278,7 @@ load();
             self.send_response(200)
             self.send_header('Content-Type', 'application/x-mswinurl')
             self.send_header('Content-Disposition',
-                             'attachment; filename="Sentinel Dashboard.url"')
+                             'attachment; filename="Arckon Dashboard.url"')
             self.send_header('Content-Length', len(content))
             self.end_headers()
             self.wfile.write(content)
@@ -5294,7 +5294,7 @@ load();
             self.send_response(200)
             self.send_header('Content-Type', 'application/octet-stream')
             self.send_header('Content-Disposition',
-                             'attachment; filename="Sentinel Dashboard.webloc"')
+                             'attachment; filename="Arckon Dashboard.webloc"')
             self.send_header('Content-Length', len(content))
             self.end_headers()
             self.wfile.write(content)
@@ -7829,7 +7829,7 @@ function _syncFilterUI() {{
       bannerText.textContent = 'Showing: ' + (labelMap[_activeFilter] || _activeFilter);
       bannerText.style.color = _activeFilter === 'fail' ? '#DC2626' : _activeFilter === 'warn' ? '#CA8A04' : '#4F46E5';
       banner.style.display = 'flex';
-      document.title = 'Sentinel — ' + (labelMap[_activeFilter] || _activeFilter);
+      document.title = 'Arckon — ' + (labelMap[_activeFilter] || _activeFilter);
     }} else {{
       banner.style.display = 'none';
     }}

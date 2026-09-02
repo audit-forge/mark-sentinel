@@ -1,5 +1,5 @@
 """
-M.A.R.K. Sentinel — Gemini Connector
+RiskRaven Arckon — Gemini Connector
 Connects to Google Gemini via the native generateContent API.
 Supports all probes — Gemini's systemInstruction field accepts per-request system prompts.
 """

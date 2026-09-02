@@ -35,8 +35,8 @@ _AI_PORTS: list[tuple[int, str, str]] = [
     (3000,  'AI service',        '/v1/models'),
     (8888,  'Jupyter / AI app',  '/api/status'),
     (8501,  'Streamlit app',     '/healthz'),
-    (7331,  'M.A.R.K. Sentinel', '/api/status'),
-    (8400,  'M.A.R.K. Hash',     '/health'),
+    (7331,  'RiskRaven Arckon', '/api/status'),
+    (8400,  'RiskRaven Arckon',     '/health'),
 ]
 
 _TCP_TIMEOUT    = 0.8

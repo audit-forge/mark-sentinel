@@ -1,5 +1,5 @@
 """
-M.A.R.K. Sentinel — Anthropic Claude Connector
+RiskRaven Arckon — Anthropic Claude Connector
 Connects to Anthropic Claude via the native Messages API.
 Requires an Anthropic API key (console.anthropic.com).
 """

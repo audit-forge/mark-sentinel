@@ -1,7 +1,7 @@
 ﻿#Requires -RunAsAdministrator
 <#
 .SYNOPSIS
-    M.A.R.K. Sentinel Agent - Windows Installer
+    RiskRaven Arckon Agent - Windows Installer
 
 .DESCRIPTION
     Installs the Sentinel Agent to C:\Program Files\Sentinel\, creates config at
@@ -59,7 +59,7 @@ function Write-Warn {
 }
 
 Write-Host ""
-Write-Host "M.A.R.K. Sentinel Agent - Windows Installer" -ForegroundColor White
+Write-Host "RiskRaven Arckon Agent - Windows Installer" -ForegroundColor White
 Write-Host "============================================" -ForegroundColor DarkGray
 Write-Host ""
 
@@ -247,8 +247,8 @@ if (-not $NoService) {
         & $nssmPath install $ServiceName $PythonExe
         & $nssmPath set $ServiceName AppParameters "`"$InstallDir\agent.py`" --daemon --config `"$ConfigFile`""
         & $nssmPath set $ServiceName AppDirectory $InstallDir
-        & $nssmPath set $ServiceName DisplayName "M.A.R.K. Sentinel Agent"
-        & $nssmPath set $ServiceName Description "Distributed security audit agent (M.A.R.K. Sentinel)"
+        & $nssmPath set $ServiceName DisplayName "RiskRaven Arckon Agent"
+        & $nssmPath set $ServiceName Description "Distributed security audit agent (RiskRaven Arckon)"
         & $nssmPath set $ServiceName Start SERVICE_AUTO_START
         & $nssmPath set $ServiceName AppRestartDelay 30000
         & $nssmPath set $ServiceName AppStdout "$env:ProgramData\Sentinel\sentinel-agent.log"
@@ -270,7 +270,7 @@ if (-not $NoService) {
 
         $WrapperScript = "$InstallDir\sentinel-service.ps1"
         @"
-# Auto-generated service wrapper for M.A.R.K. Sentinel Agent
+# Auto-generated service wrapper for RiskRaven Arckon Agent
 Set-Location '$InstallDir'
 `$env:PYTHONUNBUFFERED = '1'
 `$env:PYTHONUTF8 = '1'
@@ -303,7 +303,7 @@ Set-Location '$InstallDir'
 
         Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger `
             -Principal $principal -Settings $settings `
-            -Description "Distributed security audit agent (M.A.R.K. Sentinel)" | Out-Null
+            -Description "Distributed security audit agent (RiskRaven Arckon)" | Out-Null
 
         Start-ScheduledTask -TaskName $TaskName
         Write-OK "Startup task registered and started"
@@ -385,7 +385,7 @@ try {
 }
 
 Write-Host ""
-Write-Host "M.A.R.K. Sentinel Agent installed successfully." -ForegroundColor Green
+Write-Host "RiskRaven Arckon Agent installed successfully." -ForegroundColor Green
 Write-Host "  Install dir : $InstallDir"
 Write-Host "  Config      : $ConfigFile"
 Write-Host "  Shortcut    : $ShortcutPath"

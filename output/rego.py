@@ -1,6 +1,6 @@
 """
-M.A.R.K. Sentinel — OPA Rego policy generator
-Produces a Rego bundle that gates CI/CD using M.A.R.K. JSON report as input.
+RiskRaven Arckon — OPA Rego policy generator
+Produces a Rego bundle that gates CI/CD using RiskRaven JSON report as input.
 
 Usage:
   # Run audit, produce JSON
@@ -14,13 +14,13 @@ from datetime import date
 
 
 _HEADER = """\
-# M.A.R.K. Sentinel — OPA Rego Policy Bundle
+# RiskRaven Arckon — OPA Rego Policy Bundle
 # Profile : {profile}
 # Target  : {target}
 # Mode    : {mode}
 # Generated: {today}
 #
-# Evaluate against a M.A.R.K. JSON report:
+# Evaluate against a RiskRaven JSON report:
 #   opa eval -d {pkg}.rego -I < report.json "data.mark_sentinel.{pkg}.allow"
 #   opa eval -d {pkg}.rego -I < report.json "data.mark_sentinel.{pkg}.deny"
 #

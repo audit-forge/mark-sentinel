@@ -5,7 +5,7 @@
 import sys
 if sys.version_info < (3, 11):
     sys.exit(
-        "M.A.R.K. Sentinel requires Python 3.11 or later.\n"
+        "RiskRaven Arckon requires Python 3.11 or later.\n"
         f"Running: Python {sys.version.split()[0]}\n"
         "Install: https://python.org/downloads/"
     )
@@ -140,7 +140,7 @@ def cmd_prune(args: argparse.Namespace) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(
         prog='tokens',
-        description='M.A.R.K. Sentinel — manage agent bearer tokens',
+        description='RiskRaven Arckon — manage agent bearer tokens',
     )
     parser.add_argument('--store', default=str(DEFAULT_STORE), metavar='PATH',
                         help='Path to agent_tokens.json (default: output/agent_tokens.json)')

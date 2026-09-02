@@ -1844,7 +1844,7 @@ def _write_license_file(customer_id: str, name: str, tier: str, expires: str, ma
         "grace_pct":          10,
         "expires_at":         expires,
         "issued_at":          date.today().isoformat(),
-        "issued_by":          "M.A.R.K. AI Systems",
+        "issued_by":          "RiskRaven AI",
         "plan":               tier,
         "telemetry_url":      telemetry_url,
         "telemetry_interval_h": 1,
