@@ -1,5 +1,5 @@
 """
-Academy site builder for M.A.R.K. Sentinel
+Academy site builder for RiskRaven Arckon
 
 Public API:
     def build(root: pathlib.Path) -> bytes
@@ -27,6 +27,8 @@ SECTIONS = [
     ("command", "Command Center"),
     ("settings", "Settings"),
     ("alerts", "Alerts & Notifications"),
+    ("siem-tools", "SIEM & Tool Integrations"),
+    ("ai-spend", "AI Spend"),
     ("catalog", "Check Catalog"),
     ("troubleshoot", "Troubleshooting"),
 ]
@@ -136,9 +138,9 @@ def build(root: pathlib.Path) -> bytes:
         return f'<section id="{_escape(id_)}" class="doc-section"><h2>{_escape(title)}</h2>{content}</section>'
 
     # Static content blocks
-    overview = ("<p>Sentinel is an AI security audit platform. Scans AI deployments for STIG/NIST/OWASP compliance. "
+    overview = ("<p>RiskRaven Arckon is an AI security audit platform. It scans AI deployments for STIG/NIST/OWASP compliance. "
                 "Two components: server (dashboard) and agent (installed on each device).</p>"
-                "<p>Sentinel now supports NIST AI RMF 1.0 and SR 26-2 (April 2026 model risk guidance) for financial sector deployments.</p>")
+                "<p>Arckon now supports NIST AI RMF 1.0 and SR 26-2 (April 2026 model risk guidance) for financial sector deployments.</p>")
 
     prereqs = ("<ul>"
                "<li>Python 3.11 or later (required on every machine)</li>"
@@ -162,7 +164,7 @@ def build(root: pathlib.Path) -> bytes:
              "sudo git clone https://github.com/audit-forge/mark-sentinel.git /opt/sentinel\n"
              "# Git will prompt for username + PAT on first clone; credential.helper stores it\n\n"
              "# Check out the active branch (git clones the default branch — switch to get latest)\n"
-             "cd /opt/sentinel && sudo git checkout feat/sentinel-distributed-agent\n\n"
+             "cd /opt/sentinel && sudo git checkout main\n\n"
              "# Create a virtual environment (required — macOS blocks pip3 on system Python)\n"
              "python3 -m venv /opt/sentinel/venv\n"
              "/opt/sentinel/venv/bin/pip install -r /opt/sentinel/requirements.txt</code></pre>"
@@ -185,8 +187,8 @@ def build(root: pathlib.Path) -> bytes:
              "sudo bash /tmp/sentinel/install.sh --server http://SERVER_IP:7331 --token YOUR_TOKEN</code></pre>"
              "<h4>Service management</h4>"
              "<pre><code>sudo launchctl list | grep sentinel     # check status\n"
-             "sudo launchctl stop io.hash.sentinel-agent\n"
-             "sudo launchctl start io.hash.sentinel-agent\n"
+             "sudo launchctl stop io.riskraven.arckon-agent\n"
+             "sudo launchctl start io.riskraven.arckon-agent\n"
              "# Logs: /var/log/sentinel-agent.log</code></pre>")
 
     windows = ("<h4>Server setup (run once — PowerShell as Administrator)</h4>"
@@ -200,7 +202,7 @@ def build(root: pathlib.Path) -> bytes:
                "git clone https://github.com/audit-forge/mark-sentinel.git C:\\Sentinel\n"
                "# Windows Credential Manager will prompt once and store the PAT securely\n\n"
                "# Check out the active branch (git clones the default branch — switch to get latest)\n"
-               "cd C:\\Sentinel; git checkout feat/sentinel-distributed-agent\n\n"
+               "cd C:\\Sentinel; git checkout main\n\n"
                "# Create a virtual environment\n"
                "python -m venv C:\\Sentinel\\venv\n"
                "C:\\Sentinel\\venv\\Scripts\\pip install -r C:\\Sentinel\\requirements.txt</code></pre>"
@@ -218,9 +220,9 @@ def build(root: pathlib.Path) -> bytes:
                "<h4>Open the firewall (run once)</h4>"
                "<p>Windows Firewall blocks inbound connections by default. Run this once so agents and "
                "LAN browsers can reach the dashboard on port 7331:</p>"
-               "<pre><code>New-NetFirewallRule -DisplayName \"Sentinel Dashboard\" `\n"
-               "  -Direction Inbound -Protocol TCP -LocalPort 7331 -Action Allow</code></pre>"
-               "<p>Verify the rule was created: <code>Get-NetFirewallRule -DisplayName \"Sentinel Dashboard\"</code></p>"
+              "<pre><code>New-NetFirewallRule -DisplayName \"Arckon Dashboard\" `\n"
+              "  -Direction Inbound -Protocol TCP -LocalPort 7331 -Action Allow</code></pre>"
+              "<p>Verify the rule was created: <code>Get-NetFirewallRule -DisplayName \"Arckon Dashboard\"</code></p>"
                "<h4>Agent install</h4>"
                "<p>Run in PowerShell as Administrator on each Windows machine to monitor:</p>"
                "<pre><code>Invoke-WebRequest http://SERVER_IP:7331/bundle.tar.gz -OutFile \"$env:TEMP\\sentinel.tar.gz\"\n"
@@ -228,9 +230,9 @@ def build(root: pathlib.Path) -> bytes:
                "Set-Location \"$env:TEMP\\sentinel\"\n"
                ".\\install.ps1 -Server http://SERVER_IP:7331 -Token YOUR_TOKEN</code></pre>"
                "<h4>Service management</h4>"
-               "<pre><code>Get-Service SentinelAgent           # check status\n"
-               "Restart-Service SentinelAgent\n"
-               "# Logs: C:\\ProgramData\\Sentinel\\sentinel-agent.log</code></pre>"
+               "<pre><code>Get-Service ArckonAgent           # check status\n"
+               "Restart-Service ArckonAgent\n"
+               "# Logs: C:\\ProgramData\\Arckon\\arckon-agent.log</code></pre>"
                "<p>For best results install NSSM first (https://nssm.cc). The installer falls back to sc.exe if NSSM is not found.</p>")
 
     linux = ("<h4>Server setup (run once)</h4>"
@@ -244,7 +246,7 @@ def build(root: pathlib.Path) -> bytes:
              "sudo git clone https://github.com/audit-forge/mark-sentinel.git /opt/sentinel\n"
              "# Git will prompt for username + PAT on first clone; credential.helper stores it\n\n"
              "# Check out the active branch (git clones the default branch — switch to get latest)\n"
-             "cd /opt/sentinel && sudo git checkout feat/sentinel-distributed-agent\n\n"
+             "cd /opt/sentinel && sudo git checkout main\n\n"
              "# Create a virtual environment (required on systems with externally-managed Python)\n"
              "python3 -m venv /opt/sentinel/venv\n"
              "/opt/sentinel/venv/bin/pip install -r /opt/sentinel/requirements.txt</code></pre>"
@@ -264,14 +266,14 @@ def build(root: pathlib.Path) -> bytes:
              "<p>Run on each Linux machine to monitor (server must be running first):</p>"
              "<pre><code>curl -s http://SERVER_IP:7331/bundle.tar.gz | tar -xz -C /tmp\n"
              "sudo bash /tmp/sentinel/install.sh --server http://SERVER_IP:7331 --token YOUR_TOKEN\n"
-             "# Installs to: /opt/sentinel/ | Config: /etc/sentinel/agent_config.json</code></pre>"
+             "# Installs to: /opt/sentinel/ | Config: /etc/arckon/agent_config.json</code></pre>"
              "<h4>Service management</h4>"
              "<pre><code>sudo systemctl status sentinel-agent\n"
              "sudo systemctl restart sentinel-agent\n"
              "sudo journalctl -u sentinel-agent -f    # live logs</code></pre>")
 
     docker = (
-        "<p>Use Docker to run the Sentinel agent (or server) in an isolated container — "
+        "<p>Use Docker to run the Arckon agent (or server) in an isolated container — "
         "no Python install required on the host.</p>"
         "<h4>Prerequisites</h4>"
         "<ul>"
@@ -333,7 +335,7 @@ def build(root: pathlib.Path) -> bytes:
         "# Command Center: http://localhost:7331/command</code></pre>"
         "<h4>Environment variables</h4>"
         "<ul>"
-        "<li><b>SENTINEL_SERVER</b> — URL of the Sentinel server (required)</li>"
+        "<li><b>SENTINEL_SERVER</b> — URL of the Arckon server (required)</li>"
         "<li><b>SENTINEL_AGENT_TOKEN</b> — auth token (must match server's <code>agent_token.txt</code>)</li>"
         "</ul>"
     )
@@ -347,7 +349,7 @@ def build(root: pathlib.Path) -> bytes:
                   "</ol>")
 
     profiles = (
-        "<p>Sentinel ships with several built-in profiles to tailor checks for different environments.</p>"
+        "<p>Arckon ships with several built-in profiles to tailor checks for different environments.</p>"
         "<table class=\"sev-table\">"
         "<tr><th>default</th><td>General-purpose AI security checks. Good starting point for any organization.</td></tr>"
         "<tr><th>fedramp</th><td>Controls mapped to NIST 800-53 for U.S. federal cloud deployments.</td></tr>"
@@ -381,13 +383,13 @@ def build(root: pathlib.Path) -> bytes:
         "automatic scheduled scan). To change it permanently, edit the config file on the device and restart the agent.</p>"
 
         "<h4>Linux</h4>"
-        "<pre><code>sudo nano /etc/sentinel/agent_config.json</code></pre>"
+        "<pre><code>sudo nano /etc/arckon/agent_config.json</code></pre>"
 
         "<h4>macOS</h4>"
-        "<pre><code>sudo nano /opt/sentinel/agent_config.json</code></pre>"
+        "<pre><code>sudo nano /opt/arckon/agent_config.json</code></pre>"
 
         "<h4>Windows (PowerShell as Administrator)</h4>"
-        "<pre><code>notepad C:\\ProgramData\\Sentinel\\agent_config.json</code></pre>"
+        "<pre><code>notepad C:\\ProgramData\\Arckon\\agent_config.json</code></pre>"
 
         "<p>The file looks like this — change the <code>\"profile\"</code> value to one of the slugs in the table above:</p>"
         "<pre><code>{\n"
@@ -405,9 +407,9 @@ def build(root: pathlib.Path) -> bytes:
         "<pre><code># Linux\n"
         "sudo systemctl restart sentinel-agent\n\n"
         "# macOS\n"
-        "sudo launchctl stop io.hash.sentinel-agent &amp;&amp; sudo launchctl start io.hash.sentinel-agent\n\n"
+        "sudo launchctl stop io.riskraven.arckon-agent &amp;&amp; sudo launchctl start io.riskraven.arckon-agent\n\n"
         "# Windows (PowerShell as Administrator)\n"
-        "Restart-Service SentinelAgent</code></pre>"
+        "Restart-Service ArckonAgent</code></pre>"
 
         "<p><b>Tip:</b> You can also push a profile change to individual devices without editing files — "
         "use the <b>Scan ▾</b> dropdown on a device row in the Command Center and select a profile. "
@@ -456,86 +458,303 @@ def build(root: pathlib.Path) -> bytes:
                       "</code></pre>")
 
     settings = (
-        "<p>The <b>Settings</b> panel lives at the bottom of the Command Center. "
-        "It exists for one reason: <b>once Sentinel is installed, you should never need to open a terminal again.</b> "
-        "Everything that needs a human decision after install is exposed here.</p>"
+        "<p>The <b>Settings</b> panel is at the bottom of the Command Center sidebar. "
+        "Everything that needs a human decision after install is exposed here so you do not need a terminal.</p>"
 
-        "<h3>What is it for?</h3>"
-        "<p>After you install Sentinel on a device, two things may change over time depending on your situation:</p>"
+        "<h3>Configuration</h3>"
+        "<h4>1. Default Device Scan</h4>"
         "<ol>"
-        "<li><b>Which compliance rules to run</b> — called the Compliance Profile</li>"
-        "<li><b>How often to run them</b> — called the Scan Interval</li>"
+        "<li>Open the Command Center and click <b>Settings</b> in the sidebar.</li>"
+        "<li>Find the <b>Default Device Scan</b> dropdown under Configuration.</li>"
+        "<li>Choose the compliance profile that matches your environment (e.g., <b>Base Scan</b>, "
+        "<b>Financial Services</b>, <b>FedRAMP / NIST 800-53</b>, <b>CMMC 2.0</b>, etc.).</li>"
+        "<li>Click <b>Save</b>. The change applies to new agents, scheduled scans, and Scan All.</li>"
         "</ol>"
-        "<p>Settings lets you change both without touching a config file or opening a terminal. "
-        "Everything else — server address, authentication token, what folder to scan — is set once during install "
-        "and never needs to change.</p>"
 
-        "<h3>Compliance Profile</h3>"
-        "<p>The profile tells Sentinel <i>which rulebook to audit against</i>. "
-        "Different industries have different requirements. You pick the one that matches your situation.</p>"
+        "<h4>2. Scan Interval</h4>"
+        "<ol>"
+        "<li>In the same Configuration section, locate <b>Scan Interval</b>.</li>"
+        "<li>Enter a value in seconds. Common values:</li>"
+        "</ol>"
         "<table class=\"sev-table\">"
-        "<tr><th>Default</th><td>General-purpose AI security checks. Good starting point for any organization.</td></tr>"
-        "<tr><th>Financial Services</th><td>Full check suite mapped to NIST AI RMF 1.0, SR 11-7, and SR 26-2. "
-        "Required for banks and financial institutions. Use this for PNC and similar clients.</td></tr>"
-        "<tr><th>FedRAMP / NIST 800-53</th><td>Controls required for U.S. federal cloud deployments.</td></tr>"
-        "<tr><th>CMMC</th><td>Defense supply chain compliance (DoD contractors).</td></tr>"
-        "<tr><th>SMB</th><td>Simplified language and lightweight checks for small businesses with no compliance team.</td></tr>"
+        "<tr><th>3600</th><td>Hourly — use during active remediation.</td></tr>"
+        "<tr><th>86400</th><td>Daily — good default for ongoing monitoring.</td></tr>"
+        "<tr><th>604800</th><td>Weekly — low-overhead monitoring for stable environments.</td></tr>"
         "</table>"
+        "<p>Click <b>Save</b>. The new interval takes effect on the agent's next check-in.</p>"
 
-        "<h3>When would you change the profile?</h3>"
+        "<h4>3. Extra Subnets</h4>"
+        "<ol>"
+        "<li>Find the <b>Extra Subnets</b> field under Configuration.</li>"
+        "<li>Enter additional CIDR ranges for Shadow AI discovery, separated by commas:<br>"
+        "<code>192.168.50.0/24, 10.0.2.0/24</code></li>"
+        "<li>Click <b>Save</b>. These ranges are included the next time you run Find Shadow AI.</li>"
+        "</ol>"
+
+        "<h3>Report Branding</h3>"
+        "<ol>"
+        "<li>In Settings, scroll to <b>Report Branding</b>.</li>"
+        "<li>Enter your <b>Company Name</b> as you want it to appear on the EU AI Act Readiness Report.</li>"
+        "<li>Enter a public <b>Logo URL</b> (PNG or SVG, ideally 160×40 px).</li>"
+        "<li>Enter a <b>Report Footer</b> line such as <code>Prepared by Acme MSP · acme.com</code>.</li>"
+        "<li>Click <b>Save Branding</b>.</li>"
+        "<li>Click <b>Preview Report</b> to verify the branding before sharing with clients.</li>"
+        "</ol>"
+
+        "<h3>Alert Notifications</h3>"
+        "<p>Arckon can notify your team when new CRITICAL findings, HIGH findings, or Shadow AI assets are detected. "
+        "The dashboard writes the configuration to <code>data/alerts_config.json</code> automatically.</p>"
+
+        "<h4>Slack alerts</h4>"
+        "<ol>"
+        "<li>In Slack, open your workspace and go to <b>Apps → Incoming Webhooks</b> (or visit <code>https://api.slack.com/apps</code>).</li>"
+        "<li>Create an incoming webhook and copy the URL (looks like <code>https://hooks.slack.com/services/T.../B.../...</code>).</li>"
+        "<li>In Arckon Settings → Alert Notifications, paste the URL into <b>Slack Webhook</b>.</li>"
+        "<li>Click <b>Test</b> to confirm the message arrives in Slack.</li>"
+        "<li>Click <b>Save Alert Settings</b>.</li>"
+        "</ol>"
+
+        "<h4>Microsoft Teams alerts</h4>"
+        "<ol>"
+        "<li>In Teams, open the target channel, click the <b>⋯</b> menu, and choose <b>Connectors</b>.</li>"
+        "<li>Select <b>Incoming Webhook</b>, give it a name, and copy the URL.</li>"
+        "<li>In Arckon Settings, paste the URL into <b>Teams Webhook</b>, then <b>Test</b> and <b>Save</b>.</li>"
+        "</ol>"
+
+        "<h4>Google Chat alerts</h4>"
+        "<ol>"
+        "<li>Open the Google Chat space, click the space name, then <b>Apps & integrations → Webhooks</b>.</li>"
+        "<li>Click <b>Add webhook</b>, name it, and copy the URL.</li>"
+        "<li>In Arckon Settings, paste the URL into <b>Google Chat Webhook</b>, then <b>Test</b> and <b>Save</b>.</li>"
+        "</ol>"
+
+        "<h4>Generic webhook alerts</h4>"
+        "<ol>"
+        "<li>Enter any HTTPS endpoint that accepts POST requests in the <b>Webhook URL</b> field.</li>"
+        "<li>Click <b>Test</b> to send a sample payload.</li>"
+        "<li>Click <b>Save Alert Settings</b>.</li>"
+        "</ol>"
+
+        "<h4>Email (SMTP) alerts</h4>"
+        "<ol>"
+        "<li>Enter your SMTP host (e.g., <code>smtp.gmail.com</code>) and port (usually <code>587</code>).</li>"
+        "<li>Enter the SMTP username and password. For Gmail you must create an <b>App Password</b> at "
+        "<code>myaccount.google.com/apppasswords</code> (Gmail account passwords do not work with SMTP).</li>"
+        "<li>Enter the <b>From Address</b> and <b>Send Alerts To</b> address.</li>"
+        "<li>Click <b>Test</b> to send a test email, then <b>Save Alert Settings</b>.</li>"
+        "</ol>"
+
+        "<h4>Trigger Events</h4>"
+        "<ol>"
+        "<li>Under <b>Alert when</b>, check the events you want notifications for:</li>"
+        "</ol>"
         "<ul>"
-        "<li>A new client has different regulatory requirements than your current setting — "
-        "switch to their profile before the next scan so the report speaks their language.</li>"
-        "<li>You onboard a bank — switch from Default to Financial Services so the report "
-        "references SR 26-2 and NIST AI RMF instead of generic controls.</li>"
-        "<li>A customer gets acquired by a government contractor — switch to CMMC.</li>"
-        "<li>You want to run a quick lightweight check on a small business — switch to SMB "
-        "so the report doesn't overwhelm them with regulatory language they don't need.</li>"
+        "<li><b>New CRITICAL finding</b> — fires whenever any device reports a CRITICAL result.</li>"
+        "<li><b>New HIGH finding</b> — fires whenever any device reports a HIGH result.</li>"
+        "<li><b>New Shadow AI asset</b> — fires when network discovery finds a new unmanaged AI service.</li>"
+        "<li><b>Only alert on unapproved services</b> — suppresses Shadow AI alerts for assets you have already marked approved.</li>"
         "</ul>"
-
-        "<h3>Scan Interval</h3>"
-        "<p>This controls how frequently Sentinel automatically re-scans the device and sends updated results "
-        "to the Command Center. The value is in seconds.</p>"
-        "<table class=\"sev-table\">"
-        "<tr><th>3600</th><td>Every hour — use during active remediation or when a client is fixing issues and wants to see progress quickly.</td></tr>"
-        "<tr><th>86400</th><td>Once a day — good default for ongoing monitoring once things are in order.</td></tr>"
-        "<tr><th>604800</th><td>Once a week — low-overhead background monitoring for stable environments.</td></tr>"
-        "</table>"
-
-        "<h3>When would you change the interval?</h3>"
-        "<ul>"
-        "<li>A client is actively fixing findings — drop to 3600 (hourly) so you can both watch the score improve in real time.</li>"
-        "<li>An audit is coming up in two weeks — increase frequency to daily so you have a dense trend line to show auditors.</li>"
-        "<li>Everything is clean and stable — set to weekly to reduce noise.</li>"
-        "</ul>"
+        "<p>Click <b>Save Alert Settings</b> after changing any trigger.</p>"
 
         "<h3>Desktop Shortcut</h3>"
-        "<p>The <b>Desktop Shortcut</b> button (top right of the Settings section) downloads a file you can "
-        "save to your desktop. Double-clicking it opens the Command Center in your browser instantly — "
-        "no terminal, no remembering the URL. On Windows it creates a <code>.url</code> file; "
-        "on Mac it creates a <code>.webloc</code> file. Both work by double-click.</p>"
-        "<p>On Windows, the installer (<code>install.ps1</code>) creates this shortcut automatically on the desktop "
-        "during setup, so most users will already have it without needing to download it manually.</p>"
+        "<ol>"
+        "<li>In Settings, click the <b>Desktop Shortcut</b> button in the top-right.</li>"
+        "<li>Save the downloaded file to your desktop.</li>"
+        "<li>Double-click it anytime to open the Command Center. Windows creates a <code>.url</code> file; "
+        "macOS creates a <code>.webloc</code> file.</li>"
+        "</ol>"
+        "<p>The Windows installer creates this shortcut automatically during setup.</p>"
 
         "<h3>What Settings does NOT do</h3>"
-        "<p>Settings does not control:</p>"
         "<ul>"
-        "<li>Which server the agent reports to — set at install time, does not change</li>"
-        "<li>Which folder is scanned — set at install time, Sentinel figures this out automatically</li>"
-        "<li>Authentication tokens — managed by the installer, not the UI</li>"
+        "<li>Server URL and authentication token — set at install time.</li>"
+        "<li>Scan target directory — set at install time.</li>"
         "</ul>"
-        "<p>Those are one-time install decisions. If they ever need to change, that is done by re-running "
-        "the installer or using the Update Agent button from the Command Center.</p>"
+        "<p>If those need to change, re-run the installer or use the <b>Update</b> button on a device row.</p>"
     )
 
-    alerts = ("<p>Create a file called <code>alerts.json</code> in the Sentinel directory:</p>"
-              "<pre><code>{\n  \"webhook_url\": \"https://hooks.slack.com/services/YOUR/WEBHOOK/URL\",\n  \"min_severity\": \"HIGH\",\n  \"email_to\": \"security@yourcompany.com\",\n  \"email_from\": \"sentinel@yourcompany.com\",\n  \"smtp_host\": \"smtp.yourcompany.com\"\n}</code></pre>"
-              "<p>Fields:</p>"
-              "<ul>"
-              "<li><b>webhook_url</b> — Slack, Teams, or any HTTP POST endpoint</li>"
-              "<li><b>min_severity</b> — CRITICAL, HIGH, MEDIUM, or LOW (only alerts above this threshold fire)</li>"
-              "<li><b>email_to / email_from / smtp_host</b> — optional email alerts</li>"
-              "</ul>")
+    alerts = (
+        "<p>The recommended way to configure alerts is through the <b>Settings → Alert Notifications</b> panel. "
+        "The dashboard saves your choices to <code>data/alerts_config.json</code> automatically.</p>"
+        "<p>If you prefer to edit the file manually, it lives next to the server code and uses this schema:</p>"
+        "<pre><code>{\n"
+        "  \"slack_webhook\": \"https://hooks.slack.com/services/...\",\n"
+        "  \"teams_webhook\": \"https://yourorg.webhook.office.com/...\",\n"
+        "  \"gchat_webhook\": \"https://chat.googleapis.com/v1/spaces/...\",\n"
+        "  \"webhook_url\": \"https://your-endpoint.com/alerts\",\n"
+        "  \"email\": {\n"
+        "    \"smtp_host\": \"smtp.gmail.com\",\n"
+        "    \"smtp_port\": 587,\n"
+        "    \"smtp_user\": \"you@gmail.com\",\n"
+        "    \"smtp_pass\": \"app-password\",\n"
+        "    \"from\": \"sentinel@yourdomain.com\",\n"
+        "    \"to\": \"security-team@yourdomain.com\"\n"
+        "  },\n"
+        "  \"triggers\": {\n"
+        "    \"new_critical\": true,\n"
+        "    \"new_high\": true,\n"
+        "    \"new_shadow_ai\": true,\n"
+        "    \"alert_unapproved_only\": false\n"
+        "  }\n"
+        "}</code></pre>"
+        "<p><b>Gmail users:</b> use an App Password from <code>myaccount.google.com/apppasswords</code>, not your normal password.</p>"
+    )
+
+    siem_tools = (
+        "<p>The <b>SIEM &amp; Tool Integrations</b> tab connects Arckon to your security stack. "
+        "Each integration has its own card. Enable it, fill in the required fields, click <b>Test</b>, then click <b>Save</b>. "
+        "Findings are forwarded automatically when a scan completes.</p>"
+
+        "<h3>PSA &amp; Ticketing</h3>"
+        "<p>Auto-create tickets when CRITICAL or HIGH findings are detected. Only one PSA can be active at a time. "
+        "MSP admins can also choose a <b>Client Org</b> to override settings per client.</p>"
+
+        "<h4>ConnectWise Manage</h4>"
+        "<ol>"
+        "<li>Open the <b>SIEM &amp; Tool Integrations</b> tab and find the ConnectWise card.</li>"
+        "<li>Toggle <b>Enabled</b> on.</li>"
+        "<li>Enter your ConnectWise site (e.g., <code>na.myconnectwise.net</code>), <b>Company ID</b>, <b>Public Key</b>, <b>Private Key</b>, and <b>Client ID</b>.</li>"
+        "<li>Enter the <b>Service Board</b> name (must exist in ConnectWise) and the <b>Company Name</b> for the target client.</li>"
+        "<li>Click <b>Test</b> to verify credentials.</li>"
+        "<li>Click <b>Save</b>.</li>"
+        "</ol>"
+
+        "<h4>Autotask PSA</h4>"
+        "<ol>"
+        "<li>Toggle the Autotask card to Enabled.</li>"
+        "<li>Enter your zone (usually <code>webservices2</code>), API <b>Username</b>, <b>API Key</b>, and <b>Account ID</b>.</li>"
+        "<li>Set the <b>Queue ID</b> and <b>Priority ID</b> for new tickets.</li>"
+        "<li>Click <b>Test</b>, then <b>Save</b>.</li>"
+        "</ol>"
+
+        "<h4>HaloPSA</h4>"
+        "<ol>"
+        "<li>Toggle the HaloPSA card to Enabled.</li>"
+        "<li>Enter your <b>Tenant</b> name, <b>Client ID</b>, and <b>Client Secret</b>.</li>"
+        "<li>Set the <b>Ticket Type ID</b> and <b>Priority ID</b>.</li>"
+        "<li>Click <b>Test</b>, then <b>Save</b>.</li>"
+        "</ol>"
+
+        "<h4>Jira (optional PSA connector)</h4>"
+        "<ol>"
+        "<li>Choose Jira as the PSA provider.</li>"
+        "<li>Enter the Jira base URL, project key, issue type, and an API token.</li>"
+        "<li>Click <b>Test</b>, then <b>Save</b>.</li>"
+        "</ol>"
+
+        "<h3>Wiki &amp; Docs</h3>"
+        "<p>Create a documentation page for every CRITICAL or HIGH finding. The only wiki connector currently shipped is Notion.</p>"
+
+        "<h4>Notion</h4>"
+        "<ol>"
+        "<li>Go to <a href=\"https://www.notion.so/my-integrations\" target=\"_blank\">notion.so/my-integrations</a> and create a new integration.</li>"
+        "<li>Copy the <b>Internal Integration Secret</b> (starts with <code>secret_</code>).</li>"
+        "<li>In Arckon, paste it into the Notion <b>Token</b> field.</li>"
+        "<li>Choose whether pages are created under a <b>Page</b> or a <b>Database</b>, then paste the corresponding Page ID or Database ID.</li>"
+        "<li>For databases, enter the title column name (usually <code>Name</code>).</li>"
+        "<li>Share the target page/database with your integration (⋮⋮⋮ menu → Connections → your integration).</li>"
+        "<li>Click <b>Test</b>, then <b>Save</b>.</li>"
+        "</ol>"
+
+        "<h3>SIEM &amp; Log Management</h3>"
+        "<p>Forward findings to a SIEM in real time. Configuration is stored in <code>siem_config.json</code>.</p>"
+
+        "<h4>Splunk (HTTP Event Collector)</h4>"
+        "<ol>"
+        "<li>In Splunk, enable the HTTP Event Collector and create a new token.</li>"
+        "<li>Copy the HEC URL (e.g., <code>https://splunk.example.com:8088</code>) and token.</li>"
+        "<li>In Arckon, open the Splunk card, enable it, and paste the URL and token.</li>"
+        "<li>Enter the target index (default <code>arckon</code>) and sourcetype (default <code>arckon:finding</code>).</li>"
+        "<li>Choose which severities to send (default: <code>critical</code>, <code>high</code>).</li>"
+        "<li>Click <b>Test</b>, then <b>Save</b>.</li>"
+        "</ol>"
+
+        "<h4>Microsoft Sentinel</h4>"
+        "<ol>"
+        "<li>Open your Log Analytics workspace in Azure and copy the <b>Workspace ID</b>.</li>"
+        "<li>Generate or copy the <b>Primary Key</b> (shared key).</li>"
+        "<li>In Arckon, open the Sentinel card, enable it, and paste both values.</li>"
+        "<li>Set the <b>Log Type</b> (default <code>ArckonFindings</code>).</li>"
+        "<li>Click <b>Test</b>, then <b>Save</b>.</li>"
+        "</ol>"
+
+        "<h4>Elastic Security</h4>"
+        "<ol>"
+        "<li>Get your Elasticsearch endpoint (e.g., <code>https://elasticsearch.example.com:9200</code>) and an API key.</li>"
+        "<li>In Arckon, open the Elastic card, enable it, and paste both values.</li>"
+        "<li>Enter the target index (default <code>arckon-findings</code>).</li>"
+        "<li>Click <b>Test</b>, then <b>Save</b>.</li>"
+        "</ol>"
+
+        "<h4>IBM QRadar / Exabeam (syslog)</h4>"
+        "<ol>"
+        "<li>Enter the syslog host IP or hostname and port.</li>"
+        "<li>Select the protocol: <code>tcp</code> for QRadar, <code>udp</code> for Exabeam.</li>"
+        "<li>Choose which severities to send.</li>"
+        "<li>Click <b>Test</b>, then <b>Save</b>.</li>"
+        "</ol>"
+
+        "<h4>Kaseya VSA / BMS / IT Glue</h4>"
+        "<ol>"
+        "<li>Enter your Kaseya VSA URL and API key to create tickets in VSA.</li>"
+        "<li>Optionally enter BMS URL/API key and IT Glue API key + organization ID to sync documentation.</li>"
+        "<li>Set the <b>Ticket Queue</b> name.</li>"
+        "<li>Click <b>Test</b>, then <b>Save</b>.</li>"
+        "</ol>"
+    )
+
+    ai_spend = (
+        "<p>The <b>AI Spend</b> tab shows token usage and estimated cost across OpenAI, Anthropic, and Google Gemini. "
+        "Add read-only provider API keys, then click <b>Fetch Latest</b> to pull usage data into the dashboard.</p>"
+
+        "<h3>Before you start</h3>"
+        "<ul>"
+        "<li>Provider admin keys are required. Project keys and normal Claude API keys cannot read organization spend.</li>"
+        "<li>Arckon stores only the last four characters of each key. The full key is encrypted at rest.</li>"
+        "<li>Fetch is rate-limited to once per day per provider unless you use <b>force</b>.</li>"
+        "</ul>"
+
+        "<h3>Add an OpenAI spend key</h3>"
+        "<ol>"
+        "<li>Sign in at <a href=\"https://platform.openai.com/\" target=\"_blank\">platform.openai.com</a>.</li>"
+        "<li>Go to <b>Organization Settings → Admin keys</b>.</li>"
+        "<li>Create a <b>Read only</b> admin key (starts with <code>sk-admin-...</code>).</li>"
+        "<li>In Arckon AI Spend, click <b>Add / Rotate Key</b>.</li>"
+        "<li>Select <b>OpenAI</b>, paste the key, add a label, then click <b>Save Key</b>.</li>"
+        "<li>Click <b>Fetch Latest</b> to pull the last 7 days of usage.</li>"
+        "</ol>"
+
+        "<h3>Add an Anthropic spend key</h3>"
+        "<ol>"
+        "<li>Sign in at <a href=\"https://console.anthropic.com/\" target=\"_blank\">console.anthropic.com</a>.</li>"
+        "<li>Open <b>Settings → Organization</b>.</li>"
+        "<li>Create an <b>Admin API key</b> with Usage and Cost access (starts with <code>sk-ant-admin01-...</code>).</li>"
+        "<li>In Arckon, add the key under <b>Anthropic</b> and fetch.</li>"
+        "</ol>"
+
+        "<h3>Add a Google Gemini spend key</h3>"
+        "<ol>"
+        "<li>Go to <a href=\"https://aistudio.google.com/app/apikey\" target=\"_blank\">aistudio.google.com/app/apikey</a>.</li>"
+        "<li>Create an API key with access to usage/cost data.</li>"
+        "<li>In Arckon, add the key under <b>Gemini</b> and fetch.</li>"
+        "</ol>"
+
+        "<h3>Reading the dashboard</h3>"
+        "<ul>"
+        "<li><b>Total cost</b> — billed USD across all configured providers for the selected period.</li>"
+        "<li><b>By provider</b> — relative spend bar chart.</li>"
+        "<li><b>By model</b> — input, output, and total tokens per model.</li>"
+        "<li><b>Daily trend</b> — cost per day over the selected range.</li>"
+        "<li><b>By API key / client org</b> — MSP-only breakdowns appear for scoped users.</li>"
+        "</ul>"
+
+        "<h3>Troubleshooting</h3>"
+        "<ul>"
+        "<li><b>“Already fetched today”</b> — Arckon limits fetches to once per day. Click <b>Fetch Latest</b> again and confirm force if you need fresh data.</li>"
+        "<li><b>“No spend data yet”</b> — verify the key has admin/read usage permissions, not just model inference permissions.</li>"
+        "<li><b>Cost does not match invoice</b> — Arckon shows the usage and cost returned by the provider API at fetch time. Taxes, credits, and tiered pricing may differ from your invoice.</li>"
+        "</ul>"
+    )
 
     troubleshoot = (
                     "<h3>Linux install: \"set: illegal option\" or \"set pipefall\" error</h3>"
@@ -567,7 +786,7 @@ def build(root: pathlib.Path) -> bytes:
                     "sudo cp -r /tmp/sentinel/profiles /opt/sentinel/ 2>/dev/null || true\n\n"
                     "# Create config\n"
                     "sudo mkdir -p /etc/sentinel\n"
-                    "sudo tee /etc/sentinel/agent_config.json &lt;&lt; 'EOF'\n"
+                    "sudo tee /etc/arckon/agent_config.json &lt;&lt; 'EOF'\n"
                     "{\n"
                     "  \"server\": \"http://SERVER_IP:7331\",\n"
                     "  \"token\": \"YOUR_TOKEN\",\n"
@@ -577,13 +796,13 @@ def build(root: pathlib.Path) -> bytes:
                     "}\n"
                     "EOF\n\n"
                     "# Create systemd service\n"
-                    "sudo tee /etc/systemd/system/sentinel-agent.service &lt;&lt; 'EOF'\n"
+                    "sudo tee /etc/systemd/system/arckon-agent.service &lt;&lt; 'EOF'\n"
                     "[Unit]\n"
-                    "Description=M.A.R.K. Sentinel Agent\n"
+                    "Description=RiskRaven Arckon Agent\n"
                     "After=network-online.target\n\n"
                     "[Service]\n"
                     "Type=simple\n"
-                    "ExecStart=/usr/bin/python3 /opt/sentinel/agent.py --config /etc/sentinel/agent_config.json --daemon\n"
+                    "ExecStart=/usr/bin/python3 /opt/sentinel/agent.py --config /etc/arckon/agent_config.json --daemon\n"
                     "Restart=on-failure\n"
                     "RestartSec=30\n"
                     "Environment=PYTHONUNBUFFERED=1\n\n"
@@ -654,7 +873,7 @@ def build(root: pathlib.Path) -> bytes:
                     "git remote add private https://github.com/keithferg2018/hash-ai-remediation.git\n"
                     "git fetch private\n"
                     "# Git will prompt for your PAT on first fetch and store it via credential.helper\n"
-                    "git merge private/feat/sentinel-distributed-agent</code></pre>"
+                    "git merge private/main</code></pre>"
 
                     "<h3>Windows: \"error: unknown switch C\" when running git</h3>"
                     "<p>Windows Git does not support the <code>-C</code> flag used to run git in another directory. "
@@ -668,7 +887,7 @@ def build(root: pathlib.Path) -> bytes:
                     "Stash the changes first, then merge:</p>"
                     "<pre><code>cd C:\\Sentinel\n"
                     "git stash\n"
-                    "git merge private/feat/sentinel-distributed-agent</code></pre>"
+                    "git merge private/main</code></pre>"
                     "<p>The stash saves your local changes aside. After the merge the updated files are live. "
                     "Run <code>git stash pop</code> only if you need to recover the local edits — "
                     "in most cases the merged version is what you want.</p>"
@@ -745,7 +964,7 @@ def build(root: pathlib.Path) -> bytes:
         '<head>',
         '<meta charset="utf-8">',
         '<meta name="viewport" content="width=device-width,initial-scale=1">',
-        '<title>M.A.R.K. Sentinel — Academy</title>',
+        '<title>RiskRaven Arckon — Academy</title>',
         '<style>',
         '/* Sentinel dark theme (self-contained) */',
         'html,body{height:100%;}',
@@ -789,7 +1008,7 @@ def build(root: pathlib.Path) -> bytes:
         '<body>',
         '<div class="container">',
         '<aside class="sidebar">',
-        '<div class="brand">M.A.R.K. SENTINEL</div>',
+        '<div class="brand">RISKRAVEN ARCKON</div>',
         '<div class="brand-sub">Academy</div>',
         '<div class="search"><input id="search" placeholder="Search sections or checks…" /></div>',
         '<nav class="nav" id="nav">'
@@ -818,6 +1037,8 @@ def build(root: pathlib.Path) -> bytes:
         section_html('command', 'Command Center', command_center),
         section_html('settings', 'Settings', settings),
         section_html('alerts', 'Alerts & Notifications', alerts),
+        section_html('siem-tools', 'SIEM & Tool Integrations', siem_tools),
+        section_html('ai-spend', 'AI Spend', ai_spend),
         '<section id="catalog" class="doc-section">',
         '<h2>Check Catalog</h2>',
         '<p class="muted">This section parses checks/* files matching AI-*.md and renders them as collapsible cards.</p>',
@@ -825,7 +1046,7 @@ def build(root: pathlib.Path) -> bytes:
         '</section>',
         section_html('troubleshoot', 'Troubleshooting', troubleshoot),
         '<hr style="border:none;border-top:1px solid #21262d;margin:30px 0">',
-        '<footer class="muted">Generated by M.A.R.K. Sentinel — Academy</footer>',
+        '<footer class="muted">Generated by RiskRaven Arckon — Academy</footer>',
         '</div>',
         '</main>',
         '</div>',
