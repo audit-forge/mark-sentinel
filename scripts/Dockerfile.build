@@ -38,6 +38,7 @@ COPY agent.py discovery.py network_inventory.py ./
 RUN python -m nuitka --onefile --assume-yes-for-downloads \
     --include-module=discovery \
     --include-module=network_inventory \
+    --include-module=pyexpat \
     --include-package=checks \
     --include-package=connectors \
     --include-package=output \

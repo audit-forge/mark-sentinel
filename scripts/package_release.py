@@ -87,6 +87,7 @@ def _build_nuitka_binary(
         '--include-package=checks',
         '--include-package=connectors',
         '--include-package=output',
+        '--include-module=pyexpat',
         '--assume-yes-for-downloads',
         f'--output-filename={output_name}{extension}',
         f'--output-dir={dist_dir}',
