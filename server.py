@@ -1482,6 +1482,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             '/api/fleet/k8s-status': self._api_fleet_k8s_status,
             '/api/fleet/shadow':  self._api_fleet_shadow,
             '/api/fleet/network-assets': self._api_fleet_network_assets,
+            '/api/fleet/network-assets.csv': self._api_fleet_network_assets_csv,
             '/api/fleet/network-assets/scans': self._api_fleet_network_asset_scans,
             '/api/fleet/mcp':        self._api_fleet_mcp,
             '/api/fleet/mcp/report': self._api_fleet_mcp_report,
@@ -3295,6 +3296,31 @@ load();
         """GET /api/fleet/network-assets — separately stored passive network inventory."""
         assets = self._store().list_network_assets(client_org_id=self._scoped_client_org())
         self._json({'assets': assets, 'count': len(assets)})
+
+    def _api_fleet_network_assets_csv(self):
+        """Download the same normalized, tenant-scoped network inventory as CSV."""
+        import csv
+        import io
+        assets = self._store().list_network_assets(client_org_id=self._scoped_client_org())
+        out = io.StringIO()
+        writer = csv.writer(out)
+        writer.writerow(['IP Addresses', 'MAC Address', 'Hostnames', 'Interfaces', 'Sources',
+                         'AI-Related Open Ports', 'Reporting Agents', 'First Seen', 'Last Seen'])
+        for host in _normalize_network_assets(assets):
+            writer.writerow([
+                ', '.join(sorted(host['ips'])), host['mac'], ', '.join(sorted(host['hostnames'])),
+                ', '.join(sorted(host['interfaces'])), ', '.join(sorted(host['sources'])),
+                ', '.join(sorted(host['services'])), ', '.join(sorted(host['reporters'])),
+                datetime.fromtimestamp(host['first_seen'], timezone.utc).isoformat() if host['first_seen'] else '',
+                datetime.fromtimestamp(host['last_seen'], timezone.utc).isoformat() if host['last_seen'] else '',
+            ])
+        data = out.getvalue().encode('utf-8')
+        self.send_response(200)
+        self.send_header('Content-Type', 'text/csv; charset=utf-8')
+        self.send_header('Content-Disposition', 'attachment; filename="arckon_network_inventory.csv"')
+        self.send_header('Content-Length', str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
 
     def _api_fleet_network_asset_scans(self):
         scans = self._store().list_network_asset_scans(client_org_id=self._scoped_client_org())
@@ -6408,6 +6434,26 @@ def send_client_org_report(customer_id: str, org_id: str, org_name: str, report_
         return False, str(e)
 
 
+def _normalize_network_assets(network_assets: list[dict]) -> list[dict]:
+    """Merge passive and active observations into safe, spreadsheet-ready hosts."""
+    network_hosts: dict[str, dict] = {}
+    for asset in network_assets:
+        mac = asset.get('mac_address', '') or ''
+        key = f"mac:{mac}" if mac else f"agent:{asset.get('reporter_device_id', '')}:ip:{asset.get('ip_address', '')}"
+        host = network_hosts.setdefault(key, {'ips': set(), 'mac': mac, 'hostnames': set(), 'interfaces': set(),
+                                              'sources': set(), 'services': set(), 'reporters': set(), 'first_seen': 0, 'last_seen': 0})
+        host['ips'].add(asset.get('ip_address', ''))
+        if asset.get('hostname'): host['hostnames'].add(asset['hostname'])
+        if asset.get('interface'): host['interfaces'].add(asset['interface'])
+        host['sources'].add(asset.get('source', '').split(':', 1)[0])
+        if asset.get('port'): host['services'].add(f"{asset['port']}/{asset.get('service') or 'tcp'}")
+        host['reporters'].add(asset.get('reporter_hostname', '') or asset.get('reporter_device_id', ''))
+        first_seen = asset.get('first_seen', 0) or 0
+        host['first_seen'] = min(host['first_seen'], first_seen) if host['first_seen'] and first_seen else host['first_seen'] or first_seen
+        host['last_seen'] = max(host['last_seen'], asset.get('last_seen', 0) or 0)
+    return sorted(network_hosts.values(), key=lambda host: host['last_seen'], reverse=True)
+
+
 def _build_fleet_html(devices: list[dict], shadow: list[dict] | None = None,
                       mcp: list[dict] | None = None,
                       network_assets: list[dict] | None = None,
@@ -6438,19 +6484,7 @@ def _build_fleet_html(devices: list[dict], shadow: list[dict] | None = None,
     # Normalize raw ARP/NDP/Nmap observations into one display row per known
     # MAC, or per reporter/IP when no MAC is available. This merges IPv4,
     # IPv6, and distinct collection sources without conflating separate sites.
-    network_hosts: dict[str, dict] = {}
-    for asset in network_assets:
-        mac = asset.get('mac_address', '') or ''
-        key = f"mac:{mac}" if mac else f"agent:{asset.get('reporter_device_id', '')}:ip:{asset.get('ip_address', '')}"
-        host = network_hosts.setdefault(key, {'ips': set(), 'mac': mac, 'hostnames': set(), 'interfaces': set(),
-                                              'sources': set(), 'services': set(), 'reporters': set(), 'last_seen': 0})
-        host['ips'].add(asset.get('ip_address', ''))
-        if asset.get('hostname'): host['hostnames'].add(asset['hostname'])
-        if asset.get('interface'): host['interfaces'].add(asset['interface'])
-        host['sources'].add(asset.get('source', '').split(':', 1)[0])
-        if asset.get('port'): host['services'].add(f"{asset['port']}/{asset.get('service') or 'tcp'}")
-        host['reporters'].add(asset.get('reporter_hostname', '') or asset.get('reporter_device_id', ''))
-        host['last_seen'] = max(host['last_seen'], asset.get('last_seen', 0) or 0)
+    network_hosts = _normalize_network_assets(network_assets)
     asset_rows = ''.join(
         '<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td></tr>'.format(
             _html.escape(', '.join(sorted(h['ips']))), _html.escape(h['mac'] or '—'),
@@ -6458,7 +6492,7 @@ def _build_fleet_html(devices: list[dict], shadow: list[dict] | None = None,
             _html.escape(', '.join(sorted(h['sources']))),
             _html.escape(', '.join(sorted(h['services'])) or '—'),
             _html.escape(', '.join(sorted(h['reporters']))), _age(h['last_seen']),
-        ) for h in sorted(network_hosts.values(), key=lambda h: h['last_seen'], reverse=True))
+        ) for h in network_hosts)
     if not asset_rows:
         asset_rows = '<tr><td colspan="8" class="empty">No passive neighbor-cache observations yet.</td></tr>'
     asset_options = ''.join('<option value="{}">{}</option>'.format(
@@ -6863,7 +6897,10 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
       </div>
     </div>
 
-    <div class="sec-hdr" style="margin-bottom:8px">Observed Network Assets <span style="font-size:11px;font-weight:500;color:#9CA3AF">({len(network_hosts)})</span></div>
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px">
+      <div class="sec-hdr" style="margin:0">Observed Network Assets <span style="font-size:11px;font-weight:500;color:#9CA3AF">({len(network_hosts)})</span></div>
+      <a class="scan-btn" href="/api/fleet/network-assets.csv" style="font-size:12px;color:#4F46E5;border-color:#C7D2FE;text-decoration:none">Export CSV</a>
+    </div>
     <div style="overflow-x:auto">
       <table class="dev-table" style="min-width:760px">
         <thead><tr><th>IP Address(es)</th><th>MAC Address</th><th>Hostname</th><th>Interface</th><th>Source</th><th>AI Ports</th><th>Reporting Agent</th><th>Last Seen</th></tr></thead>

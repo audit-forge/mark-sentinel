@@ -76,3 +76,11 @@ def test_active_scan_refuses_public_or_unavailable_scans():
     assert not assets and scan['status'] == 'failed'
     assets, scan = collect_active_ai_services('192.168.1.0/24', which=lambda _: None)
     assert not assets and scan['status'] == 'unavailable'
+
+
+def test_network_inventory_csv_export_uses_normalized_tenant_scoped_data():
+    from pathlib import Path
+    source = (Path(__file__).resolve().parents[1] / 'server.py').read_text()
+    assert "'/api/fleet/network-assets.csv': self._api_fleet_network_assets_csv" in source
+    assert 'def _normalize_network_assets(network_assets: list[dict])' in source
+    assert 'Content-Disposition\', \'attachment; filename="arckon_network_inventory.csv"\'' in source
