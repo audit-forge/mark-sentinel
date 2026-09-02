@@ -284,6 +284,7 @@ if errorlevel 1 (
 )
 echo Arckon agent repaired. If the service is still stopped, restart the computer or run:
 echo   powershell -Command "Start-Service ArckonAgent"
+echo See docs: https://github.com/audit-forge/mark-sentinel/blob/main/docs/WINDOWS_AGENT_BINARY_RECOVERY.md
 exit /b 0
 "@
 [System.IO.File]::WriteAllText($RepairScript, $RepairBody, $Utf8NoBom)
@@ -487,6 +488,7 @@ Write-Host "  Install dir : $InstallDir"
 Write-Host "  Config      : $ConfigFile"
 Write-Host "  Shortcut    : $ShortcutPath"
 Write-Host "  Repair tool : $RepairScript"
+Write-Host "  Recovery doc: https://github.com/audit-forge/mark-sentinel/blob/main/docs/WINDOWS_AGENT_BINARY_RECOVERY.md"
 Write-Host ""
 if ($Server -eq "" -or $Token -eq "") {
     Write-Host "Edit $ConfigFile to set your server URL and token, then restart the service." -ForegroundColor Yellow
