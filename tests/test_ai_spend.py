@@ -243,15 +243,22 @@ def test_ollama_connector_counts_tokens_from_response():
 
 # -- Storage layer ------------------------------------------------------------
 
+# Fixture rows below are queried with a `days=7` lookback in the same test run,
+# so the period_date must stay within 7 days of "now" no matter when CI runs —
+# a hardcoded past date silently drops out of the window months later and every
+# assertion reads back 0. Anchor it to the real run date instead.
+_SPEND_PERIOD_DATE = date.today().isoformat()
+
+
 def test_ai_spend_storage_upsert_and_summary():
     with tempfile.TemporaryDirectory() as tmp:
         store = AgentStore(Path(tmp) / "test.db")
         records = [
-            {"provider": "openai", "model": "gpt-4o", "period_date": "2026-08-14",
+            {"provider": "openai", "model": "gpt-4o", "period_date": _SPEND_PERIOD_DATE,
              "client_org_id": "orgA", "input_tokens": 100, "output_tokens": 50,
              "total_tokens": 150, "cost_usd": 1.25, "currency": "USD",
              "request_count": 10, "raw_snapshot": "{}"},
-            {"provider": "anthropic", "model": "claude-sonnet-4-6", "period_date": "2026-08-14",
+            {"provider": "anthropic", "model": "claude-sonnet-4-6", "period_date": _SPEND_PERIOD_DATE,
              "client_org_id": "orgA", "input_tokens": 200, "output_tokens": 100,
              "total_tokens": 300, "cost_usd": 2.50, "currency": "USD",
              "request_count": 5, "raw_snapshot": "{}"},
@@ -271,7 +278,7 @@ def test_ai_spend_upsert_overwrites_same_day_model():
     with tempfile.TemporaryDirectory() as tmp:
         store = AgentStore(Path(tmp) / "test.db")
         records = [
-            {"provider": "openai", "model": "gpt-4o", "period_date": "2026-08-14",
+            {"provider": "openai", "model": "gpt-4o", "period_date": _SPEND_PERIOD_DATE,
              "client_org_id": "orgA", "input_tokens": 100, "output_tokens": 50,
              "total_tokens": 150, "cost_usd": 1.00, "currency": "USD",
              "request_count": 1, "raw_snapshot": "{}"},
@@ -288,11 +295,11 @@ def test_ai_spend_summary_filters_by_client_org():
     with tempfile.TemporaryDirectory() as tmp:
         store = AgentStore(Path(tmp) / "test.db")
         store.upsert_ai_spend([
-            {"provider": "openai", "model": "gpt-4o", "period_date": "2026-08-14",
+            {"provider": "openai", "model": "gpt-4o", "period_date": _SPEND_PERIOD_DATE,
              "client_org_id": "orgA", "input_tokens": 100, "output_tokens": 50,
              "total_tokens": 150, "cost_usd": 5.00, "currency": "USD",
              "request_count": 1, "raw_snapshot": "{}"},
-            {"provider": "anthropic", "model": "claude-sonnet-4-6", "period_date": "2026-08-14",
+            {"provider": "anthropic", "model": "claude-sonnet-4-6", "period_date": _SPEND_PERIOD_DATE,
              "client_org_id": "orgB", "input_tokens": 200, "output_tokens": 100,
              "total_tokens": 300, "cost_usd": 9.00, "currency": "USD",
              "request_count": 1, "raw_snapshot": "{}"},
@@ -315,11 +322,11 @@ def test_ai_spend_by_client_org_aggregates():
     with tempfile.TemporaryDirectory() as tmp:
         store = AgentStore(Path(tmp) / "test.db")
         store.upsert_ai_spend([
-            {"provider": "openai", "model": "gpt-4o", "period_date": "2026-08-14",
+            {"provider": "openai", "model": "gpt-4o", "period_date": _SPEND_PERIOD_DATE,
              "client_org_id": "orgA", "input_tokens": 100, "output_tokens": 50,
              "total_tokens": 150, "cost_usd": 5.00, "currency": "USD",
              "request_count": 1, "raw_snapshot": "{}"},
-            {"provider": "anthropic", "model": "claude", "period_date": "2026-08-14",
+            {"provider": "anthropic", "model": "claude", "period_date": _SPEND_PERIOD_DATE,
              "client_org_id": "orgB", "input_tokens": 200, "output_tokens": 100,
              "total_tokens": 300, "cost_usd": 9.00, "currency": "USD",
              "request_count": 1, "raw_snapshot": "{}"},
@@ -500,13 +507,13 @@ def test_ai_spend_is_isolated_per_customer_store():
         store_b = AgentStore(root / "customers" / "custB" / "agents.db")
 
         store_a.upsert_ai_spend([
-            {"provider": "openai", "model": "gpt-4o", "period_date": "2026-08-14",
+            {"provider": "openai", "model": "gpt-4o", "period_date": _SPEND_PERIOD_DATE,
              "client_org_id": "orgA", "input_tokens": 100, "output_tokens": 50,
              "total_tokens": 150, "cost_usd": 5.00, "currency": "USD",
              "request_count": 1, "raw_snapshot": "{}"},
         ])
         store_b.upsert_ai_spend([
-            {"provider": "anthropic", "model": "claude-sonnet-4-6", "period_date": "2026-08-14",
+            {"provider": "anthropic", "model": "claude-sonnet-4-6", "period_date": _SPEND_PERIOD_DATE,
              "client_org_id": "orgX", "input_tokens": 200, "output_tokens": 100,
              "total_tokens": 300, "cost_usd": 9.00, "currency": "USD",
              "request_count": 1, "raw_snapshot": "{}"},
