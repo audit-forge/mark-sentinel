@@ -117,12 +117,24 @@ class AgentStore:
                     interface TEXT NOT NULL DEFAULT '',
                     source TEXT NOT NULL,
                     hostname TEXT NOT NULL DEFAULT '',
+                    port INTEGER NOT NULL DEFAULT 0,
+                    service TEXT NOT NULL DEFAULT '',
                     first_seen INTEGER NOT NULL,
                     last_seen INTEGER NOT NULL,
                     UNIQUE(reporter_device_id, ip_address, mac_address, interface, source)
                 );
                 CREATE INDEX IF NOT EXISTS idx_network_assets_reporter_seen
                     ON network_assets(reporter_device_id, last_seen DESC);
+
+                CREATE TABLE IF NOT EXISTS network_asset_scans (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    reporter_device_id TEXT NOT NULL,
+                    scan_type TEXT NOT NULL,
+                    scope TEXT NOT NULL DEFAULT '',
+                    status TEXT NOT NULL,
+                    detail TEXT NOT NULL DEFAULT '',
+                    completed_at INTEGER NOT NULL
+                );
 
                 CREATE TABLE IF NOT EXISTS approval_events (
                     id              INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -280,6 +292,11 @@ class AgentStore:
                 conn.execute(
                     "ALTER TABLE scan_schedules ADD COLUMN interval_hours INTEGER NOT NULL DEFAULT 0"
                 )
+            network_cols = {r[1] for r in conn.execute("PRAGMA table_info(network_assets)")}
+            if 'port' not in network_cols:
+                conn.execute("ALTER TABLE network_assets ADD COLUMN port INTEGER NOT NULL DEFAULT 0")
+            if 'service' not in network_cols:
+                conn.execute("ALTER TABLE network_assets ADD COLUMN service TEXT NOT NULL DEFAULT ''")
 
         # Prune old reports per retention policy (env var or default 90 days)
         self.prune_old_reports(int(os.environ.get('SENTINEL_RETAIN_DAYS', '90')))
@@ -817,21 +834,21 @@ class AgentStore:
             return cur.rowcount > 0
 
     def upsert_network_asset(self, reporter_device_id: str, ip_address: str,
-                             mac_address: str = '', interface: str = '', source: str = '',
-                             hostname: str = '') -> None:
+                              mac_address: str = '', interface: str = '', source: str = '',
+                              hostname: str = '', port: int = 0, service: str = '') -> None:
         """Upsert one passive neighbor-cache observation; no AI inventory overlap."""
         now = int(time.time())
         with self._lock, self._conn() as conn:
             conn.execute("""INSERT INTO network_assets
-                (reporter_device_id, ip_address, mac_address, interface, source, hostname, first_seen, last_seen)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                (reporter_device_id, ip_address, mac_address, interface, source, hostname, port, service, first_seen, last_seen)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(reporter_device_id, ip_address, mac_address, interface, source) DO UPDATE SET
-                    hostname=excluded.hostname, last_seen=excluded.last_seen""",
-                (reporter_device_id, ip_address, mac_address, interface, source, hostname, now, now))
+                    hostname=excluded.hostname, service=excluded.service, last_seen=excluded.last_seen""",
+                (reporter_device_id, ip_address, mac_address, interface, source, hostname, port, service, now, now))
 
     def list_network_assets(self, client_org_id: str | None = None) -> list[dict]:
         """List assets only through their reporting device's client-org assignment."""
-        query = """SELECT n.id, n.ip_address, n.mac_address, n.interface, n.source, n.hostname,
+        query = """SELECT n.id, n.ip_address, n.mac_address, n.interface, n.source, n.hostname, n.port, n.service,
                    n.first_seen, n.last_seen, n.reporter_device_id, d.hostname AS reporter_hostname,
                    d.client_org_id FROM network_assets n JOIN devices d ON d.device_id=n.reporter_device_id"""
         params: tuple = ()
@@ -841,6 +858,26 @@ class AgentStore:
             query += ' WHERE d.client_org_id = ?'
             params = (client_org_id,)
         query += ' ORDER BY n.last_seen DESC'
+        with self._lock, self._conn() as conn:
+            return [dict(r) for r in conn.execute(query, params).fetchall()]
+
+    def record_network_asset_scan(self, reporter_device_id: str, scan_type: str, scope: str,
+                                  status: str, detail: str) -> None:
+        with self._lock, self._conn() as conn:
+            conn.execute("INSERT INTO network_asset_scans "
+                         "(reporter_device_id, scan_type, scope, status, detail, completed_at) VALUES (?,?,?,?,?,?)",
+                         (reporter_device_id, scan_type, scope, status, detail, int(time.time())))
+
+    def list_network_asset_scans(self, client_org_id: str | None = None) -> list[dict]:
+        query = """SELECT s.*, d.hostname AS reporter_hostname, d.client_org_id
+                   FROM network_asset_scans s JOIN devices d ON d.device_id=s.reporter_device_id"""
+        params: tuple = ()
+        if client_org_id == '':
+            query += ' WHERE d.client_org_id IS NULL'
+        elif client_org_id is not None:
+            query += ' WHERE d.client_org_id = ?'
+            params = (client_org_id,)
+        query += ' ORDER BY s.completed_at DESC LIMIT 50'
         with self._lock, self._conn() as conn:
             return [dict(r) for r in conn.execute(query, params).fetchall()]
 

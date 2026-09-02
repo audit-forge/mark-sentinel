@@ -2,10 +2,13 @@
 import ipaddress
 import platform
 import re
+import shutil
 import subprocess
+import xml.etree.ElementTree as ET
 
 
 _MAC = re.compile(r"^(?:[0-9a-f]{2}[:-]){5}[0-9a-f]{2}$", re.I)
+_AI_PORTS = (11434, 8000, 8001, 8080, 5000, 3000, 7860, 8501, 9000, 6333, 19530)
 
 
 def _asset(ip: str, mac: str = '', interface: str = '', source: str = '') -> dict | None:
@@ -116,3 +119,69 @@ def collect_passive_neighbors(run=subprocess.run, system: str | None = None) -> 
         except (OSError, subprocess.SubprocessError):
             continue
     return list(found.values())
+
+
+def _nmap_hosts(xml_text: str, source: str) -> list[dict]:
+    """Parse Nmap XML into host and AI-service observations."""
+    try:
+        root = ET.fromstring(xml_text)
+    except ET.ParseError:
+        return []
+    results = []
+    for host in root.findall('host'):
+        status = host.find('status')
+        if status is None or status.get('state') != 'up':
+            continue
+        addresses = {a.get('addrtype'): a.get('addr', '') for a in host.findall('address')}
+        mac = addresses.get('mac', '')
+        hostname = next((h.get('name', '') for h in host.findall('./hostnames/hostname') if h.get('name')), '')
+        for addrtype in ('ipv4', 'ipv6'):
+            ip = addresses.get(addrtype, '')
+            asset = _asset(ip, mac, '', source) if ip else None
+            if not asset:
+                continue
+            asset['hostname'] = hostname
+            asset['port'] = 0
+            asset['service'] = ''
+            results.append(asset)
+            for port in host.findall('./ports/port'):
+                state = port.find('state')
+                if state is None or state.get('state') != 'open':
+                    continue
+                service = port.find('service')
+                port_asset = dict(asset)
+                port_asset['port'] = int(port.get('portid', '0') or 0)
+                port_asset['source'] = f"nmap_ai_service:{port_asset['port']}"
+                port_asset['service'] = (service.get('name', '') if service is not None else '')[:64]
+                results.append(port_asset)
+    return results
+
+
+def collect_active_ai_services(cidr: str, run=subprocess.run, which=shutil.which) -> tuple[list[dict], dict]:
+    """Authorized Nmap discovery of one private CIDR and selected AI ports."""
+    try:
+        network = ipaddress.ip_network(cidr, strict=False)
+    except ValueError:
+        return [], {'status': 'failed', 'detail': 'invalid CIDR'}
+    if not network.is_private or network.num_addresses > 1024:
+        return [], {'status': 'failed', 'detail': 'CIDR must be private and contain 1,024 addresses or fewer'}
+    if not which('nmap'):
+        return [], {'status': 'unavailable', 'detail': 'Nmap is not installed on this agent'}
+    base = ['nmap'] + (['-6'] if network.version == 6 else [])
+    try:
+        discovery = run(base + ['-sn', '-oX', '-', str(network)], capture_output=True, text=True, timeout=180, check=False)
+        hosts = _nmap_hosts(discovery.stdout or '', 'nmap_active')
+        addresses = sorted({a['ip_address'] for a in hosts})
+        if not addresses:
+            return [], {'status': 'complete', 'detail': 'No live hosts found'}
+        ports = ','.join(str(port) for port in _AI_PORTS)
+        services = run(base + ['-sT', '-sV', '--version-light', '--open', '--max-retries', '1', '--host-timeout', '15s', '-p', ports, '-oX', '-'] + addresses,
+                       capture_output=True, text=True, timeout=300, check=False)
+        found = _nmap_hosts(services.stdout or '', 'nmap_active')
+        # Preserve host discovery rows even if no selected port is open.
+        merged = {(a['ip_address'], a.get('mac_address', ''), a.get('port', 0), a['source']): a for a in hosts}
+        for asset in found:
+            merged[(asset['ip_address'], asset.get('mac_address', ''), asset.get('port', 0), asset['source'])] = asset
+        return list(merged.values()), {'status': 'complete', 'detail': f'{len(addresses)} live host(s) discovered'}
+    except (OSError, subprocess.SubprocessError) as exc:
+        return [], {'status': 'failed', 'detail': f'Nmap execution failed: {exc}'}

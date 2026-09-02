@@ -1482,6 +1482,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             '/api/fleet/k8s-status': self._api_fleet_k8s_status,
             '/api/fleet/shadow':  self._api_fleet_shadow,
             '/api/fleet/network-assets': self._api_fleet_network_assets,
+            '/api/fleet/network-assets/scans': self._api_fleet_network_asset_scans,
             '/api/fleet/mcp':        self._api_fleet_mcp,
             '/api/fleet/mcp/report': self._api_fleet_mcp_report,
             '/api/fleet/eu-ai-act-report': self._api_eu_ai_act_report,
@@ -1687,6 +1688,8 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self._api_fleet_discover(path[len('/api/fleet/discover/'):])
         elif path == '/api/fleet/network-assets/discover/all':
             self._api_fleet_network_assets_discover_all()
+        elif path.startswith('/api/fleet/network-assets/active-discover/'):
+            self._api_fleet_network_assets_active_discover(path[len('/api/fleet/network-assets/active-discover/'):])
         elif path.startswith('/api/fleet/network-assets/discover/'):
             self._api_fleet_network_assets_discover(path[len('/api/fleet/network-assets/discover/'):])
         elif path.startswith('/api/fleet/shadow/dismiss/'):
@@ -3097,10 +3100,22 @@ load();
             interface = str(result.get('interface', '')).strip()[:128]
             source = str(result.get('source', '')).strip()[:64]
             hostname = str(result.get('hostname', '')).strip()[:255]
+            port = result.get('port', 0)
+            service = str(result.get('service', '')).strip()[:64]
             if not source:
                 continue
-            store.upsert_network_asset(device_id, ip, mac, interface, source, hostname)
+            try:
+                port = int(port)
+            except (TypeError, ValueError):
+                port = 0
+            if not 0 <= port <= 65535:
+                continue
+            store.upsert_network_asset(device_id, ip, mac, interface, source, hostname, port, service)
             stored += 1
+        scan = body.get('scan', {})
+        if isinstance(scan, dict) and scan.get('type'):
+            store.record_network_asset_scan(device_id, str(scan.get('type'))[:64], str(scan.get('scope', ''))[:128],
+                                            str(scan.get('status', 'complete'))[:32], str(scan.get('detail', ''))[:500])
         log.info('passive network inventory: %s reported %d observations', device_id, stored)
         self._json({'status': 'accepted', 'stored': stored})
 
@@ -3134,6 +3149,28 @@ load();
             return
         command_id = _get_store_for_device(device_id).enqueue_command(device_id, 'discover_network_assets')
         self._json({'status': 'queued', 'device_id': device_id, 'command_id': command_id})
+
+    def _api_fleet_network_assets_active_discover(self, device_id: str):
+        """Queue an authorized, bounded Nmap AI-service scan on one agent."""
+        import ipaddress
+        device_id = device_id.strip()
+        length = _content_length(self.headers)
+        try:
+            body = json.loads(self.rfile.read(length)) if length else {}
+            network = ipaddress.ip_network(str(body.get('cidr', '')).strip(), strict=False)
+        except (ValueError, json.JSONDecodeError):
+            self._json({'error': 'valid private CIDR required'}, 400)
+            return
+        if not network.is_private or network.num_addresses > 1024:
+            self._json({'error': 'CIDR must be private and contain 1,024 addresses or fewer'}, 400)
+            return
+        device = self._store().get_device(device_id)
+        scope = self._scoped_client_org()
+        if not device or (scope is not None and device.get('client_org_id') != scope):
+            self._json({'error': 'device not found'}, 404)
+            return
+        command_id = _get_store_for_device(device_id).enqueue_command(device_id, f'discover_network_assets_active:{network}')
+        self._json({'status': 'queued', 'device_id': device_id, 'command_id': command_id, 'cidr': str(network)})
 
     def _api_fleet_live_stats(self):
         """GET /api/fleet/live-stats — lightweight poll: stat counts + device rows HTML."""
@@ -3258,6 +3295,10 @@ load();
         """GET /api/fleet/network-assets — separately stored passive network inventory."""
         assets = self._store().list_network_assets(client_org_id=self._scoped_client_org())
         self._json({'assets': assets, 'count': len(assets)})
+
+    def _api_fleet_network_asset_scans(self):
+        scans = self._store().list_network_asset_scans(client_org_id=self._scoped_client_org())
+        self._json({'scans': scans, 'count': len(scans)})
 
     def _api_fleet_shadow_dismiss(self, shadow_id_str: str):
         """POST /api/fleet/shadow/dismiss/<id|all> — dismiss one or all shadow findings."""
@@ -6640,6 +6681,7 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
       {'<button class="sb-item" id="nav-reseller" onclick="navTo(\'reseller\')">&#127970; MSP View</button>' if current_user_is_reseller else ''}
       <div class="sb-group">Fleet</div>
       <button class="sb-item" id="nav-shadow" onclick="navTo('shadow')">&#9888; Shadow AI</button>
+       <button class="sb-item" id="nav-network-assets" onclick="navTo('network-assets')">&#127760; Network Inventory</button>
       <button class="sb-item" id="nav-inventory" onclick="navTo('inventory')">&#129302; AI Asset Inventory</button>
       <button class="sb-item" id="nav-spend" onclick="navTo('spend')">&#128176; AI Spend</button>
       <button class="sb-item" id="nav-alerts" onclick="navTo('alerts')">&#128276; Alerts <span id="alert-badge" style="display:none;background:#DC2626;color:#fff;border-radius:10px;font-size:10px;padding:1px 6px;margin-left:4px;font-weight:700"></span></button>
@@ -6777,6 +6819,48 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
     </div>
   </div>
   {_build_shadow_section(shadow, ts_now)}
+  </div>
+
+  <div class="page" id="page-network-assets">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:8px">
+      <div>
+        <div class="sec-hdr" style="margin:0;padding:0">Passive + Active Network Inventory</div>
+        <div style="font-size:12px;color:#6B7280;margin-top:4px">Passive neighbor-cache observations and authorized active discovery from fleet agents.</div>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <select id="network-asset-device" class="form-select" style="font-size:12px;padding:4px 8px;min-width:180px">
+          <option value="">Select agent</option>{asset_options}
+        </select>
+        <button class="scan-btn" onclick="discoverNetworkAssets(false,this)" style="font-size:12px;color:#4F46E5;border-color:#E5E7EB">Collect Passive</button>
+        <button class="scan-btn" onclick="discoverNetworkAssets(true,this)" style="font-size:12px;color:#6B7280;border-color:#E5E7EB">Collect From All</button>
+      </div>
+    </div>
+
+    <div style="background:#fff;border:1px solid #E5E7EB;border-radius:8px;padding:14px 16px;margin-bottom:18px;box-shadow:0 1px 3px rgba(0,0,0,0.06)">
+      <div style="font-size:12px;font-weight:600;color:#374151;text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">Authorized Active Scan</div>
+      <div style="font-size:12px;color:#6B7280;margin-bottom:10px">Scan a private CIDR through the selected agent. Ranges are limited to 1,024 addresses.</div>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <input id="network-asset-cidr" type="text" placeholder="Private CIDR, e.g. 192.168.1.0/24" aria-label="Private CIDR to scan"
+          style="width:260px;background:#F9FAFB;border:1px solid #D1D5DB;border-radius:4px;color:#111827;font-size:12px;font-family:monospace;padding:5px 10px;outline:none" />
+        <button class="scan-btn" onclick="discoverNetworkAssetsActive(this)" style="font-size:12px;color:#DC2626;border-color:#FECACA">Run Active Scan</button>
+      </div>
+    </div>
+
+    <div class="sec-hdr" style="margin-bottom:8px">Observed Network Assets <span style="font-size:11px;font-weight:500;color:#9CA3AF">({len(network_assets)})</span></div>
+    <div style="overflow-x:auto">
+      <table class="dev-table" style="min-width:760px">
+        <thead><tr><th>IP Address</th><th>MAC Address</th><th>Hostname</th><th>Interface</th><th>Source</th><th>Reporting Agent</th><th>Last Seen</th></tr></thead>
+        <tbody>{asset_rows}</tbody>
+      </table>
+    </div>
+
+    <div style="border-top:1px solid #E5E7EB;padding-top:16px">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px">
+        <div class="sec-hdr" style="margin:0">Scan History</div>
+        <button class="scan-btn" onclick="loadNetworkAssetScans()" style="font-size:12px;color:#6B7280;border-color:#E5E7EB">Refresh</button>
+      </div>
+      <div id="network-asset-scans" style="font-size:13px;color:#9CA3AF;padding:12px 0">Open this page to load scan history.</div>
+    </div>
   </div>
 
   <div class="page" id="page-alerts">
@@ -7495,6 +7579,7 @@ function navTo(page) {{
   if (page === 'siem') {{ loadSiemConfig(); loadPsaClientOrgs(); loadPsaConfig(); }}
   if (page === 'users') {{ loadUsers(); loadCustomerInfo(); }}
   if (page === 'alerts') {{ loadActiveIssues(); loadAlertEvents(); }}
+   if (page === 'network-assets') {{ loadNetworkAssetScans(); }}
   if (page === 'spend') {{ loadSpend(); }}
   if (page === 'probe') {{
     const fr = document.getElementById('probe-iframe');
@@ -8262,6 +8347,53 @@ async function discoverNetworkAssets(all, btn) {{
     setTimeout(() => location.reload(), 30000);
   }} catch (e) {{ alert('Passive collection failed: ' + e.message); btn.textContent = label; }}
   finally {{ setTimeout(() => {{ btn.disabled = false; btn.textContent = label; }}, 3000); }}
+}}
+
+async function discoverNetworkAssetsActive(btn) {{
+  const device = document.getElementById('network-asset-device')?.value;
+  const cidr = document.getElementById('network-asset-cidr')?.value.trim();
+  if (!device) {{ alert('Select an agent first.'); return; }}
+  if (!cidr) {{ alert('Enter a private CIDR first.'); return; }}
+  const label = btn.textContent;
+  btn.disabled = true; btn.textContent = 'Queuing...';
+  try {{
+    const resp = await fetch('/api/fleet/network-assets/active-discover/' + encodeURIComponent(device), {{
+      method: 'POST', headers: {{'Content-Type': 'application/json'}}, body: JSON.stringify({{cidr}}),
+    }});
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.error || 'request failed');
+    btn.textContent = 'Queued';
+    setTimeout(loadNetworkAssetScans, 1000);
+  }} catch (e) {{ alert('Active scan failed: ' + e.message); }}
+  finally {{ setTimeout(() => {{ btn.disabled = false; btn.textContent = label; }}, 3000); }}
+}}
+
+async function loadNetworkAssetScans() {{
+  const container = document.getElementById('network-asset-scans');
+  if (!container) return;
+  container.textContent = 'Loading...';
+  try {{
+    const resp = await fetch('/api/fleet/network-assets/scans');
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.error || 'request failed');
+    const scans = data.scans || [];
+    if (!scans.length) {{ container.textContent = 'No completed network inventory scans yet.'; return; }}
+    const table = document.createElement('table');
+    table.className = 'dev-table';
+    table.style.marginBottom = '0';
+    table.innerHTML = '<thead><tr><th>Completed</th><th>Agent</th><th>Type</th><th>Scope</th><th>Status</th><th>Detail</th></tr></thead>';
+    const body = document.createElement('tbody');
+    scans.forEach(scan => {{
+      const row = document.createElement('tr');
+      const completed = scan.completed_at ? new Date(scan.completed_at * 1000).toLocaleString() : 'Unknown';
+      [completed, scan.reporter_hostname || scan.reporter_device_id || '-', scan.scan_type || '-', scan.scope || '-', scan.status || '-', scan.detail || '-'].forEach(value => {{
+        const cell = document.createElement('td'); cell.textContent = value; row.appendChild(cell);
+      }});
+      body.appendChild(row);
+    }});
+    table.appendChild(body);
+    container.replaceChildren(table);
+  }} catch (e) {{ container.textContent = 'Unable to load scan history: ' + e.message; }}
 }}
 
 async function dismissShadow(id) {{

@@ -1,5 +1,6 @@
 """Focused coverage for passive network asset inventory boundaries."""
-from network_inventory import collect_passive_neighbors, parse_arp, parse_ip_neighbors, parse_ndp, parse_windows_neighbors
+from network_inventory import (collect_active_ai_services, collect_passive_neighbors, parse_arp,
+                               parse_ip_neighbors, parse_ndp, parse_windows_neighbors)
 from storage import AgentStore
 
 
@@ -51,3 +52,27 @@ def test_removing_reporter_removes_its_network_assets(tmp_path):
     store.upsert_network_asset('a', '192.0.2.10', '', 'eth0', 'linux_ipv4_neighbor')
     store.delete_device('a')
     assert store.list_network_assets() == []
+
+
+def test_active_scan_collects_hosts_and_selected_ai_ports_only():
+    discovery_xml = '''<nmaprun><host><status state="up"/><address addr="192.168.1.20" addrtype="ipv4"/><address addr="aa:bb:cc:dd:ee:ff" addrtype="mac"/><hostnames><hostname name="ollama.local"/></hostnames></host></nmaprun>'''
+    services_xml = '''<nmaprun><host><status state="up"/><address addr="192.168.1.20" addrtype="ipv4"/><address addr="aa:bb:cc:dd:ee:ff" addrtype="mac"/><hostnames><hostname name="ollama.local"/></hostnames><ports><port protocol="tcp" portid="11434"><state state="open"/><service name="http"/></port></ports></host></nmaprun>'''
+    commands = []
+    class Result:
+        def __init__(self, stdout): self.stdout = stdout
+    def run(command, **kwargs):
+        commands.append(command)
+        return Result(discovery_xml if '-sn' in command else services_xml)
+    assets, scan = collect_active_ai_services('192.168.1.0/24', run=run, which=lambda _: '/usr/bin/nmap')
+    assert scan['status'] == 'complete'
+    assert any(a.get('port') == 11434 and a['source'] == 'nmap_ai_service:11434' for a in assets)
+    assert any(a['source'] == 'nmap_active' and a['hostname'] == 'ollama.local' for a in assets)
+    assert commands[0][1:3] == ['-sn', '-oX']
+    assert '-sT' in commands[1] and any('11434' in value for value in commands[1])
+
+
+def test_active_scan_refuses_public_or_unavailable_scans():
+    assets, scan = collect_active_ai_services('8.8.8.0/24', which=lambda _: '/usr/bin/nmap')
+    assert not assets and scan['status'] == 'failed'
+    assets, scan = collect_active_ai_services('192.168.1.0/24', which=lambda _: None)
+    assert not assets and scan['status'] == 'unavailable'

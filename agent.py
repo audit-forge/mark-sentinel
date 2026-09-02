@@ -368,12 +368,13 @@ def report_discovery(results: list, config: dict, device_id: str, hostname: str)
     return False
 
 
-def report_network_assets(results: list, config: dict, device_id: str, hostname: str) -> bool:
+def report_network_assets(results: list, config: dict, device_id: str, hostname: str,
+                          scan: dict | None = None) -> bool:
     """POST passive neighbor-cache observations to the separate asset inventory."""
     server = config.get('server', '').rstrip('/')
     if not server:
         return True
-    payload = json.dumps({'device_id': device_id, 'hostname': hostname, 'results': results}).encode()
+    payload = json.dumps({'device_id': device_id, 'hostname': hostname, 'results': results, 'scan': scan or {}}).encode()
     headers = {'Content-Type': 'application/json', 'Content-Length': str(len(payload)),
                'User-Agent': f'sentinel-agent/{VERSION}'}
     if config.get('token'):
@@ -1706,6 +1707,16 @@ def main() -> None:
                     report_network_assets(collect_passive_neighbors(), cfg, device_id, hostname)
                 except Exception as e:
                     log.error('Passive network asset discovery error: %s', e)
+            elif cmd and cmd.startswith('discover_network_assets_active:'):
+                try:
+                    from network_inventory import collect_active_ai_services
+                    cidr = cmd.split(':', 1)[1]
+                    log.info('Authorized active AI-service discovery triggered for %s', cidr)
+                    results, scan = collect_active_ai_services(cidr)
+                    scan.update({'type': 'active_ai_services', 'scope': cidr})
+                    report_network_assets(results, cfg, device_id, hostname, scan)
+                except Exception as e:
+                    log.error('Active network asset discovery error: %s', e)
             elif cmd == 'discover_mcp':
                 try:
                     from discovery import discover_mcp_servers, expand_subnets, _local_subnet_hosts
