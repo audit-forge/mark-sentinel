@@ -4,7 +4,6 @@ import platform
 import re
 import shutil
 import subprocess
-import xml.etree.ElementTree as ET
 
 
 _MAC = re.compile(r"^(?:[0-9a-f]{2}[:-]){5}[0-9a-f]{2}$", re.I)
@@ -123,18 +122,15 @@ def collect_passive_neighbors(run=subprocess.run, system: str | None = None) -> 
 
 def _nmap_hosts(xml_text: str, source: str) -> list[dict]:
     """Parse Nmap XML into host and AI-service observations."""
-    try:
-        root = ET.fromstring(xml_text)
-    except ET.ParseError:
-        return []
     results = []
-    for host in root.findall('host'):
-        status = host.find('status')
-        if status is None or status.get('state') != 'up':
+    for host in re.findall(r'<host\b[^>]*>(.*?)</host>', xml_text, re.DOTALL):
+        if not re.search(r'<status\b[^>]*\bstate="up"', host):
             continue
-        addresses = {a.get('addrtype'): a.get('addr', '') for a in host.findall('address')}
+        addresses = {kind: address for address, kind in re.findall(
+            r'<address\b[^>]*\baddr="([^"]+)"[^>]*\baddrtype="([^"]+)"', host)}
         mac = addresses.get('mac', '')
-        hostname = next((h.get('name', '') for h in host.findall('./hostnames/hostname') if h.get('name')), '')
+        hostname_match = re.search(r'<hostname\b[^>]*\bname="([^"]+)"', host)
+        hostname = hostname_match.group(1) if hostname_match else ''
         for addrtype in ('ipv4', 'ipv6'):
             ip = addresses.get(addrtype, '')
             asset = _asset(ip, mac, '', source) if ip else None
@@ -144,15 +140,14 @@ def _nmap_hosts(xml_text: str, source: str) -> list[dict]:
             asset['port'] = 0
             asset['service'] = ''
             results.append(asset)
-            for port in host.findall('./ports/port'):
-                state = port.find('state')
-                if state is None or state.get('state') != 'open':
+            for port_id, port_body in re.findall(r'<port\b[^>]*\bportid="(\d+)"[^>]*>(.*?)</port>', host, re.DOTALL):
+                if not re.search(r'<state\b[^>]*\bstate="open"', port_body):
                     continue
-                service = port.find('service')
                 port_asset = dict(asset)
-                port_asset['port'] = int(port.get('portid', '0') or 0)
+                port_asset['port'] = int(port_id)
                 port_asset['source'] = f"nmap_ai_service:{port_asset['port']}"
-                port_asset['service'] = (service.get('name', '') if service is not None else '')[:64]
+                service_match = re.search(r'<service\b[^>]*\bname="([^"]+)"', port_body)
+                port_asset['service'] = (service_match.group(1) if service_match else '')[:64]
                 results.append(port_asset)
     return results
 
