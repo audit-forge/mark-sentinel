@@ -6638,6 +6638,8 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
 .sb-footer{{padding:14px 16px;border-top:1px solid rgba(255,255,255,0.07);display:flex;flex-direction:column;gap:7px}}
 .sb-footer a{{font-size:11px;color:#6B7280;text-decoration:none}}
 .sb-footer a:hover{{color:#D1D5DB}}
+.sb-help{{font-size:13px;font-weight:600;color:#D1D5DB;background:rgba(79,70,229,0.15);border:1px solid rgba(79,70,229,0.3);border-radius:6px;padding:7px 10px;text-align:center;transition:background .12s,color .12s}}
+.sb-help:hover{{background:rgba(79,70,229,0.25);color:#fff}}
 .page{{display:none}}
 .page.active{{display:block}}
 #kpi-bar{{margin-bottom:20px}}
@@ -6771,7 +6773,7 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
     </nav>
     <div class="sb-footer">
       {f'<span style="font-size:11px;color:#9CA3AF;word-break:break-all">{current_user_email}</span>' if current_user_email else ''}
-      <a href="/academy" target="_blank">Academy</a>
+      <a href="/academy" target="_blank" class="sb-help">&#127891; Academy</a>
       <a href="https://github.com/audit-forge/mark-sentinel/blob/main/docs/WINDOWS_AGENT_BINARY_RECOVERY.md" target="_blank" title="Windows agent offline / missing agent.exe recovery">Windows Agent Recovery</a>
       <a href="/logout" style="color:#ef4444">&#x2192; Sign Out</a>
     </div>
