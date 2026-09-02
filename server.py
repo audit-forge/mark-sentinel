@@ -6454,6 +6454,15 @@ def _normalize_network_assets(network_assets: list[dict]) -> list[dict]:
     return sorted(network_hosts.values(), key=lambda host: host['last_seen'], reverse=True)
 
 
+def _network_host_summary(values: set[str], limit: int = 3) -> tuple[str, str]:
+    """Compact long evidence lists for the dashboard while preserving full detail."""
+    ordered = sorted(value for value in values if value)
+    full = ', '.join(ordered)
+    if len(ordered) <= limit:
+        return full or '—', full
+    return f"{', '.join(ordered[:limit])} +{len(ordered) - limit} more", full
+
+
 def _build_fleet_html(devices: list[dict], shadow: list[dict] | None = None,
                       mcp: list[dict] | None = None,
                       network_assets: list[dict] | None = None,
@@ -6485,16 +6494,23 @@ def _build_fleet_html(devices: list[dict], shadow: list[dict] | None = None,
     # MAC, or per reporter/IP when no MAC is available. This merges IPv4,
     # IPv6, and distinct collection sources without conflating separate sites.
     network_hosts = _normalize_network_assets(network_assets)
-    asset_rows = ''.join(
-        '<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td></tr>'.format(
-            _html.escape(', '.join(sorted(h['ips']))), _html.escape(h['mac'] or '—'),
-            _html.escape(', '.join(sorted(h['hostnames'])) or '—'), _html.escape(', '.join(sorted(h['interfaces'])) or '—'),
-            _html.escape(', '.join(sorted(h['sources']))),
-            _html.escape(', '.join(sorted(h['services'])) or '—'),
-            _html.escape(', '.join(sorted(h['reporters']))), _age(h['last_seen']),
-        ) for h in network_hosts)
+    current_hosts = [host for host in network_hosts if ts_now - host['last_seen'] <= 7 * 86400]
+    historical_hosts = [host for host in network_hosts if host not in current_hosts]
+
+    def _host_rows(hosts: list[dict]) -> str:
+        return ''.join(
+            '<tr><td title="{}">{}</td><td>{}</td><td title="{}">{}</td><td>{}</td><td>{}</td><td>{}</td><td title="{}">{}</td><td>{}</td></tr>'.format(
+                _html.escape(_network_host_summary(h['ips'])[1], quote=True), _html.escape(_network_host_summary(h['ips'])[0]),
+                _html.escape(h['mac'] or '—'), _html.escape(_network_host_summary(h['hostnames'])[1], quote=True),
+                _html.escape(_network_host_summary(h['hostnames'])[0]), _html.escape(_network_host_summary(h['interfaces'])[0]),
+                _html.escape(_network_host_summary(h['sources'])[0]), _html.escape(_network_host_summary(h['services'])[0]),
+                _html.escape(_network_host_summary(h['reporters'])[1], quote=True), _html.escape(_network_host_summary(h['reporters'])[0]),
+                _age(h['last_seen']),
+            ) for h in hosts)
+    asset_rows = _host_rows(current_hosts)
+    historical_asset_rows = _host_rows(historical_hosts)
     if not asset_rows:
-        asset_rows = '<tr><td colspan="8" class="empty">No passive neighbor-cache observations yet.</td></tr>'
+        asset_rows = '<tr><td colspan="8" class="empty">No hosts observed in the last 7 days. Run a passive collection or an authorized active scan.</td></tr>'
     asset_options = ''.join('<option value="{}">{}</option>'.format(
         _html.escape(d.get('device_id', ''), quote=True), _html.escape(d.get('hostname', '') or d.get('device_id', ''))
     ) for d in devices)
@@ -6873,17 +6889,28 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
   </div>
 
   <div class="page" id="page-network-assets">
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:8px">
+    <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:18px;flex-wrap:wrap;gap:14px">
       <div>
-        <div class="sec-hdr" style="margin:0;padding:0">Passive + Active Network Inventory</div>
-        <div style="font-size:12px;color:#6B7280;margin-top:4px">Passive neighbor-cache observations and authorized active discovery from fleet agents.</div>
+        <div class="sec-hdr" style="margin:0;padding:0">Network Inventory</div>
+        <div style="font-size:12px;color:#6B7280;margin-top:4px">Current hosts observed by your fleet. Passive collection is traffic-free; active scans are explicit and bounded.</div>
       </div>
+      <a class="scan-btn" href="/api/fleet/network-assets.csv" style="font-size:12px;color:#4F46E5;border-color:#C7D2FE;text-decoration:none">Export CSV</a>
+    </div>
+
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px;margin-bottom:18px">
+      <div style="background:#fff;border:1px solid #E5E7EB;border-radius:7px;padding:13px 15px"><div style="font-size:23px;font-weight:700;color:#111827">{len(current_hosts)}</div><div style="font-size:11px;color:#6B7280;text-transform:uppercase;letter-spacing:.06em;margin-top:3px">Current hosts</div></div>
+      <div style="background:#fff;border:1px solid #E5E7EB;border-radius:7px;padding:13px 15px"><div style="font-size:23px;font-weight:700;color:#111827">{sum(len(h['services']) for h in current_hosts)}</div><div style="font-size:11px;color:#6B7280;text-transform:uppercase;letter-spacing:.06em;margin-top:3px">AI-related ports</div></div>
+      <div style="background:#fff;border:1px solid #E5E7EB;border-radius:7px;padding:13px 15px"><div style="font-size:23px;font-weight:700;color:#6B7280">{len(historical_hosts)}</div><div style="font-size:11px;color:#6B7280;text-transform:uppercase;letter-spacing:.06em;margin-top:3px">Historical hosts</div></div>
+    </div>
+
+    <div style="background:#fff;border:1px solid #E5E7EB;border-radius:8px;padding:14px 16px;margin-bottom:18px;box-shadow:0 1px 3px rgba(0,0,0,0.04)">
+      <div style="font-size:12px;font-weight:600;color:#374151;margin-bottom:9px">Passive Collection</div>
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
         <select id="network-asset-device" class="form-select" style="font-size:12px;padding:4px 8px;min-width:180px">
           <option value="">Select agent</option>{asset_options}
         </select>
         <button class="scan-btn" onclick="discoverNetworkAssets(false,this)" style="font-size:12px;color:#4F46E5;border-color:#E5E7EB">Collect Passive</button>
-        <button class="scan-btn" onclick="discoverNetworkAssets(true,this)" style="font-size:12px;color:#6B7280;border-color:#E5E7EB">Collect From All</button>
+        <button class="scan-btn" onclick="discoverNetworkAssets(true,this)" style="font-size:12px;color:#6B7280;border-color:#E5E7EB">All Agents</button>
       </div>
     </div>
 
@@ -6897,16 +6924,18 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
       </div>
     </div>
 
-    <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px">
-      <div class="sec-hdr" style="margin:0">Observed Network Assets <span style="font-size:11px;font-weight:500;color:#9CA3AF">({len(network_hosts)})</span></div>
-      <a class="scan-btn" href="/api/fleet/network-assets.csv" style="font-size:12px;color:#4F46E5;border-color:#C7D2FE;text-decoration:none">Export CSV</a>
-    </div>
+    <div class="sec-hdr" style="margin-bottom:8px">Current Inventory <span style="font-size:11px;font-weight:500;color:#9CA3AF">Seen in the last 7 days</span></div>
     <div style="overflow-x:auto">
       <table class="dev-table" style="min-width:760px">
         <thead><tr><th>IP Address(es)</th><th>MAC Address</th><th>Hostname</th><th>Interface</th><th>Source</th><th>AI Ports</th><th>Reporting Agent</th><th>Last Seen</th></tr></thead>
         <tbody>{asset_rows}</tbody>
       </table>
     </div>
+
+    <details style="margin-top:14px;margin-bottom:20px">
+      <summary style="cursor:pointer;font-size:12px;color:#6B7280">Show {len(historical_hosts)} historical hosts not seen in the last 7 days</summary>
+      <div style="overflow-x:auto;margin-top:10px"><table class="dev-table" style="min-width:760px"><thead><tr><th>IP Address(es)</th><th>MAC Address</th><th>Hostname</th><th>Interface</th><th>Source</th><th>AI Ports</th><th>Reporting Agent</th><th>Last Seen</th></tr></thead><tbody>{historical_asset_rows or '<tr><td colspan="8" class="empty">No historical hosts.</td></tr>'}</tbody></table></div>
+    </details>
 
     <div style="border-top:1px solid #E5E7EB;padding-top:16px">
       <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px">
