@@ -659,6 +659,7 @@ def self_update(config: dict) -> bool:
             if staged_agent_binary is None or live_agent_binary is None:
                 log.error('self_update: staged agent binary is missing')
                 return False
+            _backup_agent_binary()
             os.replace(staged_agent_binary, live_agent_binary)
         # If a compiled agent binary was shipped, exec it directly.
         # Otherwise fall back to re-running with the Python interpreter.
@@ -679,27 +680,112 @@ def _update_check_due(last_check: float, now: float) -> bool:
     return last_check <= 0 or now - last_check >= _UPDATE_CHECK_INTERVAL
 
 
+def _agent_binary_paths() -> tuple[Path, Path, Path]:
+    """Return (live, staged, backup) paths for the compiled agent binary."""
+    live = ROOT / ('agent.exe' if sys.platform == 'win32' else 'agent')
+    staged = ROOT / ('agent.exe.new' if sys.platform == 'win32' else 'agent.new')
+    backup = ROOT / ('agent.exe.bak' if sys.platform == 'win32' else 'agent.bak')
+    return live, staged, backup
+
+
+def _backup_agent_binary() -> bool:
+    """Copy the current live agent binary to agent.exe.bak / agent.bak."""
+    live, _, backup = _agent_binary_paths()
+    try:
+        if live.is_file() and live.stat().st_size > 0:
+            shutil.copy2(str(live), str(backup))
+            return True
+    except Exception as e:
+        log.warning('self_update: could not back up agent binary: %s', e)
+    return False
+
+
+def _restore_agent_binary() -> bool:
+    """Repair a missing live agent binary from staged .new or .bak files.
+
+    This is the customer-side safety net: if an AV quarantine, interrupted
+    update, or failed rename leaves agent.exe missing, the next service
+    start (or daemon startup) can recover without backend intervention.
+    """
+    live, staged, backup = _agent_binary_paths()
+    if live.is_file() and live.stat().st_size > 0:
+        return True
+    sources = [staged, backup]
+    # Also consider dated backups left by the installer/older updates.
+    sources += sorted(ROOT.glob('agent.exe.*.bak' if sys.platform == 'win32' else 'agent.*.bak'), reverse=True)
+    for src in sources:
+        try:
+            if src.is_file() and src.stat().st_size > 0:
+                shutil.copy2(str(src), str(live))
+                live.chmod(0o755)
+                log.info('self_update: restored missing agent binary from %s', src)
+                return True
+        except Exception as e:
+            log.warning('self_update: failed to restore agent binary from %s: %s', src, e)
+    return False
+
+
 def _restart_windows_service_after_update(staged: Path | None, live: Path | None) -> bool:
-    """Atomically activate a staged Windows agent through the service manager."""
+    """Atomically activate a staged Windows agent through the service manager.
+
+    The batch script:
+      1. Backs up the current live binary.
+      2. Stops the service and waits for the lock to release.
+      3. Moves the staged binary into place.
+      4. If the move fails or leaves agent.exe missing, restores from backup.
+      5. Starts the service only after verifying agent.exe exists.
+
+    This prevents the stranded-binary state where agent.exe is missing and
+    customers cannot start the service without manual repair.
+    """
     if staged is None or live is None or not staged.is_file():
         log.error('self_update: staged Windows agent binary is missing')
         return False
+    _backup_agent_binary()
     script = ROOT / 'activate-agent-update.cmd'
     script.write_text(
         '@echo off\r\n'
+        'setlocal enabledelayedexpansion\r\n'
+        f'set "LIVE={live}"\r\n'
+        f'set "STAGED={staged}"\r\n'
+        f'set "BACKUP={live}.bak"\r\n'
+        f'set "SVC={_WINDOWS_SERVICE_NAME}"\r\n'
+        'set "REPAIRED=0"\r\n'
+        '# Backup current binary before touching it\r\n'
+        'if exist "%LIVE%" copy /y "%LIVE%" "%BACKUP%" >nul 2>&1\r\n'
+        '# Stop the service\r\n'
         f'sc stop {_WINDOWS_SERVICE_NAME} >nul 2>&1\r\n'
         f'schtasks /end /tn {_WINDOWS_SERVICE_NAME} >nul 2>&1\r\n'
-        'timeout /t 3 /nobreak >nul\r\n'
-        f'move /y "{staged}" "{live}" >nul\r\n'
-        'if not errorlevel 1 goto :start\r\n'
-        # Never strand the installed agent if replacement is blocked by AV or a lock.
-        f'sc start {_WINDOWS_SERVICE_NAME} >nul 2>&1\r\n'
-        f'schtasks /run /tn {_WINDOWS_SERVICE_NAME} >nul 2>&1\r\n'
-        'exit /b 1\r\n'
-        ':start\r\n'
-        f'sc start {_WINDOWS_SERVICE_NAME} >nul 2>&1\r\n'
-        f'schtasks /run /tn {_WINDOWS_SERVICE_NAME} >nul 2>&1\r\n'
-        'del "%~f0"\r\n',
+        ':wait_stop\r\n'
+        'timeout /t 1 /nobreak >nul\r\n'
+        f'sc query {_WINDOWS_SERVICE_NAME} | find "STOPPED" >nul\r\n'
+        'if errorlevel 1 goto wait_stop\r\n'
+        '# Attempt the swap\r\n'
+        'move /y "%STAGED%" "%LIVE%" >nul 2>&1\r\n'
+        'if not exist "%LIVE%" set "REPAIRED=1"\r\n'
+        'if errorlevel 1 set "REPAIRED=1"\r\n'
+        '# If swap failed or live binary is gone, restore from backup\r\n'
+        'if "%REPAIRED%"=="1" (\r\n'
+        '    if exist "%BACKUP%" (\r\n'
+        '        copy /y "%BACKUP%" "%LIVE%" >nul 2>&1\r\n'
+        '        echo %date% %time% [WARN] Update swap failed; restored agent.exe from backup >> "%~dp0arckon-agent.log"\r\n'
+        '    ) else (\r\n'
+        '        echo %date% %time% [ERROR] Update swap failed and no backup exists >> "%~dp0arckon-agent.log"\r\n'
+        '    )\r\n'
+        ')\r\n'
+        '# Ensure the binary is executable (best effort)\r\n'
+        'if exist "%LIVE%" icacls "%LIVE%" /grant Everyone:RX >nul 2>&1\r\n'
+        '# Start the service only if we have a binary\r\n'
+        'if exist "%LIVE%" (\r\n'
+        f'    sc start {_WINDOWS_SERVICE_NAME} >nul 2>&1\r\n'
+        f'    schtasks /run /tn {_WINDOWS_SERVICE_NAME} >nul 2>&1\r\n'
+        '    del "%~f0"\r\n'
+        '    exit /b 0\r\n'
+        ') else (\r\n'
+        '    echo %date% %time% [ERROR] Cannot start service: agent.exe missing after update >> "%~dp0arckon-agent.log"\r\n'
+        '    del "%~f0"\r\n'
+        '    exit /b 1\r\n'
+        ')\r\n',
         encoding='utf-8',
     )
     try:
@@ -1553,6 +1639,16 @@ def main() -> None:
 
         device_id = _device_id()
         hostname  = os.environ.get('SENTINEL_HOSTNAME', '').strip() or socket.gethostname()
+
+        # Self-healing: if the compiled agent binary is missing (e.g. Windows AV
+        # quarantine or interrupted self-update), try to restore it before the
+        # daemon loop begins. On Windows this also helps when the service is
+        # restarted by NSSM and agent.exe has been stranded.
+        if sys.platform == 'win32':
+            if not _restore_agent_binary():
+                log.error('Daemon startup: agent binary is missing and cannot be restored')
+        else:
+            _restore_agent_binary()
 
         # Startup jitter: stagger first scan across fleet so mass reboots don't
         # create a thundering herd. Capped at half the scan interval.

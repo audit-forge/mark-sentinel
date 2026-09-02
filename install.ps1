@@ -239,6 +239,56 @@ $acl.AddAccessRule($rule1)
 $acl.AddAccessRule($rule2)
 Set-Acl -Path $ConfigFile -AclObject $acl
 
+# -- Create customer-facing repair script --------------------------------------
+# If a self-update is interrupted by AV/EDR, the service may fail to start
+# because agent.exe is missing. This script restores agent.exe from the
+# staged .new file or backup and restarts the service without backend access.
+$RepairScript = "$ConfigDir\repair-arckon.cmd"
+$RepairBody = @"
+@echo off
+setlocal enabledelayedexpansion
+set "INSTALLDIR=C:\Program Files\Arckon"
+set "LIVE=%INSTALLDIR%\agent.exe"
+set "STAGED=%INSTALLDIR%\agent.exe.new"
+set "BACKUP=%INSTALLDIR%\agent.exe.bak"
+set "SVC=ArckonAgent"
+set "REPAIRED=0"
+
+if exist "%LIVE%" goto :check_service
+
+if exist "%STAGED%" (
+    copy /y "%STAGED%" "%LIVE%" >nul 2>&1
+    if exist "%LIVE%" set REPAIRED=1
+    echo %date% %time% [INFO] Restored agent.exe from agent.exe.new >> "$ConfigDir\arckon-agent.log"
+)
+
+if "%REPAIRED%"=="0" if exist "%BACKUP%" (
+    copy /y "%BACKUP%" "%LIVE%" >nul 2>&1
+    if exist "%LIVE%" set REPAIRED=1
+    echo %date% %time% [INFO] Restored agent.exe from agent.exe.bak >> "$ConfigDir\arckon-agent.log"
+)
+
+if "%REPAIRED%"=="0" (
+    echo %date% %time% [ERROR] Cannot repair agent.exe: no staged or backup binary found >> "$ConfigDir\arckon-agent.log"
+    echo No staged or backup agent.exe found. Re-run the Arckon installer.
+    exit /b 1
+)
+
+:check_service
+sc start "%SVC%" >nul 2>&1
+timeout /t 3 /nobreak >nul
+sc query "%SVC%" | find "RUNNING" >nul
+if errorlevel 1 (
+    echo %date% %time% [WARN] Service did not start automatically; retrying... >> "$ConfigDir\arckon-agent.log"
+    sc start "%SVC%" >nul 2>&1
+)
+echo Arckon agent repaired. If the service is still stopped, restart the computer or run:
+echo   powershell -Command "Start-Service ArckonAgent"
+exit /b 0
+"@
+[System.IO.File]::WriteAllText($RepairScript, $RepairBody, $Utf8NoBom)
+Write-OK "Created repair script: $RepairScript"
+
 # -- Verify agent files are present --------------------------------------------
 
 $AgentExe = "$InstallDir\agent.exe"
@@ -332,9 +382,25 @@ if (-not $NoService) {
         & $nssmPath start $ServiceName
         Write-OK "Service registered and started via NSSM"
 
+        # Watchdog: run the repair script every 5 minutes so a stranded or
+        # quarantined agent.exe is restored automatically without customer action.
+        Write-Step "Registering Arckon repair watchdog task ..."
+        $taskName = "ArckonRepairWatchdog"
+        $taskAction = New-ScheduledTaskAction -Execute "cmd.exe" -Argument "/c `"$RepairScript`""
+        $taskTrigger = New-ScheduledTaskTrigger -Once -At (Get-Date) -RepetitionInterval (New-TimeSpan -Minutes 5) -RepetitionDuration (New-TimeSpan -Days 3650)
+        $taskPrincipal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount -RunLevel Highest
+        $taskSettings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable
+        try {
+            Register-ScheduledTask -TaskName $taskName -Action $taskAction -Trigger $taskTrigger -Principal $taskPrincipal -Settings $taskSettings -Force | Out-Null
+            Write-OK "Repair watchdog registered (runs every 5 minutes)"
+        } catch {
+            Write-Warn "Could not register repair watchdog: $_"
+        }
+
     } else {
         throw "NSSM is required for a Windows service. Installation stopped rather than creating a non-SCM-compliant PowerShell service wrapper."
     }
+
 
     # The product was formerly branded Sentinel. Remove only the obsolete
     # service after the canonical ArckonAgent service has been registered.
@@ -420,6 +486,7 @@ Write-Host "Arckon Agent installed successfully." -ForegroundColor Green
 Write-Host "  Install dir : $InstallDir"
 Write-Host "  Config      : $ConfigFile"
 Write-Host "  Shortcut    : $ShortcutPath"
+Write-Host "  Repair tool : $RepairScript"
 Write-Host ""
 if ($Server -eq "" -or $Token -eq "") {
     Write-Host "Edit $ConfigFile to set your server URL and token, then restart the service." -ForegroundColor Yellow

@@ -197,3 +197,68 @@ def test_self_update_uses_the_packaged_windows_agent_filename(release_key, monke
 
     assert agent.self_update({'server': 'https://updates.example.test'}) is True
     assert activated == [(tmp_path / 'agent.new', tmp_path / 'agent')]
+
+
+def test_restore_agent_binary_repairs_missing_live_from_staged(tmp_path, monkeypatch):
+    monkeypatch.setattr(agent.sys, 'platform', 'win32')
+    (tmp_path / 'agent.exe.new').write_bytes(b'staged binary')
+    old_root = agent.ROOT
+    try:
+        agent.ROOT = tmp_path
+        assert agent._restore_agent_binary() is True
+        assert (tmp_path / 'agent.exe').read_bytes() == b'staged binary'
+    finally:
+        agent.ROOT = old_root
+
+
+def test_restore_agent_binary_repairs_missing_live_from_backup(tmp_path, monkeypatch):
+    monkeypatch.setattr(agent.sys, 'platform', 'win32')
+    (tmp_path / 'agent.exe.bak').write_bytes(b'backup binary')
+    old_root = agent.ROOT
+    try:
+        agent.ROOT = tmp_path
+        assert agent._restore_agent_binary() is True
+        assert (tmp_path / 'agent.exe').read_bytes() == b'backup binary'
+    finally:
+        agent.ROOT = old_root
+
+
+def test_restore_agent_binary_is_noop_when_live_exists(tmp_path, monkeypatch):
+    monkeypatch.setattr(agent.sys, 'platform', 'win32')
+    (tmp_path / 'agent.exe').write_bytes(b'live binary')
+    (tmp_path / 'agent.exe.new').write_bytes(b'staged binary')
+    old_root = agent.ROOT
+    try:
+        agent.ROOT = tmp_path
+        assert agent._restore_agent_binary() is True
+        assert (tmp_path / 'agent.exe').read_bytes() == b'live binary'
+    finally:
+        agent.ROOT = old_root
+
+
+def test_windows_update_activation_creates_backup_and_script(tmp_path, monkeypatch):
+    monkeypatch.setattr(agent.sys, 'platform', 'win32')
+    monkeypatch.setattr(agent, 'ROOT', tmp_path)
+    staged = tmp_path / 'agent.exe.new'
+    live = tmp_path / 'agent.exe'
+    staged.write_bytes(b'new windows agent')
+    live.write_bytes(b'old windows agent')
+
+    # Prevent the script from actually executing by patching Popen.
+    executed = []
+    monkeypatch.setattr(
+        agent.subprocess,
+        'Popen',
+        lambda *args, **kwargs: executed.append((args, kwargs)) or type('P', (), {'pid': 123})(),
+    )
+
+    assert agent._restart_windows_service_after_update(staged, live) is True
+    backup = tmp_path / 'agent.exe.bak'
+    assert backup.exists() and backup.read_bytes() == b'old windows agent'
+    script = tmp_path / 'activate-agent-update.cmd'
+    assert script.exists()
+    script_text = script.read_text(encoding='utf-8')
+    assert 'move /y' in script_text
+    assert 'copy /y "%BACKUP%" "%LIVE%"' in script_text
+    assert 'sc start ArckonAgent' in script_text
+    assert len(executed) == 1
