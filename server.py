@@ -6772,6 +6772,7 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
     <div class="sb-footer">
       {f'<span style="font-size:11px;color:#9CA3AF;word-break:break-all">{current_user_email}</span>' if current_user_email else ''}
       <a href="/academy" target="_blank">Academy</a>
+      <a href="https://github.com/audit-forge/mark-sentinel/blob/main/docs/WINDOWS_AGENT_BINARY_RECOVERY.md" target="_blank" title="Windows agent offline / missing agent.exe recovery">Windows Agent Recovery</a>
       <a href="/logout" style="color:#ef4444">&#x2192; Sign Out</a>
     </div>
   </aside>
