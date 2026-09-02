@@ -46,6 +46,11 @@ tar xzf "$TMP/app.tar.gz" -C "$TMP/app"
 # fail trying to replace the mounted file.
 rm -f "$TMP/app/license.json"
 
+# releases/ is a read-only bind mount of the signed release catalog. Copying
+# into it fails with "read-only file system", so strip it from the app bundle
+# before docker cp. The mounted copy is the source of truth for agent updates.
+rm -rf "$TMP/app/releases"
+
 # Deploy into the running container
 docker cp "$TMP/agent"   sentinel-mfdynamicsllc:/app/agent
 docker cp "$TMP/audit"   sentinel-mfdynamicsllc:/app/audit
