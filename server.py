@@ -6435,15 +6435,32 @@ def _build_fleet_html(devices: list[dict], shadow: list[dict] | None = None,
             return f'{secs // 3600}h ago'
         return f'{secs // 86400}d ago'
 
+    # Normalize raw ARP/NDP/Nmap observations into one display row per known
+    # MAC, or per reporter/IP when no MAC is available. This merges IPv4,
+    # IPv6, and distinct collection sources without conflating separate sites.
+    network_hosts: dict[str, dict] = {}
+    for asset in network_assets:
+        mac = asset.get('mac_address', '') or ''
+        key = f"mac:{mac}" if mac else f"agent:{asset.get('reporter_device_id', '')}:ip:{asset.get('ip_address', '')}"
+        host = network_hosts.setdefault(key, {'ips': set(), 'mac': mac, 'hostnames': set(), 'interfaces': set(),
+                                              'sources': set(), 'services': set(), 'reporters': set(), 'last_seen': 0})
+        host['ips'].add(asset.get('ip_address', ''))
+        if asset.get('hostname'): host['hostnames'].add(asset['hostname'])
+        if asset.get('interface'): host['interfaces'].add(asset['interface'])
+        host['sources'].add(asset.get('source', '').split(':', 1)[0])
+        if asset.get('port'): host['services'].add(f"{asset['port']}/{asset.get('service') or 'tcp'}")
+        host['reporters'].add(asset.get('reporter_hostname', '') or asset.get('reporter_device_id', ''))
+        host['last_seen'] = max(host['last_seen'], asset.get('last_seen', 0) or 0)
     asset_rows = ''.join(
-        '<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td></tr>'.format(
-            _html.escape(a.get('ip_address', '')), _html.escape(a.get('mac_address', '') or '—'),
-            _html.escape(a.get('hostname', '') or '—'), _html.escape(a.get('interface', '') or '—'),
-            _html.escape(a.get('source', '')), _html.escape(a.get('reporter_hostname', '') or a.get('reporter_device_id', '')),
-            _age(a.get('last_seen')),
-        ) for a in network_assets)
+        '<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td></tr>'.format(
+            _html.escape(', '.join(sorted(h['ips']))), _html.escape(h['mac'] or '—'),
+            _html.escape(', '.join(sorted(h['hostnames'])) or '—'), _html.escape(', '.join(sorted(h['interfaces'])) or '—'),
+            _html.escape(', '.join(sorted(h['sources']))),
+            _html.escape(', '.join(sorted(h['services'])) or '—'),
+            _html.escape(', '.join(sorted(h['reporters']))), _age(h['last_seen']),
+        ) for h in sorted(network_hosts.values(), key=lambda h: h['last_seen'], reverse=True))
     if not asset_rows:
-        asset_rows = '<tr><td colspan="7" class="empty">No passive neighbor-cache observations yet.</td></tr>'
+        asset_rows = '<tr><td colspan="8" class="empty">No passive neighbor-cache observations yet.</td></tr>'
     asset_options = ''.join('<option value="{}">{}</option>'.format(
         _html.escape(d.get('device_id', ''), quote=True), _html.escape(d.get('hostname', '') or d.get('device_id', ''))
     ) for d in devices)
@@ -6846,10 +6863,10 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
       </div>
     </div>
 
-    <div class="sec-hdr" style="margin-bottom:8px">Observed Network Assets <span style="font-size:11px;font-weight:500;color:#9CA3AF">({len(network_assets)})</span></div>
+    <div class="sec-hdr" style="margin-bottom:8px">Observed Network Assets <span style="font-size:11px;font-weight:500;color:#9CA3AF">({len(network_hosts)})</span></div>
     <div style="overflow-x:auto">
       <table class="dev-table" style="min-width:760px">
-        <thead><tr><th>IP Address</th><th>MAC Address</th><th>Hostname</th><th>Interface</th><th>Source</th><th>Reporting Agent</th><th>Last Seen</th></tr></thead>
+        <thead><tr><th>IP Address(es)</th><th>MAC Address</th><th>Hostname</th><th>Interface</th><th>Source</th><th>AI Ports</th><th>Reporting Agent</th><th>Last Seen</th></tr></thead>
         <tbody>{asset_rows}</tbody>
       </table>
     </div>
