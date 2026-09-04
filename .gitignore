@@ -75,3 +75,5 @@ stdout.txt
 stderr.txt
 output/.device_id
 dist/
+*.provisionprofile
+ArckonESCollector.app/

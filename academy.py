@@ -27,6 +27,7 @@ SECTIONS = [
     ("command", "Command Center"),
     ("settings", "Settings"),
     ("alerts", "Alerts & Notifications"),
+    ("protected-files", "Protected Files Monitoring"),
     ("siem-tools", "SIEM & Tool Integrations"),
     ("ai-spend", "AI Spend"),
     ("catalog", "Check Catalog"),
@@ -600,6 +601,153 @@ def build(root: pathlib.Path) -> bytes:
         "<p><b>Gmail users:</b> use an App Password from <code>myaccount.google.com/apppasswords</code>, not your normal password.</p>"
     )
 
+    protected_files = (
+        "<p><b>Protected Files Monitoring</b> detects when an AI tool (Claude, Cursor, Copilot, "
+        "Ollama, Aider, etc.) accesses a file or directory you've designated as protected. "
+        "It also monitors server access (SSH/RDP logins) correlated with AI processes. "
+        "When an AI process touches a protected resource, an alert fires through your configured "
+        "channels (Slack, Teams, email, webhook, PSA, etc.) and the event appears in the "
+        "<b>Protected Files</b> dashboard tab.</p>"
+
+        "<p>This feature is built to <b>FedRAMP</b> security controls including "
+        "SC-13 (encryption at rest), AU-2 (tamper-evident audit log), SI-4 (system monitoring), "
+        "AC-3 (access enforcement), and CM-6 (configuration management).</p>"
+
+        "<h3>How It Works</h3>"
+        "<ol>"
+        "<li>You designate protected paths (files or directories) in the dashboard.</li>"
+        "<li>The server pushes the protected-paths policy to each agent via the existing "
+        "command poll (signed, authenticated).</li>"
+        "<li>The agent starts a platform-specific collector that monitors file access at the "
+        "OS level (see below).</li>"
+        "<li>When an AI process accesses a protected path, the collector emits an event.</li>"
+        "<li>The agent reports the event to the server, which stores it in a tamper-evident "
+        "hash chain and fires an alert.</li>"
+        "</ol>"
+
+        "<h3>Platform Collectors</h3>"
+        "<table style='width:100%;border-collapse:collapse;font-size:13px'>"
+        "<tr style='background:#f3f4f6'>"
+        "<th style='padding:8px;text-align:left;border:1px solid #e5e7eb'>Platform</th>"
+        "<th style='padding:8px;text-align:left;border:1px solid #e5e7eb'>Mechanism</th>"
+        "<th style='padding:8px;text-align:left;border:1px solid #e5e7eb'>Requirement</th>"
+        "</tr>"
+        "<tr><td style='padding:8px;border:1px solid #e5e7eb'><b>macOS</b></td>"
+        "<td style='padding:8px;border:1px solid #e5e7eb'>Endpoint Security framework (kernel-level, signed Swift helper)</td>"
+        "<td style='padding:8px;border:1px solid #e5e7eb'>ArckonESCollector.app installed + Full Disk Access + root LaunchDaemon</td></tr>"
+        "<tr><td style='padding:8px;border:1px solid #e5e7eb'><b>Linux</b></td>"
+        "<td style='padding:8px;border:1px solid #e5e7eb'>auditd rules + ausearch parsing + /var/log/auth.log</td>"
+        "<td style='padding:8px;border:1px solid #e5e7eb'>auditd installed, agent running as root</td></tr>"
+        "<tr><td style='padding:8px;border:1px solid #e5e7eb'><b>Windows</b></td>"
+        "<td style='padding:8px;border:1px solid #e5e7eb'>Event Log (4663 file access, 4624 login) + auditpol</td>"
+        "<td style='padding:8px;border:1px solid #e5e7eb'>Agent running with admin privileges</td></tr>"
+        "</table>"
+
+        "<h3>Setting Up Protected Files (Step by Step)</h3>"
+        "<ol>"
+        "<li>In the Arckon dashboard, click <b>Protected Files</b> in the left sidebar (Security section).</li>"
+        "<li>Click the <b>+ Add Path</b> button.</li>"
+        "<li>Enter the absolute path of the file or directory to protect "
+        "(e.g. <code>/etc/secrets</code>, <code>/Users/keith/.ssh</code>, <code>C:\\\\Company\\\\Payroll</code>).</li>"
+        "<li>Select which <b>device</b> the path applies to, or choose <b>All devices</b> for a global policy.</li>"
+        "<li>Choose which <b>actions</b> to monitor: Read+Write+Open (default), Read only, Write only, or All.</li>"
+        "<li>Check <b>Recursive</b> if you want to monitor all files under a directory (default: on).</li>"
+        "<li>Click <b>Add</b>. The policy is pushed to the agent on the next command poll (within 15 seconds).</li>"
+        "</ol>"
+
+        "<h3>Reviewing Access Events</h3>"
+        "<p>The <b>Access Events</b> panel shows every time an AI process accessed a protected resource:</p>"
+        "<ul>"
+        "<li><b>Process</b> — the AI tool that triggered the event (e.g. <code>claude</code>, <code>cursor</code>)</li>"
+        "<li><b>Action</b> — read, write, open, rename, unlink, or login</li>"
+        "<li><b>Path</b> — the protected file that was accessed</li>"
+        "<li><b>Device</b> — which endpoint the access occurred on</li>"
+        "<li><b>Source</b> — which collector detected it (esf, auditd, etw)</li>"
+        "<li><b>Timestamp</b> — when the access occurred</li>"
+        "</ul>"
+        "<p>Click <b>Review</b> on any event to mark it as reviewed. Use <b>Mark all reviewed</b> "
+        "to clear the unreviewed badge.</p>"
+
+        "<h3>Chain Integrity Verification</h3>"
+        "<p>All access events are stored in a <b>SHA-256 hash chain</b> — each event's hash includes "
+        "the previous event's hash. This makes retroactive tampering detectable: if any event is "
+        "modified, the chain breaks for all subsequent events. The <b>Chain Integrity</b> indicator "
+        "on the dashboard shows whether the chain is intact (✓) or broken (⚠).</p>"
+
+        "<h3>Policy Change Audit Log</h3>"
+        "<p>Every change to the protected-paths policy (add, update, remove) is recorded in the "
+        "<b>Policy Change Audit Log</b> with the user who made the change, the timestamp, and the "
+        "action taken. This satisfies FedRAMP CM-6 (configuration management) requirements.</p>"
+
+        "<h3>Alert Configuration</h3>"
+        "<p>Protected file access alerts use the same alert channels as other Arckon alerts. "
+        "To enable or configure notifications:</p>"
+        "<ol>"
+        "<li>Go to <b>Settings</b> → <b>Alerts &amp; Notifications</b>.</li>"
+        "<li>Configure your channels (Slack, Teams, Google Chat, webhook, email, PSA, Notion).</li>"
+        "<li>The <b>AI accessed protected file</b> trigger is enabled by default.</li>"
+        "<li>Alerts are deduplicated per (device, path, process) with a 24-hour cooldown — "
+        "repeated access by the same AI tool to the same file only alerts once per day.</li>"
+        "</ol>"
+
+        "<h3>Security &amp; Privacy</h3>"
+        "<ul>"
+        "<li><b>No file contents are ever stored</b> — only the path, process name, PID, and action.</li>"
+        "<li><b>Protected-path policy is encrypted at rest</b> with AES-256-GCM.</li>"
+        "<li><b>Access events form a tamper-evident hash chain</b> (SHA-256).</li>"
+        "<li><b>All communication is over HTTPS</b> with agent-bearer token authentication.</li>"
+        "<li><b>Collectors read audit events only</b> — no write or modify capability (least privilege).</li>"
+        "<li><b>Rate limited</b> — max 100 events per batch, max 1 batch per 30 seconds per agent.</li>"
+        "</ul>"
+
+        "<h3>macOS: Installing the ES Collector</h3>"
+        "<p>The macOS collector requires a signed, notarized helper binary "
+        "(<code>ArckonESCollector.app</code>) that uses Apple's Endpoint Security framework. "
+        "This binary is built with your Developer ID and the "
+        "<code>com.apple.developer.endpoint-security.client</code> entitlement.</p>"
+        "<ol>"
+        "<li>Install the app: <code>sudo cp -r ArckonESCollector.app /Library/Arckon/</code></li>"
+        "<li>Install the LaunchDaemon: <code>sudo cp ai.mfdynamics.arckon-es-collector.plist /Library/LaunchDaemons/</code></li>"
+        "<li>Load it: <code>sudo launchctl load /Library/LaunchDaemons/ai.mfdynamics.arckon-es-collector.plist</code></li>"
+        "<li>Grant <b>Full Disk Access</b>: System Settings → Privacy &amp; Security → Full Disk Access → "
+        "add <code>arckon-es-collector</code></li>"
+        "<li>The Python agent automatically connects to the ES collector's Unix socket and "
+        "correlates events with your protected-paths policy.</li>"
+        "</ol>"
+        "<p>If the ES collector is not installed, the agent continues to work normally — "
+        "protected-files monitoring is simply not active on that Mac until it's installed.</p>"
+
+        "<h3>FedRAMP Control Mapping</h3>"
+        "<table style='width:100%;border-collapse:collapse;font-size:12px'>"
+        "<tr style='background:#f3f4f6'>"
+        "<th style='padding:6px;text-align:left;border:1px solid #e5e7eb'>Control</th>"
+        "<th style='padding:6px;text-align:left;border:1px solid #e5e7eb'>Implementation</th>"
+        "</tr>"
+        "<tr><td style='padding:6px;border:1px solid #e5e7eb'><b>AC-3</b></td>"
+        "<td style='padding:6px;border:1px solid #e5e7eb'>Session auth for policy management, agent-bearer auth for event ingestion</td></tr>"
+        "<tr><td style='padding:6px;border:1px solid #e5e7eb'><b>AC-6</b></td>"
+        "<td style='padding:6px;border:1px solid #e5e7eb'>Collectors read audit events only — no write/modify capability</td></tr>"
+        "<tr><td style='padding:6px;border:1px solid #e5e7eb'><b>AU-2</b></td>"
+        "<td style='padding:6px;border:1px solid #e5e7eb'>SHA-256 hash chain for all access events — tamper-evident</td></tr>"
+        "<tr><td style='padding:6px;border:1px solid #e5e7eb'><b>AU-6</b></td>"
+        "<td style='padding:6px;border:1px solid #e5e7eb'>Dashboard review UI for access events; chain integrity verification</td></tr>"
+        "<tr><td style='padding:6px;border:1px solid #e5e7eb'><b>AU-12</b></td>"
+        "<td style='padding:6px;border:1px solid #e5e7eb'>Collectors generate events on every protected-path access by AI process</td></tr>"
+        "<tr><td style='padding:6px;border:1px solid #e5e7eb'><b>SC-8</b></td>"
+        "<td style='padding:6px;border:1px solid #e5e7eb'>All agent↔server communication over HTTPS (TLS)</td></tr>"
+        "<tr><td style='padding:6px;border:1px solid #e5e7eb'><b>SC-13</b></td>"
+        "<td style='padding:6px;border:1px solid #e5e7eb'>AES-256-GCM encryption at rest for protected-path policy</td></tr>"
+        "<tr><td style='padding:6px;border:1px solid #e5e7eb'><b>SI-4</b></td>"
+        "<td style='padding:6px;border:1px solid #e5e7eb'>Continuous monitoring for AI process access to protected files</td></tr>"
+        "<tr><td style='padding:6px;border:1px solid #e5e7eb'><b>CM-2</b></td>"
+        "<td style='padding:6px;border:1px solid #e5e7eb'>Protected-path policy is versioned; changes audit-logged</td></tr>"
+        "<tr><td style='padding:6px;border:1px solid #e5e7eb'><b>CM-6</b></td>"
+        "<td style='padding:6px;border:1px solid #e5e7eb'>Policy stored server-side; all changes recorded in audit log</td></tr>"
+        "<tr><td style='padding:6px;border:1px solid #e5e7eb'><b>MP-3</b></td>"
+        "<td style='padding:6px;border:1px solid #e5e7eb'>No file contents stored — only path, process, action metadata</td></tr>"
+        "</table>"
+    )
+
     siem_tools = (
         "<p>The <b>SIEM &amp; Tool Integrations</b> tab connects Arckon to your security stack. "
         "Each integration has its own card. Enable it, fill in the required fields, click <b>Test</b>, then click <b>Save</b>. "
@@ -1037,6 +1185,7 @@ def build(root: pathlib.Path) -> bytes:
         section_html('command', 'Command Center', command_center),
         section_html('settings', 'Settings', settings),
         section_html('alerts', 'Alerts & Notifications', alerts),
+        section_html('protected-files', 'Protected Files Monitoring', protected_files),
         section_html('siem-tools', 'SIEM & Tool Integrations', siem_tools),
         section_html('ai-spend', 'AI Spend', ai_spend),
         '<section id="catalog" class="doc-section">',

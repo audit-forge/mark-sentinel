@@ -250,6 +250,59 @@ class AgentStore:
                 CREATE INDEX IF NOT EXISTS idx_ai_spend_key
                     ON ai_spend(key_id, period_date DESC);
 
+                -- Protected Files monitoring (FedRAMP-aligned AI access detection)
+                -- SC-13: protected_paths.path is encrypted at rest (AES-256-GCM via crypto.py)
+                CREATE TABLE IF NOT EXISTS protected_paths (
+                    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                    device_id   TEXT NOT NULL,
+                    path        TEXT NOT NULL,
+                    path_hash   TEXT NOT NULL,
+                    recursive   INTEGER NOT NULL DEFAULT 1,
+                    actions     TEXT NOT NULL DEFAULT 'read,write,open',
+                    created_by  TEXT NOT NULL DEFAULT '',
+                    created_at  INTEGER NOT NULL,
+                    updated_at  INTEGER NOT NULL,
+                    UNIQUE(device_id, path_hash)
+                );
+                CREATE INDEX IF NOT EXISTS idx_protected_paths_device
+                    ON protected_paths(device_id);
+
+                -- AU-2: access_events form a tamper-evident SHA-256 hash chain
+                CREATE TABLE IF NOT EXISTS access_events (
+                    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                    ts          INTEGER NOT NULL,
+                    device_id   TEXT NOT NULL,
+                    hostname    TEXT NOT NULL DEFAULT '',
+                    platform    TEXT NOT NULL DEFAULT '',
+                    process     TEXT NOT NULL,
+                    pid         INTEGER NOT NULL DEFAULT 0,
+                    path        TEXT NOT NULL,
+                    action      TEXT NOT NULL,
+                    source      TEXT NOT NULL DEFAULT '',
+                    prev_hash   TEXT NOT NULL DEFAULT '',
+                    event_hash  TEXT NOT NULL,
+                    reviewed    INTEGER NOT NULL DEFAULT 0
+                );
+                CREATE INDEX IF NOT EXISTS idx_access_events_ts
+                    ON access_events(ts DESC);
+                CREATE INDEX IF NOT EXISTS idx_access_events_device
+                    ON access_events(device_id, ts DESC);
+                CREATE INDEX IF NOT EXISTS idx_access_events_unreviewed
+                    ON access_events(reviewed, ts DESC);
+
+                -- CM-2/CM-6: audit log of all protected-path policy changes
+                CREATE TABLE IF NOT EXISTS protected_paths_audit (
+                    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                    ts          INTEGER NOT NULL,
+                    action      TEXT NOT NULL,
+                    device_id   TEXT NOT NULL,
+                    path        TEXT NOT NULL,
+                    changed_by  TEXT NOT NULL,
+                    details     TEXT NOT NULL DEFAULT ''
+                );
+                CREATE INDEX IF NOT EXISTS idx_protected_paths_audit_ts
+                    ON protected_paths_audit(ts DESC);
+
             """)
             # Migrations
             cols = {r[1] for r in conn.execute("PRAGMA table_info(devices)")}
@@ -1210,6 +1263,220 @@ class AgentStore:
     def mark_all_alerts_reviewed(self) -> None:
         with self._lock, self._conn() as conn:
             conn.execute("UPDATE alert_events SET reviewed=1 WHERE reviewed=0")
+
+    # ── Protected Files monitoring ──────────────────────────────────────────────
+    #
+    # FedRAMP controls: SC-13 (encryption at rest), AU-2 (audit events with
+    # tamper-evident hash chain), CM-2/CM-6 (policy config management + audit).
+
+    def add_protected_path(self, device_id: str, path: str, recursive: bool = True,
+                           actions: str = 'read,write,open', created_by: str = '') -> int:
+        """Add a protected path for a device. Path is encrypted at rest (SC-13).
+        A policy-change audit record is written (CM-6). Returns the new row id."""
+        import crypto
+        canon = os.path.realpath(path)
+        path_hash = crypto.hash_path(canon)
+        enc_path = crypto.encrypt_field(canon)
+        now = int(time.time())
+        with self._lock, self._conn() as conn:
+            cur = conn.execute(
+                """INSERT INTO protected_paths
+                       (device_id, path, path_hash, recursive, actions, created_by, created_at, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                   ON CONFLICT(device_id, path_hash) DO UPDATE SET
+                       recursive = excluded.recursive,
+                       actions   = excluded.actions,
+                       updated_at = excluded.updated_at""",
+                (device_id, enc_path, path_hash, 1 if recursive else 0,
+                 actions, created_by, now, now))
+            row_id = cur.lastrowid
+            conn.execute(
+                """INSERT INTO protected_paths_audit
+                       (ts, action, device_id, path, changed_by, details)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                (now, 'upsert', device_id, enc_path, created_by,
+                 f'recursive={recursive}, actions={actions}'))
+        return row_id
+
+    def remove_protected_path(self, path_id: int, changed_by: str = '') -> bool:
+        """Remove a protected path by id. Writes an audit record. Returns True
+        if a row was deleted."""
+        now = int(time.time())
+        with self._lock, self._conn() as conn:
+            row = conn.execute(
+                "SELECT device_id, path FROM protected_paths WHERE id=?",
+                (path_id,)).fetchone()
+            if not row:
+                return False
+            conn.execute("DELETE FROM protected_paths WHERE id=?", (path_id,))
+            conn.execute(
+                """INSERT INTO protected_paths_audit
+                       (ts, action, device_id, path, changed_by, details)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                (now, 'remove', row['device_id'], row['path'], changed_by, ''))
+            return True
+
+    def get_protected_paths(self, device_id: str | None = None) -> list[dict]:
+        """Return protected paths (decrypted). If device_id is None, returns all.
+        Includes both device-specific paths and wildcard ('*') paths."""
+        import crypto
+        with self._lock, self._conn() as conn:
+            if device_id is None:
+                rows = conn.execute(
+                    "SELECT * FROM protected_paths ORDER BY device_id, path").fetchall()
+            else:
+                rows = conn.execute(
+                    """SELECT * FROM protected_paths
+                       WHERE device_id=? OR device_id='*'
+                       ORDER BY path""",
+                    (device_id,)).fetchall()
+        out = []
+        for r in rows:
+            d = dict(r)
+            try:
+                d['path'] = crypto.decrypt_field(d['path'])
+            except Exception:
+                pass  # legacy plaintext
+            d['recursive'] = bool(d['recursive'])
+            out.append(d)
+        return out
+
+    def get_protected_paths_for_agent(self, device_id: str) -> list[dict]:
+        """Return protected paths (decrypted) for a specific agent, including
+        wildcard ('*') paths. Used when pushing policy to agents via command
+        poll. Returns only the fields the agent needs."""
+        rows = self.get_protected_paths(device_id)
+        return [{'path': r['path'], 'recursive': r['recursive'],
+                 'actions': r['actions']} for r in rows]
+
+    def get_protected_paths_audit_log(self, limit: int = 100) -> list[dict]:
+        """Return the policy-change audit log (CM-6). Paths are decrypted for
+        dashboard display."""
+        import crypto
+        with self._lock, self._conn() as conn:
+            rows = conn.execute(
+                """SELECT * FROM protected_paths_audit
+                   ORDER BY ts DESC LIMIT ?""",
+                (limit,)).fetchall()
+        out = []
+        for r in rows:
+            d = dict(r)
+            try:
+                d['path'] = crypto.decrypt_field(d['path'])
+            except Exception:
+                pass
+            out.append(d)
+        return out
+
+    def ingest_access_events(self, events: list[dict]) -> int:
+        """Ingest a batch of access events from an agent. Each event is
+        appended to the tamper-evident hash chain (AU-2). Returns the count
+        stored.
+
+        Events are validated: required fields must be present, and the hash
+        chain is continued from the last stored event_hash.
+        """
+        import crypto
+        if not events:
+            return 0
+        required = {'ts', 'device_id', 'process', 'path', 'action'}
+        stored = 0
+        with self._lock, self._conn() as conn:
+            # Get the last event_hash to continue the chain
+            last = conn.execute(
+                "SELECT event_hash FROM access_events ORDER BY id DESC LIMIT 1"
+            ).fetchone()
+            prev_hash = last['event_hash'] if last else ''
+            for evt in events:
+                if not required.issubset(evt):
+                    continue
+                data = {
+                    'ts': int(evt['ts']),
+                    'device_id': str(evt['device_id']),
+                    'hostname': str(evt.get('hostname', '')),
+                    'platform': str(evt.get('platform', '')),
+                    'process': str(evt['process']),
+                    'pid': int(evt.get('pid', 0)),
+                    'path': str(evt['path']),
+                    'action': str(evt['action']),
+                    'source': str(evt.get('source', '')),
+                }
+                event_hash = crypto.compute_event_hash(prev_hash, data)
+                conn.execute(
+                    """INSERT INTO access_events
+                           (ts, device_id, hostname, platform, process, pid,
+                            path, action, source, prev_hash, event_hash)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (data['ts'], data['device_id'], data['hostname'],
+                     data['platform'], data['process'], data['pid'],
+                     data['path'], data['action'], data['source'],
+                     prev_hash, event_hash))
+                prev_hash = event_hash
+                stored += 1
+        return stored
+
+    def get_access_events(self, limit: int = 300,
+                          device_id: str | None = None,
+                          unreviewed_only: bool = False) -> list[dict]:
+        """Return access events (newest first). Optionally filter by device."""
+        with self._lock, self._conn() as conn:
+            conditions = []
+            params: list = []
+            if device_id:
+                conditions.append("device_id=?")
+                params.append(device_id)
+            if unreviewed_only:
+                conditions.append("reviewed=0")
+            where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+            params.append(limit)
+            rows = conn.execute(
+                f"""SELECT * FROM access_events {where}
+                    ORDER BY ts DESC LIMIT ?""",
+                tuple(params)).fetchall()
+        return [dict(r) for r in rows]
+
+    def count_unreviewed_access_events(self) -> int:
+        with self._lock, self._conn() as conn:
+            row = conn.execute(
+                "SELECT COUNT(*) AS c FROM access_events WHERE reviewed=0"
+            ).fetchone()
+            return row['c']
+
+    def mark_access_event_reviewed(self, event_id: int) -> None:
+        with self._lock, self._conn() as conn:
+            conn.execute(
+                "UPDATE access_events SET reviewed=1 WHERE id=?", (event_id,))
+
+    def mark_all_access_events_reviewed(self) -> None:
+        with self._lock, self._conn() as conn:
+            conn.execute("UPDATE access_events SET reviewed=1 WHERE reviewed=0")
+
+    def verify_access_event_chain(self) -> bool:
+        """Verify the full access_events hash chain integrity (AU-2 tamper
+        detection). Returns True if the chain is intact."""
+        import crypto
+        with self._lock, self._conn() as conn:
+            rows = conn.execute(
+                "SELECT * FROM access_events ORDER BY id ASC").fetchall()
+        prev = ''
+        for r in rows:
+            d = dict(r)
+            data = {
+                'ts': d['ts'],
+                'device_id': d['device_id'],
+                'hostname': d.get('hostname', ''),
+                'platform': d.get('platform', ''),
+                'process': d['process'],
+                'pid': d['pid'],
+                'path': d['path'],
+                'action': d['action'],
+                'source': d.get('source', ''),
+            }
+            expected = crypto.compute_event_hash(prev, data)
+            if d.get('event_hash') != expected:
+                return False
+            prev = d['event_hash']
+        return True
 
     # ── AI spend tracking ─────────────────────────────────────────────────────
 

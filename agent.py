@@ -390,6 +390,90 @@ def report_network_assets(results: list, config: dict, device_id: str, hostname:
     return False
 
 
+# ── Protected Files access-event reporting ───────────────────────────────────
+
+def post_access_events(events: list, config: dict) -> bool:
+    """POST a batch of protected-file access events to the server.
+
+    FedRAMP SC-8: transmitted over HTTPS. FedRAMP AU-12: events generated
+    by the platform collector are forwarded to the central server for
+    alerting and audit. Rate limited to 100 events per batch server-side.
+    """
+    if not events:
+        return True
+    server = config.get('server', '').rstrip('/')
+    if not server:
+        return True
+    payload = json.dumps({'events': events[:100]}).encode()
+    headers = {
+        'Content-Type': 'application/json',
+        'Content-Length': str(len(payload)),
+        'User-Agent': f'sentinel-agent/{VERSION}',
+    }
+    if config.get('token'):
+        headers['Authorization'] = f"Bearer {config['token']}"
+    url = f'{server}/api/agent/access-events'
+    try:
+        req = _urlreq.Request(url, data=payload, headers=headers, method='POST')
+        with _urlopen(req, timeout=30) as resp:
+            if 200 <= resp.status < 300:
+                log.info('Access events accepted (%d events)', len(events[:100]))
+                return True
+            log.warning('Access events: server returned HTTP %s', resp.status)
+    except Exception as e:
+        log.warning('Access events report error: %s', e)
+    return False
+
+
+def start_access_collector(config: dict, device_id: str, hostname: str):
+    """Start the platform-appropriate protected-files access collector.
+
+    Returns (collector, queue) or (None, None) if the platform is not
+    supported or no protected paths are configured. The collector runs
+    in a daemon thread; events are drained from the queue and posted to
+    the server on each scan cycle.
+
+    FedRAMP SI-4: continuous system monitoring for AI access to protected
+    resources. The collector is purely additive — if it fails to start,
+    the agent continues normal scan operations.
+    """
+    protected_paths = config.get('protected_paths', [])
+    if not protected_paths:
+        return None, None
+    platform = _platform_key()
+    try:
+        from monitors.base import EventQueue
+        queue = EventQueue(max_size=5000)
+        if platform == 'linux':
+            from monitors.linux import LinuxCollector as Collector
+        elif platform == 'windows':
+            from monitors.windows import WindowsCollector as Collector
+        elif platform == 'macos':
+            from monitors.macos_esf import MacOSESCollector as Collector
+        else:
+            log.info('Protected-files monitoring not supported on platform %s', platform)
+            return None, None
+        collector = Collector(
+            device_id=device_id, hostname=hostname, platform=platform,
+            protected_paths=protected_paths, queue=queue)
+        collector.start()
+        log.info('Protected-files collector started (%s, %d protected paths)',
+                 platform, len(protected_paths))
+        return collector, queue
+    except Exception as e:
+        log.warning('Protected-files collector failed to start: %s', e)
+        return None, None
+
+
+def _platform_key() -> str:
+    """Return 'linux', 'windows', or 'macos'."""
+    import platform as _pf
+    system = _pf.system().lower()
+    if system == 'darwin':
+        return 'macos'
+    return system
+
+
 def _apply_token_update(config: dict, new_token: str) -> None:
     """Persist a new agent token to disk and update the live config dict.
     Called when the server signals a token rotation via check-in response or set_config."""
@@ -1660,6 +1744,12 @@ def main() -> None:
         last_scan = time.time() - interval + startup_delay  # first scan fires after delay
         last_success = 0.0
         last_update_check = 0.0
+
+        # Start the protected-files access collector (if protected paths are
+        # configured). Purely additive — failure doesn't affect scans.
+        _access_collector, _access_queue = start_access_collector(
+            cfg, device_id, os.environ.get('SENTINEL_HOSTNAME', '').strip() or socket.gethostname())
+
         while True:
             now = time.time()
             if _update_check_due(last_update_check, now):
@@ -1693,6 +1783,15 @@ def main() -> None:
                     run_ai_connections_cycle(cfg)
                 except Exception as e:
                     log.warning('AI connection scan cycle error (non-fatal): %s', e)
+
+                # Drain and report protected-file access events (SI-4)
+                if _access_queue and len(_access_queue) > 0:
+                    try:
+                        events = _access_queue.drain(limit=100)
+                        if events:
+                            post_access_events(events, cfg)
+                    except Exception as e:
+                        log.warning('Access event reporting error (non-fatal): %s', e)
 
             # Poll for on-demand command
             cmd = poll_for_command(cfg, device_id)
@@ -1863,6 +1962,25 @@ def main() -> None:
                     log.info('Config updated by server: %s', list(updates.keys()))
                 except Exception as e:
                     log.error('set_config failed: %s', e)
+            elif cmd and cmd.startswith('set_protected_paths:'):
+                try:
+                    paths = json.loads(cmd[len('set_protected_paths:'):])
+                    cfg['protected_paths'] = paths
+                    # Update the live collector if it's running
+                    if _access_collector:
+                        _access_collector.update_protected_paths(paths)
+                        log.info('Protected paths updated (%d paths)', len(paths))
+                    else:
+                        # Collector wasn't running (no paths before) — start it
+                        _access_collector, _access_queue = start_access_collector(
+                            cfg, device_id, os.environ.get('SENTINEL_HOSTNAME', '').strip() or socket.gethostname())
+                    # Persist to config
+                    config_path = Path(cfg.get('_config_path', DEFAULT_CONFIG))
+                    existing = json.loads(config_path.read_text(encoding='utf-8')) if config_path.exists() else {}
+                    existing['protected_paths'] = paths
+                    config_path.write_text(json.dumps(existing, indent=2), encoding='utf-8')
+                except Exception as e:
+                    log.error('set_protected_paths failed: %s', e)
 
             # Per-poll jitter: each sleep varies slightly so agents don't re-sync
             time.sleep(POLL_INTERVAL + _random.uniform(-POLL_JITTER, POLL_JITTER))

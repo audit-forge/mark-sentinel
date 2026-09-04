@@ -1476,6 +1476,11 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             '/api/alerts/events':    self._api_get_alert_events,
             '/api/alerts/active-issues': self._api_get_active_issues,
             '/api/alerts/unreviewed-count': self._api_unreviewed_alert_count,
+            '/api/protected-paths':         self._api_get_protected_paths,
+            '/api/protected-paths/audit':   self._api_get_protected_paths_audit,
+            '/api/access-events':           self._api_get_access_events,
+            '/api/access-events/unreviewed-count': self._api_unreviewed_access_count,
+            '/api/access-events/verify-chain': self._api_verify_access_chain,
             '/api/siem/config':      self._api_get_siem_config,
             '/api/live-scan-config': self._api_get_live_scan_config,
             '/api/fleet/live-stats': self._api_fleet_live_stats,
@@ -1592,6 +1597,12 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                 return
             self._api_agent_network_assets()
             return
+        if path == '/api/agent/access-events':
+            if not self._check_agent_bearer():
+                self._send(401, b'Unauthorized', 'text/plain')
+                return
+            self._api_agent_access_events()
+            return
 
         # All other POST endpoints require dashboard auth
         if not self._require_dashboard_auth():
@@ -1649,6 +1660,19 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self._api_test_wiki_provider(path[len('/api/wiki/test/'):].strip('/'))
         elif path == '/api/alerts/events/review-all':
             self._api_review_all_alerts()
+        elif path == '/api/protected-paths':
+            self._api_add_protected_path()
+        elif path.startswith('/api/protected-paths/') and path.endswith('/update'):
+            _pid = path[len('/api/protected-paths/'):-len('/update')]
+            self._api_update_protected_path(_pid)
+        elif path.startswith('/api/protected-paths/'):
+            _pid = path[len('/api/protected-paths/'):]
+            self._api_delete_protected_path(_pid)
+        elif path == '/api/access-events/review-all':
+            self._api_review_all_access_events()
+        elif path.startswith('/api/access-events/') and path.endswith('/review'):
+            _eid = path[len('/api/access-events/'):-len('/review')]
+            self._api_review_access_event(_eid)
         elif path.startswith('/api/alerts/events/') and path.endswith('/review'):
             _eid = path[len('/api/alerts/events/'):-len('/review')]
             self._api_review_alert(_eid)
@@ -5224,6 +5248,168 @@ load();
         except Exception as e:
             self._json({'ok': False, 'error': str(e)}, 500)
 
+    # ── Protected Files monitoring API ─────────────────────────────────────────
+    #
+    # FedRAMP controls: AC-3 (access enforcement via session auth), CM-2/CM-6
+    # (policy management + audit log), AU-2 (tamper-evident event storage),
+    # SC-13 (encryption at rest), SI-4 (AI access monitoring + alerting).
+
+    def _api_get_protected_paths(self):
+        store = self._store()
+        try:
+            paths = store.get_protected_paths()
+            self._json({'paths': paths})
+        except Exception as e:
+            self._json({'paths': [], 'error': str(e)}, 500)
+
+    def _api_get_protected_paths_audit(self):
+        store = self._store()
+        try:
+            log_entries = store.get_protected_paths_audit_log(limit=100)
+            self._json({'audit': log_entries})
+        except Exception as e:
+            self._json({'audit': [], 'error': str(e)}, 500)
+
+    def _api_add_protected_path(self):
+        try:
+            body = self._read_json_body()
+            device_id = str(body.get('device_id', '*')).strip()
+            path = str(body.get('path', '')).strip()
+            recursive = bool(body.get('recursive', True))
+            actions = str(body.get('actions', 'read,write,open')).strip()
+            if not path:
+                self._json({'error': 'missing path'}, 400)
+                return
+            if '..' in path or '\x00' in path:
+                self._json({'error': 'invalid path'}, 400)
+                return
+            user = self._session_user()
+            changed_by = user['email'] if user else 'Dashboard user'
+            store = self._store()
+            row_id = store.add_protected_path(
+                device_id, path, recursive=recursive,
+                actions=actions, created_by=changed_by)
+            self._json({'ok': True, 'id': row_id})
+        except Exception as e:
+            log.error('add_protected_path error: %s', e, exc_info=True)
+            self._json({'error': str(e)}, 500)
+
+    def _api_update_protected_path(self, pid_str: str):
+        try:
+            pid = int(pid_str)
+            body = self._read_json_body()
+            recursive = bool(body.get('recursive', True))
+            actions = str(body.get('actions', 'read,write,open')).strip()
+            user = self._session_user()
+            changed_by = user['email'] if user else 'Dashboard user'
+            store = self._store()
+            paths = store.get_protected_paths()
+            match = next((p for p in paths if p['id'] == pid), None)
+            if not match:
+                self._json({'error': 'not found'}, 404)
+                return
+            store.add_protected_path(
+                match['device_id'], match['path'],
+                recursive=recursive, actions=actions,
+                created_by=changed_by)
+            self._json({'ok': True})
+        except Exception as e:
+            self._json({'error': str(e)}, 500)
+
+    def _api_delete_protected_path(self, pid_str: str):
+        try:
+            pid = int(pid_str)
+            user = self._session_user()
+            changed_by = user['email'] if user else 'Dashboard user'
+            store = self._store()
+            if store.remove_protected_path(pid, changed_by=changed_by):
+                self._json({'ok': True})
+            else:
+                self._json({'error': 'not found'}, 404)
+        except Exception as e:
+            self._json({'error': str(e)}, 500)
+
+    def _api_get_access_events(self):
+        import urllib.parse as _up
+        qs = _up.parse_qs(_up.urlparse(self.path).query)
+        limit = min(int(qs.get('limit', ['300'])[0]), 1000)
+        device_id = qs.get('device', [None])[0]
+        unreviewed_only = qs.get('unreviewed', [''])[0].lower() in ('1', 'true', 'yes')
+        store = self._store()
+        try:
+            events = store.get_access_events(
+                limit=limit, device_id=device_id,
+                unreviewed_only=unreviewed_only)
+            self._json({'events': events})
+        except Exception as e:
+            self._json({'events': [], 'error': str(e)}, 500)
+
+    def _api_unreviewed_access_count(self):
+        store = self._store()
+        try:
+            self._json({'count': store.count_unreviewed_access_events()})
+        except Exception:
+            self._json({'count': 0})
+
+    def _api_verify_access_chain(self):
+        store = self._store()
+        try:
+            intact = store.verify_access_event_chain()
+            self._json({'intact': intact})
+        except Exception as e:
+            self._json({'intact': False, 'error': str(e)}, 500)
+
+    def _api_review_access_event(self, eid_str: str):
+        store = self._store()
+        try:
+            store.mark_access_event_reviewed(int(eid_str))
+            self._json({'ok': True})
+        except Exception as e:
+            self._json({'ok': False, 'error': str(e)}, 400)
+
+    def _api_review_all_access_events(self):
+        store = self._store()
+        try:
+            store.mark_all_access_events_reviewed()
+            self._json({'ok': True})
+        except Exception as e:
+            self._json({'ok': False, 'error': str(e)}, 500)
+
+    def _api_agent_access_events(self):
+        """POST /api/agent/access-events — ingest a batch of access events
+        from an agent. Agent-bearer auth is already verified by the caller.
+        Rate limited to 100 events per batch. Fires alerts for each event."""
+        try:
+            body = self._read_json_body()
+            events = body.get('events', [])
+            if not isinstance(events, list) or not events:
+                self._json({'ok': True, 'stored': 0})
+                return
+            if len(events) > 100:
+                events = events[:100]
+            cust = self._get_agent_customer()
+            store = self._store() if not cust else _get_store(cust.get('id', 'default'))
+            stored = store.ingest_access_events(events)
+            from alerts import load_alert_config, fire_access_alert
+            alert_cfg = load_alert_config(ROOT / 'data' / 'alerts_config.json') or {}
+            for evt in events:
+                try:
+                    fire_access_alert(
+                        device_id=evt.get('device_id', ''),
+                        hostname=evt.get('hostname', evt.get('device_id', '')),
+                        process=evt.get('process', ''),
+                        path=evt.get('path', ''),
+                        action=evt.get('action', ''),
+                        platform=evt.get('platform', ''),
+                        alert_cfg=alert_cfg,
+                        store=store)
+                except Exception as ae:
+                    log.error('access alert fire error: %s', ae)
+            self._json({'ok': True, 'stored': stored})
+        except Exception as e:
+            log.error('agent access-events ingest error: %s', e, exc_info=True)
+            self._json({'error': str(e)}, 500)
+
     # ── SIEM config API ───────────────────────────────────────────────────────
 
     def _api_get_siem_config(self):
@@ -6757,6 +6943,7 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
       <button class="sb-item" id="nav-mcp" onclick="navTo('mcp')">&#128279; MCP Servers</button>
       <div class="sb-group">Security</div>
       <button class="sb-item" id="nav-riskregister" onclick="navTo('riskregister')">&#128203; Risk Register</button>
+      <button class="sb-item" id="nav-protected-files" onclick="navTo('protected-files')">&#128274; Protected Files <span id="pf-badge" style="display:none;background:#DC2626;color:#fff;border-radius:10px;font-size:10px;padding:1px 6px;margin-left:4px;font-weight:700"></span></button>
       <div class="sb-group">Operations</div>
       <button class="sb-item" id="nav-schedules" onclick="navTo('schedules')">&#128337; Schedules</button>
       <button class="sb-item" id="nav-discovery" onclick="navTo('discovery')">&#128270; Discovery</button>
@@ -7010,6 +7197,75 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
   </div>
   <div id="rr-body">
     <div style="color:#6B7280;font-size:13px;padding:16px 0">Loading risk register…</div>
+  </div>
+  </div>
+
+  <div class="page" id="page-protected-files">
+  <div class="sec-hdr" style="margin-top:0;padding-top:0;display:flex;align-items:center;gap:10px">
+    &#128274; Protected Files Monitoring
+    <span style="font-size:12px;font-weight:400;color:#6B7280;margin-left:8px">Detect when AI tools access designated protected files or servers · FedRAMP SI-4</span>
+  </div>
+
+  <div style="display:flex;gap:12px;margin-bottom:20px;flex-wrap:wrap">
+    <div class="scard" style="flex:1;min-width:180px;cursor:default">
+      <div class="scard-n c-blue" id="pf-count-paths">—</div><div class="scard-l">Protected Paths</div>
+    </div>
+    <div class="scard" style="flex:1;min-width:180px;cursor:default">
+      <div class="scard-n c-red" id="pf-count-events">—</div><div class="scard-l">Access Events</div>
+    </div>
+    <div class="scard" style="flex:1;min-width:180px;cursor:default">
+      <div class="scard-n c-yellow" id="pf-count-unreviewed">—</div><div class="scard-l">Unreviewed</div>
+    </div>
+    <div class="scard" style="flex:1;min-width:180px;cursor:default">
+      <div class="scard-n" id="pf-chain-status" style="color:#16A34A">✓</div><div class="scard-l">Chain Integrity</div>
+    </div>
+  </div>
+
+  <div style="display:flex;gap:20px;flex-wrap:wrap">
+    <div style="flex:1;min-width:400px">
+      <div class="sec-hdr" style="font-size:15px;margin-bottom:10px">Protected Paths
+        <button onclick="showAddPathForm()" style="margin-left:auto;font-size:12px;background:#4F46E5;color:#fff;border:none;border-radius:4px;padding:5px 14px;cursor:pointer">+ Add Path</button>
+      </div>
+      <div id="pf-add-form" style="display:none;background:#f0f4ff;border:1px solid #c7d2fe;border-radius:6px;padding:14px;margin-bottom:12px">
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:end">
+          <div style="flex:1;min-width:200px">
+            <label style="font-size:11px;color:#6B7280;display:block;margin-bottom:3px">File or directory path (absolute)</label>
+            <input id="pf-path-input" placeholder="/etc/secrets or /Users/keith/.ssh" style="width:100%;padding:6px 10px;border:1px solid #D1D5DB;border-radius:4px;font-size:13px;font-family:monospace">
+          </div>
+          <div>
+            <label style="font-size:11px;color:#6B7280;display:block;margin-bottom:3px">Device</label>
+            <select id="pf-device-select" style="padding:6px 10px;border:1px solid #D1D5DB;border-radius:4px;font-size:13px"><option value="*">All devices</option></select>
+          </div>
+          <div>
+            <label style="font-size:11px;color:#6B7280;display:block;margin-bottom:3px">Actions</label>
+            <select id="pf-actions-select" style="padding:6px 10px;border:1px solid #D1D5DB;border-radius:4px;font-size:13px">
+              <option value="read,write,open">Read, Write, Open</option>
+              <option value="read">Read only</option>
+              <option value="write">Write only</option>
+              <option value="*">All actions</option>
+            </select>
+          </div>
+          <label style="font-size:12px;display:flex;align-items:center;gap:4px;cursor:pointer"><input type="checkbox" id="pf-recursive-check" checked> Recursive</label>
+          <button onclick="addProtectedPath()" style="background:#16A34A;color:#fff;border:none;border-radius:4px;padding:6px 16px;cursor:pointer;font-size:13px">Add</button>
+          <button onclick="document.getElementById('pf-add-form').style.display='none'" style="background:#E5E7EB;color:#374151;border:none;border-radius:4px;padding:6px 16px;cursor:pointer;font-size:13px">Cancel</button>
+        </div>
+      </div>
+      <div id="pf-paths-list" style="color:#6B7280;font-size:13px;padding:16px 0">Loading protected paths…</div>
+    </div>
+
+    <div style="flex:1;min-width:400px">
+      <div class="sec-hdr" style="font-size:15px;margin-bottom:10px">Access Events
+        <button onclick="reviewAllAccessEvents()" style="margin-left:auto;font-size:12px;background:#E5E7EB;color:#374151;border:none;border-radius:4px;padding:5px 14px;cursor:pointer">Mark all reviewed</button>
+      </div>
+      <div id="pf-events-list" style="color:#6B7280;font-size:13px;padding:16px 0">Loading access events…</div>
+    </div>
+  </div>
+
+  <div style="margin-top:20px">
+    <div class="sec-hdr" style="font-size:15px;margin-bottom:10px">Policy Change Audit Log
+      <span style="font-size:11px;font-weight:400;color:#6B7280;margin-left:8px">FedRAMP CM-6 — all protected-path policy changes are recorded</span>
+    </div>
+    <div id="pf-audit-list" style="color:#6B7280;font-size:13px;padding:16px 0">Loading audit log…</div>
   </div>
   </div>
 
@@ -7666,7 +7922,8 @@ function navTo(page) {{
   if (page === 'users') {{ loadUsers(); loadCustomerInfo(); }}
   if (page === 'alerts') {{ loadActiveIssues(); loadAlertEvents(); }}
    if (page === 'network-assets') {{ loadNetworkAssetScans(); }}
-  if (page === 'spend') {{ loadSpend(); }}
+   if (page === 'spend') {{ loadSpend(); }}
+   if (page === 'protected-files') {{ loadProtectedPaths(); loadAccessEvents(); loadPFAuditLog(); loadPFChainStatus(); }}
   if (page === 'probe') {{
     const fr = document.getElementById('probe-iframe');
     if (fr && fr.getAttribute('data-loaded') === '0') {{
@@ -7685,7 +7942,7 @@ function navTo(page) {{
 (function() {{
   const hash = window.location.hash.replace('#', '');
   const valid = ['overview','shadow','alerts','mcp','riskregister','inventory','spend','schedules',
-                 'discovery','findings','reports','siem','settings','users','probe','reseller'];
+                 'discovery','findings','reports','siem','settings','users','probe','reseller','protected-files'];
   if (hash && valid.includes(hash)) {{ navTo(hash); }}
 }})();
 
@@ -10894,6 +11151,192 @@ async function updateAlertBadge() {{
 }}
 
 updateAlertBadge();
+
+// ── Protected Files monitoring ──────────────────────────────────────────────
+
+async function loadProtectedPaths() {{
+  const list = document.getElementById('pf-paths-list');
+  if (!list) return;
+  try {{
+    const r = await fetch('/api/protected-paths');
+    if (!r.ok) throw new Error(r.status);
+    const d = await r.json();
+    const paths = d.paths || [];
+    document.getElementById('pf-count-paths').textContent = paths.length;
+    if (!paths.length) {{
+      list.innerHTML = '<div style="color:#9CA3AF;padding:16px 0">No protected paths configured. Click "Add Path" to designate files or directories that AI tools should not access.</div>';
+      return;
+    }}
+    list.innerHTML = paths.map(p => {{
+      const dev = p.device_id === '*' ? 'All devices' : p.device_id;
+      const rec = p.recursive ? ' (recursive)' : '';
+      const ts = new Date(p.created_at * 1000).toLocaleDateString();
+      return `<div style="background:#fff;border:1px solid #E5E7EB;border-radius:6px;padding:10px 14px;margin-bottom:6px;display:flex;gap:10px;align-items:center">
+        <div style="font-size:16px">&#128274;</div>
+        <div style="flex:1;min-width:0">
+          <div style="font-size:13px;font-family:monospace;color:#111827;word-break:break-all">${{p.path}}</div>
+          <div style="font-size:11px;color:#6B7280;margin-top:2px">${{dev}} · actions: ${{p.actions}}${{rec}} · added by ${{p.created_by || '—'}} on ${{ts}}</div>
+        </div>
+        <button onclick="removeProtectedPath(${{p.id}})" style="font-size:11px;color:#DC2626;background:#FEF2F2;border:1px solid #FECACA;border-radius:4px;padding:3px 10px;cursor:pointer;white-space:nowrap">Remove</button>
+      </div>`;
+    }}).join('');
+  }} catch(e) {{
+    list.innerHTML = '<div style="color:#DC2626;padding:16px 0">Failed to load: ' + e + '</div>';
+  }}
+}}
+
+function showAddPathForm() {{
+  const form = document.getElementById('pf-add-form');
+  if (form) form.style.display = 'block';
+  const input = document.getElementById('pf-path-input');
+  if (input) input.focus();
+  // Populate device select with known devices
+  fetch('/api/devices').then(r => r.json()).then(d => {{
+    const sel = document.getElementById('pf-device-select');
+    if (!sel) return;
+    const devices = d.devices || d || [];
+    if (Array.isArray(devices)) {{
+      devices.forEach(dev => {{
+        const id = dev.device_id || dev.id || dev.hostname;
+        const label = dev.hostname || dev.device_id || dev.id;
+        if (id && label) {{
+          const opt = document.createElement('option');
+          opt.value = id; opt.textContent = label;
+          sel.appendChild(opt);
+        }}
+      }});
+    }}
+  }}).catch(() => {{}});
+}}
+
+async function addProtectedPath() {{
+  const path = document.getElementById('pf-path-input')?.value.trim();
+  const deviceId = document.getElementById('pf-device-select')?.value || '*';
+  const actions = document.getElementById('pf-actions-select')?.value || 'read,write,open';
+  const recursive = document.getElementById('pf-recursive-check')?.checked !== false;
+  if (!path) {{ alert('Please enter a file or directory path'); return; }}
+  try {{
+    const r = await fetch('/api/protected-paths', {{
+      method: 'POST',
+      headers: {{'Content-Type': 'application/json'}},
+      body: JSON.stringify({{path, device_id: deviceId, actions, recursive}})
+    }});
+    if (!r.ok) throw new Error(r.status);
+    document.getElementById('pf-add-form').style.display = 'none';
+    document.getElementById('pf-path-input').value = '';
+    loadProtectedPaths();
+    loadPFAuditLog();
+  }} catch(e) {{ alert('Failed to add: ' + e); }}
+}}
+
+async function removeProtectedPath(id) {{
+  if (!confirm('Remove this protected path?')) return;
+  try {{
+    const r = await fetch('/api/protected-paths/' + id, {{method: 'POST'}});
+    if (!r.ok) throw new Error(r.status);
+    loadProtectedPaths();
+    loadPFAuditLog();
+  }} catch(e) {{ alert('Failed to remove: ' + e); }}
+}}
+
+async function loadAccessEvents() {{
+  const list = document.getElementById('pf-events-list');
+  if (!list) return;
+  try {{
+    const r = await fetch('/api/access-events?limit=100');
+    if (!r.ok) throw new Error(r.status);
+    const d = await r.json();
+    const events = d.events || [];
+    document.getElementById('pf-count-events').textContent = events.length;
+    const unreviewed = events.filter(e => !e.reviewed).length;
+    document.getElementById('pf-count-unreviewed').textContent = unreviewed;
+    const badge = document.getElementById('pf-badge');
+    if (badge) {{
+      if (unreviewed > 0) {{ badge.textContent = unreviewed; badge.style.display = 'inline'; }}
+      else {{ badge.style.display = 'none'; }}
+    }}
+    if (!events.length) {{
+      list.innerHTML = '<div style="color:#9CA3AF;padding:16px 0">No access events yet. When an AI tool accesses a protected file, it will appear here in real time.</div>';
+      return;
+    }}
+    list.innerHTML = events.map(ev => {{
+      const ts = new Date(ev.ts * 1000);
+      const timeStr = ts.toLocaleDateString() + ' ' + ts.toLocaleTimeString([], {{hour:'2-digit',minute:'2-digit'}});
+      const actionColor = ev.action === 'write' ? '#DC2626' : ev.action === 'read' ? '#CA8A04' : '#4F46E5';
+      const reviewedStyle = ev.reviewed ? 'opacity:0.55;' : '';
+      return `<div style="${{reviewedStyle}}background:#fff;border:1px solid #E5E7EB;border-left:3px solid ${{actionColor}};border-radius:6px;padding:10px 14px;margin-bottom:6px;display:flex;gap:10px;align-items:center">
+        <div style="min-width:56px;text-align:center">
+          <div style="font-size:10px;font-weight:700;color:${{actionColor}};background:${{actionColor}}22;border-radius:4px;padding:2px 6px;text-transform:uppercase">${{ev.action}}</div>
+        </div>
+        <div style="flex:1;min-width:0">
+          <div style="font-size:13px;color:#111827"><strong>${{ev.process}}</strong> (PID ${{ev.pid}}) ${{ev.action}} <span style="font-family:monospace;color:#374151">${{ev.path}}</span></div>
+          <div style="font-size:11px;color:#6B7280;margin-top:2px">${{ev.hostname || ev.device_id}} · ${{ev.platform}} · ${{ev.source}} · ${{timeStr}}</div>
+        </div>
+        ${{ev.reviewed ? '<span style="font-size:11px;color:#9CA3AF">Reviewed</span>' : `<button onclick="reviewAccessEvent(${{ev.id}}, this)" style="font-size:11px;color:#16A34A;background:#F0FDF4;border:1px solid #BBF7D0;border-radius:4px;padding:3px 10px;cursor:pointer;white-space:nowrap">Review</button>`}}
+      </div>`;
+    }}).join('');
+  }} catch(e) {{
+    list.innerHTML = '<div style="color:#DC2626;padding:16px 0">Failed to load: ' + e + '</div>';
+  }}
+}}
+
+async function reviewAccessEvent(id, btn) {{
+  if (btn) {{ btn.disabled = true; btn.textContent = '…'; }}
+  try {{
+    await fetch('/api/access-events/' + id + '/review', {{method: 'POST'}});
+    loadAccessEvents();
+  }} catch(e) {{ if (btn) {{ btn.disabled = false; btn.textContent = 'Review'; }} }}
+}}
+
+async function reviewAllAccessEvents() {{
+  try {{
+    await fetch('/api/access-events/review-all', {{method: 'POST'}});
+    loadAccessEvents();
+  }} catch(e) {{}}
+}}
+
+async function loadPFAuditLog() {{
+  const list = document.getElementById('pf-audit-list');
+  if (!list) return;
+  try {{
+    const r = await fetch('/api/protected-paths/audit');
+    if (!r.ok) throw new Error(r.status);
+    const d = await r.json();
+    const entries = d.audit || [];
+    if (!entries.length) {{
+      list.innerHTML = '<div style="color:#9CA3AF;padding:16px 0">No policy changes yet.</div>';
+      return;
+    }}
+    list.innerHTML = entries.map(a => {{
+      const ts = new Date(a.ts * 1000).toLocaleString();
+      const color = a.action === 'remove' ? '#DC2626' : '#16A34A';
+      return `<div style="font-size:12px;padding:4px 0;border-bottom:1px solid #F3F4F6">
+        <span style="color:${{color}};font-weight:600">${{a.action.toUpperCase()}}</span>
+        <span style="font-family:monospace;color:#374151;margin:0 6px">${{a.path}}</span>
+        <span style="color:#9CA3AF">— ${{a.changed_by}} · ${{ts}}</span>
+      </div>`;
+    }}).join('');
+  }} catch(e) {{
+    list.innerHTML = '<div style="color:#DC2626;padding:16px 0">Failed to load: ' + e + '</div>';
+  }}
+}}
+
+async function loadPFChainStatus() {{
+  const el = document.getElementById('pf-chain-status');
+  if (!el) return;
+  try {{
+    const r = await fetch('/api/access-events/verify-chain');
+    if (!r.ok) return;
+    const d = await r.json();
+    if (d.intact) {{
+      el.textContent = '✓'; el.style.color = '#16A34A';
+      el.title = 'Hash chain intact — no tampering detected';
+    }} else {{
+      el.textContent = '⚠'; el.style.color = '#DC2626';
+      el.title = 'Hash chain BROKEN — possible tampering detected';
+    }}
+  }} catch(_) {{}}
+}}
 
 // ── Auto-refresh (lightweight poll — no full page reload) ──
 (function() {{

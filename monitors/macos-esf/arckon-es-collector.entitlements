@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- The restricted entitlement Apple approved for team SWRJ6ZV39K
+       on 2026-07-10 (request SMH99JLXP2). Without it, es_new_client()
+       returns ES_NEW_CLIENT_RESULT_ERR_NOT_ENTITLED. Must be authorized
+       by a Developer ID provisioning profile for ai.mfdynamics.arckon.agent. -->
+  <key>com.apple.developer.endpoint-security.client</key>
+  <true/>
+</dict>
+</plist>

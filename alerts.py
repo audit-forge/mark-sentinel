@@ -50,6 +50,7 @@ _DEFAULT_TRIGGERS = {
     'new_high':             True,
     'new_shadow_ai':        True,
     'alert_unapproved_only': False,
+    'ai_accessed_protected_file': True,
 }
 _PASS_MASK = '__set__'
 
@@ -392,6 +393,59 @@ def fire_shadow_alert(reporter_hostname: str, service: str,
                 service=service,
                 host=host,
                 source=source,
+                channels=', '.join(fired),
+            )
+        except Exception as e:
+            log.error('alert event log error: %s', e)
+
+
+def fire_access_alert(device_id: str, hostname: str, process: str,
+                      path: str, action: str, platform: str,
+                      alert_cfg: dict, store=None) -> None:
+    """Fire an alert when an AI process accesses a protected file or server.
+
+    Called by the server after ingesting access events from an agent. Uses
+    the same dedup cooldown and multi-channel dispatch as other alerts.
+
+    FedRAMP SI-4: system monitoring detects AI access to protected resources.
+    Dedup key is (device, path, process) so repeated access by the same AI
+    process to the same file only alerts once per 24h.
+    """
+    triggers = {**_DEFAULT_TRIGGERS, **alert_cfg.get('triggers', {})}
+    if not triggers.get('ai_accessed_protected_file', True):
+        return
+    dedup_key = f'{process}:{path}'
+    if store is not None:
+        try:
+            if store.was_alert_recently_fired('ai_accessed_protected_file', hostname, dedup_key):
+                log.info('access alert suppressed (24h cooldown): %s %s %s on %s',
+                         process, action, path, hostname)
+                return
+        except Exception as e:
+            log.error('alert dedup check error: %s', e)
+    title = f'AI process {process!r} {action} protected file {path} on {hostname}'
+    fired = _dispatch(alert_cfg, {
+        'event':    'ai_accessed_protected_file',
+        'severity': 'HIGH',
+        'device':   hostname,
+        'service':  process,
+        'host':     hostname,
+        'source':   platform,
+        'title':    title,
+        'check_id': 'PROTECTED-FILE-ACCESS',
+    })
+    log.info('access alert: %s %s %s on %s (%s)', process, action, path, hostname, platform)
+    if store is not None:
+        try:
+            store.log_alert_event(
+                event_type='ai_accessed_protected_file',
+                severity='HIGH',
+                device=hostname,
+                service=process,
+                host=hostname,
+                check_id='PROTECTED-FILE-ACCESS',
+                title=title,
+                source=platform,
                 channels=', '.join(fired),
             )
         except Exception as e:
