@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  PPPC (Privacy Preferences Policy Control) profile for the Arckon ES Collector.
+
+  Pre-grants Full Disk Access (SystemPolicyAllFiles) to the Arckon Endpoint
+  Security helper daemon so es_new_client() succeeds WITHOUT any per-device
+  manual approval in System Settings.
+
+  MUST be delivered by MDM (Jamf/Kandji/Intune/Mosyle/ABM/…). A manually-
+  installed PPPC profile can only DENY, never silently allow — MDM delivery
+  is what makes the Allow authoritative. Upload this as a custom/configuration
+  profile in the MDM and scope it to the same devices that receive the
+  Arckon ES Collector .pkg.
+
+  MDM deployment steps (see docs/PROTECTED_FILES_MDM.md for full guide):
+    1. Upload this .mobileconfig as a Custom Profile in your MDM
+    2. Scope it to the same devices that receive the Arckon agent + ES .pkg
+    3. Deploy the ArckonESCollector .pkg via MDM
+    4. No user interaction required — Full Disk Access is granted silently
+-->
+<plist version="1.0">
+<dict>
+  <key>PayloadType</key><string>Configuration</string>
+  <key>PayloadVersion</key><integer>1</integer>
+  <key>PayloadScope</key><string>System</string>
+  <key>PayloadIdentifier</key><string>ai.mfdynamics.arckon.pppc</string>
+  <key>PayloadUUID</key><string>A1B2C3D4-E5F6-4789-9ABC-DEF012345678</string>
+  <key>PayloadDisplayName</key><string>Arckon ES Collector — Full Disk Access</string>
+  <key>PayloadDescription</key><string>Grants Full Disk Access to the Arckon Endpoint Security daemon for Protected Files monitoring.</string>
+  <key>PayloadOrganization</key><string>M. F. Dynamics LLC</string>
+  <key>PayloadContent</key>
+  <array>
+    <dict>
+      <key>PayloadType</key><string>com.apple.TCC.configuration-profile-policy</string>
+      <key>PayloadVersion</key><integer>1</integer>
+      <key>PayloadIdentifier</key><string>ai.mfdynamics.arckon.pppc.tcc</string>
+      <key>PayloadUUID</key><string>B2C3D4E5-F6A7-489A-BCDE-F01234567890</string>
+      <key>PayloadDisplayName</key><string>Privacy Preferences Policy Control</key>
+      <key>Services</key>
+      <dict>
+        <key>SystemPolicyAllFiles</key>
+        <array>
+          <dict>
+            <key>Identifier</key><string>ai.mfdynamics.arckon.agent</string>
+            <key>IdentifierType</key><string>bundleID</string>
+            <key>CodeRequirement</key><string>identifier "ai.mfdynamics.arckon.agent" and anchor apple_generic and certificate 1[field.1.2.840.113635.100.6.2.6] /* exists */ and certificate leaf[field.1.2.840.113635.100.6.1.13] /* exists */ and certificate leaf[subject.OU] = SWRJ6ZV39K</string>
+            <key>Authorization</key><string>Allow</string>
+          </dict>
+        </array>
+      </dict>
+    </dict>
+  </array>
+</dict>
+</plist>

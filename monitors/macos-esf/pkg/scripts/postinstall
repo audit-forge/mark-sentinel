@@ -1,0 +1,18 @@
+#!/bin/bash
+# Runs as root during .pkg install. Loads the Arckon ES Collector daemon.
+# Full Disk Access is granted silently by the MDM-pushed PPPC profile
+# (arckon-es-collector.pppc.mobileconfig). On a standalone (non-managed) Mac,
+# the user must grant Full Disk Access manually in System Settings → Privacy
+# & Security → Full Disk Access → add arckon-es-collector.
+set -e
+
+LABEL="ai.mfdynamics.arckon-es-collector"
+PLIST="/Library/LaunchDaemons/${LABEL}.plist"
+
+# Reload cleanly if a previous version is running.
+if launchctl print "system/${LABEL}" >/dev/null 2>&1; then
+  launchctl bootout "system/${LABEL}" 2>/dev/null || true
+fi
+launchctl bootstrap system "$PLIST" 2>/dev/null || true
+
+exit 0
