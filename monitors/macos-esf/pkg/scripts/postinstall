@@ -3,16 +3,34 @@
 # Full Disk Access is granted silently by the MDM-pushed PPPC profile
 # (arckon-es-collector.pppc.mobileconfig). On a standalone (non-managed) Mac,
 # the user must grant Full Disk Access manually in System Settings → Privacy
-# & Security → Full Disk Access → add arckon-es-collector.
+# & Security → Full Disk Access → add arckon-es-collector. The daemon now
+# sleep-and-retries on ERR_NOT_PERMITTED (rather than crash-looping into
+# launchd's penalty box) so it auto-recovers the moment FDA is granted.
 set -e
 
 LABEL="ai.mfdynamics.arckon-es-collector"
 PLIST="/Library/LaunchDaemons/${LABEL}.plist"
 
-# Reload cleanly if a previous version is running.
+# Bootout any previous version (clears launchd's penalty-box state so a
+# clean bootstrap is possible after a pre-FDA crash-loop).
 if launchctl print "system/${LABEL}" >/dev/null 2>&1; then
   launchctl bootout "system/${LABEL}" 2>/dev/null || true
+  sleep 1
 fi
 launchctl bootstrap system "$PLIST" 2>/dev/null || true
+
+# Give the daemon a moment to come up, then report its state. If it failed
+# to start (e.g. FDA not granted yet on a non-managed Mac), print a clear,
+# actionable message — the user will see this in the installer's verbose log.
+sleep 2
+if pgrep -f "arckon-es-collector" >/dev/null 2>&1; then
+  echo "arckon-es-collector: daemon started"
+else
+  echo "arckon-es-collector: daemon not yet running."
+  echo "  If this is a non-managed Mac, grant Full Disk Access:"
+  echo "    System Settings → Privacy & Security → Full Disk Access → +"
+  echo "    → /Library/Arckon/ArckonESCollector.app"
+  echo "  The daemon will auto-start within 30s of FDA being granted."
+fi
 
 exit 0

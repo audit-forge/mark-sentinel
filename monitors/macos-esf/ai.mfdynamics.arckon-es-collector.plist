@@ -12,6 +12,8 @@
     <true/>
     <key>KeepAlive</key>
     <true/>
+    <key>ThrottleInterval</key>
+    <real>5</real>
     <key>StandardErrorPath</key>
     <string>/var/log/arckon-es-collector.log</string>
     <key>StandardOutPath</key>

@@ -360,7 +360,7 @@ install_protected_files_prereqs() {
         if command -v auditctl &>/dev/null; then
             echo "  auditd: ready ($(auditctl -s 2>/dev/null | head -1 || echo 'enabled'))"
         fi
-    elif [[ "$OS" == "macos" ]]; then
+        elif [[ "$OS" == "macos" ]]; then
         # Install the ArckonESCollector app (Endpoint Security helper) if the
         # installer bundle is present alongside this script. The agent downloads
         # it from the server's /releases/ path during install.
@@ -380,7 +380,13 @@ install_protected_files_prereqs() {
             fi
             if [[ -f "$ES_PLIST_SRC" ]]; then
                 cp "$ES_PLIST_SRC" /Library/LaunchDaemons/
-                launchctl load /Library/LaunchDaemons/ai.mfdynamics.arckon-es-collector.plist 2>/dev/null || true
+                ES_LABEL="ai.mfdynamics.arckon-es-collector"
+                # Clear any stale launchd penalty-box state from a prior
+                # pre-FDA crash-loop before bootstrapping, so a clean
+                # (re)install recovers immediately.
+                launchctl bootout "system/${ES_LABEL}" 2>/dev/null || true
+                sleep 1
+                launchctl bootstrap system "/Library/LaunchDaemons/${ES_LABEL}.plist" 2>/dev/null || true
                 echo "  ES Collector: installed and LaunchDaemon loaded"
             else
                 echo "  Warning: ES LaunchDaemon plist not found — helper will not auto-start"
@@ -390,14 +396,23 @@ install_protected_files_prereqs() {
             echo "      Protected Files monitoring on macOS requires the ES helper."
             echo "      Download it from the dashboard and install to /Library/Arckon/"
         fi
-        # Check Full Disk Access — can't be granted via script (Apple TCC)
-        # Check if the ES daemon is actually running
+        # Full Disk Access cannot be granted via script (Apple TCC). If the
+        # daemon isn't running after install, the most likely cause is that
+        # FDA hasn't been granted yet. Open System Settings directly to the
+        # Full Disk Access pane so the user can add the helper in two clicks.
+        # (On MDM-managed Macs the PPPC profile grants FDA silently and the
+        # daemon is already running — this block is a no-op there.)
         if pgrep -f "arckon-es-collector" &>/dev/null; then
             echo "  ES Collector: running"
         elif [[ -d /Library/Arckon/ArckonESCollector.app ]]; then
-            echo "  ⚠ Full Disk Access required: System Settings → Privacy & Security"
-            echo "    → Full Disk Access → add 'arckon-es-collector' from /Library/Arckon/"
-            echo "    (Apple does not allow TCC permissions to be granted via script)"
+            echo "  ⚠ Full Disk Access required for Protected Files monitoring."
+            echo "    Opening System Settings → Privacy & Security → Full Disk Access..."
+            echo "    Click '+', press Cmd+Shift+G, and add:"
+            echo "      /Library/Arckon/ArckonESCollector.app"
+            # Open the Full Disk Access pane directly (macOS 13+). Non-fatal
+            # if it fails — the message above tells the user the manual path.
+            open "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles" 2>/dev/null || true
+            echo "    The ES daemon auto-starts within 30s of FDA being granted."
         fi
     fi
 }

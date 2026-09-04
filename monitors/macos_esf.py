@@ -52,6 +52,7 @@ class MacOSESCollector(AccessCollector):
         self._thread: threading.Thread | None = None
         self._stop_event = threading.Event()
         self._sock: socket.socket | None = None
+        self._es_proc = None  # child ES daemon if we started it directly
 
     def start(self) -> None:
         if self._thread and self._thread.is_alive():
@@ -64,11 +65,74 @@ class MacOSESCollector(AccessCollector):
                         'real-time file monitoring disabled',
                         self.socket_path, e)
             return
+        self._ensure_es_daemon()
         self._stop_event.clear()
         self._thread = threading.Thread(
             target=self._serve, name='macos-es-collector', daemon=True)
         self._thread.start()
         log.info('macOS ES collector listening on %s', self.socket_path)
+
+    def _ensure_es_daemon(self) -> None:
+        """Ensure the native ES helper daemon is running.
+
+        The daemon is normally managed by a LaunchDaemon
+        (ai.mfdynamics.arckon-es-collector). If that daemon is dead (e.g.
+        launchd penalty-box after a pre-FDA crash, or the plist was never
+        installed), we start it directly as a root child process so
+        monitoring works without manual intervention. We also re-check
+        periodically via _watchdog so a daemon that dies later is revived.
+        """
+        import subprocess
+        import shutil
+        daemon_path = '/Library/Arckon/ArckonESCollector.app/Contents/MacOS/arckon-es-collector'
+        if not os.path.exists(daemon_path):
+            log.warning('ES helper not installed at %s — Protected Files '
+                        'monitoring disabled on macOS. Install the '
+                        'ArckonESCollector.pkg.', daemon_path)
+            return
+        # Already running? (launchd-managed or our own child)
+        if self._is_daemon_running():
+            return
+        # Try to load the LaunchDaemon first (the proper, durable way)
+        plist = '/Library/LaunchDaemons/ai.mfdynamics.arckon-es-collector.plist'
+        if os.path.exists(plist):
+            subprocess.run(
+                ['launchctl', 'bootstrap', 'system', plist],
+                capture_output=True, timeout=10)
+            import time
+            time.sleep(2)
+            if self._is_daemon_running():
+                log.info('ES daemon started via LaunchDaemon')
+                return
+        # Fallback: start it directly as a child process. We inherit the
+        # agent's root privileges. If FDA isn't granted yet, the daemon
+        # now sleeps-and-retries internally (see arckon-es-collector.swift),
+        # so this child stays alive and auto-recovers once FDA is granted.
+        try:
+            env = os.environ.copy()
+            env['ARCKON_ES_SOCKET'] = self.socket_path
+            proc = subprocess.Popen(
+                [daemon_path],
+                stdout=open('/var/log/arckon-es-collector.log', 'a'),
+                stderr=subprocess.STDOUT,
+                env=env, start_new_session=True)
+            self._es_proc = proc
+            log.info('ES daemon started directly (pid %s) — LaunchDaemon '
+                     'not running', proc.pid)
+        except Exception as e:
+            log.warning('Could not start ES daemon: %s — Protected Files '
+                        'monitoring disabled', e)
+
+    @staticmethod
+    def _is_daemon_running() -> bool:
+        import subprocess
+        try:
+            r = subprocess.run(
+                ['pgrep', '-f', 'arckon-es-collector'],
+                capture_output=True, timeout=5)
+            return r.returncode == 0 and r.stdout.strip()
+        except Exception:
+            return False
 
     def stop(self) -> None:
         super().stop()

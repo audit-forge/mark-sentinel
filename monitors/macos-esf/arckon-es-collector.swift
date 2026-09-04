@@ -195,35 +195,55 @@ func fail(_ msg: String) -> Never {
 }
 
 var client: OpaquePointer?
-let newRes = es_new_client(&client) { _, msg in
-    let eventType = msg.pointee.event_type
-    switch eventType {
-    case ES_EVENT_TYPE_NOTIFY_OPEN:
-        handleFileAccess(msg, action: "open")
-    case ES_EVENT_TYPE_NOTIFY_WRITE:
-        handleFileAccess(msg, action: "write")
-    case ES_EVENT_TYPE_NOTIFY_RENAME:
-        handleFileAccess(msg, action: "rename")
-    case ES_EVENT_TYPE_NOTIFY_UNLINK:
-        handleFileAccess(msg, action: "unlink")
-    case ES_EVENT_TYPE_NOTIFY_LOGIN_LOGIN:
-        handleLogin(msg)
-    default:
-        break
-    }
-}
 
-switch newRes {
-case ES_NEW_CLIENT_RESULT_SUCCESS:
+// es_new_client can fail with ERR_NOT_PERMITTED if Full Disk Access has not
+// yet been granted. Rather than exit (which triggers launchd's crash-loop
+// "penalty box" throttle and prevents auto-recovery once the user grants
+// FDA), we sleep-and-retry indefinitely. This keeps the process alive so
+// launchd's KeepAlive never kicks in, and the moment FDA is granted the
+// next attempt succeeds. (ERR_NOT_ENTITLED is a build/signing error that
+// cannot be fixed at runtime — fail fast there.)
+while true {
+    let newRes = es_new_client(&client) { _, msg in
+        let eventType = msg.pointee.event_type
+        switch eventType {
+        case ES_EVENT_TYPE_NOTIFY_OPEN:
+            handleFileAccess(msg, action: "open")
+        case ES_EVENT_TYPE_NOTIFY_WRITE:
+            handleFileAccess(msg, action: "write")
+        case ES_EVENT_TYPE_NOTIFY_RENAME:
+            handleFileAccess(msg, action: "rename")
+        case ES_EVENT_TYPE_NOTIFY_UNLINK:
+            handleFileAccess(msg, action: "unlink")
+        case ES_EVENT_TYPE_NOTIFY_LOGIN_LOGIN:
+            handleLogin(msg)
+        default:
+            break
+        }
+    }
+
+    switch newRes {
+    case ES_NEW_CLIENT_RESULT_SUCCESS:
+        break
+    case ES_NEW_CLIENT_RESULT_ERR_NOT_ENTITLED:
+        fail("missing com.apple.developer.endpoint-security.client entitlement")
+    case ES_NEW_CLIENT_RESULT_ERR_NOT_PERMITTED:
+        // Full Disk Access not granted yet. Sleep 30s and retry so the
+        // process stays alive (no crash-loop) and auto-recovers once
+        // the user grants FDA in System Settings.
+        FileHandle.standardError.write(Data(
+            "arckon-es-collector: waiting for Full Disk Access — retry in 30s\n".utf8))
+        sleep(30)
+        continue
+    case ES_NEW_CLIENT_RESULT_ERR_NOT_PRIVILEGED:
+        fail("must run as root")
+    default:
+        FileHandle.standardError.write(Data(
+            "arckon-es-collector: es_new_client failed (\(newRes.rawValue)) — retry in 30s\n".utf8))
+        sleep(30)
+        continue
+    }
     break
-case ES_NEW_CLIENT_RESULT_ERR_NOT_ENTITLED:
-    fail("missing com.apple.developer.endpoint-security.client entitlement")
-case ES_NEW_CLIENT_RESULT_ERR_NOT_PERMITTED:
-    fail("not permitted — grant Full Disk Access in System Settings > Privacy")
-case ES_NEW_CLIENT_RESULT_ERR_NOT_PRIVILEGED:
-    fail("must run as root")
-default:
-    fail("es_new_client failed: \(newRes.rawValue)")
 }
 
 guard let client else { fail("es_new_client returned nil client") }

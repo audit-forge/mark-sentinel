@@ -22,6 +22,18 @@ All notable changes to this project will be documented in this file.
 - Release artifacts are packaged with an allowlist and signed out-of-repo; private key never enters source control.
 - Proxy identity headers are cleared on non-authenticated routes and require a shared proxy token.
 
+## 1.0.37 — 2026-09-04
+
+### Fixed (macOS Protected Files reliability)
+- ES collector daemon now **sleep-and-retries on ERR_NOT_PERMITTED** (Full Disk Access not granted) instead of exiting, eliminating launchd's crash-loop "penalty box" that prevented auto-recovery once FDA was granted.
+- LaunchDaemon plist adds `ThrottleInterval` (5s) to prevent launchd penalty-box throttling.
+- **Agent now auto-starts the ES daemon** if the LaunchDaemon is dead (penalty-box, never installed, or post-FDA grant), so Protected Files monitoring works without manual intervention on non-managed Macs.
+- `install.sh` now **opens System Settings → Full Disk Access** directly and clears stale launchd penalty-box state on reinstall.
+- `.pkg` postinstall reports daemon state clearly and tells the user the actionable next step.
+
+### Changed
+- Protected Files access alert severity raised from **HIGH → CRITICAL** (an AI process reading a protected/secret file is a critical-signal event).
+
 ## 1.0.36 — 2026-09-04
 
 ### Added

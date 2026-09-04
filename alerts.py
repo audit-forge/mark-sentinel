@@ -426,7 +426,7 @@ def fire_access_alert(device_id: str, hostname: str, process: str,
     title = f'AI process {process!r} {action} protected file {path} on {hostname}'
     fired = _dispatch(alert_cfg, {
         'event':    'ai_accessed_protected_file',
-        'severity': 'HIGH',
+        'severity': 'CRITICAL',
         'device':   hostname,
         'service':  process,
         'host':     hostname,
@@ -439,7 +439,7 @@ def fire_access_alert(device_id: str, hostname: str, process: str,
         try:
             store.log_alert_event(
                 event_type='ai_accessed_protected_file',
-                severity='HIGH',
+                severity='CRITICAL',
                 device=hostname,
                 service=process,
                 host=hostname,
