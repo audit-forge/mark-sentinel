@@ -2801,6 +2801,18 @@ load();
                 store.enqueue_command(device_id, f'set_config:{json.dumps({"profile": profile})}')
             except Exception as _be:
                 log.error('baseline profile dispatch error: %s', _be)
+            # New devices also receive the customer's current protected-paths
+            # policy so monitoring is active immediately on first connection.
+            try:
+                policy_paths = store.get_protected_paths_for_agent(device_id)
+                if policy_paths:
+                    store.enqueue_command(
+                        device_id,
+                        f'set_protected_paths:{json.dumps(policy_paths)}')
+                    log.info('pushed %d protected paths to new device %s',
+                             len(policy_paths), device_id)
+            except Exception as _pe:
+                log.error('protected-paths dispatch error: %s', _pe)
 
         try:
             from alerts import load_alert_config, fire_alerts
@@ -5289,6 +5301,8 @@ load();
             row_id = store.add_protected_path(
                 device_id, path, recursive=recursive,
                 actions=actions, created_by=changed_by)
+            # Push the updated policy to the affected agent(s) via command poll
+            self._push_protected_paths_to_agents(store, device_id)
             self._json({'ok': True, 'id': row_id})
         except Exception as e:
             log.error('add_protected_path error: %s', e, exc_info=True)
@@ -5312,6 +5326,8 @@ load();
                 match['device_id'], match['path'],
                 recursive=recursive, actions=actions,
                 created_by=changed_by)
+            # Push the updated policy to the affected agent(s)
+            self._push_protected_paths_to_agents(store, match['device_id'])
             self._json({'ok': True})
         except Exception as e:
             self._json({'error': str(e)}, 500)
@@ -5322,12 +5338,47 @@ load();
             user = self._session_user()
             changed_by = user['email'] if user else 'Dashboard user'
             store = self._store()
+            # Get the device_id before removing so we know which agent to push to
+            paths = store.get_protected_paths()
+            match = next((p for p in paths if p['id'] == pid), None)
+            if not match:
+                self._json({'error': 'not found'}, 404)
+                return
+            device_id = match['device_id']
             if store.remove_protected_path(pid, changed_by=changed_by):
+                # Push the updated policy to the affected agent(s)
+                self._push_protected_paths_to_agents(store, device_id)
                 self._json({'ok': True})
             else:
                 self._json({'error': 'not found'}, 404)
         except Exception as e:
             self._json({'error': str(e)}, 500)
+
+    def _push_protected_paths_to_agents(self, store, device_id: str) -> None:
+        """Push the current protected-paths policy to one or all agents via
+        the command poll. If device_id is '*', pushes to every device's store.
+        Called automatically after any add/update/remove so the agent receives
+        the new policy within 15 seconds (next poll)."""
+        try:
+            policy_paths = store.get_protected_paths_for_agent(device_id)
+            cmd_payload = json.dumps(policy_paths)
+            cmd = f'set_protected_paths:{cmd_payload}'
+            if device_id == '*':
+                # Wildcard policy — push to every known device
+                for dev in store.list_devices():
+                    try:
+                        dev_store = _get_store_for_device(dev['device_id'])
+                        dev_store.enqueue_command(dev['device_id'], cmd)
+                    except Exception as e:
+                        log.warning('failed to push protected paths to %s: %s',
+                                    dev['device_id'], e)
+            else:
+                store.enqueue_command(device_id, cmd)
+            log.info('pushed protected-paths policy to %s (%d paths)',
+                     'all devices' if device_id == '*' else device_id,
+                     len(policy_paths))
+        except Exception as e:
+            log.error('failed to push protected-paths policy: %s', e)
 
     def _api_get_access_events(self):
         import urllib.parse as _up
