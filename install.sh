@@ -331,6 +331,81 @@ else
     echo "To start manually: sudo ${INSTALL_PREFIX}/agent --config ${CONFIG_FILE} --daemon"
 fi
 
+# ── Protected Files monitoring prerequisites ──────────────────────────────────
+# These set up the OS-level audit infrastructure the agent needs to detect
+# when AI tools access protected files. Skipped with --no-service.
+
+install_protected_files_prereqs() {
+    if [[ "$OS" == "linux" ]]; then
+        # Install auditd if not present — the Linux collector uses auditctl
+        # and ausearch to monitor file access and SSH logins.
+        if ! command -v auditctl &>/dev/null; then
+            echo "Installing auditd for Protected Files monitoring..."
+            if command -v apt-get &>/dev/null; then
+                apt-get update -qq && apt-get install -y -qq auditd
+            elif command -v yum &>/dev/null; then
+                yum install -y -q audit
+            elif command -v dnf &>/dev/null; then
+                dnf install -y -q audit
+            else
+                echo "Warning: could not install auditd — Protected Files monitoring"
+                echo "         will not work until auditd is installed manually."
+            fi
+        fi
+        # Ensure auditd is running
+        if command -v systemctl &>/dev/null; then
+            systemctl enable auditd 2>/dev/null || true
+            systemctl start auditd 2>/dev/null || true
+        fi
+        if command -v auditctl &>/dev/null; then
+            echo "  auditd: ready ($(auditctl -s 2>/dev/null | head -1 || echo 'enabled'))"
+        fi
+    elif [[ "$OS" == "macos" ]]; then
+        # Install the ArckonESCollector app (Endpoint Security helper) if the
+        # installer bundle is present alongside this script. The agent downloads
+        # it from the server's /releases/ path during install.
+        ES_APP_SRC="${SCRIPT_DIR}/ArckonESCollector.app"
+        # Also check the download cache location
+        if [[ ! -d "$ES_APP_SRC" ]]; then
+            ES_APP_SRC="${INSTALL_PREFIX}/ArckonESCollector.app"
+        fi
+        if [[ -d "$ES_APP_SRC" ]]; then
+            echo "Installing Arckon ES Collector (Endpoint Security helper)..."
+            mkdir -p /Library/Arckon
+            cp -r "$ES_APP_SRC" /Library/Arckon/
+            # Install the LaunchDaemon plist
+            ES_PLIST_SRC="${SCRIPT_DIR}/ai.mfdynamics.arckon-es-collector.plist"
+            if [[ ! -f "$ES_PLIST_SRC" ]]; then
+                ES_PLIST_SRC="${INSTALL_PREFIX}/ai.mfdynamics.arckon-es-collector.plist"
+            fi
+            if [[ -f "$ES_PLIST_SRC" ]]; then
+                cp "$ES_PLIST_SRC" /Library/LaunchDaemons/
+                launchctl load /Library/LaunchDaemons/ai.mfdynamics.arckon-es-collector.plist 2>/dev/null || true
+                echo "  ES Collector: installed and LaunchDaemon loaded"
+            else
+                echo "  Warning: ES LaunchDaemon plist not found — helper will not auto-start"
+            fi
+        else
+            echo "Note: ArckonESCollector.app not found alongside installer."
+            echo "      Protected Files monitoring on macOS requires the ES helper."
+            echo "      Download it from the dashboard and install to /Library/Arckon/"
+        fi
+        # Check Full Disk Access — can't be granted via script (Apple TCC)
+        # Check if the ES daemon is actually running
+        if pgrep -f "arckon-es-collector" &>/dev/null; then
+            echo "  ES Collector: running"
+        elif [[ -d /Library/Arckon/ArckonESCollector.app ]]; then
+            echo "  ⚠ Full Disk Access required: System Settings → Privacy & Security"
+            echo "    → Full Disk Access → add 'arckon-es-collector' from /Library/Arckon/"
+            echo "    (Apple does not allow TCC permissions to be granted via script)"
+        fi
+    fi
+}
+
+if [[ "$OPT_NO_SERVICE" -eq 0 ]]; then
+    install_protected_files_prereqs
+fi
+
 echo ""
 echo "Arckon Agent installed successfully."
 echo "  Install dir : ${INSTALL_PREFIX}"
