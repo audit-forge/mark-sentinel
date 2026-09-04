@@ -22,6 +22,13 @@ All notable changes to this project will be documented in this file.
 - Release artifacts are packaged with an allowlist and signed out-of-repo; private key never enters source control.
 - Proxy identity headers are cleared on non-authenticated routes and require a shared proxy token.
 
+## 1.0.36 — 2026-09-04
+
+### Added
+- Protected Files monitoring agent collector: macOS EndpointSecurity (ES) bridge, Linux auditd collector, Windows Event Log collector, AI-process path correlation, bounded event queue, and `post_access_events()` uploader.
+- Agent handles `set_protected_paths:` command and auto-starts the platform-appropriate collector on scan cycles.
+- `install.sh` auto-installs auditd (Linux) and the signed ArckonESCollector.app + LaunchDaemon (macOS).
+
 ## Unreleased (Phase 4: SMB polish & packaging)
 
 ### Added
