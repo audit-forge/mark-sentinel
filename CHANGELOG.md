@@ -22,6 +22,11 @@ All notable changes to this project will be documented in this file.
 - Release artifacts are packaged with an allowlist and signed out-of-repo; private key never enters source control.
 - Proxy identity headers are cleared on non-authenticated routes and require a shared proxy token.
 
+## 1.0.41 — 2026-09-05
+
+### Fixed
+- Protected Cloud Assets now creates and stores a dedicated per-customer CloudTrail forwarder token with `0600` permissions, rather than relying on an environment variable. Dashboard admins can reveal it explicitly for forwarder configuration.
+
 ## 1.0.40 — 2026-09-05
 
 ### Added

@@ -60,6 +60,7 @@ import json
 import logging
 import os
 import hmac
+import secrets
 import mimetypes
 import subprocess
 import threading
@@ -403,6 +404,30 @@ def _agent_token() -> str:
         if tok_file.exists():
             return tok_file.read_text().strip()
     return ''
+
+
+def _cloud_ingest_token() -> str:
+    """Return this customer's dedicated CloudTrail ingest token.
+
+    Stored in the mounted customer data directory with mode 0600 rather than
+    an environment variable, so Docker inspect and process listings cannot
+    disclose it. Race-safe creation matters during container restarts.
+    """
+    path = ROOT / 'data' / 'cloud_ingest_token.txt'
+    try:
+        if path.is_file():
+            return path.read_text(encoding='utf-8').strip()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        token = secrets.token_urlsafe(32)
+        fd = os.open(str(path), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(fd, 'w', encoding='utf-8') as f:
+            f.write(token + '\n')
+        return token
+    except FileExistsError:
+        return path.read_text(encoding='utf-8').strip()
+    except OSError:
+        log.error('cloud ingest token unavailable', exc_info=True)
+        return ''
 
 
 def _check_agent_token(submitted: str) -> bool:
@@ -1484,6 +1509,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             '/api/protected-cloud-assets': self._api_get_protected_cloud_assets,
             '/api/protected-cloud-assets/events': self._api_get_protected_cloud_asset_events,
             '/api/protected-cloud-assets/audit': self._api_get_protected_cloud_assets_audit,
+            '/api/protected-cloud-assets/ingest-token': self._api_get_cloud_ingest_token,
             '/api/siem/config':      self._api_get_siem_config,
             '/api/live-scan-config': self._api_get_live_scan_config,
             '/api/fleet/live-stats': self._api_fleet_live_stats,
@@ -5299,6 +5325,18 @@ load();
         except Exception as e:
             self._json({'audit': [], 'error': str(e)}, 500)
 
+    def _api_get_cloud_ingest_token(self):
+        """Reveal the dedicated forwarder token to an authenticated dashboard admin."""
+        user = self._session_user()
+        if not user or user.get('role') not in ('admin', 'super_admin'):
+            self._send(403, b'Forbidden', 'text/plain')
+            return
+        token = _cloud_ingest_token()
+        if not token:
+            self._json({'error': 'cloud ingest token unavailable'}, 500)
+            return
+        self._json({'token': token})
+
     def _api_add_protected_cloud_asset(self):
         try:
             body = self._read_json_body()
@@ -5346,11 +5384,11 @@ load();
     def _api_cloud_asset_events(self):
         """Accept one authenticated, normalized CloudTrail S3 event.
 
-        Deployers set a distinct 256-bit ARCKON_CLOUD_INGEST_TOKEN on each
-        customer container. The endpoint ignores caller-supplied tenant fields,
-        retains no raw CloudTrail event, and is idempotent by AWS event ID.
+        The dedicated token is stored per customer in the mounted data volume.
+        The endpoint ignores caller-supplied tenant fields, retains no raw
+        CloudTrail event, and is idempotent by AWS event ID.
         """
-        token = os.environ.get('ARCKON_CLOUD_INGEST_TOKEN', '')
+        token = _cloud_ingest_token()
         supplied = self.headers.get('Authorization', '').removeprefix('Bearer ').strip()
         if not token or not supplied or not hmac.compare_digest(supplied, token):
             self._send(401, b'Unauthorized', 'text/plain')
@@ -7445,6 +7483,7 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
   <div class="sec-hdr" style="font-size:15px;margin-bottom:10px">Policies
     <button onclick="showCloudAssetForm()" style="margin-left:auto;font-size:12px;background:#4F46E5;color:#fff;border:none;border-radius:4px;padding:5px 14px;cursor:pointer">+ Add AWS S3 Policy</button>
   </div>
+  <button onclick="showCloudIngestToken()" class="scan-btn" style="font-size:12px;margin-bottom:12px">Show CloudTrail Forwarder Token</button><span id="ca-token" style="font-size:11px;font-family:monospace;word-break:break-all;margin-left:8px"></span>
   <div id="cloud-asset-form" style="display:none;background:#f0f4ff;border:1px solid #c7d2fe;border-radius:6px;padding:14px;margin-bottom:12px">
     <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:end">
       <div style="flex:1;min-width:220px"><label style="font-size:11px;color:#6B7280;display:block;margin-bottom:3px">S3 bucket or prefix</label><input id="ca-scope" placeholder="s3://customer-records/payroll" style="width:100%;padding:6px 10px;border:1px solid #D1D5DB;border-radius:4px;font-size:13px;font-family:monospace"></div>
@@ -11486,6 +11525,13 @@ async function loadProtectedCloudAssets() {{
     if (!policies.length) {{ list.innerHTML = '<div style="color:#6B7280">No cloud policies yet. Add an explicit S3 bucket or prefix to start monitoring.</div>'; return; }}
     list.innerHTML = policies.map(p => `<div style="background:#fff;border:1px solid #E5E7EB;border-left:3px solid #4F46E5;border-radius:6px;padding:11px 14px;display:flex;gap:12px;align-items:center;margin-bottom:8px"><div style="flex:1"><strong style="font-size:13px">AWS S3</strong> <code style="font-size:12px">${{cloudEsc(p.resource_scope)}}</code><div style="font-size:11px;color:#6B7280;margin-top:4px">Account: ${{cloudEsc(p.account_id || 'any')}}${{p.tag_key ? ' · Require tag: ' + cloudEsc(p.tag_key) + '=' + cloudEsc(p.tag_value) : ''}}</div></div><button onclick="removeCloudAssetPolicy(${{p.id}})" class="scan-btn" style="font-size:11px;color:#DC2626;border-color:#FECACA">Remove</button></div>`).join('');
   }} catch (e) {{ list.innerHTML = '<div style="color:#DC2626">Failed to load cloud policies.</div>'; }}
+}}
+async function showCloudIngestToken() {{
+  if (!confirm('Reveal the CloudTrail forwarder token? Treat it like a password.')) return;
+  const r = await fetch('/api/protected-cloud-assets/ingest-token');
+  const d = await r.json();
+  if (!r.ok) {{ alert(d.error || 'Could not retrieve token'); return; }}
+  document.getElementById('ca-token').textContent = d.token;
 }}
 async function addCloudAssetPolicy() {{
   const scope = document.getElementById('ca-scope').value.trim();

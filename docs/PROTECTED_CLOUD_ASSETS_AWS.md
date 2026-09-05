@@ -19,10 +19,12 @@ CloudTrail forwarder reports access to a matching asset.
 3. Give that forwarder least privilege: CloudTrail read/receive permission and,
    only when tag matching is configured, `s3:GetObjectTagging` for the explicit
    protected scope. It must not receive `s3:GetObject`.
-4. Set a unique 256-bit `ARCKON_CLOUD_INGEST_TOKEN` in the customer Arckon
-   server/container secret store. Do not use an endpoint-agent token or an AWS
-   access key. The forwarder sends it as `Authorization: Bearer <token>` to
-   `POST /api/cloud-assets/events` over HTTPS.
+4. Retrieve the dedicated per-customer ingest token from the Protected Cloud
+   Assets integration setup. Arckon creates it in the customer data volume
+   with mode `0600`; it is not an environment variable. Do not use an
+   endpoint-agent token or an AWS access key. The forwarder sends it as
+   `Authorization: Bearer <token>` to `POST /api/cloud-assets/events` over
+   HTTPS.
 5. The forwarder sends one CloudTrail event per request. For tag-enforced
    policies, it may add `detail.arckonResourceTags` after looking up tags. Tags
    are evaluated in memory and are never persisted by Arckon.

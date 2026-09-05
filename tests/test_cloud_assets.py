@@ -60,4 +60,5 @@ def test_cloud_policy_audit_and_event_idempotency():
         assert not store.ingest_protected_cloud_event(event, policy_id)
         stored = store.get_protected_cloud_events()
         assert stored[0]['resource'] == 's3://records/payroll/2026.csv'
+        assert store.verify_protected_cloud_event_chain()
         assert store.remove_protected_cloud_asset(policy_id, 'test@example.com')

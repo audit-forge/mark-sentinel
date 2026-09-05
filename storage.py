@@ -1618,6 +1618,27 @@ class AgentStore:
             return [dict(r) for r in conn.execute(
                 "SELECT * FROM protected_cloud_asset_events ORDER BY ts DESC LIMIT ?", (limit,)).fetchall()]
 
+    def verify_protected_cloud_event_chain(self) -> bool:
+        """Verify the immutable Protected Cloud Asset event chain."""
+        import crypto
+        with self._lock, self._conn() as conn:
+            rows = conn.execute(
+                "SELECT * FROM protected_cloud_asset_events ORDER BY id ASC").fetchall()
+        prev_hash = ''
+        for row in rows:
+            d = dict(row)
+            data = {
+                'provider': d['provider'], 'resource_type': d['resource_type'],
+                'account_id': d['account_id'], 'region': d['region'],
+                'resource': d['resource'], 'actor': d['actor'], 'action': d['action'],
+                'event_name': d['event_name'], 'event_id': d['external_id'],
+                'ts': d['ts'], 'policy_id': d['policy_id'],
+            }
+            if d['prev_hash'] != prev_hash or d['event_hash'] != crypto.compute_event_hash(prev_hash, data):
+                return False
+            prev_hash = d['event_hash']
+        return True
+
     # ── AI spend tracking ─────────────────────────────────────────────────────
 
     def upsert_ai_spend(self, records: list) -> int:
