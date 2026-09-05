@@ -22,6 +22,14 @@ All notable changes to this project will be documented in this file.
 - Release artifacts are packaged with an allowlist and signed out-of-repo; private key never enters source control.
 - Proxy identity headers are cleared on non-authenticated routes and require a shared proxy token.
 
+## 1.0.44 — 2026-09-05
+
+### Added
+- Protected Cloud Assets now supports Azure Blob Storage diagnostic events and GCP Cloud Storage Cloud Audit Logs, with explicit scopes and optional exact Azure tags or GCP labels.
+
+### Fixed
+- Windows agent activation now runs through a temporary SYSTEM scheduled task, so stopping the Arckon service cannot terminate its own updater before the signed binary is installed.
+
 ## 1.0.43 — 2026-09-05
 
 ### Fixed
