@@ -22,6 +22,11 @@ All notable changes to this project will be documented in this file.
 - Release artifacts are packaged with an allowlist and signed out-of-repo; private key never enters source control.
 - Proxy identity headers are cleared on non-authenticated routes and require a shared proxy token.
 
+## 1.0.38 — 2026-09-04
+
+### Added
+- **Alert detail panel**: click any alert in the Alert History feed to open a modal with full details — event type, check ID, device, host, process, source, status, channels, timestamp, and alert ID. Close with the Close button, Esc key, or clicking outside. "Mark reviewed" is available from inside the panel too.
+
 ## 1.0.37 — 2026-09-04
 
 ### Fixed (macOS Protected Files reliability)
