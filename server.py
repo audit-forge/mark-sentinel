@@ -5346,15 +5346,20 @@ load();
             scope = str(body.get('resource_scope', '')).strip().rstrip('/')
             tag_key = str(body.get('tag_key', '')).strip()
             tag_value = str(body.get('tag_value', '')).strip()
-            # AWS S3 is deliberately the only supported provider in this first
-            # release. Explicit scope prevents an accidental all-account rule.
-            if provider != 'aws' or resource_type != 's3_object':
-                self._json({'error': 'only aws s3_object policies are supported'}, 400)
+            allowed = {
+                ('aws', 's3_object'): 's3://',
+                ('gcp', 'gcs_object'): 'gs://',
+                ('azure', 'azure_blob'): 'azure://',
+            }
+            required_prefix = allowed.get((provider, resource_type))
+            # Explicit scope prevents accidental all-account monitoring.
+            if not required_prefix:
+                self._json({'error': 'unsupported cloud provider or resource type'}, 400)
                 return
-            if not scope.startswith('s3://') or '*' in scope or '\x00' in scope:
-                self._json({'error': 'resource_scope must be an explicit s3://bucket[/prefix] without wildcards'}, 400)
+            if not scope.startswith(required_prefix) or '*' in scope or '\x00' in scope:
+                self._json({'error': f'resource_scope must be an explicit {required_prefix} scope without wildcards'}, 400)
                 return
-            if account_id and (len(account_id) != 12 or not account_id.isdigit()):
+            if provider == 'aws' and account_id and (len(account_id) != 12 or not account_id.isdigit()):
                 self._json({'error': 'account_id must be a 12-digit AWS account ID'}, 400)
                 return
             if bool(tag_key) != bool(tag_value):
@@ -5397,8 +5402,8 @@ load();
             self._send(413, b'Payload too large', 'text/plain')
             return
         try:
-            from connectors.cloud_assets import normalize_cloudtrail_s3_event, policy_matches_event
-            event = normalize_cloudtrail_s3_event(self._read_json_body())
+            from connectors.cloud_assets import normalize_cloud_asset_event, policy_matches_event
+            event = normalize_cloud_asset_event(self._read_json_body())
             if not event:
                 self._json({'ok': True, 'stored': 0})
                 return
@@ -7477,17 +7482,18 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
 
   <div class="page" id="page-protected-cloud-assets">
   <div class="sec-hdr" style="margin-top:0;padding-top:0">&#9729; Protected Cloud Assets
-    <span style="font-size:12px;font-weight:400;color:#6B7280;margin-left:8px">AWS S3 scope and tag policies monitored through authenticated CloudTrail data events</span>
+    <span style="font-size:12px;font-weight:400;color:#6B7280;margin-left:8px">AWS S3, Azure Blob, and GCP Cloud Storage policies monitored through authenticated cloud audit events</span>
   </div>
   <div style="background:#EFF6FF;border:1px solid #BFDBFE;border-radius:6px;padding:12px 14px;font-size:12px;color:#1E3A8A;margin-bottom:16px">Arckon records access metadata only, never object contents or raw CloudTrail payloads. Policies require an explicit S3 bucket or prefix; wildcard scopes are rejected.</div>
   <div class="sec-hdr" style="font-size:15px;margin-bottom:10px">Policies
-    <button onclick="showCloudAssetForm()" style="margin-left:auto;font-size:12px;background:#4F46E5;color:#fff;border:none;border-radius:4px;padding:5px 14px;cursor:pointer">+ Add AWS S3 Policy</button>
+    <button onclick="showCloudAssetForm()" style="margin-left:auto;font-size:12px;background:#4F46E5;color:#fff;border:none;border-radius:4px;padding:5px 14px;cursor:pointer">+ Add Cloud Policy</button>
   </div>
   <button onclick="showCloudIngestToken()" class="scan-btn" style="font-size:12px;margin-bottom:12px">Show CloudTrail Forwarder Token</button><span id="ca-token" style="font-size:11px;font-family:monospace;word-break:break-all;margin-left:8px"></span>
   <div id="cloud-asset-form" style="display:none;background:#f0f4ff;border:1px solid #c7d2fe;border-radius:6px;padding:14px;margin-bottom:12px">
     <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:end">
-      <div style="flex:1;min-width:220px"><label style="font-size:11px;color:#6B7280;display:block;margin-bottom:3px">S3 bucket or prefix</label><input id="ca-scope" placeholder="s3://customer-records/payroll" style="width:100%;padding:6px 10px;border:1px solid #D1D5DB;border-radius:4px;font-size:13px;font-family:monospace"></div>
-      <div><label style="font-size:11px;color:#6B7280;display:block;margin-bottom:3px">AWS account ID</label><input id="ca-account" maxlength="12" placeholder="123456789012" style="width:130px;padding:6px 10px;border:1px solid #D1D5DB;border-radius:4px;font-size:13px"></div>
+      <div><label style="font-size:11px;color:#6B7280;display:block;margin-bottom:3px">Provider</label><select id="ca-provider" onchange="updateCloudScopeHint()" style="padding:6px 10px;border:1px solid #D1D5DB;border-radius:4px;font-size:13px"><option value="aws">AWS S3</option><option value="azure">Azure Blob</option><option value="gcp">GCP Cloud Storage</option></select></div>
+      <div style="flex:1;min-width:220px"><label id="ca-scope-label" style="font-size:11px;color:#6B7280;display:block;margin-bottom:3px">S3 bucket or prefix</label><input id="ca-scope" placeholder="s3://customer-records/payroll" style="width:100%;padding:6px 10px;border:1px solid #D1D5DB;border-radius:4px;font-size:13px;font-family:monospace"></div>
+      <div><label id="ca-account-label" style="font-size:11px;color:#6B7280;display:block;margin-bottom:3px">AWS account ID</label><input id="ca-account" maxlength="128" placeholder="123456789012" style="width:130px;padding:6px 10px;border:1px solid #D1D5DB;border-radius:4px;font-size:13px"></div>
       <div><label style="font-size:11px;color:#6B7280;display:block;margin-bottom:3px">Optional tag key</label><input id="ca-tag-key" placeholder="Criticality" style="width:110px;padding:6px 10px;border:1px solid #D1D5DB;border-radius:4px;font-size:13px"></div>
       <div><label style="font-size:11px;color:#6B7280;display:block;margin-bottom:3px">Optional tag value</label><input id="ca-tag-value" placeholder="Critical" style="width:100px;padding:6px 10px;border:1px solid #D1D5DB;border-radius:4px;font-size:13px"></div>
       <button onclick="addCloudAssetPolicy()" style="background:#16A34A;color:#fff;border:none;border-radius:4px;padding:6px 16px;cursor:pointer;font-size:13px">Add</button>
@@ -11516,6 +11522,14 @@ function showCloudAssetForm() {{
   const f = document.getElementById('cloud-asset-form');
   if (f) f.style.display = f.style.display === 'none' ? 'block' : 'none';
 }}
+function updateCloudScopeHint() {{
+  const p = document.getElementById('ca-provider').value;
+  const hints = {{aws:['S3 bucket or prefix','s3://customer-records/payroll','AWS account ID','123456789012'],azure:['Storage account/container/prefix','azure://records/payroll','Azure subscription ID','subscription-id'],gcp:['Bucket or prefix','gs://customer-records/payroll','GCP project ID','project-id']}};
+  document.getElementById('ca-scope-label').textContent = hints[p][0];
+  document.getElementById('ca-scope').placeholder = hints[p][1];
+  document.getElementById('ca-account-label').textContent = hints[p][2];
+  document.getElementById('ca-account').placeholder = hints[p][3];
+}}
 function cloudEsc(v) {{ return esc(String(v || '')); }}
 async function loadProtectedCloudAssets() {{
   const list = document.getElementById('cloud-assets-list'); if (!list) return;
@@ -11523,7 +11537,7 @@ async function loadProtectedCloudAssets() {{
     const r = await fetch('/api/protected-cloud-assets'); const d = await r.json();
     const policies = d.policies || [];
     if (!policies.length) {{ list.innerHTML = '<div style="color:#6B7280">No cloud policies yet. Add an explicit S3 bucket or prefix to start monitoring.</div>'; return; }}
-    list.innerHTML = policies.map(p => `<div style="background:#fff;border:1px solid #E5E7EB;border-left:3px solid #4F46E5;border-radius:6px;padding:11px 14px;display:flex;gap:12px;align-items:center;margin-bottom:8px"><div style="flex:1"><strong style="font-size:13px">AWS S3</strong> <code style="font-size:12px">${{cloudEsc(p.resource_scope)}}</code><div style="font-size:11px;color:#6B7280;margin-top:4px">Account: ${{cloudEsc(p.account_id || 'any')}}${{p.tag_key ? ' · Require tag: ' + cloudEsc(p.tag_key) + '=' + cloudEsc(p.tag_value) : ''}}</div></div><button onclick="removeCloudAssetPolicy(${{p.id}})" class="scan-btn" style="font-size:11px;color:#DC2626;border-color:#FECACA">Remove</button></div>`).join('');
+    list.innerHTML = policies.map(p => `<div style="background:#fff;border:1px solid #E5E7EB;border-left:3px solid #4F46E5;border-radius:6px;padding:11px 14px;display:flex;gap:12px;align-items:center;margin-bottom:8px"><div style="flex:1"><strong style="font-size:13px">${{cloudEsc(p.provider)}} ${{cloudEsc(p.resource_type)}}</strong> <code style="font-size:12px">${{cloudEsc(p.resource_scope)}}</code><div style="font-size:11px;color:#6B7280;margin-top:4px">Account/project: ${{cloudEsc(p.account_id || 'any')}}${{p.tag_key ? ' · Require tag/label: ' + cloudEsc(p.tag_key) + '=' + cloudEsc(p.tag_value) : ''}}</div></div><button onclick="removeCloudAssetPolicy(${{p.id}})" class="scan-btn" style="font-size:11px;color:#DC2626;border-color:#FECACA">Remove</button></div>`).join('');
   }} catch (e) {{ list.innerHTML = '<div style="color:#DC2626">Failed to load cloud policies.</div>'; }}
 }}
 async function showCloudIngestToken() {{
@@ -11534,11 +11548,13 @@ async function showCloudIngestToken() {{
   document.getElementById('ca-token').textContent = d.token;
 }}
 async function addCloudAssetPolicy() {{
+  const provider = document.getElementById('ca-provider').value;
   const scope = document.getElementById('ca-scope').value.trim();
   const account = document.getElementById('ca-account').value.trim();
   const tagKey = document.getElementById('ca-tag-key').value.trim();
   const tagValue = document.getElementById('ca-tag-value').value.trim();
-  const r = await fetch('/api/protected-cloud-assets', {{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{provider:'aws',resource_type:'s3_object',account_id:account,resource_scope:scope,tag_key:tagKey,tag_value:tagValue}})}});
+  const type = {{aws:'s3_object',azure:'azure_blob',gcp:'gcs_object'}}[provider];
+  const r = await fetch('/api/protected-cloud-assets', {{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{provider,resource_type:type,account_id:account,resource_scope:scope,tag_key:tagKey,tag_value:tagValue}})}});
   if (!r.ok) {{ const d = await r.json(); alert(d.error || 'Could not save policy'); return; }}
   document.getElementById('cloud-asset-form').style.display = 'none'; loadProtectedCloudAssets();
 }}

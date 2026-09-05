@@ -1,4 +1,4 @@
-# Protected Cloud Assets: AWS S3
+# Protected Cloud Assets: AWS, Azure, and GCP
 
 Protected Cloud Assets monitors AWS CloudTrail S3 **data events** for explicit
 S3 bucket or prefix policies. It sends a CRITICAL alert when an authenticated
@@ -51,10 +51,26 @@ SelectObjectContent, PutObject, CompleteMultipartUpload, DeleteObject,
 DeleteObjectVersion, CopyObject, and RestoreObject. CloudTrail `eventID` is
 required and makes retries idempotent.
 
+## Azure Blob Storage
+
+Configure an explicit `azure://storage-account/container/prefix` scope and,
+optionally, an exact Azure resource tag. Forward Azure Storage diagnostic
+records from `StorageRead`, `StorageWrite`, and `StorageDelete`; Azure Activity
+Log alone is insufficient because it does not record Blob data-plane reads.
+The forwarder supplies the Blob URI, operation, identity, correlation ID, and
+optionally `arckonResourceTags` after looking up tags with least privilege.
+
+## GCP Cloud Storage
+
+Configure an explicit `gs://bucket/prefix` scope and, optionally, an exact GCP
+resource label. Forward Cloud Audit Logs Data Access entries for
+`storage.objects.get`, `create`, `update`, and `delete`. A forwarder may add
+`arckonResourceLabels` after resolving bucket labels. Grant it only the log
+subscription role and, when label matching is used, read-only metadata access
+to the configured buckets; it must not receive object-read permissions.
+
 ## Limitations
 
-- This first release supports AWS S3 only. Azure Critical Assets and GCP labels
-  will use the same policy/event model in future provider adapters.
-- Tag matching depends on the customer-controlled forwarder accurately looking
+- Tag/label matching depends on the customer-controlled forwarder accurately looking
   up the object tags. Arckon does not treat a caller-supplied "critical" field
   as evidence without a matching explicit scope and authenticated transport.

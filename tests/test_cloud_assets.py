@@ -1,4 +1,7 @@
-from connectors.cloud_assets import normalize_cloudtrail_s3_event, policy_matches_event
+from connectors.cloud_assets import (normalize_azure_blob_event,
+                                     normalize_cloudtrail_s3_event,
+                                     normalize_gcp_storage_event,
+                                     policy_matches_event)
 from pathlib import Path
 import tempfile
 
@@ -62,3 +65,23 @@ def test_cloud_policy_audit_and_event_idempotency():
         assert stored[0]['resource'] == 's3://records/payroll/2026.csv'
         assert store.verify_protected_cloud_event_chain()
         assert store.remove_protected_cloud_asset(policy_id, 'test@example.com')
+
+
+def test_normalizes_gcp_cloud_storage_audit_event():
+    event = normalize_gcp_storage_event({
+        'insertId': 'gcp-event', 'resource': {'labels': {'project_id': 'project-1', 'location': 'us-central1'}},
+        'protoPayload': {'serviceName': 'storage.googleapis.com', 'methodName': 'storage.objects.get',
+                         'resourceName': 'projects/_/buckets/records/objects/payroll/2026.csv',
+                         'authenticationInfo': {'principalEmail': 'ai@example.com'}},
+    })
+    assert event['resource'] == 'gs://records/payroll/2026.csv'
+    assert event['action'] == 'read'
+
+
+def test_normalizes_azure_blob_diagnostic_event():
+    event = normalize_azure_blob_event({'operationName': 'GetBlob',
+        'resourceUri': 'https://records.blob.core.windows.net/payroll/2026.csv',
+        'resourceId': '/subscriptions/sub-1/resourceGroups/rg/providers/Microsoft.Storage/storageAccounts/records',
+        'identity': 'ai-workload', 'correlationId': 'azure-event'})
+    assert event['resource'] == 'azure://records/payroll/2026.csv'
+    assert event['account_id'] == 'sub-1'

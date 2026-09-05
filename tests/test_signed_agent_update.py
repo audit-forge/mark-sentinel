@@ -244,12 +244,12 @@ def test_windows_update_activation_creates_backup_and_script(tmp_path, monkeypat
     staged.write_bytes(b'new windows agent')
     live.write_bytes(b'old windows agent')
 
-    # Prevent the script from actually executing by patching Popen.
+    # Prevent the task scheduler commands from actually executing.
     executed = []
     monkeypatch.setattr(
         agent.subprocess,
-        'Popen',
-        lambda *args, **kwargs: executed.append((args, kwargs)) or type('P', (), {'pid': 123})(),
+        'run',
+        lambda *args, **kwargs: executed.append((args, kwargs)) or type('R', (), {'returncode': 0})(),
     )
 
     assert agent._restart_windows_service_after_update(staged, live) is True
@@ -261,4 +261,6 @@ def test_windows_update_activation_creates_backup_and_script(tmp_path, monkeypat
     assert 'move /y' in script_text
     assert 'copy /y "%BACKUP%" "%LIVE%"' in script_text
     assert 'sc start ArckonAgent' in script_text
-    assert len(executed) == 1
+    assert 'ArckonAgentUpdate' in script_text
+    assert len(executed) == 2
+    assert executed[0][0][0][:4] == ['schtasks.exe', '/create', '/tn', 'ArckonAgentUpdate']

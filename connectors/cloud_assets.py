@@ -17,9 +17,10 @@ _S3_EVENTS = {
     'CopyObject': 'write', 'RestoreObject': 'read',
 }
 _ACCOUNT_RE = re.compile(r'^\d{12}$')
+_AZURE_SUBSCRIPTION_RE = re.compile(r'/subscriptions/([^/]+)', re.IGNORECASE)
 
 
-def normalize_cloudtrail_s3_event(payload: dict[str, Any]) -> dict[str, str] | None:
+def normalize_cloudtrail_s3_event(payload: dict[str, Any]) -> dict[str, Any] | None:
     """Return safe S3 access metadata from one CloudTrail event, or None.
 
     Only S3 object data events are accepted. Object contents, request headers,
@@ -54,6 +55,80 @@ def normalize_cloudtrail_s3_event(payload: dict[str, Any]) -> dict[str, str] | N
         'resource_tags': event.get('arckonResourceTags', {}) if isinstance(
             event.get('arckonResourceTags', {}), dict) else {},
     }
+
+
+def normalize_gcp_storage_event(payload: dict[str, Any]) -> dict[str, Any] | None:
+    """Normalize one Cloud Audit Logs Cloud Storage object data-access event."""
+    proto = payload.get('protoPayload', payload)
+    if not isinstance(proto, dict) or proto.get('serviceName') != 'storage.googleapis.com':
+        return None
+    method = str(proto.get('methodName', ''))
+    action = {
+        'storage.objects.get': 'read', 'storage.objects.create': 'write',
+        'storage.objects.update': 'write', 'storage.objects.delete': 'delete',
+    }.get(method)
+    resource_name = str(proto.get('resourceName', ''))
+    marker = '/buckets/'
+    if not action or marker not in resource_name or '/objects/' not in resource_name:
+        return None
+    bucket_and_key = resource_name.split(marker, 1)[1]
+    bucket, key = bucket_and_key.split('/objects/', 1)
+    if not bucket or not key or '\x00' in bucket or '\x00' in key:
+        return None
+    auth = proto.get('authenticationInfo') or {}
+    labels = (payload.get('resource') or {}).get('labels') or {}
+    return {
+        'provider': 'gcp', 'resource_type': 'gcs_object',
+        'account_id': str(labels.get('project_id', ''))[:256],
+        'region': str(labels.get('location', ''))[:64],
+        'resource': f'gs://{bucket}/{key.lstrip("/")}',
+        'actor': str(auth.get('principalEmail') or 'unknown')[:512],
+        'action': action, 'event_name': method,
+        'event_id': str(payload.get('insertId', ''))[:256],
+        'resource_tags': payload.get('arckonResourceLabels', {}) if isinstance(
+            payload.get('arckonResourceLabels', {}), dict) else {},
+    }
+
+
+def normalize_azure_blob_event(payload: dict[str, Any]) -> dict[str, Any] | None:
+    """Normalize a customer-forwarded Azure Storage Blob diagnostic event.
+
+    Azure Activity Log omits Blob data-plane reads. The customer forwarder must
+    source StorageRead/StorageWrite/StorageDelete diagnostic records and send
+    their URI, operation name, caller identity, and correlation ID.
+    """
+    record = payload.get('data', payload)
+    if not isinstance(record, dict):
+        return None
+    operation = str(record.get('operationName') or record.get('operation') or '')
+    lower = operation.lower()
+    action = 'read' if any(v in lower for v in ('getblob', 'read', 'headblob')) else \
+        'write' if any(v in lower for v in ('putblob', 'write', 'appendblob')) else \
+        'delete' if 'deleteblob' in lower or 'delete' in lower else None
+    uri = str(record.get('resourceUri') or record.get('uri') or '')
+    match = re.match(r'https://([a-z0-9-]+)\.blob\.core\.windows\.net/([^/]+)/(.*)', uri, re.I)
+    if not action or not match or not match.group(3) or '\x00' in uri:
+        return None
+    resource_id = str(record.get('resourceId') or '')
+    subscription = _AZURE_SUBSCRIPTION_RE.search(resource_id)
+    return {
+        'provider': 'azure', 'resource_type': 'azure_blob',
+        'account_id': subscription.group(1) if subscription else '',
+        'region': str(record.get('location', ''))[:64],
+        'resource': f'azure://{match.group(1)}/{match.group(2)}/{match.group(3)}',
+        'actor': str(record.get('identity') or record.get('caller') or 'unknown')[:512],
+        'action': action, 'event_name': operation[:256],
+        'event_id': str(record.get('correlationId') or record.get('eventId') or '')[:256],
+        'resource_tags': record.get('arckonResourceTags', {}) if isinstance(
+            record.get('arckonResourceTags', {}), dict) else {},
+    }
+
+
+def normalize_cloud_asset_event(payload: dict[str, Any]) -> dict[str, Any] | None:
+    """Return a supported normalized cloud event without retaining raw input."""
+    return (normalize_cloudtrail_s3_event(payload)
+            or normalize_gcp_storage_event(payload)
+            or normalize_azure_blob_event(payload))
 
 
 def policy_matches_event(policy: dict[str, Any], event: dict[str, str]) -> bool:

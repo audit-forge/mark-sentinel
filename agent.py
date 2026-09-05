@@ -812,15 +812,17 @@ def _restore_agent_binary() -> bool:
 def _restart_windows_service_after_update(staged: Path | None, live: Path | None) -> bool:
     """Atomically activate a staged Windows agent through the service manager.
 
-    The batch script:
+    The temporary SYSTEM scheduled task runs a batch script that:
       1. Backs up the current live binary.
       2. Stops the service and waits for the lock to release.
       3. Moves the staged binary into place.
       4. If the move fails or leaves agent.exe missing, restores from backup.
       5. Starts the service only after verifying agent.exe exists.
 
-    This prevents the stranded-binary state where agent.exe is missing and
-    customers cannot start the service without manual repair.
+    A detached child of the service cannot perform this work: Windows kills
+    it when ``sc stop`` terminates its parent service. Scheduling it as SYSTEM
+    before stopping the service makes the activation independent and prevents
+    stranded update files.
     """
     if staged is None or live is None or not staged.is_file():
         log.error('self_update: staged Windows agent binary is missing')
@@ -835,20 +837,25 @@ def _restart_windows_service_after_update(staged: Path | None, live: Path | None
         f'set "BACKUP={live}.bak"\r\n'
         f'set "SVC={_WINDOWS_SERVICE_NAME}"\r\n'
         'set "REPAIRED=0"\r\n'
-        '# Backup current binary before touching it\r\n'
+        'rem Backup current binary before touching it\r\n'
         'if exist "%LIVE%" copy /y "%LIVE%" "%BACKUP%" >nul 2>&1\r\n'
-        '# Stop the service\r\n'
+        'rem Stop the service\r\n'
         f'sc stop {_WINDOWS_SERVICE_NAME} >nul 2>&1\r\n'
         f'schtasks /end /tn {_WINDOWS_SERVICE_NAME} >nul 2>&1\r\n'
+        'set /a WAITED=0\r\n'
         ':wait_stop\r\n'
-        'timeout /t 1 /nobreak >nul\r\n'
         f'sc query {_WINDOWS_SERVICE_NAME} | find "STOPPED" >nul\r\n'
-        'if errorlevel 1 goto wait_stop\r\n'
-        '# Attempt the swap\r\n'
+        'if not errorlevel 1 goto stopped\r\n'
+        'if %WAITED% GEQ 60 goto update_failed\r\n'
+        'timeout /t 1 /nobreak >nul\r\n'
+        'set /a WAITED+=1\r\n'
+        'goto wait_stop\r\n'
+        ':stopped\r\n'
+        'rem Attempt the swap\r\n'
         'move /y "%STAGED%" "%LIVE%" >nul 2>&1\r\n'
         'if not exist "%LIVE%" set "REPAIRED=1"\r\n'
         'if errorlevel 1 set "REPAIRED=1"\r\n'
-        '# If swap failed or live binary is gone, restore from backup\r\n'
+        'rem If swap failed or live binary is gone, restore from backup\r\n'
         'if "%REPAIRED%"=="1" (\r\n'
         '    if exist "%BACKUP%" (\r\n'
         '        copy /y "%BACKUP%" "%LIVE%" >nul 2>&1\r\n'
@@ -857,15 +864,16 @@ def _restart_windows_service_after_update(staged: Path | None, live: Path | None
         '        echo %date% %time% [ERROR] Update swap failed and no backup exists >> "%~dp0arckon-agent.log"\r\n'
         '    )\r\n'
         ')\r\n'
-        '# Ensure the binary is executable (best effort)\r\n'
+        'rem Ensure the binary is executable (best effort)\r\n'
         'if exist "%LIVE%" icacls "%LIVE%" /grant Everyone:RX >nul 2>&1\r\n'
-        '# Start the service only if we have a binary\r\n'
+        'rem Start the service only if we have a binary\r\n'
         'if exist "%LIVE%" (\r\n'
         f'    sc start {_WINDOWS_SERVICE_NAME} >nul 2>&1\r\n'
-        f'    schtasks /run /tn {_WINDOWS_SERVICE_NAME} >nul 2>&1\r\n'
+        '    schtasks /delete /tn ArckonAgentUpdate /f >nul 2>&1\r\n'
         '    del "%~f0"\r\n'
         '    exit /b 0\r\n'
         ') else (\r\n'
+        ':update_failed\r\n'
         '    echo %date% %time% [ERROR] Cannot start service: agent.exe missing after update >> "%~dp0arckon-agent.log"\r\n'
         '    del "%~f0"\r\n'
         '    exit /b 1\r\n'
@@ -873,15 +881,20 @@ def _restart_windows_service_after_update(staged: Path | None, live: Path | None
         encoding='utf-8',
     )
     try:
-        subprocess.Popen(
-            ['cmd.exe', '/d', '/s', '/c', f'"{script}"'],
-            creationflags=0x00000008 | 0x00000200,  # DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
-            close_fds=True,
-        )
-        log.info('self_update: staged Windows agent activation through %s service', _WINDOWS_SERVICE_NAME)
+        task_name = 'ArckonAgentUpdate'
+        # ONCE is only a trigger type; /run starts it immediately. The task
+        # executes as LocalSystem and survives the service it is about to stop.
+        subprocess.run([
+            'schtasks.exe', '/create', '/tn', task_name, '/tr',
+            f'cmd.exe /d /s /c "{script}"', '/sc', 'ONCE', '/st', '00:00',
+            '/ru', 'SYSTEM', '/rl', 'HIGHEST', '/f',
+        ], check=True, capture_output=True, timeout=30)
+        subprocess.run(['schtasks.exe', '/run', '/tn', task_name],
+                       check=True, capture_output=True, timeout=30)
+        log.info('self_update: staged Windows agent activation through SYSTEM task')
         return True
-    except OSError as e:
-        log.error('self_update: could not start Windows activation script: %s', e)
+    except (OSError, subprocess.SubprocessError) as e:
+        log.error('self_update: could not schedule Windows activation: %s', e)
         return False
 
 
