@@ -107,7 +107,10 @@ jobs:
 
           # Write the promotion manifest last so the VM deployer sees a
           # complete, one-version server and agent release set.
-          echo "{\"sha\":\"${{ github.sha }}\",\"ref\":\"${{ inputs.release_tag }}\",\"version\":\"${{ inputs.release_tag }}\",\"ts\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}" \
+          # github.sha is the workflow-dispatch default-branch revision, not
+          # necessarily inputs.release_tag. Use the checked-out tag SHA so the
+          # VM reliably sees every promoted tagged release as a new deploy.
+          echo "{\"sha\":\"$(git rev-parse HEAD)\",\"ref\":\"${{ inputs.release_tag }}\",\"version\":\"${{ inputs.release_tag }}\",\"ts\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}" \
             | gsutil cp - gs://arckon-deploy-artifacts/latest/manifest.json
 
           echo "=== Uploaded to gs://arckon-deploy-artifacts/latest/ ==="
