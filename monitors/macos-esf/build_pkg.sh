@@ -59,16 +59,28 @@ echo "==> Verifying pkg signature…"
 pkgutil --check-signature "$OUT" | grep -iE "Status|Developer ID Installer" | head -3
 
 # ── Notarize + staple the installer itself ────────────────────────────────────
-NOTARY_PROFILE="${ARCKON_NOTARY_PROFILE:-pharaoh}"
+# Default to the dedicated 'arckon' keychain profile. Falls back to 'pharaoh'
+# (the legacy shared profile) if 'arckon' isn't configured yet.
+NOTARY_PROFILE="${ARCKON_NOTARY_PROFILE:-arckon}"
 if xcrun notarytool history --keychain-profile "$NOTARY_PROFILE" >/dev/null 2>&1; then
-  echo "==> Notarizing $OUT (Apple queue; may take a while)…"
+  echo "==> Notarizing $OUT via keychain profile '$NOTARY_PROFILE'…"
   xcrun notarytool submit "$OUT" --keychain-profile "$NOTARY_PROFILE" --wait
   echo "==> Stapling…"
   xcrun stapler staple "$OUT"
   xcrun stapler validate "$OUT" && echo "    ✓ stapled"
   spctl -a -vv -t install "$OUT" 2>&1 || true
 else
-  echo "==> Skipping notarization: no keychain profile '$NOTARY_PROFILE'." >&2
+  FALLBACK="pharaoh"
+  if xcrun notarytool history --keychain-profile "$FALLBACK" >/dev/null 2>&1; then
+    echo "==> Notarizing $OUT via fallback keychain profile '$FALLBACK'…"
+    xcrun notarytool submit "$OUT" --keychain-profile "$FALLBACK" --wait
+    echo "==> Stapling…"
+    xcrun stapler staple "$OUT"
+    xcrun stapler validate "$OUT" && echo "    ✓ stapled"
+    spctl -a -vv -t install "$OUT" 2>&1 || true
+  else
+    echo "==> Skipping notarization: no keychain profile '$NOTARY_PROFILE' or '$FALLBACK'." >&2
+  fi
 fi
 
 echo "==> Built: $OUT"

@@ -76,6 +76,10 @@ codesign -d --entitlements :- "$APP" 2>/dev/null | grep -q "endpoint-security" \
   || { echo "    ✗ entitlement missing" >&2; exit 1; }
 
 # ── Notarize + staple ────────────────────────────────────────────────────────
+# Default to the dedicated 'arckon' keychain profile. Falls back to 'pharaoh'
+# (the legacy shared profile) if 'arckon' isn't configured yet. Override with
+# ARCKON_NOTARY_PROFILE env var. Create the profile with:
+#   xcrun notarytool store-credentials arckon --apple-id keith@mfdynamics.ai --team-id SWRJ6ZV39K
 NOTARY_PROFILE="${ARCKON_NOTARY_PROFILE:-arckon}"
 ZIP="ArckonESCollector.app.zip"
 ditto -c -k --keepParent "$APP" "$ZIP"
@@ -87,8 +91,19 @@ if xcrun notarytool history --keychain-profile "$NOTARY_PROFILE" >/dev/null 2>&1
   xcrun stapler validate "$APP" && echo "    ✓ stapled"
   spctl -a -vv "$APP" 2>&1 || true
 else
-  echo "==> Skipping notarization: no keychain profile '$NOTARY_PROFILE'." >&2
-  echo "    Create one with: xcrun notarytool store-credentials arckon --apple-id keith@mfdynamics.ai --team-id SWRJ6ZV39K" >&2
+  # Fall back to the legacy shared profile if the dedicated one isn't set up yet
+  FALLBACK="pharaoh"
+  if xcrun notarytool history --keychain-profile "$FALLBACK" >/dev/null 2>&1; then
+    echo "==> Notarizing via fallback keychain profile '$FALLBACK'…"
+    xcrun notarytool submit "$ZIP" --keychain-profile "$FALLBACK" --wait
+    echo "==> Stapling…"
+    xcrun stapler staple "$APP"
+    xcrun stapler validate "$APP" && echo "    ✓ stapled"
+    spctl -a -vv "$APP" 2>&1 || true
+  else
+    echo "==> Skipping notarization: no keychain profile '$NOTARY_PROFILE' or '$FALLBACK'." >&2
+    echo "    Create one with: xcrun notarytool store-credentials arckon --apple-id keith@mfdynamics.ai --team-id SWRJ6ZV39K" >&2
+  fi
 fi
 rm -f "$ZIP"
 
