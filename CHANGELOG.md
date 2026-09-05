@@ -22,6 +22,11 @@ All notable changes to this project will be documented in this file.
 - Release artifacts are packaged with an allowlist and signed out-of-repo; private key never enters source control.
 - Proxy identity headers are cleared on non-authenticated routes and require a shared proxy token.
 
+## 1.0.42 — 2026-09-05
+
+### Fixed
+- Release promotion manifest now records the SHA of the checked-out release tag rather than the workflow's default-branch SHA, ensuring the production deployer applies every tagged release.
+
 ## 1.0.41 — 2026-09-05
 
 ### Fixed
