@@ -22,6 +22,11 @@ All notable changes to this project will be documented in this file.
 - Release artifacts are packaged with an allowlist and signed out-of-repo; private key never enters source control.
 - Proxy identity headers are cleared on non-authenticated routes and require a shared proxy token.
 
+## 1.0.43 — 2026-09-05
+
+### Fixed
+- Promoted the Protected Cloud Assets release and CloudTrail ingest-token flow onto the production branch alongside the tag-SHA deployment manifest fix.
+
 ## 1.0.42 — 2026-09-05
 
 ### Fixed
