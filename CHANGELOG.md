@@ -22,6 +22,11 @@ All notable changes to this project will be documented in this file.
 - Release artifacts are packaged with an allowlist and signed out-of-repo; private key never enters source control.
 - Proxy identity headers are cleared on non-authenticated routes and require a shared proxy token.
 
+## 1.0.39 — 2026-09-05
+
+### Added
+- **Active issue detail panel**: click any active issue card to open a modal with full details — check ID, device, severity, last-seen timestamp, and the full finding description. False Positive / Accept Risk / Close buttons available inside the panel. Esc key or backdrop click closes it.
+
 ## 1.0.38 — 2026-09-04
 
 ### Added

@@ -11056,6 +11056,7 @@ async function loadActiveIssues() {{
     if (!r.ok) throw new Error(r.status);
     const d = await r.json();
     const issues = d.issues || [];
+    _activeIssuesCache = issues;
     if (!issues.length) {{
       feed.innerHTML = '<div style="color:#16A34A;font-size:13px;padding:12px 0;display:flex;align-items:center;gap:6px"><span style="font-size:16px">✓</span> No active critical or high issues across your fleet.</div>';
       return;
@@ -11067,7 +11068,8 @@ async function loadActiveIssues() {{
       const ts = new Date(iss.last_seen * 1000);
       const timeStr = 'Last seen ' + ts.toLocaleDateString() + ' ' + ts.toLocaleTimeString([], {{hour:'2-digit',minute:'2-digit'}});
       const cid = iss.check_id.replace(/'/g, '');
-      return `<div style="background:#fff;border:1px solid ${{sevBg}};border-left:3px solid ${{sevColor}};border-radius:6px;padding:10px 14px;display:flex;gap:10px;align-items:flex-start">
+      const idx = issues.indexOf(iss);
+      return `<div onclick="openActiveIssueDetail(${{idx}})" style="cursor:pointer;background:#fff;border:1px solid ${{sevBg}};border-left:3px solid ${{sevColor}};border-radius:6px;padding:10px 14px;display:flex;gap:10px;align-items:flex-start;transition:border-color .15s" onmouseover="this.style.borderColor='#D1D5DB'" onmouseout="this.style.borderColor='${{sevBg}}'">
         <div style="min-width:64px;text-align:center;flex-shrink:0">
           <div style="font-size:10px;font-weight:700;color:${{sevColor}};background:${{sevBg}};border-radius:4px;padding:2px 6px;white-space:nowrap">${{sev}}</div>
           <div style="font-size:10px;color:#6B7280;margin-top:3px">Active</div>
@@ -11076,8 +11078,8 @@ async function loadActiveIssues() {{
           <div style="font-size:13px;color:#111827"><strong>${{iss.check_id}}</strong> on <strong>${{iss.hostname}}</strong> — ${{iss.title}}</div>
           <div style="font-size:11px;color:#9CA3AF;margin-top:4px">${{timeStr}}</div>
           <div style="margin-top:8px;display:flex;gap:6px">
-            <button onclick="issueAction('${{cid}}','false_positive')" style="font-size:11px;padding:3px 10px;border-radius:4px;border:1px solid #D1D5DB;background:#F9FAFB;cursor:pointer;color:#374151">False Positive</button>
-            <button onclick="issueAction('${{cid}}','accepted')" style="font-size:11px;padding:3px 10px;border-radius:4px;border:1px solid #D1D5DB;background:#F9FAFB;cursor:pointer;color:#374151">Accept Risk</button>
+            <button onclick="event.stopPropagation();issueAction('${{cid}}','false_positive')" style="font-size:11px;padding:3px 10px;border-radius:4px;border:1px solid #D1D5DB;background:#F9FAFB;cursor:pointer;color:#374151">False Positive</button>
+            <button onclick="event.stopPropagation();issueAction('${{cid}}','accepted')" style="font-size:11px;padding:3px 10px;border-radius:4px;border:1px solid #D1D5DB;background:#F9FAFB;cursor:pointer;color:#374151">Accept Risk</button>
           </div>
         </div>
       </div>`;
@@ -11107,8 +11109,65 @@ async function issueAction(checkId, action) {{
   }}
 }}
 
+function openActiveIssueDetail(idx) {{
+  const iss = _activeIssuesCache[idx];
+  if (!iss) return;
+  const old = document.getElementById('alert-detail-overlay');
+  if (old) old.remove();
+  const sev = iss.severity || 'HIGH';
+  const sevColor = sev === 'CRITICAL' ? '#DC2626' : '#CA8A04';
+  const sevBg    = sev === 'CRITICAL' ? '#FEF2F2' : '#FFFBEB';
+  const ts = new Date(iss.last_seen * 1000);
+  const timeStr = ts.toLocaleDateString() + ' ' + ts.toLocaleTimeString();
+  const cid = iss.check_id || '';
+  const fields = [
+    ['Check ID', iss.check_id || ''],
+    ['Device', iss.hostname || ''],
+    ['Severity', iss.severity || ''],
+    ['Last Seen', timeStr],
+  ];
+  const detailRows = fields.filter(([_, v]) => v && v !== '').map(([k, v]) =>
+    `<div style="display:flex;gap:12px;padding:7px 0;border-bottom:1px solid #F3F4F6">
+       <div style="min-width:130px;font-size:12px;color:#6B7280;font-weight:500">${{esc(k)}}</div>
+       <div style="font-size:12px;color:#111827;word-break:break-word;flex:1">${{esc(String(v))}}</div>
+     </div>`
+  ).join('');
+  const descRow = iss.description ? `<div style="padding:10px 0 0 0"><div style="font-size:12px;color:#6B7280;font-weight:500;margin-bottom:6px">Description</div><div style="font-size:12px;color:#374151;line-height:1.5;white-space:pre-wrap">${{esc(iss.description)}}</div></div>` : '';
+  const overlay = document.createElement('div');
+  overlay.id = 'alert-detail-overlay';
+  overlay.style.cssText = 'position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center';
+  overlay.onclick = (e) => {{ if (e.target === overlay) overlay.remove(); }};
+  const modal = document.createElement('div');
+  modal.style.cssText = 'background:#ffffff;border:1px solid #E5E7EB;border-radius:8px;padding:20px 24px;width:90%;max-width:560px;max-height:85vh;display:flex;flex-direction:column;box-shadow:0 8px 32px rgba(0,0,0,.6)';
+  modal.innerHTML = `
+    <div style="display:flex;align-items:flex-start;gap:12px;margin-bottom:16px;flex-shrink:0">
+      <div style="min-width:72px;text-align:center">
+        <div style="font-size:11px;font-weight:700;color:${{sevColor}};background:${{sevBg}};border-radius:4px;padding:3px 8px;white-space:nowrap">${{sev}}</div>
+        <div style="font-size:10px;color:#6B7280;margin-top:4px">Active Issue</div>
+      </div>
+      <div style="flex:1;min-width:0">
+        <div style="font-size:15px;font-weight:600;color:#111827;line-height:1.3;margin-bottom:4px">${{esc(iss.title || iss.check_id)}}</div>
+        <div style="font-size:11px;color:#9CA3AF">${{esc(iss.hostname || '')}}</div>
+      </div>
+    </div>
+    <div style="overflow-y:auto;flex:1;margin-bottom:16px">
+      ${{detailRows}}
+      ${{descRow}}
+    </div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;flex-shrink:0">
+      <button onclick="event.stopPropagation();document.getElementById('alert-detail-overlay').remove();issueAction('${{cid.replace(/'/g,'')}}','false_positive')" style="font-size:12px;padding:5px 14px;border:1px solid #D1D5DB;background:#F9FAFB;color:#374151;border-radius:4px;cursor:pointer">False Positive</button>
+      <button onclick="event.stopPropagation();document.getElementById('alert-detail-overlay').remove();issueAction('${{cid.replace(/'/g,'')}}','accepted')" style="font-size:12px;padding:5px 14px;border:1px solid #D1D5DB;background:#F9FAFB;color:#374151;border-radius:4px;cursor:pointer">Accept Risk</button>
+      <button onclick="document.getElementById('alert-detail-overlay').remove()" style="background:#111827;border:1px solid #111827;color:#fff;border-radius:4px;padding:5px 16px;font-size:12px;cursor:pointer;font-weight:600">Close</button>
+    </div>`;
+  overlay.appendChild(modal);
+  document.body.appendChild(overlay);
+  const escHandler = (e) => {{ if (e.key === 'Escape') {{ overlay.remove(); document.removeEventListener('keydown', escHandler); }} }};
+  document.addEventListener('keydown', escHandler);
+}}
+
 // ── Alert history feed ────────────────────────────────────────────────────────
 let _alertEventsCache = [];
+let _activeIssuesCache = [];
 async function loadAlertEvents() {{
   const unreviewedOnly = document.getElementById('alerts-unreviewed-only')?.checked;
   const feed = document.getElementById('alerts-feed');
