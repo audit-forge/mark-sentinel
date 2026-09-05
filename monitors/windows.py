@@ -21,6 +21,7 @@ Security notes:
 from __future__ import annotations
 
 import logging
+import os
 import subprocess
 import threading
 import time
@@ -113,22 +114,32 @@ class WindowsCollector(AccessCollector):
             self._set_path_sacl(pp['path'])
 
     def _set_path_sacl(self, path: str) -> None:
-        """Set a SACL on the path to audit Everyone's access (triggers 4663)."""
-        ps = f'''
-$path = '{path}'
-if (Test-Path $path) {{
+        """Set a SACL on the path to audit Everyone's access (triggers 4663).
+
+        `path` comes from server-pushed protected-path policy — not raw
+        end-user input, but it's still untrusted enough (a policy could
+        include a path with a single quote, e.g. C:\\Users\\O'Brien\\...)
+        that it must never be string-interpolated into the PowerShell
+        script text. It's passed via an environment variable instead,
+        which needs no shell/PowerShell quoting at all.
+        """
+        ps = '''
+$path = $env:ARCKON_SACL_PATH
+if (Test-Path $path) {
     $acl = Get-Acl $path
     $auditRule = New-Object System.Security.AccessControl.FileSystemAuditRule(
         'Everyone', 'FullControl', 'ContainerInherit,ObjectInherit',
         'None', 'Success,Failure')
     $acl.AddAuditRule($auditRule)
     Set-Acl -Path $path -AclObject $acl
-}}
+}
 '''
+        env = dict(os.environ)
+        env['ARCKON_SACL_PATH'] = path
         try:
             subprocess.run(
                 ['powershell', '-NoProfile', '-Command', ps],
-                check=True, capture_output=True, timeout=10)
+                check=True, capture_output=True, timeout=10, env=env)
             log.info('set SACL for %s', path)
         except Exception as e:
             log.warning('SACL set failed for %s: %s', path, e)
