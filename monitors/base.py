@@ -98,11 +98,9 @@ def path_matches_protected(path: str, protected_paths: list[dict]) -> dict | Non
         elif pp.get('recursive', True) and canon.startswith(pp_path + os.sep):
             matched = True
         if matched:
-            actions = pp.get('actions', 'read,write,open')
-            if actions and actions != '*':
-                allowed = {a.strip() for a in actions.split(',') if a.strip()}
-                # We return the match regardless — the action filter is
-                # applied by the caller when deciding whether to report.
+            # The actions filter itself is applied by the caller
+            # (AccessCollector._should_report), which has the event's
+            # actual action to check against pp['actions'].
             return pp
     return None
 
