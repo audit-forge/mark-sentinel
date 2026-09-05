@@ -104,7 +104,7 @@ class WindowsCollector(AccessCollector):
             subprocess.run(
                 ['auditpol', '/set', '/subcategory:"File System"',
                  '/success:enable', '/failure:enable'],
-                check=True, capture_output=True, timeout=5, shell=True)
+                check=True, capture_output=True, timeout=5)
             log.info('enabled File System audit subcategory')
         except Exception as e:
             log.warning('auditpol failed (agent may need admin): %s', e)
