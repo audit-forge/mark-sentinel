@@ -303,6 +303,53 @@ class AgentStore:
                 CREATE INDEX IF NOT EXISTS idx_protected_paths_audit_ts
                     ON protected_paths_audit(ts DESC);
 
+                -- Protected Cloud Assets: policies are scope-constrained and
+                -- event metadata is tamper-evident. No object contents or raw
+                -- provider payloads are retained.
+                CREATE TABLE IF NOT EXISTS protected_cloud_assets (
+                    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                    provider        TEXT NOT NULL,
+                    resource_type   TEXT NOT NULL,
+                    account_id      TEXT NOT NULL DEFAULT '',
+                    resource_scope  TEXT NOT NULL,
+                    tag_key         TEXT NOT NULL DEFAULT '',
+                    tag_value       TEXT NOT NULL DEFAULT '',
+                    created_by      TEXT NOT NULL DEFAULT '',
+                    created_at      INTEGER NOT NULL,
+                    updated_at      INTEGER NOT NULL,
+                    UNIQUE(provider, resource_type, account_id, resource_scope, tag_key, tag_value)
+                );
+                CREATE TABLE IF NOT EXISTS protected_cloud_asset_events (
+                    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                    ts              INTEGER NOT NULL,
+                    provider        TEXT NOT NULL,
+                    resource_type   TEXT NOT NULL,
+                    account_id      TEXT NOT NULL DEFAULT '',
+                    region          TEXT NOT NULL DEFAULT '',
+                    resource        TEXT NOT NULL,
+                    actor           TEXT NOT NULL,
+                    action          TEXT NOT NULL,
+                    event_name      TEXT NOT NULL,
+                    external_id     TEXT NOT NULL DEFAULT '',
+                    policy_id       INTEGER NOT NULL,
+                    prev_hash       TEXT NOT NULL DEFAULT '',
+                    event_hash      TEXT NOT NULL,
+                    reviewed        INTEGER NOT NULL DEFAULT 0,
+                    UNIQUE(provider, external_id)
+                );
+                CREATE INDEX IF NOT EXISTS idx_cloud_asset_events_ts
+                    ON protected_cloud_asset_events(ts DESC);
+                CREATE TABLE IF NOT EXISTS protected_cloud_assets_audit (
+                    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                    ts              INTEGER NOT NULL,
+                    action          TEXT NOT NULL,
+                    policy_id       INTEGER NOT NULL DEFAULT 0,
+                    changed_by      TEXT NOT NULL,
+                    details         TEXT NOT NULL DEFAULT ''
+                );
+                CREATE INDEX IF NOT EXISTS idx_cloud_assets_audit_ts
+                    ON protected_cloud_assets_audit(ts DESC);
+
             """)
             # Migrations
             cols = {r[1] for r in conn.execute("PRAGMA table_info(devices)")}
@@ -1477,6 +1524,99 @@ class AgentStore:
                 return False
             prev = d['event_hash']
         return True
+
+    # ── Protected Cloud Assets ────────────────────────────────────────────────
+
+    def add_protected_cloud_asset(self, provider: str, resource_type: str,
+                                  account_id: str, resource_scope: str,
+                                  tag_key: str = '', tag_value: str = '',
+                                  created_by: str = '') -> int:
+        """Add an explicit cloud-resource scope, optionally requiring a tag.
+
+        Wildcards are rejected by the API before reaching this method. The
+        audit record deliberately contains only policy metadata, never a cloud
+        access token or a provider event payload.
+        """
+        now = int(time.time())
+        with self._lock, self._conn() as conn:
+            cur = conn.execute(
+                """INSERT INTO protected_cloud_assets
+                   (provider, resource_type, account_id, resource_scope, tag_key,
+                    tag_value, created_by, created_at, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                   ON CONFLICT(provider, resource_type, account_id, resource_scope, tag_key, tag_value)
+                   DO UPDATE SET updated_at=excluded.updated_at, created_by=excluded.created_by""",
+                (provider, resource_type, account_id, resource_scope, tag_key,
+                 tag_value, created_by, now, now))
+            policy_id = cur.lastrowid
+            if not policy_id:
+                row = conn.execute(
+                    """SELECT id FROM protected_cloud_assets WHERE provider=? AND resource_type=?
+                       AND account_id=? AND resource_scope=? AND tag_key=? AND tag_value=?""",
+                    (provider, resource_type, account_id, resource_scope, tag_key, tag_value)).fetchone()
+                policy_id = row['id']
+            conn.execute(
+                """INSERT INTO protected_cloud_assets_audit
+                   (ts, action, policy_id, changed_by, details) VALUES (?, ?, ?, ?, ?)""",
+                (now, 'upsert', policy_id, created_by,
+                 f'{provider}:{resource_type} {resource_scope}'))
+        return int(policy_id)
+
+    def remove_protected_cloud_asset(self, policy_id: int, changed_by: str = '') -> bool:
+        now = int(time.time())
+        with self._lock, self._conn() as conn:
+            row = conn.execute("SELECT id FROM protected_cloud_assets WHERE id=?", (policy_id,)).fetchone()
+            if not row:
+                return False
+            conn.execute("DELETE FROM protected_cloud_assets WHERE id=?", (policy_id,))
+            conn.execute(
+                "INSERT INTO protected_cloud_assets_audit (ts, action, policy_id, changed_by) VALUES (?, ?, ?, ?)",
+                (now, 'remove', policy_id, changed_by))
+        return True
+
+    def get_protected_cloud_assets(self) -> list[dict]:
+        with self._lock, self._conn() as conn:
+            return [dict(r) for r in conn.execute(
+                "SELECT * FROM protected_cloud_assets ORDER BY provider, account_id, resource_scope").fetchall()]
+
+    def get_protected_cloud_assets_audit_log(self, limit: int = 100) -> list[dict]:
+        with self._lock, self._conn() as conn:
+            return [dict(r) for r in conn.execute(
+                "SELECT * FROM protected_cloud_assets_audit ORDER BY ts DESC LIMIT ?", (limit,)).fetchall()]
+
+    def ingest_protected_cloud_event(self, event: dict, policy_id: int) -> bool:
+        """Append a normalized cloud event to its tamper-evident chain.
+
+        Duplicate external provider event IDs are rejected by SQLite's unique
+        constraint, providing idempotency for at-least-once delivery.
+        """
+        import crypto
+        now = int(time.time())
+        data = {k: str(event.get(k, '')) for k in ('provider', 'resource_type', 'account_id',
+                'region', 'resource', 'actor', 'action', 'event_name', 'event_id')}
+        data['ts'] = int(event.get('ts', now))
+        data['policy_id'] = int(policy_id)
+        with self._lock, self._conn() as conn:
+            last = conn.execute("SELECT event_hash FROM protected_cloud_asset_events ORDER BY id DESC LIMIT 1").fetchone()
+            prev_hash = last['event_hash'] if last else ''
+            event_hash = crypto.compute_event_hash(prev_hash, data)
+            try:
+                conn.execute(
+                    """INSERT INTO protected_cloud_asset_events
+                       (ts, provider, resource_type, account_id, region, resource, actor, action,
+                        event_name, external_id, policy_id, prev_hash, event_hash)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (data['ts'], data['provider'], data['resource_type'], data['account_id'],
+                     data['region'], data['resource'], data['actor'], data['action'],
+                     data['event_name'], data['event_id'], policy_id, prev_hash, event_hash))
+            except sqlite3.IntegrityError:
+                return False
+        return True
+
+    def get_protected_cloud_events(self, limit: int = 300) -> list[dict]:
+        with self._lock, self._conn() as conn:
+            return [dict(r) for r in conn.execute(
+                "SELECT * FROM protected_cloud_asset_events ORDER BY ts DESC LIMIT ?", (limit,)).fetchall()]
 
     # ── AI spend tracking ─────────────────────────────────────────────────────
 

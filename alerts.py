@@ -51,6 +51,7 @@ _DEFAULT_TRIGGERS = {
     'new_shadow_ai':        True,
     'alert_unapproved_only': False,
     'ai_accessed_protected_file': True,
+    'protected_cloud_asset_access': True,
 }
 _PASS_MASK = '__set__'
 
@@ -450,6 +451,34 @@ def fire_access_alert(device_id: str, hostname: str, process: str,
             )
         except Exception as e:
             log.error('alert event log error: %s', e)
+
+
+def fire_cloud_asset_alert(event: dict, alert_cfg: dict, store=None) -> None:
+    """Dispatch a CRITICAL alert for access to a Protected Cloud Asset."""
+    triggers = {**_DEFAULT_TRIGGERS, **alert_cfg.get('triggers', {})}
+    if not triggers.get('protected_cloud_asset_access', True):
+        return
+    provider = event.get('provider', 'cloud')
+    resource = event.get('resource', '')
+    actor = event.get('actor', 'unknown')
+    account = event.get('account_id', '')
+    dedup_key = f'{provider}:{account}:{resource}:{actor}:{event.get("action", "")}'
+    if store is not None and store.was_alert_recently_fired(
+            'protected_cloud_asset_access', provider, dedup_key):
+        return
+    title = f"{provider.upper()} actor {actor!r} {event.get('action', 'accessed')} protected asset {resource}"
+    payload = {
+        'event': 'protected_cloud_asset_access', 'severity': 'CRITICAL',
+        'device': provider.upper(), 'host': account, 'service': actor,
+        'source': provider, 'title': title,
+        'check_id': 'PROTECTED-CLOUD-ASSET-ACCESS',
+    }
+    fired = _dispatch(alert_cfg, payload)
+    if store is not None:
+        store.log_alert_event(event_type=payload['event'], severity='CRITICAL',
+                              device=payload['device'], service=actor, host=account,
+                              check_id=payload['check_id'], title=title,
+                              source=provider, channels=', '.join(fired))
 
 
 def send_test_alert(alert_cfg: dict, channel: str) -> tuple[bool, str]:

@@ -22,6 +22,11 @@ All notable changes to this project will be documented in this file.
 - Release artifacts are packaged with an allowlist and signed out-of-repo; private key never enters source control.
 - Proxy identity headers are cleared on non-authenticated routes and require a shared proxy token.
 
+## 1.0.40 — 2026-09-05
+
+### Added
+- **Protected Cloud Assets (AWS S3)**: explicit bucket/prefix policies with optional `Criticality=Critical` tag matching, authenticated CloudTrail S3 data-event ingestion, idempotency by CloudTrail event ID, tamper-evident event storage, CRITICAL alerts, dashboard policy/event views, and a least-privilege deployment guide.
+
 ## 1.0.39 — 2026-09-05
 
 ### Added

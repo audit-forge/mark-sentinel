@@ -1481,6 +1481,9 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             '/api/access-events':           self._api_get_access_events,
             '/api/access-events/unreviewed-count': self._api_unreviewed_access_count,
             '/api/access-events/verify-chain': self._api_verify_access_chain,
+            '/api/protected-cloud-assets': self._api_get_protected_cloud_assets,
+            '/api/protected-cloud-assets/events': self._api_get_protected_cloud_asset_events,
+            '/api/protected-cloud-assets/audit': self._api_get_protected_cloud_assets_audit,
             '/api/siem/config':      self._api_get_siem_config,
             '/api/live-scan-config': self._api_get_live_scan_config,
             '/api/fleet/live-stats': self._api_fleet_live_stats,
@@ -1603,6 +1606,11 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                 return
             self._api_agent_access_events()
             return
+        # CloudTrail forwarders use a dedicated ingest token. Never reuse an
+        # endpoint-agent token for an external cloud integration.
+        if path == '/api/cloud-assets/events':
+            self._api_cloud_asset_events()
+            return
 
         # All other POST endpoints require dashboard auth
         if not self._require_dashboard_auth():
@@ -1662,6 +1670,11 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self._api_review_all_alerts()
         elif path == '/api/protected-paths':
             self._api_add_protected_path()
+        elif path == '/api/protected-cloud-assets':
+            self._api_add_protected_cloud_asset()
+        elif path.startswith('/api/protected-cloud-assets/'):
+            self._api_delete_protected_cloud_asset(
+                path[len('/api/protected-cloud-assets/'):])
         elif path.startswith('/api/protected-paths/') and path.endswith('/update'):
             _pid = path[len('/api/protected-paths/'):-len('/update')]
             self._api_update_protected_path(_pid)
@@ -5266,6 +5279,109 @@ load();
     # (policy management + audit log), AU-2 (tamper-evident event storage),
     # SC-13 (encryption at rest), SI-4 (AI access monitoring + alerting).
 
+    # ── Protected Cloud Assets (AWS CloudTrail S3 data events) ─────────────────
+
+    def _api_get_protected_cloud_assets(self):
+        try:
+            self._json({'policies': self._store().get_protected_cloud_assets()})
+        except Exception as e:
+            self._json({'policies': [], 'error': str(e)}, 500)
+
+    def _api_get_protected_cloud_asset_events(self):
+        try:
+            self._json({'events': self._store().get_protected_cloud_events(limit=300)})
+        except Exception as e:
+            self._json({'events': [], 'error': str(e)}, 500)
+
+    def _api_get_protected_cloud_assets_audit(self):
+        try:
+            self._json({'audit': self._store().get_protected_cloud_assets_audit_log()})
+        except Exception as e:
+            self._json({'audit': [], 'error': str(e)}, 500)
+
+    def _api_add_protected_cloud_asset(self):
+        try:
+            body = self._read_json_body()
+            provider = str(body.get('provider', '')).strip().lower()
+            resource_type = str(body.get('resource_type', '')).strip().lower()
+            account_id = str(body.get('account_id', '')).strip()
+            scope = str(body.get('resource_scope', '')).strip().rstrip('/')
+            tag_key = str(body.get('tag_key', '')).strip()
+            tag_value = str(body.get('tag_value', '')).strip()
+            # AWS S3 is deliberately the only supported provider in this first
+            # release. Explicit scope prevents an accidental all-account rule.
+            if provider != 'aws' or resource_type != 's3_object':
+                self._json({'error': 'only aws s3_object policies are supported'}, 400)
+                return
+            if not scope.startswith('s3://') or '*' in scope or '\x00' in scope:
+                self._json({'error': 'resource_scope must be an explicit s3://bucket[/prefix] without wildcards'}, 400)
+                return
+            if account_id and (len(account_id) != 12 or not account_id.isdigit()):
+                self._json({'error': 'account_id must be a 12-digit AWS account ID'}, 400)
+                return
+            if bool(tag_key) != bool(tag_value):
+                self._json({'error': 'tag_key and tag_value must be provided together'}, 400)
+                return
+            user = self._session_user()
+            policy_id = self._store().add_protected_cloud_asset(
+                provider, resource_type, account_id, scope, tag_key, tag_value,
+                user['email'] if user else 'Dashboard user')
+            self._json({'ok': True, 'id': policy_id})
+        except Exception as e:
+            log.error('add protected cloud asset: %s', e, exc_info=True)
+            self._json({'error': 'could not save policy'}, 500)
+
+    def _api_delete_protected_cloud_asset(self, policy_id_str: str):
+        try:
+            policy_id = int(policy_id_str)
+            user = self._session_user()
+            if self._store().remove_protected_cloud_asset(
+                    policy_id, user['email'] if user else 'Dashboard user'):
+                self._json({'ok': True})
+            else:
+                self._json({'error': 'not found'}, 404)
+        except (TypeError, ValueError):
+            self._json({'error': 'invalid policy id'}, 400)
+
+    def _api_cloud_asset_events(self):
+        """Accept one authenticated, normalized CloudTrail S3 event.
+
+        Deployers set a distinct 256-bit ARCKON_CLOUD_INGEST_TOKEN on each
+        customer container. The endpoint ignores caller-supplied tenant fields,
+        retains no raw CloudTrail event, and is idempotent by AWS event ID.
+        """
+        token = os.environ.get('ARCKON_CLOUD_INGEST_TOKEN', '')
+        supplied = self.headers.get('Authorization', '').removeprefix('Bearer ').strip()
+        if not token or not supplied or not hmac.compare_digest(supplied, token):
+            self._send(401, b'Unauthorized', 'text/plain')
+            return
+        if _content_length(self.headers) > 1024 * 1024:
+            self._send(413, b'Payload too large', 'text/plain')
+            return
+        try:
+            from connectors.cloud_assets import normalize_cloudtrail_s3_event, policy_matches_event
+            event = normalize_cloudtrail_s3_event(self._read_json_body())
+            if not event:
+                self._json({'ok': True, 'stored': 0})
+                return
+            store = self._store()
+            policy = next((p for p in store.get_protected_cloud_assets()
+                           if policy_matches_event(p, event)), None)
+            if not policy:
+                self._json({'ok': True, 'stored': 0})
+                return
+            if not event.get('event_id'):
+                self._json({'error': 'CloudTrail eventID is required'}, 400)
+                return
+            stored = store.ingest_protected_cloud_event(event, policy['id'])
+            if stored:
+                from alerts import load_alert_config, fire_cloud_asset_alert
+                fire_cloud_asset_alert(event, load_alert_config(ROOT / 'data' / 'alerts_config.json') or {}, store)
+            self._json({'ok': True, 'stored': int(stored)})
+        except Exception as e:
+            log.error('cloud asset event ingest: %s', e, exc_info=True)
+            self._json({'error': 'cloud event ingest failed'}, 500)
+
     def _api_get_protected_paths(self):
         store = self._store()
         try:
@@ -6994,7 +7110,8 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
       <button class="sb-item" id="nav-mcp" onclick="navTo('mcp')">&#128279; MCP Servers</button>
       <div class="sb-group">Security</div>
       <button class="sb-item" id="nav-riskregister" onclick="navTo('riskregister')">&#128203; Risk Register</button>
-      <button class="sb-item" id="nav-protected-files" onclick="navTo('protected-files')">&#128274; Protected Files <span id="pf-badge" style="display:none;background:#DC2626;color:#fff;border-radius:10px;font-size:10px;padding:1px 6px;margin-left:4px;font-weight:700"></span></button>
+       <button class="sb-item" id="nav-protected-files" onclick="navTo('protected-files')">&#128274; Protected Files <span id="pf-badge" style="display:none;background:#DC2626;color:#fff;border-radius:10px;font-size:10px;padding:1px 6px;margin-left:4px;font-weight:700"></span></button>
+       <button class="sb-item" id="nav-protected-cloud-assets" onclick="navTo('protected-cloud-assets')">&#9729; Protected Cloud Assets</button>
       <div class="sb-group">Operations</div>
       <button class="sb-item" id="nav-schedules" onclick="navTo('schedules')">&#128337; Schedules</button>
       <button class="sb-item" id="nav-discovery" onclick="navTo('discovery')">&#128270; Discovery</button>
@@ -7318,6 +7435,27 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
     </div>
     <div id="pf-audit-list" style="color:#6B7280;font-size:13px;padding:16px 0">Loading audit log…</div>
   </div>
+  </div>
+
+  <div class="page" id="page-protected-cloud-assets">
+  <div class="sec-hdr" style="margin-top:0;padding-top:0">&#9729; Protected Cloud Assets
+    <span style="font-size:12px;font-weight:400;color:#6B7280;margin-left:8px">AWS S3 scope and tag policies monitored through authenticated CloudTrail data events</span>
+  </div>
+  <div style="background:#EFF6FF;border:1px solid #BFDBFE;border-radius:6px;padding:12px 14px;font-size:12px;color:#1E3A8A;margin-bottom:16px">Arckon records access metadata only, never object contents or raw CloudTrail payloads. Policies require an explicit S3 bucket or prefix; wildcard scopes are rejected.</div>
+  <div class="sec-hdr" style="font-size:15px;margin-bottom:10px">Policies
+    <button onclick="showCloudAssetForm()" style="margin-left:auto;font-size:12px;background:#4F46E5;color:#fff;border:none;border-radius:4px;padding:5px 14px;cursor:pointer">+ Add AWS S3 Policy</button>
+  </div>
+  <div id="cloud-asset-form" style="display:none;background:#f0f4ff;border:1px solid #c7d2fe;border-radius:6px;padding:14px;margin-bottom:12px">
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:end">
+      <div style="flex:1;min-width:220px"><label style="font-size:11px;color:#6B7280;display:block;margin-bottom:3px">S3 bucket or prefix</label><input id="ca-scope" placeholder="s3://customer-records/payroll" style="width:100%;padding:6px 10px;border:1px solid #D1D5DB;border-radius:4px;font-size:13px;font-family:monospace"></div>
+      <div><label style="font-size:11px;color:#6B7280;display:block;margin-bottom:3px">AWS account ID</label><input id="ca-account" maxlength="12" placeholder="123456789012" style="width:130px;padding:6px 10px;border:1px solid #D1D5DB;border-radius:4px;font-size:13px"></div>
+      <div><label style="font-size:11px;color:#6B7280;display:block;margin-bottom:3px">Optional tag key</label><input id="ca-tag-key" placeholder="Criticality" style="width:110px;padding:6px 10px;border:1px solid #D1D5DB;border-radius:4px;font-size:13px"></div>
+      <div><label style="font-size:11px;color:#6B7280;display:block;margin-bottom:3px">Optional tag value</label><input id="ca-tag-value" placeholder="Critical" style="width:100px;padding:6px 10px;border:1px solid #D1D5DB;border-radius:4px;font-size:13px"></div>
+      <button onclick="addCloudAssetPolicy()" style="background:#16A34A;color:#fff;border:none;border-radius:4px;padding:6px 16px;cursor:pointer;font-size:13px">Add</button>
+    </div>
+  </div>
+  <div id="cloud-assets-list" style="color:#6B7280;font-size:13px;padding:16px 0">Loading policies...</div>
+  <div style="margin-top:24px"><div class="sec-hdr" style="font-size:15px;margin-bottom:10px">Cloud Access Events</div><div id="cloud-events-list" style="color:#6B7280;font-size:13px;padding:16px 0">Loading events...</div></div>
   </div>
 
   <div class="page" id="page-inventory">
@@ -7974,7 +8112,8 @@ function navTo(page) {{
   if (page === 'alerts') {{ loadActiveIssues(); loadAlertEvents(); }}
    if (page === 'network-assets') {{ loadNetworkAssetScans(); }}
    if (page === 'spend') {{ loadSpend(); }}
-   if (page === 'protected-files') {{ loadProtectedPaths(); loadAccessEvents(); loadPFAuditLog(); loadPFChainStatus(); }}
+    if (page === 'protected-files') {{ loadProtectedPaths(); loadAccessEvents(); loadPFAuditLog(); loadPFChainStatus(); }}
+   if (page === 'protected-cloud-assets') {{ loadProtectedCloudAssets(); loadProtectedCloudEvents(); }}
   if (page === 'probe') {{
     const fr = document.getElementById('probe-iframe');
     if (fr && fr.getAttribute('data-loaded') === '0') {{
@@ -11332,6 +11471,43 @@ async function updateAlertBadge() {{
 }}
 
 updateAlertBadge();
+
+// ── Protected Cloud Assets ─────────────────────────────────────────────────
+function showCloudAssetForm() {{
+  const f = document.getElementById('cloud-asset-form');
+  if (f) f.style.display = f.style.display === 'none' ? 'block' : 'none';
+}}
+function cloudEsc(v) {{ return esc(String(v || '')); }}
+async function loadProtectedCloudAssets() {{
+  const list = document.getElementById('cloud-assets-list'); if (!list) return;
+  try {{
+    const r = await fetch('/api/protected-cloud-assets'); const d = await r.json();
+    const policies = d.policies || [];
+    if (!policies.length) {{ list.innerHTML = '<div style="color:#6B7280">No cloud policies yet. Add an explicit S3 bucket or prefix to start monitoring.</div>'; return; }}
+    list.innerHTML = policies.map(p => `<div style="background:#fff;border:1px solid #E5E7EB;border-left:3px solid #4F46E5;border-radius:6px;padding:11px 14px;display:flex;gap:12px;align-items:center;margin-bottom:8px"><div style="flex:1"><strong style="font-size:13px">AWS S3</strong> <code style="font-size:12px">${{cloudEsc(p.resource_scope)}}</code><div style="font-size:11px;color:#6B7280;margin-top:4px">Account: ${{cloudEsc(p.account_id || 'any')}}${{p.tag_key ? ' · Require tag: ' + cloudEsc(p.tag_key) + '=' + cloudEsc(p.tag_value) : ''}}</div></div><button onclick="removeCloudAssetPolicy(${{p.id}})" class="scan-btn" style="font-size:11px;color:#DC2626;border-color:#FECACA">Remove</button></div>`).join('');
+  }} catch (e) {{ list.innerHTML = '<div style="color:#DC2626">Failed to load cloud policies.</div>'; }}
+}}
+async function addCloudAssetPolicy() {{
+  const scope = document.getElementById('ca-scope').value.trim();
+  const account = document.getElementById('ca-account').value.trim();
+  const tagKey = document.getElementById('ca-tag-key').value.trim();
+  const tagValue = document.getElementById('ca-tag-value').value.trim();
+  const r = await fetch('/api/protected-cloud-assets', {{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{provider:'aws',resource_type:'s3_object',account_id:account,resource_scope:scope,tag_key:tagKey,tag_value:tagValue}})}});
+  if (!r.ok) {{ const d = await r.json(); alert(d.error || 'Could not save policy'); return; }}
+  document.getElementById('cloud-asset-form').style.display = 'none'; loadProtectedCloudAssets();
+}}
+async function removeCloudAssetPolicy(id) {{
+  if (!confirm('Remove this cloud asset policy?')) return;
+  await fetch('/api/protected-cloud-assets/' + id, {{method:'POST'}}); loadProtectedCloudAssets();
+}}
+async function loadProtectedCloudEvents() {{
+  const list = document.getElementById('cloud-events-list'); if (!list) return;
+  try {{
+    const r = await fetch('/api/protected-cloud-assets/events'); const d = await r.json(); const events = d.events || [];
+    if (!events.length) {{ list.innerHTML = '<div style="color:#6B7280">No protected cloud-asset access events yet.</div>'; return; }}
+    list.innerHTML = events.map(e => `<div style="background:#fff;border:1px solid #FECACA;border-left:3px solid #DC2626;border-radius:6px;padding:11px 14px;margin-bottom:8px"><div style="font-size:13px"><strong>CRITICAL</strong> · ${{cloudEsc(e.action)}} <code>${{cloudEsc(e.resource)}}</code></div><div style="font-size:11px;color:#6B7280;margin-top:5px">${{cloudEsc(e.provider)}} · account ${{cloudEsc(e.account_id)}} · actor ${{cloudEsc(e.actor)}} · ${{new Date(e.ts * 1000).toLocaleString()}}</div></div>`).join('');
+  }} catch (e) {{ list.innerHTML = '<div style="color:#DC2626">Failed to load cloud events.</div>'; }}
+}}
 
 // ── Protected Files monitoring ──────────────────────────────────────────────
 
