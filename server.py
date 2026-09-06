@@ -1731,6 +1731,8 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self._api_fleet_scan(path[len('/api/fleet/scan/'):])
         elif path == '/api/fleet/update/all':
             self._api_fleet_update_all()
+        elif path == '/api/fleet/reinstall/all':
+            self._api_fleet_reinstall_all()
         elif path == '/api/fleet/push-token':
             self._api_fleet_push_token()
         elif path.startswith('/api/fleet/update/'):
@@ -3034,6 +3036,22 @@ load();
             did = d.get('device_id', '')
             if did:
                 store.enqueue_command(did, 'update_self')
+                queued.append(did)
+        self._json({'status': 'queued', 'count': len(queued), 'devices': queued})
+
+    def _api_fleet_reinstall_all(self):
+        """POST /api/fleet/reinstall/all — push reinstall command to every known device.
+
+        This is the one-time bootstrap for Windows agents stuck on a version
+        whose self-update activation is broken. The agent downloads and runs
+        the full installer, which copies the binary directly."""
+        store = self._store()
+        devices = store.list_devices()
+        queued = []
+        for d in devices:
+            did = d.get('device_id', '')
+            if did:
+                store.enqueue_command(did, 'reinstall')
                 queued.append(did)
         self._json({'status': 'queued', 'count': len(queued), 'devices': queued})
 

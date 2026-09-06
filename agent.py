@@ -898,6 +898,66 @@ def _restart_windows_service_after_update(staged: Path | None, live: Path | None
         return False
 
 
+def _reinstall_agent(config: dict) -> None:
+    """Download and run the platform installer as a privileged task.
+
+    This is the one-time bootstrap for Windows agents stuck on a version
+    whose self-update activation is broken (pre-v1.0.44). The installer
+    copies the binary directly — it does not rely on the self-update swap —
+    so it bypasses the broken activation entirely.
+
+    On Windows, the installer runs as a SYSTEM scheduled task (independent
+    of the service, so it survives service stops). On macOS/Linux, it runs
+    via sudo/systemctl restart.
+    """
+    server = config.get('server', '').rstrip('/')
+    token = config.get('token', '')
+    if not server:
+        log.error('reinstall: no server configured')
+        return
+    try:
+        if sys.platform == 'win32':
+            # Download install.ps1 from the server
+            install_url = f'{server}/install/install.ps1'
+            headers = {'Authorization': f'Bearer {token}'} if token else {}
+            install_text = _read_update_url(install_url, headers, timeout=60)
+            if not install_text:
+                log.error('reinstall: could not download install.ps1')
+                return
+            script_path = ROOT / 'reinstall-agent.ps1'
+            script_path.write_text(install_text.decode('utf-8'), encoding='utf-8')
+            # Create a SYSTEM scheduled task to run the installer
+            task_name = 'ArckonReinstall'
+            subprocess.run([
+                'schtasks.exe', '/create', '/tn', task_name,
+                '/tr', f'powershell.exe -NoProfile -ExecutionPolicy Bypass '
+                       f'-File "{script_path}" -Server "{server}" -Token "{token}"',
+                '/sc', 'ONCE', '/st', '00:00',
+                '/ru', 'SYSTEM', '/rl', 'HIGHEST', '/f',
+            ], check=True, capture_output=True, timeout=30)
+            subprocess.run(['schtasks.exe', '/run', '/tn', task_name],
+                           check=True, capture_output=True, timeout=30)
+            log.info('reinstall: Windows installer launched via SYSTEM task')
+        else:
+            # macOS/Linux: download and run install.sh
+            import urllib.request
+            install_url = f'{server}/install/install.sh'
+            req = urllib.request.Request(install_url)
+            if token:
+                req.add_header('Authorization', f'Bearer {token}')
+            with urllib.request.urlopen(req, timeout=60) as resp:
+                install_text = resp.read()
+            script_path = ROOT / 'reinstall-agent.sh'
+            script_path.write_bytes(install_text)
+            script_path.chmod(0o755)
+            subprocess.Popen(
+                ['bash', str(script_path), '--server', server, '--token', token],
+                start_new_session=True)
+            log.info('reinstall: installer launched')
+    except Exception as e:
+        log.error('reinstall failed: %s', e)
+
+
 # ── On-device OS notification ──────────────────────────────────────────────────
 
 def _notify_critical_findings(report: dict) -> None:
@@ -1758,6 +1818,18 @@ def main() -> None:
         last_success = 0.0
         last_update_check = 0.0
 
+        # Stuck-update detector (Windows): if agent.exe.new exists from a
+        # previous failed activation, retry the swap via a SYSTEM scheduled
+        # task before entering the main loop. This catches the case where an
+        # older agent (pre-v1.0.44) staged an update but its child-process
+        # activation was killed by sc stop. Once v1.0.44+ is running, the
+        # scheduled-task activation prevents this from recurring.
+        if sys.platform == 'win32':
+            live, staged, _ = _agent_binary_paths()
+            if staged.is_file() and staged.stat().st_size > 0:
+                log.warning('Staged update found at startup — retrying activation')
+                _restart_windows_service_after_update(staged, live)
+
         # Start the protected-files access collector (if protected paths are
         # configured). Purely additive — failure doesn't affect scans.
         _access_collector, _access_queue = start_access_collector(
@@ -1945,6 +2017,9 @@ def main() -> None:
             elif cmd == 'update_self':
                 log.info('Remote update triggered by server')
                 self_update(cfg)
+            elif cmd == 'reinstall':
+                log.info('Remote reinstall triggered by server')
+                _reinstall_agent(cfg)
             elif cmd and cmd.startswith('set_config:'):
                 try:
                     updates = json.loads(cmd[len('set_config:'):])
