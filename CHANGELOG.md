@@ -22,6 +22,14 @@ All notable changes to this project will be documented in this file.
 - Release artifacts are packaged with an allowlist and signed out-of-repo; private key never enters source control.
 - Proxy identity headers are cleared on non-authenticated routes and require a shared proxy token.
 
+## 1.0.49 — 2026-09-06
+
+### Added
+- **Google Workspace Drive forwarder script** (`scripts/gworkspace_drive_forwarder.py`): polls the Admin SDK Reports API for Drive audit activities and forwards them to Arckon's authenticated ingest endpoint. Includes state persistence for at-least-once delivery.
+
+### Fixed
+- **Remediation gated behind PRO tier**: standard-tier customers now receive full alerts (severity, device, title, details) but without the "Recommended fix" remediation text — they see a "log in to view" fallback instead. Remediation is stripped from all channels: Slack, Teams, Google Chat, email, generic webhook JSON, PSA tickets, and Notion pages. PRO (plus) customers continue to receive full remediation as before.
+
 ## 1.0.48 — 2026-09-06
 
 ### Fixed

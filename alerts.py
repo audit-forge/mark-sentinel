@@ -239,6 +239,29 @@ def _finding_payload(event: str, severity: str, hostname: str, finding: dict) ->
     }
 
 
+def _customer_has_remediation() -> bool:
+    """Return True if the current customer's tier includes remediation steps.
+
+    Remediation is a PRO (plus) feature. Standard-tier customers receive
+    full alerts with severity, device, title, and details, but the
+    remediation / "Recommended fix" text is replaced with a "log in to
+    view" fallback.
+
+    Uses the server-wide License singleton (license.json), which in
+    multi-tenant deployments is the per-customer license mounted in each
+    customer's container.
+    """
+    try:
+        from license import get_license
+        lic = get_license()
+        return lic.has_technical_reports
+    except Exception:
+        # If the license module isn't importable (e.g. running in a test
+        # context without license.json), default to including remediation
+        # so existing behavior is preserved.
+        return True
+
+
 def _build_canned_response(payload: dict) -> dict:
     """Turns an alert payload into structured, actionable content shared
     by every notification channel (chat, PSA tickets, Notion) — so a
@@ -251,6 +274,10 @@ def _build_canned_response(payload: dict) -> dict:
     with light structure, Notion wants markdown-ish block content, PSA
     tickets want a plain description field. All three are built from the
     same underlying facts so the content never diverges between channels.
+
+    Remediation steps are gated behind the PRO (plus) tier. Standard-tier
+    customers see the alert but receive a "log in to view" fallback
+    instead of the remediation text.
     """
     severity    = payload.get('severity', 'HIGH')
     device      = payload.get('device', 'unknown')
@@ -260,6 +287,12 @@ def _build_canned_response(payload: dict) -> dict:
     details     = payload.get('details', '')
     remediation = payload.get('remediation', '')
     frameworks  = payload.get('frameworks') or {}
+
+    # Gate remediation behind PRO tier — standard customers get the alert
+    # but not the fix steps.
+    include_remediation = _customer_has_remediation()
+    if not include_remediation:
+        remediation = ''
 
     summary = f'{severity} Finding' + (f' — {check_id}' if check_id else '') + (f': {title}' if title else '')
 
@@ -564,6 +597,11 @@ def _dispatch(alert_cfg: dict, payload: dict) -> list[str]:
     email_cfg   = alert_cfg.get('email', {})
     psa_cfg     = alert_cfg.get('psa', {})
     text        = _format_text(payload)
+    # Strip remediation from the raw payload for standard-tier customers
+    # so the webhook JSON doesn't leak the fix steps either.
+    webhook_payload = payload
+    if not _customer_has_remediation() and 'remediation' in payload:
+        webhook_payload = {k: v for k, v in payload.items() if k != 'remediation'}
     fired: list[str] = []
     if slack_url:
         if is_valid_slack_webhook(slack_url) and _post_slack(slack_url, text, payload):
@@ -581,7 +619,7 @@ def _dispatch(alert_cfg: dict, payload: dict) -> list[str]:
         elif not is_valid_teams_webhook(teams_url):
             log.error('Skipping invalid Microsoft Teams webhook URL')
     if webhook_url:
-        if is_valid_url(webhook_url, ('http', 'https')) and _post_webhook(webhook_url, payload):
+        if is_valid_url(webhook_url, ('http', 'https')) and _post_webhook(webhook_url, webhook_payload):
             fired.append('webhook')
         elif not is_valid_url(webhook_url, ('http', 'https')):
             log.error('Skipping invalid generic webhook URL')
@@ -606,7 +644,7 @@ def _create_notion_page(notion_cfg: dict, payload: dict) -> None:
             'title':       payload.get('title', ''),
             'severity':    payload.get('severity', 'HIGH'),
             'description': _build_canned_response(payload)['detail_text'],
-            'remediation': payload.get('remediation', ''),
+            'remediation': payload.get('remediation', '') if _customer_has_remediation() else '',
         }
         hostname = payload.get('device', 'Unknown')
         ok, msg = create_page(notion_cfg, finding, hostname)
@@ -633,7 +671,7 @@ def _create_psa_ticket(psa_cfg: dict, payload: dict) -> None:
             'title':       payload.get('title', ''),
             'severity':    payload.get('severity', 'HIGH'),
             'description': _build_canned_response(payload)['detail_text'],
-            'remediation': payload.get('remediation', ''),
+            'remediation': payload.get('remediation', '') if _customer_has_remediation() else '',
         }
         hostname = payload.get('device', 'Unknown')
         ok, msg = create_ticket(psa_cfg, finding, hostname)
