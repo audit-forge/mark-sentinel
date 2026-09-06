@@ -1,6 +1,7 @@
 from connectors.cloud_assets import (normalize_azure_blob_event,
                                      normalize_cloudtrail_s3_event,
                                      normalize_gcp_storage_event,
+                                     normalize_google_workspace_drive_event,
                                      policy_matches_event)
 from pathlib import Path
 import tempfile
@@ -85,3 +86,34 @@ def test_normalizes_azure_blob_diagnostic_event():
         'identity': 'ai-workload', 'correlationId': 'azure-event'})
     assert event['resource'] == 'azure://records/payroll/2026.csv'
     assert event['account_id'] == 'sub-1'
+
+
+def test_normalizes_google_workspace_drive_audit_event():
+    event = normalize_google_workspace_drive_event({
+        'id': {'time': '2026-09-06T12:00:00.000Z'}, 'arckonDomain': 'company.com',
+        'actor': {'email': 'user@company.com'},
+        'events': [{'name': 'view', 'parameters': [
+            {'name': 'doc_id', 'value': '1aB2cD'},
+            {'name': 'doc_title', 'value': 'Q3 Financials'},
+        ]}],
+    })
+    assert event['provider'] == 'gworkspace'
+    assert event['resource_type'] == 'drive_file'
+    assert event['action'] == 'read'
+    assert event['actor'] == 'user@company.com'
+    assert event['account_id'] == 'company.com'
+
+
+def test_google_workspace_policy_matches_folder_prefix():
+    event = normalize_google_workspace_drive_event({
+        'arckonDomain': 'company.com', 'actor': {'email': 'user@company.com'},
+        'arckonResourcePath': 'Protected/Financial',
+        'events': [{'name': 'download', 'parameters': [
+            {'name': 'doc_id', 'value': '1aB2cD'},
+            {'name': 'doc_title', 'value': 'Q3 Financials'},
+        ]}],
+    })
+    policy = {'provider': 'gworkspace', 'resource_type': 'drive_file',
+              'account_id': 'company.com',
+              'resource_scope': 'gworkspace://Protected/Financial'}
+    assert policy_matches_event(policy, event)

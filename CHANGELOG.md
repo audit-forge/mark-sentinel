@@ -22,6 +22,11 @@ All notable changes to this project will be documented in this file.
 - Release artifacts are packaged with an allowlist and signed out-of-repo; private key never enters source control.
 - Proxy identity headers are cleared on non-authenticated routes and require a shared proxy token.
 
+## 1.0.47 — 2026-09-06
+
+### Added
+- **Google Workspace Drive** adapter for Protected Cloud Assets: monitors Google Docs, Sheets, Slides, and Drive files via the Admin SDK Reports API (Drive audit log). Supports folder-prefix policies (`gworkspace://Protected/Financial`), optional domain restriction, read/write/delete action mapping, and CRITICAL alerts. Customer forwarder polls the Reports API with a delegated service account and sends events to the authenticated ingest endpoint.
+
 ## 1.0.46 — 2026-09-06
 
 ### Fixed

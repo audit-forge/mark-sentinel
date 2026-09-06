@@ -5368,6 +5368,7 @@ load();
                 ('aws', 's3_object'): 's3://',
                 ('gcp', 'gcs_object'): 'gs://',
                 ('azure', 'azure_blob'): 'azure://',
+                ('gworkspace', 'drive_file'): 'gworkspace://',
             }
             required_prefix = allowed.get((provider, resource_type))
             # Explicit scope prevents accidental all-account monitoring.
@@ -7500,7 +7501,7 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
 
   <div class="page" id="page-protected-cloud-assets">
   <div class="sec-hdr" style="margin-top:0;padding-top:0">&#9729; Protected Cloud Assets
-    <span style="font-size:12px;font-weight:400;color:#6B7280;margin-left:8px">AWS S3, Azure Blob, and GCP Cloud Storage policies monitored through authenticated cloud audit events</span>
+    <span style="font-size:12px;font-weight:400;color:#6B7280;margin-left:8px">AWS S3, Azure Blob, GCP Cloud Storage, and Google Workspace Drive policies monitored through authenticated cloud audit events</span>
   </div>
   <div style="background:#EFF6FF;border:1px solid #BFDBFE;border-radius:6px;padding:12px 14px;font-size:12px;color:#1E3A8A;margin-bottom:16px">Arckon records access metadata only, never object contents or raw CloudTrail payloads. Policies require an explicit S3 bucket or prefix; wildcard scopes are rejected.</div>
   <div class="sec-hdr" style="font-size:15px;margin-bottom:10px">Policies
@@ -7509,7 +7510,7 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
   <button onclick="showCloudIngestToken()" class="scan-btn" style="font-size:12px;margin-bottom:12px">Show CloudTrail Forwarder Token</button><span id="ca-token" style="font-size:11px;font-family:monospace;word-break:break-all;margin-left:8px"></span>
   <div id="cloud-asset-form" style="display:none;background:#f0f4ff;border:1px solid #c7d2fe;border-radius:6px;padding:14px;margin-bottom:12px">
     <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:end">
-      <div><label style="font-size:11px;color:#6B7280;display:block;margin-bottom:3px">Provider</label><select id="ca-provider" onchange="updateCloudScopeHint()" style="padding:6px 10px;border:1px solid #D1D5DB;border-radius:4px;font-size:13px"><option value="aws">AWS S3</option><option value="azure">Azure Blob</option><option value="gcp">GCP Cloud Storage</option></select></div>
+      <div><label style="font-size:11px;color:#6B7280;display:block;margin-bottom:3px">Provider</label><select id="ca-provider" onchange="updateCloudScopeHint()" style="padding:6px 10px;border:1px solid #D1D5DB;border-radius:4px;font-size:13px"><option value="aws">AWS S3</option><option value="azure">Azure Blob</option><option value="gcp">GCP Cloud Storage</option><option value="gworkspace">Google Workspace Drive</option></select></div>
       <div style="flex:1;min-width:220px"><label id="ca-scope-label" style="font-size:11px;color:#6B7280;display:block;margin-bottom:3px">S3 bucket or prefix</label><input id="ca-scope" placeholder="s3://customer-records/payroll" style="width:100%;padding:6px 10px;border:1px solid #D1D5DB;border-radius:4px;font-size:13px;font-family:monospace"></div>
       <div><label id="ca-account-label" style="font-size:11px;color:#6B7280;display:block;margin-bottom:3px">AWS account ID</label><input id="ca-account" maxlength="128" placeholder="123456789012" style="width:130px;padding:6px 10px;border:1px solid #D1D5DB;border-radius:4px;font-size:13px"></div>
       <div><label style="font-size:11px;color:#6B7280;display:block;margin-bottom:3px">Optional tag key</label><input id="ca-tag-key" placeholder="Criticality" style="width:110px;padding:6px 10px;border:1px solid #D1D5DB;border-radius:4px;font-size:13px"></div>
@@ -11542,7 +11543,7 @@ function showCloudAssetForm() {{
 }}
 function updateCloudScopeHint() {{
   const p = document.getElementById('ca-provider').value;
-  const hints = {{aws:['S3 bucket or prefix','s3://customer-records/payroll','AWS account ID','123456789012'],azure:['Storage account/container/prefix','azure://records/payroll','Azure subscription ID','subscription-id'],gcp:['Bucket or prefix','gs://customer-records/payroll','GCP project ID','project-id']}};
+  const hints = {{aws:['S3 bucket or prefix','s3://customer-records/payroll','AWS account ID','123456789012'],azure:['Storage account/container/prefix','azure://records/payroll','Azure subscription ID','subscription-id'],gcp:['Bucket or prefix','gs://customer-records/payroll','GCP project ID','project-id'],gworkspace:['Drive folder path or file ID','gworkspace://Protected/Financial','Workspace domain','yourdomain.com']}};
   document.getElementById('ca-scope-label').textContent = hints[p][0];
   document.getElementById('ca-scope').placeholder = hints[p][1];
   document.getElementById('ca-account-label').textContent = hints[p][2];
@@ -11571,7 +11572,7 @@ async function addCloudAssetPolicy() {{
   const account = document.getElementById('ca-account').value.trim();
   const tagKey = document.getElementById('ca-tag-key').value.trim();
   const tagValue = document.getElementById('ca-tag-value').value.trim();
-  const type = {{aws:'s3_object',azure:'azure_blob',gcp:'gcs_object'}}[provider];
+  const type = {{aws:'s3_object',azure:'azure_blob',gcp:'gcs_object',gworkspace:'drive_file'}}[provider];
   const r = await fetch('/api/protected-cloud-assets', {{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{provider,resource_type:type,account_id:account,resource_scope:scope,tag_key:tagKey,tag_value:tagValue}})}});
   if (!r.ok) {{ const d = await r.json(); alert(d.error || 'Could not save policy'); return; }}
   document.getElementById('cloud-asset-form').style.display = 'none'; loadProtectedCloudAssets();

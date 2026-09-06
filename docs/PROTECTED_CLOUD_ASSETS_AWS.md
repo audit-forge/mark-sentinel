@@ -69,6 +69,41 @@ resource label. Forward Cloud Audit Logs Data Access entries for
 subscription role and, when label matching is used, read-only metadata access
 to the configured buckets; it must not receive object-read permissions.
 
+## Google Workspace Drive
+
+Protect Google Docs, Sheets, Slides, and files in Google Drive by monitoring
+the Google Workspace Admin SDK Reports API (Drive audit log).
+
+### Setup
+
+1. Create a Google Cloud service account with domain-wide delegation.
+2. In the Google Workspace Admin Console, grant the service account the OAuth
+   scope `https://www.googleapis.com/auth/admin.reports.audit.readonly`.
+3. Deploy a forwarder (e.g., a Cloud Function or scheduled script) that polls
+   `activities.list(applicationName='drive')` every few minutes and forwards
+   each activity to Arckon's `POST /api/cloud-assets/events` endpoint with the
+   per-customer ingest token.
+4. The forwarder may optionally include `arckonResourcePath` (the Drive folder
+   path) so policies can match by folder prefix, and `arckonResourceTags` for
+   custom label matching.
+
+### Policies
+
+- Provider: Google Workspace
+- Resource: Drive file
+- Scope: an explicit `gworkspace://folder/path` or `gworkspace://doc_id`
+- Domain: optional Workspace domain restriction
+- Required tag: optional custom label
+
+Example: `gworkspace://Protected/Financial` monitors all files under the
+"Protected/Financial" folder.
+
+### Supported actions
+
+- **Read**: `view`, `download`, `preview`
+- **Write**: `edit`, `create`, `upload`, `rename`, `move`, `share`
+- **Delete**: `delete`, `trash`
+
 ## Limitations
 
 - Tag/label matching depends on the customer-controlled forwarder accurately looking

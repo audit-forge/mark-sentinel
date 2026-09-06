@@ -124,18 +124,93 @@ def normalize_azure_blob_event(payload: dict[str, Any]) -> dict[str, Any] | None
     }
 
 
+def normalize_google_workspace_drive_event(payload: dict[str, Any]) -> dict[str, Any] | None:
+    """Normalize a Google Workspace Drive audit activity from the Admin SDK
+    Reports API (applicationName=drive).
+
+    A customer-controlled forwarder polls the Reports API with a service
+    account that has domain-wide delegation for
+    ``https://www.googleapis.com/auth/admin.reports.audit.readonly`` and
+    forwards each activity to Arckon. Arckon never receives the service
+    account credentials or file contents — only the audit metadata.
+
+    The forwarder supplies the Drive file URL (``gworkspace://<doc_id>``)
+    and, optionally, a ``resource_path`` (folder path) so policies can
+    match by folder prefix.
+    """
+    activity = payload.get('events', [payload]) if isinstance(
+        payload.get('events'), list) else [payload]
+    if not activity:
+        return None
+    event = activity[0] if isinstance(activity[0], dict) else {}
+    # The Reports API wraps each activity in id/time/actor/events; accept
+    # both the wrapped and unwrapped shapes.
+    inner = event.get('events', [event])
+    inner = inner[0] if isinstance(inner, list) and inner and isinstance(inner[0], dict) else event
+    name = str(inner.get('name', ''))
+    if not name:
+        return None
+    # Map Drive audit event names to canonical actions
+    action = (
+        'read' if name in ('view', 'download', 'preview') else
+        'write' if name in ('edit', 'create', 'upload', 'rename', 'move',
+                            'add_to_folder', 'change_document_visibility',
+                            'share', 'change_user_access') else
+        'delete' if name in ('delete', 'trash', 'untrash') else None
+    )
+    if not action:
+        return None
+    params = inner.get('parameters') or []
+    # Reports API returns parameters as a list of {name, value} dicts
+    fields: dict[str, Any] = {}
+    if isinstance(params, list):
+        for p in params:
+            if isinstance(p, dict) and 'name' in p:
+                fields[p['name']] = p.get('value') or p.get('multiValue') or ''
+    elif isinstance(params, dict):
+        fields = params
+    doc_id = str(fields.get('doc_id', '')).strip()
+    doc_title = str(fields.get('doc_title', '')).strip()
+    if not doc_id or '\x00' in doc_id:
+        return None
+    # Actor is at the top level of the activity, not inside the inner event
+    top_actor = payload.get('actor', {}) if isinstance(payload, dict) else {}
+    actor_email = str(top_actor.get('email', ''))[:512] if isinstance(top_actor, dict) else ''
+    if not actor_email:
+        actor_email = str(fields.get('actor', 'unknown'))[:512]
+    # The forwarder may supply a folder path for prefix-based policies
+    resource_path = str(payload.get('arckonResourcePath', fields.get('resource_path', ''))).strip()
+    resource = f'gworkspace://{doc_id}'
+    if resource_path:
+        resource = f'gworkspace://{resource_path.rstrip("/")}/{doc_title or doc_id}'
+    domain = str(payload.get('arckonDomain', ''))[:128]
+    return {
+        'provider': 'gworkspace', 'resource_type': 'drive_file',
+        'account_id': domain, 'region': '',
+        'resource': resource, 'actor': actor_email,
+        'action': action, 'event_name': name,
+        'event_id': str(event.get('id', {}).get('time', ''))[:256] if isinstance(
+            event.get('id'), dict) else str(payload.get('id', ''))[:256],
+        'resource_tags': payload.get('arckonResourceTags', {}) if isinstance(
+            payload.get('arckonResourceTags', {}), dict) else {},
+        'doc_title': doc_title[:256],
+    }
+
+
 def normalize_cloud_asset_event(payload: dict[str, Any]) -> dict[str, Any] | None:
     """Return a supported normalized cloud event without retaining raw input."""
     return (normalize_cloudtrail_s3_event(payload)
             or normalize_gcp_storage_event(payload)
-            or normalize_azure_blob_event(payload))
+            or normalize_azure_blob_event(payload)
+            or normalize_google_workspace_drive_event(payload))
 
 
 def policy_matches_event(policy: dict[str, Any], event: dict[str, str]) -> bool:
-    """Match an AWS S3 event to a constrained bucket/prefix policy.
+    """Match a normalized cloud event to a constrained scope policy.
 
-    The policy scope is an s3://bucket or s3://bucket/prefix value. Wildcards
-    are not supported to avoid accidental fleet-wide monitoring.
+    The policy scope is a provider-specific URI (s3://, gs://, azure://,
+    or gworkspace://). Wildcards are not supported to avoid accidental
+    fleet-wide monitoring.
     """
     if policy.get('provider') != event.get('provider'):
         return False
