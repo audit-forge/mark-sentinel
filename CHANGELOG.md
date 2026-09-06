@@ -22,6 +22,11 @@ All notable changes to this project will be documented in this file.
 - Release artifacts are packaged with an allowlist and signed out-of-repo; private key never enters source control.
 - Proxy identity headers are cleared on non-authenticated routes and require a shared proxy token.
 
+## 1.0.48 — 2026-09-06
+
+### Fixed
+- Windows activation batch script: replaced `timeout /t 1` with `ping -n 2 127.0.0.1` for the service-stop wait loop. `timeout` requires an interactive console and fails under SYSTEM scheduled task context, causing the activation to exit with code 1 before swapping the binary.
+
 ## 1.0.47 — 2026-09-06
 
 ### Added

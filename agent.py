@@ -847,7 +847,7 @@ def _restart_windows_service_after_update(staged: Path | None, live: Path | None
         f'sc query {_WINDOWS_SERVICE_NAME} | find "STOPPED" >nul\r\n'
         'if not errorlevel 1 goto stopped\r\n'
         'if %WAITED% GEQ 60 goto update_failed\r\n'
-        'timeout /t 1 /nobreak >nul\r\n'
+        'ping -n 2 127.0.0.1 >nul\r\n'
         'set /a WAITED+=1\r\n'
         'goto wait_stop\r\n'
         ':stopped\r\n'
