@@ -22,6 +22,12 @@ All notable changes to this project will be documented in this file.
 - Release artifacts are packaged with an allowlist and signed out-of-repo; private key never enters source control.
 - Proxy identity headers are cleared on non-authenticated routes and require a shared proxy token.
 
+## 1.0.45 — 2026-09-06
+
+### Fixed
+- **Windows stuck-update detector**: on daemon startup, if a staged `agent.exe.new` exists from a previous failed activation, the agent retries the swap via a SYSTEM scheduled task. This catches the bootstrapping edge case where a pre-v1.0.44 agent staged an update but its child-process activation was killed by `sc stop`.
+- **`reinstall` command**: server can now push a `reinstall` command that tells the agent to download and run the full platform installer (`install.ps1` / `install.sh`) as a SYSTEM scheduled task. The installer copies the binary directly — bypassing the self-update swap entirely — making it a reliable one-time bridge for Windows agents stuck on versions with broken self-update activation.
+
 ## 1.0.44 — 2026-09-05
 
 ### Added
