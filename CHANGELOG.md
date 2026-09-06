@@ -22,6 +22,11 @@ All notable changes to this project will be documented in this file.
 - Release artifacts are packaged with an allowlist and signed out-of-repo; private key never enters source control.
 - Proxy identity headers are cleared on non-authenticated routes and require a shared proxy token.
 
+## 1.0.46 — 2026-09-06
+
+### Fixed
+- Windows activation batch script: moved the `:update_failed` label outside the parenthesized `if/else` block. Batch `goto` labels inside `()` blocks are unreachable, causing the activation task to exit with code 1 and leave the staged binary uninstalled.
+
 ## 1.0.45 — 2026-09-06
 
 ### Fixed

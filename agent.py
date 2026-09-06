@@ -867,17 +867,15 @@ def _restart_windows_service_after_update(staged: Path | None, live: Path | None
         'rem Ensure the binary is executable (best effort)\r\n'
         'if exist "%LIVE%" icacls "%LIVE%" /grant Everyone:RX >nul 2>&1\r\n'
         'rem Start the service only if we have a binary\r\n'
-        'if exist "%LIVE%" (\r\n'
+        'if not exist "%LIVE%" goto update_failed\r\n'
         f'    sc start {_WINDOWS_SERVICE_NAME} >nul 2>&1\r\n'
         '    schtasks /delete /tn ArckonAgentUpdate /f >nul 2>&1\r\n'
         '    del "%~f0"\r\n'
         '    exit /b 0\r\n'
-        ') else (\r\n'
         ':update_failed\r\n'
         '    echo %date% %time% [ERROR] Cannot start service: agent.exe missing after update >> "%~dp0arckon-agent.log"\r\n'
         '    del "%~f0"\r\n'
-        '    exit /b 1\r\n'
-        ')\r\n',
+        '    exit /b 1\r\n',
         encoding='utf-8',
     )
     try:
