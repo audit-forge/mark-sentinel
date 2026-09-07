@@ -22,6 +22,11 @@ All notable changes to this project will be documented in this file.
 - Release artifacts are packaged with an allowlist and signed out-of-repo; private key never enters source control.
 - Proxy identity headers are cleared on non-authenticated routes and require a shared proxy token.
 
+## 1.0.55 — 2026-09-07
+
+### Security
+- Production deployment now refreshes declared Python requirements in the running container before restart, ensuring remediated dependencies and server-only integrations are applied on every GCS deployment.
+
 ## 1.0.54 — 2026-09-07
 
 ### Security

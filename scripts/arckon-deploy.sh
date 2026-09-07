@@ -55,6 +55,11 @@ rm -rf "$TMP/app/releases"
 docker cp "$TMP/agent"   sentinel-mfdynamicsllc:/app/agent
 docker cp "$TMP/audit"   sentinel-mfdynamicsllc:/app/audit
 docker cp "$TMP/app/."   sentinel-mfdynamicsllc:/app/
+# The GCS deployment updates source files in-place rather than rebuilding the
+# image. Refresh declared dependencies before restart so security-pinned
+# requirements (and new server-only integrations) apply to every deployment.
+docker exec -u root sentinel-mfdynamicsllc \
+  python3 -m pip install --no-cache-dir --upgrade -r /app/requirements.txt
 docker restart sentinel-mfdynamicsllc
 
 # Record deployed SHA
