@@ -22,6 +22,12 @@ All notable changes to this project will be documented in this file.
 - Release artifacts are packaged with an allowlist and signed out-of-repo; private key never enters source control.
 - Proxy identity headers are cleared on non-authenticated routes and require a shared proxy token.
 
+## 1.0.54 — 2026-09-07
+
+### Security
+- AWS Marketplace fulfillment now verifies current entitlement before activating a tenant, ignores expired entitlements, rate-limits unauthenticated registration-token resolution, preserves manual service suspensions during Marketplace synchronization, and disables nginx access logging for fulfillment URLs carrying the short-lived AWS token.
+- Remediated current image-scan findings by requiring `msgpack>=1.2.1` and `setuptools>=78.1.1`.
+
 ## 1.0.53 — 2026-09-07
 
 ### Added
