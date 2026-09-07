@@ -786,11 +786,17 @@ class AgentStore:
         return result
 
     def get_active_critical_high_findings(self) -> list[dict]:
-        """Return CRITICAL/HIGH FAILs from the latest report per device, excluding overridden findings."""
+        """Return CRITICAL/HIGH FAILs from the latest report per device, excluding
+        overridden findings (false_positive, accepted, or resolved).
+
+        A 'resolved' override suppresses the finding from Active Issues until
+        the next scan confirms it's fixed (PASS). If the next scan still shows
+        FAIL, the resolution is auto-cleared and the finding re-appears.
+        """
         with self._lock, self._conn() as conn:
             overrides = {
-                row['check_id']: row['action']
-                for row in conn.execute("SELECT check_id, action FROM risk_overrides").fetchall()
+                row['check_id']: dict(row)
+                for row in conn.execute("SELECT * FROM risk_overrides").fetchall()
             }
             rows = conn.execute("""
                 SELECT r.device_id, d.hostname, r.received_at, r.report_json
@@ -802,6 +808,25 @@ class AgentStore:
                 )
                 ORDER BY r.received_at DESC
             """).fetchall()
+            # Auto-clear stale 'resolved' overrides: if the finding still
+            # appears as FAIL in the latest scan, the resolution was premature.
+            stale_to_clear: list[str] = []
+            for row in rows:
+                rep = json.loads(row['report_json'])
+                failing_checks = {
+                    f.get('check_id', '') for f in rep.get('findings', [])
+                    if f.get('status') == 'FAIL'
+                    and f.get('severity', '').upper() in ('CRITICAL', 'HIGH')
+                }
+                for check_id, ov in overrides.items():
+                    if ov.get('action') == 'resolved' and check_id in failing_checks:
+                        # Only auto-clear if the scan is newer than the resolution
+                        if row['received_at'] > ov.get('updated_at', 0):
+                            stale_to_clear.append(check_id)
+            for check_id in stale_to_clear:
+                conn.execute("DELETE FROM risk_overrides WHERE check_id=? AND action='resolved'",
+                             (check_id,))
+                overrides.pop(check_id, None)
         issues = []
         for row in rows:
             rep = json.loads(row['report_json'])
@@ -809,7 +834,9 @@ class AgentStore:
                 if (f.get('status') == 'FAIL'
                         and f.get('severity', '').upper() in ('CRITICAL', 'HIGH')):
                     check_id = f.get('check_id', '')
-                    if overrides.get(check_id) in ('false_positive', 'accepted'):
+                    ov = overrides.get(check_id, {})
+                    ov_action = ov.get('action', '')
+                    if ov_action in ('false_positive', 'accepted', 'resolved'):
                         continue
                     issues.append({
                         'device_id':  row['device_id'],
@@ -819,6 +846,10 @@ class AgentStore:
                         'title':      f.get('title', ''),
                         'severity':   f.get('severity', '').upper(),
                         'description': f.get('description', ''),
+                        'override_action': ov_action,
+                        'override_note':   ov.get('note', ''),
+                        'override_by':     ov.get('created_by', ''),
+                        'override_updated': ov.get('updated_at', 0),
                     })
         issues.sort(key=lambda x: (0 if x['severity'] == 'CRITICAL' else 1, x['hostname']))
         return issues

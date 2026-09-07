@@ -59,8 +59,8 @@ def normalize_cloudtrail_s3_event(payload: dict[str, Any]) -> dict[str, Any] | N
     """Return safe S3 access metadata from one CloudTrail event, or None.
 
     Only S3 object data events are accepted. Object contents, request headers,
-    source IP addresses, and arbitrary CloudTrail fields are deliberately not
-    retained.
+    and arbitrary CloudTrail fields are deliberately not retained. Source IP
+    and device name (if supplied by the forwarder) are included for alerting.
     """
     event = payload.get('detail', payload)
     if not isinstance(event, dict) or event.get('eventSource') != 's3.amazonaws.com':
@@ -78,6 +78,8 @@ def normalize_cloudtrail_s3_event(payload: dict[str, Any]) -> dict[str, Any] | N
     identity = event.get('userIdentity') or {}
     actor = str(identity.get('arn') or identity.get('principalId') or 'unknown')[:512]
     region = str(event.get('awsRegion', '')).strip()[:64]
+    source_ip = str(event.get('sourceIPAddress', ''))[:64]
+    device_name = str(payload.get('arckonDeviceName', event.get('arckonDeviceName', '')))[:128]
     return {
         'provider': 'aws', 'resource_type': 's3_object',
         'account_id': account, 'region': region,
@@ -85,9 +87,7 @@ def normalize_cloudtrail_s3_event(payload: dict[str, Any]) -> dict[str, Any] | N
         'actor_type': detect_actor_type(actor),
         'action': action, 'event_name': name,
         'event_id': str(event.get('eventID', ''))[:256],
-        # Tags are evaluated in-memory only and never persisted. They must be
-        # supplied by the authenticated customer-owned forwarder after it has
-        # resolved the object's tags with least-privilege AWS access.
+        'source_ip': source_ip, 'device_name': device_name,
         'resource_tags': event.get('arckonResourceTags', {}) if isinstance(
             event.get('arckonResourceTags', {}), dict) else {},
     }

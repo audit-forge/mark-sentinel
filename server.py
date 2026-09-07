@@ -3874,8 +3874,8 @@ load();
             body = json.loads(self.rfile.read(cl)) if cl else {}
             check_id = (body.get('check_id') or '').strip()
             action   = (body.get('action') or '').strip()
-            if not check_id or action not in ('accepted', 'assigned', 'false_positive'):
-                self._json({'error': 'check_id and action (accepted|assigned|false_positive) required'}, 400)
+            if not check_id or action not in ('accepted', 'assigned', 'false_positive', 'resolved'):
+                self._json({'error': 'check_id and action (accepted|assigned|false_positive|resolved) required'}, 400)
                 return
             assignee   = (body.get('assignee') or '').strip()
             note       = (body.get('note') or '').strip()
@@ -5407,17 +5407,26 @@ load();
             self._json({'error': 'invalid policy id'}, 400)
 
     def _api_cloud_asset_events(self):
-        """Accept one authenticated, normalized CloudTrail S3 event.
+        """Accept one authenticated, normalized cloud audit event.
 
         The dedicated token is stored per customer in the mounted data volume.
         The endpoint ignores caller-supplied tenant fields, retains no raw
-        CloudTrail event, and is idempotent by AWS event ID.
+        provider event, and is idempotent by event ID.
         """
-        token = _cloud_ingest_token()
         supplied = self.headers.get('Authorization', '').removeprefix('Bearer ').strip()
-        if not token or not supplied or not hmac.compare_digest(supplied, token):
+        if not supplied:
             self._send(401, b'Unauthorized', 'text/plain')
             return
+        # Accept either the dedicated cloud-ingest token or the agent token
+        # (both resolve to this customer's store in single-tenant containers).
+        cloud_token = _cloud_ingest_token()
+        is_cloud_token = cloud_token and hmac.compare_digest(supplied, cloud_token)
+        if not is_cloud_token:
+            # Fall back to agent-token auth so forwarders can use the same
+            # credential as the endpoint agent.
+            if not self._check_agent_bearer():
+                self._send(401, b'Unauthorized', 'text/plain')
+                return
         if _content_length(self.headers) > 1024 * 1024:
             self._send(413, b'Payload too large', 'text/plain')
             return
@@ -5427,7 +5436,15 @@ load();
             if not event:
                 self._json({'ok': True, 'stored': 0})
                 return
-            store = self._store()
+            # Resolve the customer store from the agent token (if used) or
+            # from the cloud-ingest token (which maps to this container's
+            # single customer). In multi-tenant deployments each container
+            # serves one customer, so the store is always this customer's.
+            cust = self._get_agent_customer()
+            if cust and cust.get('id'):
+                store = _get_store(cust['id'])
+            else:
+                store = self._store()
             policy = next((p for p in store.get_protected_cloud_assets()
                            if policy_matches_event(p, event)), None)
             if not policy:
@@ -11291,6 +11308,7 @@ async function loadActiveIssues() {{
           <div style="font-size:13px;color:#111827"><strong>${{iss.check_id}}</strong> on <strong>${{iss.hostname}}</strong> — ${{iss.title}}</div>
           <div style="font-size:11px;color:#9CA3AF;margin-top:4px">${{timeStr}}</div>
           <div style="margin-top:8px;display:flex;gap:6px">
+            <button onclick="event.stopPropagation();issueAction('${{cid}}','resolved')" style="font-size:11px;padding:3px 10px;border-radius:4px;border:1px solid #16A34A;background:#F0FDF4;cursor:pointer;color:#16A34A;font-weight:600">Resolved</button>
             <button onclick="event.stopPropagation();issueAction('${{cid}}','false_positive')" style="font-size:11px;padding:3px 10px;border-radius:4px;border:1px solid #D1D5DB;background:#F9FAFB;cursor:pointer;color:#374151">False Positive</button>
             <button onclick="event.stopPropagation();issueAction('${{cid}}','accepted')" style="font-size:11px;padding:3px 10px;border-radius:4px;border:1px solid #D1D5DB;background:#F9FAFB;cursor:pointer;color:#374151">Accept Risk</button>
           </div>
@@ -11303,7 +11321,8 @@ async function loadActiveIssues() {{
 }}
 
 async function issueAction(checkId, action) {{
-  const label = action === 'false_positive' ? 'false positive' : 'accepted risk';
+  const labels = {{'false_positive':'false positive','accepted':'accepted risk','resolved':'resolved'}};
+  const label = labels[action] || action;
   const note = window.prompt('Optional note for marking as ' + label + ':') ?? '';
   if (note === null) return;
   try {{
@@ -11368,6 +11387,7 @@ function openActiveIssueDetail(idx) {{
       ${{descRow}}
     </div>
     <div style="display:flex;gap:8px;justify-content:flex-end;flex-shrink:0">
+      <button onclick="event.stopPropagation();document.getElementById('alert-detail-overlay').remove();issueAction('${{cid.replace(/'/g,'')}}','resolved')" style="font-size:12px;padding:5px 14px;border:1px solid #16A34A;background:#F0FDF4;color:#16A34A;border-radius:4px;cursor:pointer;font-weight:600">Resolved</button>
       <button onclick="event.stopPropagation();document.getElementById('alert-detail-overlay').remove();issueAction('${{cid.replace(/'/g,'')}}','false_positive')" style="font-size:12px;padding:5px 14px;border:1px solid #D1D5DB;background:#F9FAFB;color:#374151;border-radius:4px;cursor:pointer">False Positive</button>
       <button onclick="event.stopPropagation();document.getElementById('alert-detail-overlay').remove();issueAction('${{cid.replace(/'/g,'')}}','accepted')" style="font-size:12px;padding:5px 14px;border:1px solid #D1D5DB;background:#F9FAFB;color:#374151;border-radius:4px;cursor:pointer">Accept Risk</button>
       <button onclick="document.getElementById('alert-detail-overlay').remove()" style="background:#111827;border:1px solid #111827;color:#fff;border-radius:4px;padding:5px 16px;font-size:12px;cursor:pointer;font-weight:600">Close</button>

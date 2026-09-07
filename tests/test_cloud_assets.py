@@ -30,7 +30,7 @@ def test_normalizes_s3_object_metadata_without_contents():
         'resource': 's3://records/payroll/2026.csv',
         'actor': 'arn:aws:sts::123456789012:assumed-role/ai/worker',
         'action': 'read', 'event_name': 'GetObject', 'event_id': 'evt-1',
-        'resource_tags': {}, 'actor_type': 'ai',
+        'resource_tags': {}, 'actor_type': 'ai', 'device_name': '', 'source_ip': '',
     }
 
 
