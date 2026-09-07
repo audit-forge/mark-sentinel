@@ -113,6 +113,9 @@ def normalize_gcp_storage_event(payload: dict[str, Any]) -> dict[str, Any] | Non
         return None
     auth = proto.get('authenticationInfo') or {}
     labels = (payload.get('resource') or {}).get('labels') or {}
+    req_meta = proto.get('requestMetadata') or {}
+    source_ip = str(req_meta.get('callerIp', ''))[:64]
+    device_name = str(payload.get('arckonDeviceName', ''))[:128]
     return {
         'provider': 'gcp', 'resource_type': 'gcs_object',
         'account_id': str(labels.get('project_id', ''))[:256],
@@ -122,6 +125,7 @@ def normalize_gcp_storage_event(payload: dict[str, Any]) -> dict[str, Any] | Non
         'actor_type': detect_actor_type(str(auth.get('principalEmail') or 'unknown')),
         'action': action, 'event_name': method,
         'event_id': str(payload.get('insertId', ''))[:256],
+        'source_ip': source_ip, 'device_name': device_name,
         'resource_tags': payload.get('arckonResourceLabels', {}) if isinstance(
             payload.get('arckonResourceLabels', {}), dict) else {},
     }
@@ -148,6 +152,8 @@ def normalize_azure_blob_event(payload: dict[str, Any]) -> dict[str, Any] | None
         return None
     resource_id = str(record.get('resourceId') or '')
     subscription = _AZURE_SUBSCRIPTION_RE.search(resource_id)
+    source_ip = str(record.get('callerIpAddress', ''))[:64]
+    device_name = str(payload.get('arckonDeviceName', record.get('arckonDeviceName', '')))[:128]
     return {
         'provider': 'azure', 'resource_type': 'azure_blob',
         'account_id': subscription.group(1) if subscription else '',
@@ -157,6 +163,7 @@ def normalize_azure_blob_event(payload: dict[str, Any]) -> dict[str, Any] | None
         'actor_type': detect_actor_type(str(record.get('identity') or record.get('caller') or '')),
         'action': action, 'event_name': operation[:256],
         'event_id': str(record.get('correlationId') or record.get('eventId') or '')[:256],
+        'source_ip': source_ip, 'device_name': device_name,
         'resource_tags': record.get('arckonResourceTags', {}) if isinstance(
             record.get('arckonResourceTags', {}), dict) else {},
     }
@@ -222,14 +229,25 @@ def normalize_google_workspace_drive_event(payload: dict[str, Any]) -> dict[str,
     if resource_path:
         resource = f'gworkspace://{resource_path.rstrip("/")}/{doc_title or doc_id}'
     domain = str(payload.get('arckonDomain', ''))[:128]
+    # Event ID: use arckonEventId if supplied, else the Reports API id.time
+    event_id = str(payload.get('arckonEventId', '')).strip()
+    if not event_id:
+        top_id = payload.get('id', {})
+        if isinstance(top_id, dict):
+            event_id = str(top_id.get('time', ''))
+        else:
+            event_id = str(top_id)
+    # Device name: the forwarder can enrich events with the device hostname
+    # (e.g., by correlating the source IP with the endpoint inventory).
+    device_name = str(payload.get('arckonDeviceName', ''))[:128]
     return {
         'provider': 'gworkspace', 'resource_type': 'drive_file',
         'account_id': domain, 'region': '',
         'resource': resource, 'actor': actor_email,
         'actor_type': detect_actor_type(actor_email),
         'action': action, 'event_name': name,
-        'event_id': str(event.get('id', {}).get('time', ''))[:256] if isinstance(
-            event.get('id'), dict) else str(payload.get('id', ''))[:256],
+        'event_id': event_id[:256],
+        'source_ip': '', 'device_name': device_name,
         'resource_tags': payload.get('arckonResourceTags', {}) if isinstance(
             payload.get('arckonResourceTags', {}), dict) else {},
         'doc_title': doc_title[:256],

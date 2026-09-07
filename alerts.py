@@ -497,21 +497,35 @@ def fire_cloud_asset_alert(event: dict, alert_cfg: dict, store=None) -> None:
     actor_type = event.get('actor_type', 'human')
     actor_label = f'[AI]' if actor_type == 'ai' else '[User]'
     account = event.get('account_id', '')
+    device_name = event.get('device_name', '')
+    source_ip = event.get('source_ip', '')
+    # Build a device label that shows the actor's email + device name + IP
+    # so the alert recipient can immediately see who accessed the asset and
+    # from which machine.
+    device_label = actor
+    if device_name:
+        device_label = f'{actor} on {device_name}'
+    elif source_ip:
+        device_label = f'{actor} from {source_ip}'
     dedup_key = f'{provider}:{account}:{resource}:{actor}:{event.get("action", "")}'
     if store is not None and store.was_alert_recently_fired(
             'protected_cloud_asset_access', provider, dedup_key):
         return
     title = f"{provider.upper()} {actor_label} {actor!r} {event.get('action', 'accessed')} protected asset {resource}"
+    if device_name:
+        title += f" on {device_name}"
+    elif source_ip:
+        title += f" from {source_ip}"
     payload = {
         'event': 'protected_cloud_asset_access', 'severity': 'CRITICAL',
-        'device': actor, 'host': account, 'service': actor,
+        'device': device_label, 'host': account, 'service': actor,
         'source': provider, 'title': title,
         'check_id': 'PROTECTED-CLOUD-ASSET-ACCESS',
     }
     fired = _dispatch(alert_cfg, payload)
     if store is not None:
         store.log_alert_event(event_type=payload['event'], severity='CRITICAL',
-                              device=actor, service=actor, host=account,
+                              device=device_label, service=actor, host=account,
                               check_id=payload['check_id'], title=title,
                               source=provider, channels=', '.join(fired))
 
