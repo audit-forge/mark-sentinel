@@ -27,6 +27,20 @@ _LOGIN_WINDOW   = 300   # 5 minutes
 _LOGIN_MAX      = 10    # max attempts per window
 _LOCKOUT_SECS   = 600   # 10 minute lockout after exceeding limit
 _CUSTOMER_ID_PATTERN = re.compile(r"[a-z0-9][a-z0-9-]{0,62}")
+_marketplace_attempts: dict[str, list[float]] = defaultdict(list)
+_MARKETPLACE_WINDOW = 300
+_MARKETPLACE_MAX = 10
+
+
+def _marketplace_request_allowed(ip: str) -> bool:
+    """Limit unauthenticated AWS fulfillment resolution calls per source IP."""
+    now = time.time()
+    attempts = [t for t in _marketplace_attempts[ip] if now - t < _MARKETPLACE_WINDOW]
+    _marketplace_attempts[ip] = attempts
+    if len(attempts) >= _MARKETPLACE_MAX:
+        return False
+    attempts.append(now)
+    return True
 
 
 @app.get("/marketplace/aws/fulfillment", response_class=HTMLResponse)
@@ -37,6 +51,9 @@ async def aws_marketplace_fulfillment(request: Request):
     server-side with the seller's IAM role; the token is never stored.
     """
     registration_token = request.query_params.get('x-amzn-marketplace-token', '')
+    client_ip = request.client.host if request.client else 'unknown'
+    if not _marketplace_request_allowed(client_ip):
+        return HTMLResponse('Too many fulfillment attempts. Retry shortly.', status_code=429)
     if not registration_token:
         return HTMLResponse('Missing AWS Marketplace registration token.', status_code=400)
     try:
@@ -58,7 +75,7 @@ async def aws_marketplace_fulfillment(request: Request):
           <input type="hidden" name="session_id" value="{session_id}">
           <label>Existing Arckon customer ID <input name="customer_id" required></label>
           <button type="submit">Activate subscription</button>
-        </form>''')
+        </form>''', headers={'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer'})
 
 
 @app.post("/marketplace/aws/activate")
@@ -75,8 +92,11 @@ async def aws_marketplace_activate(request: Request, session_id: str = Form(...)
         customer = conn.execute("SELECT * FROM customers WHERE id=?", (customer_id,)).fetchone()
         if not session or not customer or datetime.fromisoformat(session['expires_at']) <= now:
             return HTMLResponse('Activation session is invalid or expired.', status_code=400)
+        entitlement = get_entitlement(session['marketplace_customer_id'], session['product_code'])
+        if not entitlement['active']:
+            return HTMLResponse('AWS Marketplace entitlement is not active.', status_code=403)
         conn.execute("""UPDATE customers SET marketplace_provider='aws', marketplace_customer_id=?,
-                     marketplace_product_code=?, marketplace_entitlement_status='active',
+                     marketplace_product_code=?, marketplace_entitlement_status='active', service_suspended=0,
                      marketplace_entitlement_updated_at=? WHERE id=?""",
                      (session['marketplace_customer_id'], session['product_code'], now.isoformat(), customer_id))
         conn.execute("UPDATE marketplace_fulfillment_sessions SET consumed_at=? WHERE id=?",
@@ -98,9 +118,16 @@ async def sync_aws_marketplace_entitlement(request: Request, customer_id: str):
             return JSONResponse({'error': 'AWS Marketplace tenant not found'}, status_code=404)
         result = get_entitlement(customer['marketplace_customer_id'], customer['marketplace_product_code'])
         status = 'active' if result['active'] else 'suspended'
-        conn.execute("""UPDATE customers SET marketplace_entitlement_status=?,
-                     marketplace_entitlement_updated_at=?, service_suspended=? WHERE id=?""",
-                     (status, datetime.now(timezone.utc).isoformat(), 0 if result['active'] else 1, customer_id))
+        # Marketplace sync may suspend a non-entitled tenant, but it must never
+        # clear a manual suspension placed for abuse/security reasons.
+        if result['active'] and customer['service_suspended'] and customer['service_suspended_by'] not in ('aws_marketplace', None, ''):
+            conn.execute("UPDATE customers SET marketplace_entitlement_status=?, marketplace_entitlement_updated_at=? WHERE id=?",
+                         (status, datetime.now(timezone.utc).isoformat(), customer_id))
+        else:
+            conn.execute("""UPDATE customers SET marketplace_entitlement_status=?,
+                         marketplace_entitlement_updated_at=?, service_suspended=?, service_suspended_by=? WHERE id=?""",
+                         (status, datetime.now(timezone.utc).isoformat(), 0 if result['active'] else 1,
+                          None if result['active'] else 'aws_marketplace', customer_id))
     return JSONResponse({'ok': True, 'status': status, 'entitlement_count': len(result['entitlements'])})
 
 

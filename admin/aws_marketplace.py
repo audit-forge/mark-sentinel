@@ -6,6 +6,7 @@ role/identity provider. Never accept AWS access keys from a marketplace buyer.
 from __future__ import annotations
 
 import os
+from datetime import datetime, timezone
 from typing import Any
 
 
@@ -54,4 +55,12 @@ def get_entitlement(customer_id: str, product_code: str) -> dict[str, Any]:
     entitlements = []
     for page in paginator.paginate(ProductCode=product_code, Filter={'CUSTOMER_IDENTIFIER': [customer_id]}):
         entitlements.extend(page.get('Entitlements', []))
-    return {'active': bool(entitlements), 'entitlements': entitlements}
+    active = []
+    now = datetime.now(timezone.utc)
+    for entitlement in entitlements:
+        expiry = entitlement.get('ExpirationDate')
+        # AWS returns a timezone-aware datetime. An absent expiration is an
+        # active perpetual entitlement; an expired one must never grant access.
+        if expiry is None or expiry > now:
+            active.append(entitlement)
+    return {'active': bool(active), 'entitlements': active}
