@@ -22,6 +22,14 @@ All notable changes to this project will be documented in this file.
 - Release artifacts are packaged with an allowlist and signed out-of-repo; private key never enters source control.
 - Proxy identity headers are cleared on non-authenticated routes and require a shared proxy token.
 
+## 1.0.51 — 2026-09-07
+
+### Fixed
+- Protected Cloud Asset alerts now show the actual actor (person/AI identity) as the device instead of the cloud provider name. Previously the device field showed "GWORKSPACE" or "AWS" — now it shows "keith@mfdynamics.ai" or "ai-agent@mfdynamics.ai" so you can immediately see who accessed the protected asset.
+- Cloud-asset event ingest now resolves the correct customer store when using the agent token (was defaulting to the 'default' store, causing events to not match policies).
+- Google Workspace Drive normalizer now correctly extracts the event ID from `arckonEventId` or `id.time` at the top level of the payload.
+- Nginx now routes `/api/cloud-assets/` through bearer-token auth bypass (was falling through to dashboard session auth, rejecting forwarder requests).
+
 ## 1.0.50 — 2026-09-06
 
 ### Added

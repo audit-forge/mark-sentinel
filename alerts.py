@@ -504,14 +504,14 @@ def fire_cloud_asset_alert(event: dict, alert_cfg: dict, store=None) -> None:
     title = f"{provider.upper()} {actor_label} {actor!r} {event.get('action', 'accessed')} protected asset {resource}"
     payload = {
         'event': 'protected_cloud_asset_access', 'severity': 'CRITICAL',
-        'device': provider.upper(), 'host': account, 'service': actor,
+        'device': actor, 'host': account, 'service': actor,
         'source': provider, 'title': title,
         'check_id': 'PROTECTED-CLOUD-ASSET-ACCESS',
     }
     fired = _dispatch(alert_cfg, payload)
     if store is not None:
         store.log_alert_event(event_type=payload['event'], severity='CRITICAL',
-                              device=payload['device'], service=actor, host=account,
+                              device=actor, service=actor, host=account,
                               check_id=payload['check_id'], title=title,
                               source=provider, channels=', '.join(fired))
 
