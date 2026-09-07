@@ -19,6 +19,41 @@ _S3_EVENTS = {
 _ACCOUNT_RE = re.compile(r'^\d{12}$')
 _AZURE_SUBSCRIPTION_RE = re.compile(r'/subscriptions/([^/]+)', re.IGNORECASE)
 
+# Heuristics for detecting AI/automated (non-human) actors in cloud audit
+# events. These are intentionally conservative — when unclear, we classify
+# as 'human' to avoid missing alerts for AI tools that impersonate users.
+_AI_ACTOR_PATTERNS = re.compile(
+    r'(?:'
+    r'assumed-role/[^/]*(?:ai|agent|bot|claude|copilot|cursor|llm|model|'
+    r'inference|gpt|gemini|bedrock|sagemaker|vertex|pipeline|automation)'
+    r'|service-account@'
+    r'|@[a-z0-9-]+\.iam\.gserviceaccount\.com'
+    r'|system:serviceaccount:'
+    r'|machine-identity'
+    r'|workload-identity'
+    r'|ai[-_]?(?:agent|bot|worker|runner|service|tool)[@:]'
+    r'|(?:agent|bot|automation)[@:]'
+    r')',
+    re.IGNORECASE,
+)
+
+
+def detect_actor_type(actor: str) -> str:
+    """Classify an actor identity as 'ai' or 'human'.
+
+    Uses pattern matching on service-account ARNs, IAM emails, and
+    known AI-tool naming patterns. Returns 'ai' if the actor looks
+    like an automated/AI identity, 'human' otherwise.
+
+    This is heuristic — a human using an AI tool that runs under a
+    service account will appear as 'ai', which is the desired behavior
+    for AI-only alerting (the access was performed by the AI tool, not
+    by the human directly).
+    """
+    if not actor:
+        return 'human'
+    return 'ai' if _AI_ACTOR_PATTERNS.search(actor) else 'human'
+
 
 def normalize_cloudtrail_s3_event(payload: dict[str, Any]) -> dict[str, Any] | None:
     """Return safe S3 access metadata from one CloudTrail event, or None.
@@ -47,6 +82,7 @@ def normalize_cloudtrail_s3_event(payload: dict[str, Any]) -> dict[str, Any] | N
         'provider': 'aws', 'resource_type': 's3_object',
         'account_id': account, 'region': region,
         'resource': f's3://{bucket}/{key}', 'actor': actor,
+        'actor_type': detect_actor_type(actor),
         'action': action, 'event_name': name,
         'event_id': str(event.get('eventID', ''))[:256],
         # Tags are evaluated in-memory only and never persisted. They must be
@@ -83,6 +119,7 @@ def normalize_gcp_storage_event(payload: dict[str, Any]) -> dict[str, Any] | Non
         'region': str(labels.get('location', ''))[:64],
         'resource': f'gs://{bucket}/{key.lstrip("/")}',
         'actor': str(auth.get('principalEmail') or 'unknown')[:512],
+        'actor_type': detect_actor_type(str(auth.get('principalEmail') or 'unknown')),
         'action': action, 'event_name': method,
         'event_id': str(payload.get('insertId', ''))[:256],
         'resource_tags': payload.get('arckonResourceLabels', {}) if isinstance(
@@ -117,6 +154,7 @@ def normalize_azure_blob_event(payload: dict[str, Any]) -> dict[str, Any] | None
         'region': str(record.get('location', ''))[:64],
         'resource': f'azure://{match.group(1)}/{match.group(2)}/{match.group(3)}',
         'actor': str(record.get('identity') or record.get('caller') or 'unknown')[:512],
+        'actor_type': detect_actor_type(str(record.get('identity') or record.get('caller') or '')),
         'action': action, 'event_name': operation[:256],
         'event_id': str(record.get('correlationId') or record.get('eventId') or '')[:256],
         'resource_tags': record.get('arckonResourceTags', {}) if isinstance(
@@ -188,6 +226,7 @@ def normalize_google_workspace_drive_event(payload: dict[str, Any]) -> dict[str,
         'provider': 'gworkspace', 'resource_type': 'drive_file',
         'account_id': domain, 'region': '',
         'resource': resource, 'actor': actor_email,
+        'actor_type': detect_actor_type(actor_email),
         'action': action, 'event_name': name,
         'event_id': str(event.get('id', {}).get('time', ''))[:256] if isinstance(
             event.get('id'), dict) else str(payload.get('id', ''))[:256],

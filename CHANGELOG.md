@@ -22,6 +22,12 @@ All notable changes to this project will be documented in this file.
 - Release artifacts are packaged with an allowlist and signed out-of-repo; private key never enters source control.
 - Proxy identity headers are cleared on non-authenticated routes and require a shared proxy token.
 
+## 1.0.50 — 2026-09-06
+
+### Added
+- **Actor type detection (AI vs human)**: all cloud-asset events now include an `actor_type` field (`ai` or `human`) based on pattern matching of the actor identity (service accounts, assumed roles with AI/agent naming, etc.). Alert titles show `[AI]` or `[User]` so you can see at a glance who/what accessed the protected asset. Event cards in the dashboard show the same label.
+- **AI-only policy filter**: each Protected Cloud Assets policy can now be toggled to "AI only" — when enabled, events are still logged but alerts only fire when the actor is classified as AI/automated. Human access is stored silently. The toggle appears as a checkbox in the Add Cloud Policy form and as a badge on policy cards.
+
 ## 1.0.49 — 2026-09-06
 
 ### Added

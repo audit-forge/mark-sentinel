@@ -1,4 +1,5 @@
-from connectors.cloud_assets import (normalize_azure_blob_event,
+from connectors.cloud_assets import (detect_actor_type,
+                                     normalize_azure_blob_event,
                                      normalize_cloudtrail_s3_event,
                                      normalize_gcp_storage_event,
                                      normalize_google_workspace_drive_event,
@@ -29,7 +30,7 @@ def test_normalizes_s3_object_metadata_without_contents():
         'resource': 's3://records/payroll/2026.csv',
         'actor': 'arn:aws:sts::123456789012:assumed-role/ai/worker',
         'action': 'read', 'event_name': 'GetObject', 'event_id': 'evt-1',
-        'resource_tags': {},
+        'resource_tags': {}, 'actor_type': 'ai',
     }
 
 
@@ -117,3 +118,12 @@ def test_google_workspace_policy_matches_folder_prefix():
               'account_id': 'company.com',
               'resource_scope': 'gworkspace://Protected/Financial'}
     assert policy_matches_event(policy, event)
+
+
+def test_detects_ai_vs_human_actors():
+    assert detect_actor_type('arn:aws:sts::123456789012:assumed-role/ai-agent/workspace') == 'ai'
+    assert detect_actor_type('ai-service@project.iam.gserviceaccount.com') == 'ai'
+    assert detect_actor_type('system:serviceaccount:default:claude-runner') == 'ai'
+    assert detect_actor_type('keith@mfdynamics.ai') == 'human'
+    assert detect_actor_type('user@company.com') == 'human'
+    assert detect_actor_type('') == 'human'

@@ -314,6 +314,7 @@ class AgentStore:
                     resource_scope  TEXT NOT NULL,
                     tag_key         TEXT NOT NULL DEFAULT '',
                     tag_value       TEXT NOT NULL DEFAULT '',
+                    ai_only         INTEGER NOT NULL DEFAULT 0,
                     created_by      TEXT NOT NULL DEFAULT '',
                     created_at      INTEGER NOT NULL,
                     updated_at      INTEGER NOT NULL,
@@ -361,6 +362,10 @@ class AgentStore:
                 # migration can't fail against existing data.
                 conn.execute("ALTER TABLE devices ADD COLUMN client_org_id TEXT DEFAULT NULL")
                 conn.execute("CREATE INDEX IF NOT EXISTS idx_devices_client_org ON devices(client_org_id)")
+            # protected_cloud_assets: add ai_only column for existing tables
+            pca_cols = {r[1] for r in conn.execute("PRAGMA table_info(protected_cloud_assets)")}
+            if 'ai_only' not in pca_cols:
+                conn.execute("ALTER TABLE protected_cloud_assets ADD COLUMN ai_only INTEGER NOT NULL DEFAULT 0")
             # ai_spend: add client_org_id to pre-existing tables (nullable→default '')
             spend_cols = {r[1] for r in conn.execute("PRAGMA table_info(ai_spend)")}
             if 'client_org_id' not in spend_cols:
@@ -1530,24 +1535,27 @@ class AgentStore:
     def add_protected_cloud_asset(self, provider: str, resource_type: str,
                                   account_id: str, resource_scope: str,
                                   tag_key: str = '', tag_value: str = '',
-                                  created_by: str = '') -> int:
+                                  created_by: str = '',
+                                  ai_only: bool = False) -> int:
         """Add an explicit cloud-resource scope, optionally requiring a tag.
 
         Wildcards are rejected by the API before reaching this method. The
         audit record deliberately contains only policy metadata, never a cloud
-        access token or a provider event payload.
+        access token or a provider event payload. When ai_only is True, only
+        events from AI/automated actors will trigger alerts.
         """
         now = int(time.time())
         with self._lock, self._conn() as conn:
             cur = conn.execute(
                 """INSERT INTO protected_cloud_assets
                    (provider, resource_type, account_id, resource_scope, tag_key,
-                    tag_value, created_by, created_at, updated_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    tag_value, ai_only, created_by, created_at, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                    ON CONFLICT(provider, resource_type, account_id, resource_scope, tag_key, tag_value)
-                   DO UPDATE SET updated_at=excluded.updated_at, created_by=excluded.created_by""",
+                   DO UPDATE SET updated_at=excluded.updated_at, created_by=excluded.created_by,
+                                 ai_only=excluded.ai_only""",
                 (provider, resource_type, account_id, resource_scope, tag_key,
-                 tag_value, created_by, now, now))
+                 tag_value, 1 if ai_only else 0, created_by, now, now))
             policy_id = cur.lastrowid
             if not policy_id:
                 row = conn.execute(

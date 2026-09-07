@@ -494,12 +494,14 @@ def fire_cloud_asset_alert(event: dict, alert_cfg: dict, store=None) -> None:
     provider = event.get('provider', 'cloud')
     resource = event.get('resource', '')
     actor = event.get('actor', 'unknown')
+    actor_type = event.get('actor_type', 'human')
+    actor_label = f'[AI]' if actor_type == 'ai' else '[User]'
     account = event.get('account_id', '')
     dedup_key = f'{provider}:{account}:{resource}:{actor}:{event.get("action", "")}'
     if store is not None and store.was_alert_recently_fired(
             'protected_cloud_asset_access', provider, dedup_key):
         return
-    title = f"{provider.upper()} actor {actor!r} {event.get('action', 'accessed')} protected asset {resource}"
+    title = f"{provider.upper()} {actor_label} {actor!r} {event.get('action', 'accessed')} protected asset {resource}"
     payload = {
         'event': 'protected_cloud_asset_access', 'severity': 'CRITICAL',
         'device': provider.upper(), 'host': account, 'service': actor,
