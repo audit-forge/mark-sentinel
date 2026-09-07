@@ -15,4 +15,4 @@ boto3>=1.34.0,<2.0.0
 msgpack>=1.2.1
 setuptools>=78.1.1
 # Compiled macOS agents need an explicit CA bundle for Cloudflare HTTPS.
-certifi==2025.8.3
+certifi==2026.7.22
