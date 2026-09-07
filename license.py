@@ -186,7 +186,7 @@ def get_customer_license(customer: dict) -> License:
     return License({
         'customer_id': customer.get('id', 'unknown'),
         'licensed_to': customer.get('name', 'Unknown'),
-        'plan':        customer.get('plan', License.PLAN_PLUS),
+        'plan':        customer.get('tier', customer.get('plan', License.PLAN_PLUS)),
         'max_agents':  int(customer.get('max_agents', 0)),
         'expires_at':  customer.get('expires_at', ''),
     })

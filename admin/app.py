@@ -16,6 +16,7 @@ from fastapi.templating import Jinja2Templates
 from db import init_db, get_conn
 from auth import hash_password, verify_password, create_token, get_current_user, require_super_admin
 from monitor import start_monitor
+from aws_marketplace import get_entitlement, resolve_customer
 
 app = FastAPI(docs_url=None, redoc_url=None)
 templates = Jinja2Templates(directory="templates")
@@ -26,6 +27,81 @@ _LOGIN_WINDOW   = 300   # 5 minutes
 _LOGIN_MAX      = 10    # max attempts per window
 _LOCKOUT_SECS   = 600   # 10 minute lockout after exceeding limit
 _CUSTOMER_ID_PATTERN = re.compile(r"[a-z0-9][a-z0-9-]{0,62}")
+
+
+@app.get("/marketplace/aws/fulfillment", response_class=HTMLResponse)
+async def aws_marketplace_fulfillment(request: Request):
+    """AWS Marketplace SaaS landing page after a buyer subscribes.
+
+    AWS supplies a short-lived registration token. ResolveCustomer validates it
+    server-side with the seller's IAM role; the token is never stored.
+    """
+    registration_token = request.query_params.get('x-amzn-marketplace-token', '')
+    if not registration_token:
+        return HTMLResponse('Missing AWS Marketplace registration token.', status_code=400)
+    try:
+        buyer = resolve_customer(registration_token)
+    except Exception:
+        return HTMLResponse('Could not validate the AWS Marketplace subscription. Please retry from AWS Marketplace.', status_code=400)
+    session_id = secrets.token_urlsafe(32)
+    expires = datetime.now(timezone.utc) + timedelta(minutes=15)
+    with get_conn() as conn:
+        conn.execute("""INSERT INTO marketplace_fulfillment_sessions
+                     (id, provider, marketplace_customer_id, aws_account_id, product_code, expires_at)
+                     VALUES (?, 'aws', ?, ?, ?, ?)""",
+                     (session_id, buyer['customer_id'], buyer['account_id'],
+                      buyer['product_code'], expires.isoformat()))
+    return HTMLResponse(f'''<!doctype html><title>Arckon AWS Marketplace</title>
+        <h1>Activate RiskRaven: Arckon</h1>
+        <p>Your AWS Marketplace subscription was verified. Sign in as an Arckon administrator to complete tenant activation.</p>
+        <form method="post" action="/marketplace/aws/activate">
+          <input type="hidden" name="session_id" value="{session_id}">
+          <label>Existing Arckon customer ID <input name="customer_id" required></label>
+          <button type="submit">Activate subscription</button>
+        </form>''')
+
+
+@app.post("/marketplace/aws/activate")
+async def aws_marketplace_activate(request: Request, session_id: str = Form(...), customer_id: str = Form(...)):
+    """Bind a verified AWS Marketplace buyer to an existing Arckon tenant."""
+    try:
+        user = require_super_admin(request)
+    except HTTPException:
+        return RedirectResponse('/login', status_code=303)
+    now = datetime.now(timezone.utc)
+    with get_conn() as conn:
+        session = conn.execute("SELECT * FROM marketplace_fulfillment_sessions WHERE id=? AND consumed_at IS NULL",
+                               (session_id,)).fetchone()
+        customer = conn.execute("SELECT * FROM customers WHERE id=?", (customer_id,)).fetchone()
+        if not session or not customer or datetime.fromisoformat(session['expires_at']) <= now:
+            return HTMLResponse('Activation session is invalid or expired.', status_code=400)
+        conn.execute("""UPDATE customers SET marketplace_provider='aws', marketplace_customer_id=?,
+                     marketplace_product_code=?, marketplace_entitlement_status='active',
+                     marketplace_entitlement_updated_at=? WHERE id=?""",
+                     (session['marketplace_customer_id'], session['product_code'], now.isoformat(), customer_id))
+        conn.execute("UPDATE marketplace_fulfillment_sessions SET consumed_at=? WHERE id=?",
+                     (now.isoformat(), session_id))
+    return HTMLResponse('AWS Marketplace subscription activated for this Arckon tenant.')
+
+
+@app.post("/api/marketplace/aws/entitlements/{customer_id}")
+async def sync_aws_marketplace_entitlement(request: Request, customer_id: str):
+    """Super-admin sync of a tenant's AWS Marketplace entitlement state."""
+    try:
+        require_super_admin(request)
+    except HTTPException:
+        return JSONResponse({'error': 'unauthorized'}, status_code=403)
+    with get_conn() as conn:
+        customer = conn.execute("SELECT * FROM customers WHERE id=? AND marketplace_provider='aws'",
+                                (customer_id,)).fetchone()
+        if not customer:
+            return JSONResponse({'error': 'AWS Marketplace tenant not found'}, status_code=404)
+        result = get_entitlement(customer['marketplace_customer_id'], customer['marketplace_product_code'])
+        status = 'active' if result['active'] else 'suspended'
+        conn.execute("""UPDATE customers SET marketplace_entitlement_status=?,
+                     marketplace_entitlement_updated_at=?, service_suspended=? WHERE id=?""",
+                     (status, datetime.now(timezone.utc).isoformat(), 0 if result['active'] else 1, customer_id))
+    return JSONResponse({'ok': True, 'status': status, 'entitlement_count': len(result['entitlements'])})
 
 
 def _is_valid_customer_id(customer_id: str) -> bool:

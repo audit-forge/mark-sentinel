@@ -19,6 +19,12 @@ def init_db():
                 license_expires_at TEXT,
                 max_seats INTEGER NOT NULL DEFAULT 5,
                 current_agents INTEGER NOT NULL DEFAULT 0
+                ,marketplace_provider TEXT NOT NULL DEFAULT ''
+                ,marketplace_customer_id TEXT NOT NULL DEFAULT ''
+                ,marketplace_product_code TEXT NOT NULL DEFAULT ''
+                ,marketplace_subscription_id TEXT NOT NULL DEFAULT ''
+                ,marketplace_entitlement_status TEXT NOT NULL DEFAULT ''
+                ,marketplace_entitlement_updated_at TEXT
             );
             CREATE TABLE IF NOT EXISTS users (
                 id TEXT PRIMARY KEY,
@@ -73,6 +79,15 @@ def init_db():
                 details TEXT,
                 ip_address TEXT
             );
+            CREATE TABLE IF NOT EXISTS marketplace_fulfillment_sessions (
+                id TEXT PRIMARY KEY,
+                provider TEXT NOT NULL,
+                marketplace_customer_id TEXT NOT NULL,
+                aws_account_id TEXT NOT NULL DEFAULT '',
+                product_code TEXT NOT NULL,
+                expires_at TEXT NOT NULL,
+                consumed_at TEXT
+            );
         """)
         for col, defn in [
             ('tier',                "TEXT NOT NULL DEFAULT 'standard'"),
@@ -90,6 +105,12 @@ def init_db():
             ('service_suspended',   "INTEGER NOT NULL DEFAULT 0"),
             ('service_suspended_at', "TEXT"),
             ('service_suspended_by', "TEXT"),
+            ('marketplace_provider', "TEXT NOT NULL DEFAULT ''"),
+            ('marketplace_customer_id', "TEXT NOT NULL DEFAULT ''"),
+            ('marketplace_product_code', "TEXT NOT NULL DEFAULT ''"),
+            ('marketplace_subscription_id', "TEXT NOT NULL DEFAULT ''"),
+            ('marketplace_entitlement_status', "TEXT NOT NULL DEFAULT ''"),
+            ('marketplace_entitlement_updated_at', "TEXT"),
         ]:
             try:
                 conn.execute(f"ALTER TABLE customers ADD COLUMN {col} {defn}")
@@ -99,6 +120,9 @@ def init_db():
             conn.execute("ALTER TABLE users ADD COLUMN client_org_id TEXT")
         except Exception:
             pass
+        conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_customers_marketplace_customer "
+                     "ON customers(marketplace_provider, marketplace_customer_id) "
+                     "WHERE marketplace_customer_id <> ''")
 
 
 class StaleSessionError(Exception):

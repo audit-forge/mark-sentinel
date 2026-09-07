@@ -22,6 +22,11 @@ All notable changes to this project will be documented in this file.
 - Release artifacts are packaged with an allowlist and signed out-of-repo; private key never enters source control.
 - Proxy identity headers are cleared on non-authenticated routes and require a shared proxy token.
 
+## 1.0.53 — 2026-09-07
+
+### Added
+- **AWS Marketplace SaaS foundation**: tenant marketplace identity and entitlement state, AWS fulfillment landing and one-use activation session, product-code allowlisting, IAM-role-based `ResolveCustomer` and `GetEntitlements` integration, reversible suspension on missing entitlement, and seller technical setup guide.
+
 ## 1.0.52 — 2026-09-07
 
 ### Added
