@@ -108,7 +108,7 @@ async def aws_marketplace_activate(request: Request, session_id: str = Form(...)
 async def sync_aws_marketplace_entitlement(request: Request, customer_id: str):
     """Super-admin sync of a tenant's AWS Marketplace entitlement state."""
     try:
-        require_super_admin(request)
+        user = require_super_admin(request)
     except HTTPException:
         return JSONResponse({'error': 'unauthorized'}, status_code=403)
     with get_conn() as conn:
@@ -128,6 +128,14 @@ async def sync_aws_marketplace_entitlement(request: Request, customer_id: str):
                          marketplace_entitlement_updated_at=?, service_suspended=?, service_suspended_by=? WHERE id=?""",
                          (status, datetime.now(timezone.utc).isoformat(), 0 if result['active'] else 1,
                           None if result['active'] else 'aws_marketplace', customer_id))
+        conn.execute(
+            """INSERT INTO audit_log
+               (occurred_at, actor_name, actor_role, customer_id, action, target, details, ip_address)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            (datetime.now(timezone.utc).isoformat(), user.get('email', ''), user.get('role', ''),
+             customer_id, 'marketplace_entitlement_sync', 'aws',
+             f'status={status}; entitlements={len(result["entitlements"])}',
+             request.client.host if request.client else ''))
     return JSONResponse({'ok': True, 'status': status, 'entitlement_count': len(result['entitlements'])})
 
 
@@ -456,6 +464,13 @@ async def dashboard(request: Request):
             "JOIN customers c ON a.customer_id = c.id "
             "ORDER BY a.created_at DESC LIMIT 20"
         ).fetchall()
+        marketplace_rows = conn.execute(
+            """SELECT id, name, tier, max_seats, marketplace_provider,
+                      marketplace_customer_id, marketplace_product_code,
+                      marketplace_entitlement_status, marketplace_entitlement_updated_at,
+                      service_suspended, service_suspended_by
+               FROM customers WHERE marketplace_provider <> '' ORDER BY name"""
+        ).fetchall()
     seats = [dict(r) for r in seat_rows]
     overages = sum(1 for s in seats if s["current_agents"] > s["max_seats"])
     return templates.TemplateResponse("dashboard.html", {
@@ -466,6 +481,7 @@ async def dashboard(request: Request):
         "seats": seats,
         "overages": overages,
         "alerts": [dict(r) for r in alert_rows],
+        "marketplace_subscriptions": [dict(r) for r in marketplace_rows],
         "shadow_ai_devices": _get_shadow_ai_devices(user["customer_id"]) if user.get("customer_id") else []})
 
 

@@ -22,6 +22,11 @@ All notable changes to this project will be documented in this file.
 - Release artifacts are packaged with an allowlist and signed out-of-repo; private key never enters source control.
 - Proxy identity headers are cleared on non-authenticated routes and require a shared proxy token.
 
+## 1.0.56 — 2026-09-07
+
+### Added
+- **Super Admin Marketplace Subscriptions dashboard**: view AWS Marketplace buyer identity, product, Standard/Pro plan, entitlement state, last synchronization, and suspension origin for every linked tenant. Per-tenant entitlement Sync actions are super-admin-only and written to the audit log.
+
 ## 1.0.55 — 2026-09-07
 
 ### Security

@@ -150,6 +150,36 @@
   <span id="update-all-status" style="font-size:12px;margin-left:12px"></span>
 </div>
 
+<div class="card">
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+    <div class="card-title" style="margin:0">Marketplace Subscriptions</div>
+    <span style="font-size:11px;color:#6B7280">Super Admin only</span>
+  </div>
+  <p style="color:#6B7280;font-size:13px;margin-top:0;margin-bottom:12px">AWS Marketplace tenant entitlement state. Marketplace sync never clears a manual security suspension.</p>
+  {% if marketplace_subscriptions %}
+  <table>
+    <thead><tr><th>Customer</th><th>Provider</th><th>Plan</th><th>Buyer identity</th><th>Product</th><th>Entitlement</th><th>Last sync</th><th>Service</th><th></th></tr></thead>
+    <tbody>
+    {% for m in marketplace_subscriptions %}
+    <tr>
+      <td>{{ m.name }}</td>
+      <td><span class="badge badge-blue">{{ m.marketplace_provider|upper }}</span></td>
+      <td>{% if m.tier == 'plus' %}<span class="badge badge-blue">Pro</span>{% else %}<span class="badge badge-yellow">Standard</span>{% endif %}</td>
+      <td style="font-family:monospace;font-size:11px">{{ m.marketplace_customer_id }}</td>
+      <td style="font-family:monospace;font-size:11px">{{ m.marketplace_product_code }}</td>
+      <td>{% if m.marketplace_entitlement_status == 'active' %}<span class="badge badge-green">active</span>{% elif m.marketplace_entitlement_status %}<span class="badge badge-red">{{ m.marketplace_entitlement_status }}</span>{% else %}<span style="color:#9CA3AF">not synced</span>{% endif %}</td>
+      <td style="font-size:11px;color:#6B7280">{{ m.marketplace_entitlement_updated_at[:16].replace('T',' ') if m.marketplace_entitlement_updated_at else 'never' }}</td>
+      <td>{% if m.service_suspended %}<span class="badge badge-red">suspended{% if m.service_suspended_by %}: {{ m.service_suspended_by }}{% endif %}</span>{% else %}<span class="badge badge-green">active</span>{% endif %}</td>
+      <td><button class="btn btn-sm" onclick="syncMarketplaceEntitlement('{{ m.id }}', this)" style="background:#F9FAFB;color:#4F46E5;border:1px solid #4F46E540">Sync</button></td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty">No Marketplace subscriptions are linked yet. AWS Marketplace buyers appear here after fulfillment activation.</div>
+  {% endif %}
+</div>
+
 <script>
 async function loadMaintenanceList() {
   const table = document.getElementById('maint-list-table');
@@ -227,6 +257,22 @@ async function pushAllAgentUpdates(btn) {
     status.style.color = '#DC2626';
   }
   btn.disabled = false;
+}
+
+async function syncMarketplaceEntitlement(customerId, btn) {
+  const old = btn.textContent;
+  btn.disabled = true; btn.textContent = 'Syncing...';
+  try {
+    const r = await fetch('/api/marketplace/aws/entitlements/' + encodeURIComponent(customerId), {method: 'POST'});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || r.status);
+    btn.textContent = data.status === 'active' ? 'Active' : 'Suspended';
+    setTimeout(() => location.reload(), 800);
+  } catch (e) {
+    btn.textContent = 'Failed';
+    alert('Marketplace sync failed: ' + e.message);
+    setTimeout(() => { btn.textContent = old; btn.disabled = false; }, 1800);
+  }
 }
 
 loadMaintenanceList();
