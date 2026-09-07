@@ -22,6 +22,11 @@ All notable changes to this project will be documented in this file.
 - Release artifacts are packaged with an allowlist and signed out-of-repo; private key never enters source control.
 - Proxy identity headers are cleared on non-authenticated routes and require a shared proxy token.
 
+## 1.0.52 — 2026-09-07
+
+### Added
+- **Resolved workflow for Active Issues**: responders can mark an issue Resolved with an optional note. Resolved findings leave Active Issues immediately, preventing duplicate outreach; the next scan validates the resolution. If the finding still fails in a scan received after the resolution, Arckon clears the premature resolution and reopens the issue automatically.
+
 ## 1.0.51 — 2026-09-07
 
 ### Fixed
