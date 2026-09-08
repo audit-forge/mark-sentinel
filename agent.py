@@ -751,9 +751,13 @@ def self_update(config: dict) -> bool:
         if agent_binary_updated and agent_bin.exists() and os.access(agent_bin, os.X_OK):
             os.execv(str(agent_bin), [str(agent_bin)] + sys.argv[1:])
         else:
-            import subprocess
+            # Spawn the replacement as a detached child, then exit this process.
+            # Using subprocess.Popen without waiting means the parent stays alive
+            # indefinitely as a zombie process, accumulating on each self-update.
+            # os._exit(0) kills the parent immediately so only one daemon runs.
+            log.info('self_update: spawning replacement agent and exiting')
             subprocess.Popen([sys.executable, str(Path(__file__).resolve())] + sys.argv[1:])
-            return True
+            os._exit(0)
     except Exception as e:
         log.error('self_update failed: %s', e)
         return False
@@ -1804,6 +1808,37 @@ def main() -> None:
                 log.error('Daemon startup: agent binary is missing and cannot be restored')
         else:
             _restore_agent_binary()
+
+        # Clean up stale Nuitka onefile temp directories left by crashed/zombie
+        # predecessors. A Nuitka onefile binary extracts to a random temp dir
+        # (~119 MB) each launch; if the parent doesn't exit cleanly, the dir
+        # stays behind and accumulates. Remove any whose creation time predates
+        # the current process start, indicating the owning process is gone.
+        _tmp_dir = Path(os.environ.get('TMPDIR', '/tmp'))
+        _my_pid = str(os.getpid())
+        try:
+            _proc_start = os.stat(f'/proc/{_my_pid}').st_ctime if os.name == 'posix' else time.time()
+            for onefile_dir in _tmp_dir.glob('onefile_*'):
+                try:
+                    dir_info = onefile_dir.stat()
+                    # Remove if the dir is older than our process and the owning
+                    # PID no longer exists. The dir name contains the PID: onefile_{PID}_...
+                    parts = onefile_dir.name.split('_')
+                    owner_pid = parts[1] if len(parts) > 1 else ''
+                    if owner_pid and owner_pid != _my_pid:
+                        try:
+                            os.kill(int(owner_pid), 0)
+                            continue  # owning process is still alive
+                        except (OSError, ProcessLookupError):
+                            pass  # process is gone — safe to remove
+                        except ValueError:
+                            pass  # non-numeric PID — probably a stale dir
+                    if dir_info.st_ctime < _proc_start:
+                        shutil.rmtree(str(onefile_dir), ignore_errors=False)
+                except (OSError, PermissionError):
+                    pass  # skip dirs we can't read or remove
+        except Exception as e:
+            log.debug('Onefile temp cleanup error (non-fatal): %s', e)
 
         # Startup jitter: stagger first scan across fleet so mass reboots don't
         # create a thundering herd. Capped at half the scan interval.
