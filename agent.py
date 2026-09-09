@@ -833,6 +833,11 @@ def _restart_windows_service_after_update(staged: Path | None, live: Path | None
         return False
     _backup_agent_binary()
     script = ROOT / 'activate-agent-update.cmd'
+    update_log = Path(os.environ.get('ProgramData', str(ROOT))) / 'Arckon' / 'agent-update.log'
+    try:
+        update_log.parent.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        update_log = ROOT / 'agent-update.log'
     script.write_text(
         '@echo off\r\n'
         'setlocal enabledelayedexpansion\r\n'
@@ -840,15 +845,19 @@ def _restart_windows_service_after_update(staged: Path | None, live: Path | None
         f'set "STAGED={staged}"\r\n'
         f'set "BACKUP={live}.bak"\r\n'
         f'set "SVC={_WINDOWS_SERVICE_NAME}"\r\n'
+        f'set "LOG={update_log}"\r\n'
         'set "REPAIRED=0"\r\n'
+        'echo %date% %time% [INFO] Starting agent update >> "%LOG%"\r\n'
         'rem Backup current binary before touching it\r\n'
-        'if exist "%LIVE%" copy /y "%LIVE%" "%BACKUP%" >nul 2>&1\r\n'
+        'if exist "%LIVE%" copy /y "%LIVE%" "%BACKUP%" >> "%LOG%" 2>&1\r\n'
         'rem Stop the service\r\n'
-        f'sc stop {_WINDOWS_SERVICE_NAME} >nul 2>&1\r\n'
+        'sc.exe query "%SVC%" >nul 2>&1\r\n'
+        'if errorlevel 1060 goto service_missing\r\n'
+        'sc.exe stop "%SVC%" >> "%LOG%" 2>&1\r\n'
         f'schtasks /end /tn {_WINDOWS_SERVICE_NAME} >nul 2>&1\r\n'
         'set /a WAITED=0\r\n'
         ':wait_stop\r\n'
-        f'sc query {_WINDOWS_SERVICE_NAME} | find "STOPPED" >nul\r\n'
+        'sc.exe query "%SVC%" | find "STOPPED" >nul\r\n'
         'if not errorlevel 1 goto stopped\r\n'
         'if %WAITED% GEQ 60 goto update_failed\r\n'
         'ping -n 2 127.0.0.1 >nul\r\n'
@@ -872,12 +881,16 @@ def _restart_windows_service_after_update(staged: Path | None, live: Path | None
         'if exist "%LIVE%" icacls "%LIVE%" /grant Everyone:RX >nul 2>&1\r\n'
         'rem Start the service only if we have a binary\r\n'
         'if not exist "%LIVE%" goto update_failed\r\n'
-        f'    sc start {_WINDOWS_SERVICE_NAME} >nul 2>&1\r\n'
+        'sc.exe start "%SVC%" >> "%LOG%" 2>&1\r\n'
+        'echo %date% %time% [INFO] Agent update completed >> "%LOG%"\r\n'
         '    schtasks /delete /tn ArckonAgentUpdate /f >nul 2>&1\r\n'
         '    del "%~f0"\r\n'
         '    exit /b 0\r\n'
+        ':service_missing\r\n'
+        '    echo %date% %time% [ERROR] Service %SVC% was not found; staged update retained >> "%LOG%"\r\n'
+        '    goto update_failed\r\n'
         ':update_failed\r\n'
-        '    echo %date% %time% [ERROR] Cannot start service: agent.exe missing after update >> "%~dp0arckon-agent.log"\r\n'
+        '    echo %date% %time% [ERROR] Agent update failed; staged binary retained for recovery >> "%LOG%"\r\n'
         '    del "%~f0"\r\n'
         '    exit /b 1\r\n',
         encoding='utf-8',
@@ -886,9 +899,11 @@ def _restart_windows_service_after_update(staged: Path | None, live: Path | None
         task_name = 'ArckonAgentUpdate'
         # ONCE is only a trigger type; /run starts it immediately. The task
         # executes as LocalSystem and survives the service it is about to stop.
+        # cmd.exe /s needs doubled outer quotes to preserve paths such as
+        # C:\Program Files\Arckon\activate-agent-update.cmd as one command.
         subprocess.run([
             'schtasks.exe', '/create', '/tn', task_name, '/tr',
-            f'cmd.exe /d /s /c "{script}"', '/sc', 'ONCE', '/st', '00:00',
+            f'cmd.exe /d /s /c ""{script}""', '/sc', 'ONCE', '/st', '00:00',
             '/ru', 'SYSTEM', '/rl', 'HIGHEST', '/f',
         ], check=True, capture_output=True, timeout=30)
         subprocess.run(['schtasks.exe', '/run', '/tn', task_name],
@@ -921,7 +936,9 @@ def _reinstall_agent(config: dict) -> None:
         if sys.platform == 'win32':
             # Download install.ps1 from the server
             install_url = f'{server}/install/install.ps1'
-            headers = {'Authorization': f'Bearer {token}'} if token else {}
+            headers = {'User-Agent': f'sentinel-agent/{VERSION}'}
+            if token:
+                headers['Authorization'] = f'Bearer {token}'
             install_text = _read_update_url(install_url, headers, timeout=60)
             if not install_text:
                 log.error('reinstall: could not download install.ps1')

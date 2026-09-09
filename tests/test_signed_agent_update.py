@@ -260,7 +260,33 @@ def test_windows_update_activation_creates_backup_and_script(tmp_path, monkeypat
     script_text = script.read_text(encoding='utf-8')
     assert 'move /y' in script_text
     assert 'copy /y "%BACKUP%" "%LIVE%"' in script_text
-    assert 'sc start ArckonAgent' in script_text
+    assert 'sc.exe start "%SVC%"' in script_text
+    assert 'Service %SVC% was not found; staged update retained' in script_text
+    assert 'agent-update.log' in script_text
     assert 'ArckonAgentUpdate' in script_text
     assert len(executed) == 2
-    assert executed[0][0][0][:4] == ['schtasks.exe', '/create', '/tn', 'ArckonAgentUpdate']
+    create_cmd = executed[0][0][0]
+    assert create_cmd[:4] == ['schtasks.exe', '/create', '/tn', 'ArckonAgentUpdate']
+    task_action = create_cmd[create_cmd.index('/tr') + 1]
+    assert task_action.startswith('cmd.exe /d /s /c ""')
+    assert task_action.endswith('activate-agent-update.cmd""')
+
+
+def test_windows_reinstall_uses_the_agent_user_agent(tmp_path, monkeypatch):
+    monkeypatch.setattr(agent.sys, 'platform', 'win32')
+    monkeypatch.setattr(agent, 'ROOT', tmp_path)
+    seen_headers = []
+    monkeypatch.setattr(
+        agent,
+        '_read_update_url',
+        lambda url, headers, timeout=60: seen_headers.append(headers) or b'installer',
+    )
+    monkeypatch.setattr(
+        agent.subprocess,
+        'run',
+        lambda *args, **kwargs: type('R', (), {'returncode': 0})(),
+    )
+
+    agent._reinstall_agent({'server': 'https://updates.example.test', 'token': 'token'})
+
+    assert seen_headers == [{'User-Agent': f'sentinel-agent/{agent.VERSION}', 'Authorization': 'Bearer token'}]
