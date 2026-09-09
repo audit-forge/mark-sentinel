@@ -1492,7 +1492,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             '/api/devices':    self._api_devices,
             '/api/discover':   self._api_discover,
             '/fleet':          lambda: self._redirect('/'),
-            '/academy':        self._serve_academy,
+            '/academy':        lambda: self._serve_academy(None),
             '/probe':          self._serve_probe_tester if _has_live_scan() else lambda: self._send(403, b'Live scanning requires a Pro license. Contact sales@markai.io to upgrade.', 'text/plain'),
             '/command':        lambda: self._redirect('/'),
             '/api/config':           self._api_get_config,
@@ -1539,6 +1539,9 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         }
         if path in static:
             static[path]()
+        elif path == '/academy' or path.startswith('/academy/'):
+            page = path[len('/academy/'):] if path.startswith('/academy/') else None
+            self._serve_academy(page)
         elif path.startswith('/fleet/device/') and path.endswith('/timeseries.json'):
             did = path[len('/fleet/device/'): -len('/timeseries.json')]
             self._api_device_timeseries(did)
@@ -6495,11 +6498,11 @@ body{{background:#0d1117;color:#e6edf3;font-family:-apple-system,BlinkMacSystemF
         self._send(200, page, 'text/html; charset=utf-8')
 
 
-    def _serve_academy(self):
+    def _serve_academy(self, page):
         try:
             sys.path.insert(0, str(ROOT))
             from academy import build
-            html = build(ROOT)
+            html = build(ROOT, page)
             self._send(200, html, 'text/html; charset=utf-8')
         except Exception as e:
             self._send(500, f'Academy build failed: {e}'.encode(), 'text/plain')

@@ -101,26 +101,37 @@ def _read_checks(root: pathlib.Path) -> Dict[str, List[Dict[str, str]]]:
     return out
 
 
-def build(root: pathlib.Path) -> bytes:
-    """Return full HTML bytes for the academy page."""
+def build(root: pathlib.Path, page: str | None = None) -> bytes:
+    """Return full HTML bytes for an Academy page.
+
+    Each item in the left navigation now has its own URL:
+        /academy             -> overview
+        /academy/<section>   -> that section's dedicated page
+        /academy/cat-<id>    -> that check catalog category
+    """
     root = pathlib.Path(root)
     checks = _read_checks(root)
+
+    # Order for catalog categories
+    cat_order = [
+        'AI-DEPLOY', 'AI-RUNTIME', 'AI-AGENT', 'AI-GOV', 'AI-INP', 'AI-OUT', 'AI-SUPPLY'
+    ]
 
     # build nav links (static sections + dynamic catalog group links)
     nav_items = []
     for sid, title in SECTIONS:
         nav_items.append((sid, title))
-    # add category anchors for checks
-    cat_order = [
-        'AI-DEPLOY', 'AI-RUNTIME', 'AI-AGENT', 'AI-GOV', 'AI-INP', 'AI-OUT', 'AI-SUPPLY'
-    ]
-    # append categories present in checks in desired order, then any extras
     for c in cat_order:
         if c in checks:
             nav_items.append((f'cat-{c}', f'Catalog: {c}'))
     for c in sorted(checks.keys()):
         if c not in cat_order:
             nav_items.append((f'cat-{c}', f'Catalog: {c}'))
+
+    # Normalize requested page; fall back to overview for unknown/missing values
+    requested = (page or 'overview').strip('/')
+    if requested not in {sid for sid, _ in nav_items}:
+        requested = 'overview'
 
     def badge_for(sev: str) -> str:
         sev_u = (sev or '').upper()
@@ -1595,8 +1606,49 @@ def build(root: pathlib.Path) -> bytes:
                     "</ul>"
                     )
 
+    # pass / fail lists helper
+    def _make_list(md_text: str) -> str:
+        if not md_text:
+            return '<div class="muted">No criteria provided.</div>'
+        # simple split on lines that look like list items
+        lines = [ln.strip('-* ').strip() for ln in md_text.splitlines() if ln.strip()]
+        if not lines:
+            return '<div class="muted">No criteria provided.</div>'
+        return '<ul>' + ''.join(f'<li>{_escape(line)}</li>' for line in lines) + '</ul>'
+
     # build check catalog HTML
-    def render_catalog():
+    def render_catalog_category(cat_id: str, items: List[Dict[str, str]]) -> str:
+        parts = []
+        for itm in items:
+            cid = _escape(itm['id'])
+            title = _escape(itm['title'])
+            sev = itm.get('severity', '')
+            parts.append(f'<div class="check-card" data-check="{cid}">')
+            parts.append('<div class="check-hdr" onclick="toggleCard(this)">')
+            parts.append(f'<div class="check-id">{cid}</div>')
+            parts.append(f'<div class="check-title">{title}</div>')
+            parts.append(badge_for(sev))
+            parts.append('<div style="flex:1"></div>')
+            parts.append('<div class="chev">▶</div>')
+            parts.append('</div>')
+            parts.append('<div class="check-body">')
+            parts.append('<div class="plain"><strong>Plain English</strong><div class="plain-body">')
+            parts.append(f'{_escape(itm.get("smb", ""))}</div></div>')
+            parts.append('<div class="pf-grid">')
+            parts.append('<div><strong>PASS Criteria</strong>' + _make_list(itm.get('pass', '')) + '</div>')
+            parts.append('<div><strong>FAIL Criteria</strong>' + _make_list(itm.get('fail', '')) + '</div>')
+            parts.append('</div>')
+            rem = itm.get('remediation', '')
+            if rem:
+                parts.append('<div class="rem"><strong>Remediation</strong>')
+                parts.append(f'<pre><code>{_escape(rem)}</code></pre>')
+                parts.append('<button class="copy-btn" onclick="copySiblingCode(this)">Copy</button>')
+                parts.append('</div>')
+            parts.append('</div>')  # body
+            parts.append('</div>')  # card
+        return '\n'.join(parts)
+
+    def render_catalog() -> str:
         if not checks:
             return '<p class="muted">No checks found in checks/ (AI-*.md)</p>'
         parts = []
@@ -1611,42 +1663,7 @@ def build(root: pathlib.Path) -> bytes:
         for c in cats:
             items = checks.get(c, [])
             parts.append(f'<div class="cat" id="cat-{_escape(c)}"><h3>{_escape(c)}</h3>')
-            for itm in items:
-                cid = _escape(itm['id'])
-                title = _escape(itm['title'])
-                sev = itm.get('severity','')
-                parts.append(f'<div class="check-card" data-check="{cid}">')
-                parts.append('<div class="check-hdr" onclick="toggleCard(this)">')
-                parts.append(f'<div class="check-id">{cid}</div>')
-                parts.append(f'<div class="check-title">{title}</div>')
-                parts.append(badge_for(sev))
-                parts.append('<div style="flex:1"></div>')
-                parts.append('<div class="chev">▶</div>')
-                parts.append('</div>')
-                parts.append('<div class="check-body">')
-                parts.append('<div class="plain"><strong>Plain English</strong><div class="plain-body">')
-                parts.append(f'{_escape(itm.get("smb",""))}</div></div>')
-                # pass / fail lists
-                def _make_list(md_text: str):
-                    if not md_text:
-                        return '<div class="muted">No criteria provided.</div>'
-                    # simple split on lines that look like list items
-                    lines = [ln.strip('-* ').strip() for ln in md_text.splitlines() if ln.strip()]
-                    if not lines:
-                        return '<div class="muted">No criteria provided.</div>'
-                    return '<ul>' + ''.join(f'<li>{_escape(line)}</li>' for line in lines) + '</ul>'
-                parts.append('<div class="pf-grid">')
-                parts.append('<div><strong>PASS Criteria</strong>' + _make_list(itm.get('pass','')) + '</div>')
-                parts.append('<div><strong>FAIL Criteria</strong>' + _make_list(itm.get('fail','')) + '</div>')
-                parts.append('</div>')
-                rem = itm.get('remediation','')
-                if rem:
-                    parts.append('<div class="rem"><strong>Remediation</strong>')
-                    parts.append(f'<pre><code>{_escape(rem)}</code></pre>')
-                    parts.append('<button class="copy-btn" onclick="copySiblingCode(this)">Copy</button>')
-                    parts.append('</div>')
-                parts.append('</div>')  # body
-                parts.append('</div>')  # card
+            parts.append(render_catalog_category(c, items))
             parts.append('</div>')
         return '\n'.join(parts)
 
@@ -1709,8 +1726,35 @@ def build(root: pathlib.Path) -> bytes:
         '<nav class="nav" id="nav">'
     ]
 
+    # Look up the human-readable title for the requested page
+    page_title = dict(nav_items).get(requested, 'Overview')
+
     for sid, title in nav_items:
-        html_parts.append(f'<a href="#{_escape(sid)}" data-target="{_escape(sid)}">{_escape(title)}</a>')
+        active = ' active' if sid == requested else ''
+        html_parts.append(f'<a href="/academy/{_escape(sid)}" class="{active.strip()}">{_escape(title)}</a>')
+
+    # Build single-page content for the requested section
+    section_content = {
+        'overview': overview,
+        'prereqs': prereqs,
+        'macos': macos,
+        'windows': windows,
+        'linux': linux,
+        'docker': docker,
+        'first-scan': first_scan,
+        'profiles': profiles,
+        'severity': severity,
+        'status': status,
+        'tabs': tabs,
+        'command': command_center,
+        'settings': settings,
+        'alerts': alerts,
+        'protected-files': protected_files,
+        'siem-tools': siem_tools,
+        'ai-spend': ai_spend,
+        'catalog': catalog_html,
+        'troubleshoot': troubleshoot,
+    }
 
     html_parts.extend([
         '</nav>',
@@ -1718,36 +1762,29 @@ def build(root: pathlib.Path) -> bytes:
         '</aside>',
         '<main class="main">',
         '<div class="content">',
-        section_html('overview', 'Overview', overview),
-        section_html('prereqs', 'Prerequisites', prereqs),
-        section_html('macos', 'macOS', macos),
-        section_html('windows', 'Windows', windows),
-        section_html('linux', 'Linux', linux),
-        section_html('docker', 'Docker', docker),
-        section_html('first-scan', 'First Scan', first_scan),
-        section_html('profiles', 'Profiles', profiles),
-        section_html('severity', 'Severity Levels', severity),
-        section_html('status', 'Finding Status', status),
-        section_html('tabs', 'Dashboard Tabs', tabs),
-        section_html('command', 'Command Center', command_center),
-        section_html('settings', 'Settings', settings),
-        section_html('alerts', 'Alerts & Notifications', alerts),
-        section_html('protected-files', 'Protected Files Monitoring', protected_files),
-        section_html('siem-tools', 'SIEM & Tool Integrations', siem_tools),
-        section_html('ai-spend', 'AI Spend', ai_spend),
-        '<section id="catalog" class="doc-section">',
-        '<h2>Check Catalog</h2>',
-        '<p class="muted">This section parses checks/* files matching AI-*.md and renders them as collapsible cards.</p>',
-        catalog_html,
-        '</section>',
-        section_html('troubleshoot', 'Troubleshooting', troubleshoot),
+    ])
+
+    if requested.startswith('cat-'):
+        cat_id = requested[4:]
+        cat_title = f'Catalog: {cat_id}'
+        cat_items = checks.get(cat_id, [])
+        if not cat_items:
+            html_parts.append(section_html(requested, cat_title, '<p class="muted">No checks found for this category.</p>'))
+        else:
+            cat_body = render_catalog_category(cat_id, cat_items)
+            html_parts.append(f'<section id="{_escape(requested)}" class="doc-section"><h2>{_escape(cat_title)}</h2>{cat_body}</section>')
+    else:
+        content = section_content.get(requested, overview)
+        html_parts.append(section_html(requested, page_title, content))
+
+    html_parts.extend([
         '<hr style="border:none;border-top:1px solid #21262d;margin:30px 0">',
         '<footer class="muted">Generated by RiskRaven Arckon — Academy</footer>',
         '</div>',
         '</main>',
         '</div>',
         '<script>',
-        '/* Client-side: search, scroll-spy, copy, toggle */',
+        '/* Client-side: search, copy, toggle */',
         'const nav = document.getElementById("nav");',
         'const links = Array.from(nav.querySelectorAll("a"));',
         'const search = document.getElementById("search");',
@@ -1760,15 +1797,6 @@ def build(root: pathlib.Path) -> bytes:
         '  });',
         '  if(!shown) { if(!document.getElementById("empty-note")) { const el=document.createElement("div"); el.id="empty-note"; el.className="search-empty"; el.textContent="No results"; nav.appendChild(el);} } else { const ex=document.getElementById("empty-note"); if(ex) ex.remove(); }',
         '});',
-        '// scroll-spy',
-        'const sections = Array.from(document.querySelectorAll(".doc-section"));',
-        'const obs = new IntersectionObserver((ents)=>{',
-        '  ents.forEach(en=>{',
-        '    const id = en.target.id; const l = nav.querySelector(`[data-target="${id}"]`);',
-        '    if(en.isIntersecting){ links.forEach(x=>x.classList.remove("active")); if(l) l.classList.add("active"); }',
-        '  });',
-        '},{root:null,rootMargin:"-20% 0px -60% 0px",threshold:0});',
-        'sections.forEach(s=>obs.observe(s));',
         '// toggle cards',
         'function toggleCard(el){const card=el.closest(".check-card"); const body=card.querySelector(".check-body"); const chev=el.querySelector(".chev"); if(body.style.display==="block"){ body.style.display="none"; if(chev) chev.textContent="▶" } else { body.style.display="block"; if(chev) chev.textContent="▼" }}',
         '// copy button',
