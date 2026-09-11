@@ -2,10 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
-## 1.0.59 - 2026-09-11
+## 1.0.60 - 2026-09-11
 
 ### Fixed
-- Agent self-updates now replace the running source-mode process instead of creating recursive daemon chains, and compiled agents do not restart when an update bundle lacks an executable.
+- Agent self-updates now replace the running source-mode process instead of creating recursive daemon chains. Compiled onefile agents exit after an executable update so their service manager restarts a clean wrapper pair.
 
 ## 1.0.0 — 2026-07-31
 

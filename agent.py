@@ -746,10 +746,14 @@ def self_update(config: dict) -> bool:
             _backup_agent_binary()
             os.replace(staged_agent_binary, live_agent_binary)
         # Replace this process so update checks cannot create a daemon chain.
-        # A compiled agent can only activate an executable update; source-mode
-        # installs may re-exec Python after source files are refreshed.
+        # A onefile binary runs its payload in a child process; re-execing its
+        # outer executable from that child nests another onefile wrapper. Exit
+        # instead and let the service manager start a clean wrapper pair.
         agent_bin = ROOT / ('agent.exe' if sys.platform == 'win32' else 'agent')
         if agent_binary_updated and agent_bin.exists() and os.access(agent_bin, os.X_OK):
+            if '__compiled__' in globals() or getattr(sys, 'frozen', False):
+                log.info('self_update: executable updated; exiting for service-managed restart')
+                os._exit(75)
             os.execv(str(agent_bin), [str(agent_bin)] + sys.argv[1:])
         if '__compiled__' in globals() or getattr(sys, 'frozen', False):
             log.info('self_update: no executable update in bundle; continuing with current compiled agent')
