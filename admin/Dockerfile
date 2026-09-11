@@ -7,5 +7,10 @@ COPY connectors/dns_connector.py connectors/dns_connector.py
 # Public installers must come from the canonical root scripts, not the legacy
 # admin-local copies retained for historical development environments.
 COPY install.sh install.ps1 /installers/
+
+RUN groupadd -r arckon && useradd -r -g arckon -m -d /home/arckon arckon \
+    && chown -R arckon:arckon /app /installers
+
+USER arckon
 EXPOSE 8000
 CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8000"]

@@ -1,6 +1,6 @@
 services:
   nginx:
-    image: nginx:alpine
+    image: nginx:alpine@sha256:8b1e78743a03dbb2c95171cc58639fef29abc8816598e27fb910ed2e621e589a
     container_name: sentinel-nginx
     ports:
       - "80:80"
@@ -12,12 +12,24 @@ services:
     restart: always
     depends_on:
       - user-manager
+    read_only: true
+    tmpfs:
+      - /var/cache/nginx
+      - /var/run
+      - /tmp
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: '0.5'
 
   user-manager:
     build:
       context: ../..
       dockerfile: admin/Dockerfile
+    image: gcp-user-manager:hardened
     container_name: sentinel-admin
+    user: 1000:1000
     environment:
       - SECRET_KEY_FILE=/run/secrets/secret_key
       - DEPLOY_TOKEN_FILE=/run/secrets/deploy_token
@@ -43,26 +55,22 @@ services:
       - /opt/sentinel-secrets/admin-secret-key:/run/secrets/secret_key:ro
       - /opt/sentinel-secrets/deployer-token:/run/secrets/deploy_token:ro
       - /opt/sentinel-secrets/admin-password:/run/secrets/admin_password:ro
-      - /opt/licenses:/licenses
+      - /opt/licenses:/licenses:ro
     networks:
       - sentinel-net
     restart: always
-
-  deployer:
-    build: ./deployer
-    container_name: sentinel-deployer
-    environment:
-      - DEPLOY_TOKEN_FILE=/run/secrets/deploy_token
-    volumes:
-      - /opt/sentinel:/opt/sentinel:rw
-      - /var/run/docker.sock:/var/run/docker.sock:rw
-      - /opt/sentinel-secrets/deployer-token:/run/secrets/deploy_token:ro
-    networks:
-      - sentinel-net
-    restart: always
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /home/arckon
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.5'
 
   cloudflared:
-    image: cloudflare/cloudflared:latest
+    image: cloudflare/cloudflared:2026.8.3@sha256:51c9cefcb4569df44e1ad403ab1d3d8065aa8e84339bcfc6aee75502e1140339
     container_name: sentinel-cloudflared
     # The token stays in a root-owned host file. It is deliberately not an
     # environment variable, which Docker would expose through inspect.
@@ -74,6 +82,14 @@ services:
     restart: always
     depends_on:
       - nginx
+    read_only: true
+    tmpfs:
+      - /tmp
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+          cpus: '0.25'
 
 networks:
   sentinel-net:
