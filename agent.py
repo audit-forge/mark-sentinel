@@ -745,15 +745,16 @@ def self_update(config: dict) -> bool:
                 return False
             _backup_agent_binary()
             os.replace(staged_agent_binary, live_agent_binary)
-        # If a compiled agent binary was shipped, exec it directly.
-        # Otherwise fall back to re-running with the Python interpreter.
+        # Replace this process so update checks cannot create a daemon chain.
+        # A compiled agent can only activate an executable update; source-mode
+        # installs may re-exec Python after source files are refreshed.
         agent_bin = ROOT / ('agent.exe' if sys.platform == 'win32' else 'agent')
         if agent_binary_updated and agent_bin.exists() and os.access(agent_bin, os.X_OK):
             os.execv(str(agent_bin), [str(agent_bin)] + sys.argv[1:])
-        else:
-            import subprocess
-            subprocess.Popen([sys.executable, str(Path(__file__).resolve())] + sys.argv[1:])
+        if '__compiled__' in globals() or getattr(sys, 'frozen', False):
+            log.info('self_update: no executable update in bundle; continuing with current compiled agent')
             return True
+        os.execv(sys.executable, [sys.executable, str(Path(__file__).resolve())] + sys.argv[1:])
     except Exception as e:
         log.error('self_update failed: %s', e)
         return False

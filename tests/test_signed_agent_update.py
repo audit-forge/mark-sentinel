@@ -3,6 +3,7 @@ import hashlib
 import io
 import json
 import tarfile
+from pathlib import Path
 
 import pytest
 from cryptography.hazmat.primitives import serialization
@@ -197,6 +198,73 @@ def test_self_update_uses_the_packaged_windows_agent_filename(release_key, monke
 
     assert agent.self_update({'server': 'https://updates.example.test'}) is True
     assert activated == [(tmp_path / 'agent.new', tmp_path / 'agent')]
+
+
+def test_self_update_reexecs_source_mode_agent_without_spawning_child(release_key, monkeypatch, tmp_path):
+    archive = io.BytesIO()
+    with tarfile.open(fileobj=archive, mode='w:gz') as tar:
+        info = tarfile.TarInfo('sentinel/profiles/iso42001.json')
+        payload = b'{}'
+        info.size = len(payload)
+        tar.addfile(info, io.BytesIO(payload))
+    artifact = archive.getvalue()
+    data, signature = _signed_manifest(
+        release_key,
+        artifact='agent.tar.gz',
+        sha256=hashlib.sha256(artifact).hexdigest(),
+        size=len(artifact),
+        version='9.9.9',
+        platform='macos',
+    )
+    monkeypatch.setattr(agent.platform, 'system', lambda: 'Darwin')
+    monkeypatch.setattr(agent, 'ROOT', tmp_path)
+    monkeypatch.setattr(
+        agent,
+        '_read_update_url',
+        lambda url, headers, timeout=60: (
+            data if url.endswith('manifest.json') else signature
+            if url.endswith('manifest.sig') else artifact
+        ),
+    )
+    exec_args = []
+    monkeypatch.setattr(agent.os, 'execv', lambda path, args: exec_args.append((path, args)))
+
+    assert agent.self_update({'server': 'https://updates.example.test'}) is None
+    assert exec_args == [
+        (agent.sys.executable, [agent.sys.executable, str(Path(agent.__file__).resolve())] + agent.sys.argv[1:])
+    ]
+
+
+def test_self_update_keeps_compiled_agent_running_without_executable_update(release_key, monkeypatch, tmp_path):
+    archive = io.BytesIO()
+    with tarfile.open(fileobj=archive, mode='w:gz') as tar:
+        info = tarfile.TarInfo('sentinel/profiles/iso42001.json')
+        payload = b'{}'
+        info.size = len(payload)
+        tar.addfile(info, io.BytesIO(payload))
+    artifact = archive.getvalue()
+    data, signature = _signed_manifest(
+        release_key,
+        artifact='agent.tar.gz',
+        sha256=hashlib.sha256(artifact).hexdigest(),
+        size=len(artifact),
+        version='9.9.9',
+        platform='macos',
+    )
+    monkeypatch.setattr(agent.platform, 'system', lambda: 'Darwin')
+    monkeypatch.setattr(agent, 'ROOT', tmp_path)
+    monkeypatch.setitem(agent.__dict__, '__compiled__', True)
+    monkeypatch.setattr(
+        agent,
+        '_read_update_url',
+        lambda url, headers, timeout=60: (
+            data if url.endswith('manifest.json') else signature
+            if url.endswith('manifest.sig') else artifact
+        ),
+    )
+    monkeypatch.setattr(agent.os, 'execv', lambda *args: pytest.fail('must not re-exec'))
+
+    assert agent.self_update({'server': 'https://updates.example.test'}) is True
 
 
 def test_restore_agent_binary_repairs_missing_live_from_staged(tmp_path, monkeypatch):
