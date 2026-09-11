@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## 1.0.59 - 2026-09-11
+
+### Fixed
+- Agent self-updates now replace the running source-mode process instead of creating recursive daemon chains, and compiled agents do not restart when an update bundle lacks an executable.
+
 ## 1.0.0 — 2026-07-31
 
 ### Added

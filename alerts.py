@@ -495,7 +495,7 @@ def fire_cloud_asset_alert(event: dict, alert_cfg: dict, store=None) -> None:
     resource = event.get('resource', '')
     actor = event.get('actor', 'unknown')
     actor_type = event.get('actor_type', 'human')
-    actor_label = f'[AI]' if actor_type == 'ai' else '[User]'
+    actor_label = '[AI]' if actor_type == 'ai' else '[User]'
     account = event.get('account_id', '')
     device_name = event.get('device_name', '')
     source_ip = event.get('source_ip', '')
