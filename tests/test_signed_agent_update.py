@@ -267,6 +267,91 @@ def test_self_update_keeps_compiled_agent_running_without_executable_update(rele
     assert agent.self_update({'server': 'https://updates.example.test'}) is True
 
 
+def test_self_update_exits_compiled_agent_after_executable_update(release_key, monkeypatch, tmp_path):
+    archive = io.BytesIO()
+    with tarfile.open(fileobj=archive, mode='w:gz') as tar:
+        info = tarfile.TarInfo('sentinel/agent')
+        payload = b'new agent'
+        info.size = len(payload)
+        tar.addfile(info, io.BytesIO(payload))
+    artifact = archive.getvalue()
+    data, signature = _signed_manifest(
+        release_key,
+        artifact='agent.tar.gz',
+        sha256=hashlib.sha256(artifact).hexdigest(),
+        size=len(artifact),
+        version='9.9.9',
+        platform='macos',
+    )
+    (tmp_path / 'agent').write_bytes(b'old agent')
+    monkeypatch.setattr(agent.platform, 'system', lambda: 'Darwin')
+    monkeypatch.setattr(agent, 'ROOT', tmp_path)
+    monkeypatch.setitem(agent.__dict__, '__compiled__', True)
+    monkeypatch.setattr(
+        agent,
+        '_read_update_url',
+        lambda url, headers, timeout=60: (
+            data if url.endswith('manifest.json') else signature
+            if url.endswith('manifest.sig') else artifact
+        ),
+    )
+    exit_codes = []
+
+    def fake_exit(code):
+        exit_codes.append(code)
+        raise SystemExit(code)
+
+    monkeypatch.setattr(agent.os, '_exit', fake_exit)
+    monkeypatch.setattr(agent.os, 'execv', lambda *args: pytest.fail('must not re-exec'))
+
+    with pytest.raises(SystemExit, match='75'):
+        agent.self_update({'server': 'https://updates.example.test'})
+    assert exit_codes == [75]
+    assert (tmp_path / 'agent').read_bytes() == b'new agent'
+
+
+def test_self_update_reexecs_source_agent_after_executable_update(release_key, monkeypatch, tmp_path):
+    archive = io.BytesIO()
+    with tarfile.open(fileobj=archive, mode='w:gz') as tar:
+        info = tarfile.TarInfo('sentinel/agent')
+        payload = b'new agent'
+        info.size = len(payload)
+        tar.addfile(info, io.BytesIO(payload))
+    artifact = archive.getvalue()
+    data, signature = _signed_manifest(
+        release_key,
+        artifact='agent.tar.gz',
+        sha256=hashlib.sha256(artifact).hexdigest(),
+        size=len(artifact),
+        version='9.9.9',
+        platform='macos',
+    )
+    (tmp_path / 'agent').write_bytes(b'old agent')
+    monkeypatch.setattr(agent.platform, 'system', lambda: 'Darwin')
+    monkeypatch.setattr(agent, 'ROOT', tmp_path)
+    monkeypatch.setattr(
+        agent,
+        '_read_update_url',
+        lambda url, headers, timeout=60: (
+            data if url.endswith('manifest.json') else signature
+            if url.endswith('manifest.sig') else artifact
+        ),
+    )
+    exec_args = []
+
+    def fake_exec(path, args):
+        exec_args.append((path, args))
+        raise SystemExit(0)
+
+    monkeypatch.setattr(agent.os, 'execv', fake_exec)
+    monkeypatch.setattr(agent.os, '_exit', lambda *args: pytest.fail('must not exit'))
+
+    with pytest.raises(SystemExit, match='0'):
+        agent.self_update({'server': 'https://updates.example.test'})
+    assert exec_args == [(str(tmp_path / 'agent'), [str(tmp_path / 'agent')] + agent.sys.argv[1:])]
+    assert (tmp_path / 'agent').read_bytes() == b'new agent'
+
+
 def test_restore_agent_binary_repairs_missing_live_from_staged(tmp_path, monkeypatch):
     monkeypatch.setattr(agent.sys, 'platform', 'win32')
     (tmp_path / 'agent.exe.new').write_bytes(b'staged binary')
