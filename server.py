@@ -1697,6 +1697,8 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self._api_test_wiki_provider(path[len('/api/wiki/test/'):].strip('/'))
         elif path == '/api/alerts/events/review-all':
             self._api_review_all_alerts()
+        elif path == '/api/alerts/events/export':
+            self._api_export_alert_events()
         elif path == '/api/protected-paths':
             self._api_add_protected_path()
         elif path == '/api/protected-cloud-assets':
@@ -5320,6 +5322,39 @@ load();
         except Exception as e:
             self._json({'ok': False, 'error': str(e)}, 500)
 
+    def _api_export_alert_events(self):
+        import csv, io as _io, urllib.parse as _up
+        qs = _up.parse_qs(_up.urlparse(self.path).query)
+        unreviewed_only = qs.get('unreviewed', [''])[0].lower() in ('1', 'true', 'yes')
+        store = self._store()
+        try:
+            events = store.get_alert_events(limit=10000, unreviewed_only=unreviewed_only)
+        except Exception as e:
+            self._json({'error': str(e)}, 500)
+            return
+        buf = _io.StringIO()
+        writer = csv.writer(buf)
+        writer.writerow(['ID', 'Timestamp', 'Type', 'Severity', 'Device',
+                         'Service', 'Host', 'Check ID', 'Title', 'Source',
+                         'Channels', 'Reviewed'])
+        for ev in events:
+            ts_str = time.strftime('%Y-%m-%d %H:%M:%S UTC', time.gmtime(ev['ts']))
+            writer.writerow([
+                ev['id'], ts_str, ev['event_type'], ev['severity'],
+                ev['device'], ev.get('service', ''), ev.get('host', ''),
+                ev.get('check_id', ''), ev.get('title', ''),
+                ev.get('source', ''), ev.get('channels', ''),
+                'Yes' if ev['reviewed'] else 'No',
+            ])
+        csv_bytes = buf.getvalue().encode('utf-8')
+        filename = time.strftime('arckon-alerts-%Y%m%d-%H%M%S.csv', time.gmtime())
+        self.send_response(200)
+        self.send_header('Content-Type', 'text/csv; charset=utf-8')
+        self.send_header('Content-Disposition', f'attachment; filename="{filename}"')
+        self.send_header('Content-Length', len(csv_bytes))
+        self.end_headers()
+        self.wfile.write(csv_bytes)
+
     # ── Protected Files monitoring API ─────────────────────────────────────────
     #
     # FedRAMP controls: AC-3 (access enforcement via session auth), CM-2/CM-6
@@ -7421,6 +7456,7 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
           <input type="checkbox" id="alerts-unreviewed-only" onchange="loadAlertEvents()"> Unreviewed only
         </label>
         <button class="scan-btn" onclick="markAllAlertsReviewed()" style="font-size:12px;color:#6B7280;border-color:#E5E7EB">Mark all reviewed</button>
+        <button class="scan-btn" onclick="exportAlertsCSV()" style="font-size:12px;color:#4F46E5;border-color:#4F46E540">Export CSV</button>
       </div>
     </div>
     <div id="alerts-feed" style="display:flex;flex-direction:column;gap:8px"></div>
@@ -11480,6 +11516,12 @@ async function markAllAlertsReviewed() {{
     loadAlertEvents();
     updateAlertBadge();
   }} catch(e) {{}}
+}}
+
+function exportAlertsCSV() {{
+  const unreviewed = document.getElementById('alerts-unreviewed-only').checked;
+  const url = '/api/alerts/events/export' + (unreviewed ? '?unreviewed=1' : '');
+  window.location.href = url;
 }}
 
 function openAlertDetail(id) {{
