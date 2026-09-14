@@ -661,7 +661,11 @@ async def communications_test_email(request: Request):
 @app.get("/install/{filename}")
 async def serve_installer(filename: str):
     from fastapi.responses import PlainTextResponse
-    allowed = {"install.sh", "install.ps1", "install.bat"}
+    allowed = {
+        "install.sh", "install.ps1", "install.bat",
+        "install-intune.ps1", "detect-intune.ps1", "uninstall-intune.ps1",
+        "install-intune.sh", "detect-intune.sh", "uninstall-intune.sh",
+    }
     if filename not in allowed:
         raise HTTPException(404)
     # Canonical root installers are copied to /installers during the admin

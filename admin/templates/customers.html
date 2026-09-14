@@ -91,8 +91,19 @@
     </div>
   </div>
   {% if customers %}
-  <div style="overflow-x:auto">
-  <table>
+  <table style="table-layout:fixed;width:100%;word-break:break-word">
+    <colgroup>
+      <col style="width:9%">
+      <col style="width:11%">
+      <col style="width:8%">
+      <col style="width:9%">
+      <col style="width:7%">
+      <col style="width:6%">
+      <col style="width:13%">
+      <col style="width:9%">
+      <col style="width:7%">
+      <col style="width:21%">
+    </colgroup>
     <thead>
       <tr>
         <th>ID</th>
@@ -243,7 +254,6 @@
     {% endfor %}
     </tbody>
   </table>
-  </div>
   {% else %}
   <div class="empty">No customers found.</div>
   {% endif %}
@@ -272,6 +282,7 @@
       <button class="dtab"     id="dtab-ans" onclick="showDTab('ans')">Ansible</button>
       <button class="dtab"     id="dtab-tf"  onclick="showDTab('tf')">Terraform</button>
       <button class="dtab"     id="dtab-mdm" onclick="showDTab('mdm')">MDM / Jamf</button>
+      <button class="dtab"     id="dtab-int" onclick="showDTab('int')">Intune</button>
       <button class="dtab"     id="dtab-av"  onclick="showDTab('av')">AV Exclusions</button>
     </div>
 
@@ -329,6 +340,49 @@
           <button onclick="dCopy('dm-mdm-cmd',this)" style="position:absolute;top:10px;right:10px;background:#F9FAFB;border:1px solid #E5E7EB;color:#6B7280;font-size:12px;padding:4px 10px;border-radius:4px;cursor:pointer;font-family:inherit">Copy</button>
         </div>
         <p style="font-size:13px;color:#6B7280;margin-top:14px">For Jamf: create a Policy with this script as a Files and Processes payload. For Intune: use as a Shell Script on macOS devices. The Nuitka binary runs without Python.</p>
+      </div>
+
+      <!-- Intune pane -->
+      <div id="dpane-int" style="display:none">
+        <p style="font-size:14px;color:#6B7280;margin-bottom:14px">Complete deployment guide for Microsoft Intune — copy and send to the customer's IT/ deployment team.</p>
+
+        <div style="background:#EEF2FF;border:1px solid #C7D2FE;border-radius:6px;padding:12px 16px;margin-bottom:18px;font-size:13px;color:#3730A3">
+          <strong>Server:</strong> <code id="dm-int-server" style="color:#4F46E5"></code><br>
+          <strong>Token:</strong> <code id="dm-int-token" style="color:#4F46E5;font-size:12px;word-break:break-all"></code>
+        </div>
+
+        <div style="margin-bottom:20px">
+          <div style="font-size:12px;font-weight:600;color:#6B7280;letter-spacing:.8px;text-transform:uppercase;margin-bottom:8px">Part 1 — Windows (Win32 App)</div>
+          <pre id="dm-int-win" style="background:#F9FAFB;border:1px solid #E5E7EB;border-radius:6px;padding:14px;font-size:12px;font-family:'Menlo','Consolas',monospace;color:#374151;line-height:1.65;white-space:pre-wrap;word-break:break-word;max-height:340px;overflow-y:auto"></pre>
+          <button onclick="dCopy('dm-int-win',this)" style="margin-top:6px;background:#F9FAFB;border:1px solid #E5E7EB;color:#6B7280;font-size:12px;padding:4px 10px;border-radius:4px;cursor:pointer;font-family:inherit">Copy Windows instructions</button>
+        </div>
+
+        <div style="margin-bottom:20px">
+          <div style="font-size:12px;font-weight:600;color:#6B7280;letter-spacing:.8px;text-transform:uppercase;margin-bottom:8px">Part 2 — macOS (Shell Script)</div>
+          <pre id="dm-int-mac" style="background:#F9FAFB;border:1px solid #E5E7EB;border-radius:6px;padding:14px;font-size:12px;font-family:'Menlo','Consolas',monospace;color:#374151;line-height:1.65;white-space:pre-wrap;word-break:break-word;max-height:340px;overflow-y:auto"></pre>
+          <button onclick="dCopy('dm-int-mac',this)" style="margin-top:6px;background:#F9FAFB;border:1px solid #E5E7EB;color:#6B7280;font-size:12px;padding:4px 10px;border-radius:4px;cursor:pointer;font-family:inherit">Copy macOS instructions</button>
+        </div>
+
+        <div style="margin-bottom:20px">
+          <div style="font-size:12px;font-weight:600;color:#6B7280;letter-spacing:.8px;text-transform:uppercase;margin-bottom:8px">Part 3 — AV / EDR Exclusions (deploy BEFORE agent)</div>
+          <pre style="background:#F9FAFB;border:1px solid #E5E7EB;border-radius:6px;padding:14px;font-size:12px;font-family:'Menlo','Consolas',monospace;color:#374151;line-height:1.65">Windows:
+  Paths:   C:\Program Files\Arckon\
+           C:\ProgramData\Arckon\
+  Process: agent.exe
+  Service: ArckonAgent
+
+macOS:
+  Paths:   /opt/arckon/
+           /etc/arckon/
+  Process: agent
+
+Network (both platforms):
+  Outbound TCP to <span id="dm-int-net"></span> — no inbound ports required.</pre>
+        </div>
+
+        <div style="background:#F0FDF4;border:1px solid #BBF7D0;border-radius:6px;padding:12px 16px;font-size:13px;color:#166534">
+          <strong>Verification:</strong> After deployment, devices appear in the Arckon Command Center within 5 minutes. Check device install status in MEM → Devices → select device. Contact <a href="mailto:support@riskraven.ai" style="color:#15803D">support@riskraven.ai</a> if any device fails to check in.
+        </div>
       </div>
 
       <!-- AV Exclusions pane -->
@@ -413,6 +467,117 @@ function openDeploy(cid, name, server, token) {
 
   document.getElementById('dm-av-server').textContent = srv;
 
+  // Intune tab content
+  document.getElementById('dm-int-server').textContent = srv;
+  document.getElementById('dm-int-token').textContent = token || 'TOKEN (see server admin)';
+  document.getElementById('dm-int-net').textContent = srv;
+
+  var intWinText =
+    '═══════════════════════════════════════════════════════════════\n' +
+    '  ARCKON AGENT — INTUNE DEPLOYMENT (WINDOWS)\n' +
+    '  Customer: ' + name + '\n' +
+    '  Server:   ' + srv + '\n' +
+    '  Token:    ' + (token || 'TOKEN (see server admin)') + '\n' +
+    '═══════════════════════════════════════════════════════════════\n\n' +
+    'PREREQUISITES\n' +
+    '  • Microsoft Intune / Endpoint Manager admin access\n' +
+    '  • Microsoft Win32 Content Prep Tool (IntuneWinAppUtil.exe)\n' +
+    '    Download: https://github.com/Microsoft/Microsoft-Win32-Content-Prep-Tool\n' +
+    '  • The three scripts below saved as .ps1 files in a folder\n\n' +
+    'STEP 1 — Create source folder\n' +
+    '  Create a folder named arckon-intune-win containing these 3 files:\n\n' +
+    '  --- install-intune.ps1 ---\n' +
+    '  (Download from ' + srv + '/install/install-intune.ps1)\n\n' +
+    '  --- detect-intune.ps1 ---\n' +
+    '  (Download from ' + srv + '/install/detect-intune.ps1)\n\n' +
+    '  --- uninstall-intune.ps1 ---\n' +
+    '  (Download from ' + srv + '/install/uninstall-intune.ps1)\n\n' +
+    'STEP 2 — Package as Win32 app\n' +
+    '  Run on a Windows machine:\n\n' +
+    '  IntuneWinAppUtil.exe -c arckon-intune-win -s install-intune.ps1 -o output\n\n' +
+    '  This produces output\\install-intune.intunewin\n\n' +
+    'STEP 3 — Upload to Intune\n' +
+    '  1. Go to https://endpoint.microsoft.com → Apps → Windows → + Add\n' +
+    '  2. Select "Windows app (Win32)"\n' +
+    '  3. Upload install-intune.intunewin\n\n' +
+    'STEP 4 — App information\n' +
+    '  Name:      Arckon Agent\n' +
+    '  Publisher: RiskRaven\n' +
+    '  Category:  Security\n\n' +
+    'STEP 5 — Program settings\n' +
+    '  Install command:\n' +
+    '    powershell.exe -ExecutionPolicy Bypass -File install-intune.ps1 -Server "' + srv + '" -Token "' + (token || 'YOUR_TOKEN') + '"\n\n' +
+    '  Uninstall command:\n' +
+    '    powershell.exe -ExecutionPolicy Bypass -File uninstall-intune.ps1\n\n' +
+    '  Install behavior:          System\n' +
+    '  Device restart behavior:   No specific action\n' +
+    '  Maximum execution time:    60 minutes\n\n' +
+    'STEP 6 — Detection rules\n' +
+    '  Rule type:                 Custom script\n' +
+    '  Script file:               detect-intune.ps1\n' +
+    '  Run as 32-bit on 64-bit:   No\n' +
+    '  Enforce signature check:   No\n' +
+    '  Use user credentials:      No\n\n' +
+    'STEP 7 — Return codes\n' +
+    '  0    = Success\n' +
+    '  1603 = Failure\n' +
+    '  3010 = Soft reboot\n' +
+    '  1707 = Success (already installed)\n\n' +
+    'STEP 8 — Assignments\n' +
+    '  Assign as Required to the device group for this customer.\n' +
+    '  For phased rollout use Available for enrolled devices.\n\n' +
+    'POST-DEPLOYMENT VERIFICATION (Windows)\n' +
+    '  Get-Service ArckonAgent              # should show Running\n' +
+    '  Test-Path "C:\\Program Files\\Arckon\\agent.exe"   # should be True\n' +
+    '  Get-Content "C:\\ProgramData\\Arckon\\arckon-agent.log" -Tail 20\n\n';
+
+  var intMacText =
+    '═══════════════════════════════════════════════════════════════\n' +
+    '  ARCKON AGENT — INTUNE DEPLOYMENT (macOS)\n' +
+    '  Customer: ' + name + '\n' +
+    '  Server:   ' + srv + '\n' +
+    '  Token:    ' + (token || 'TOKEN (see server admin)') + '\n' +
+    '═══════════════════════════════════════════════════════════════\n\n' +
+    'PREREQUISITES\n' +
+    '  • Microsoft Intune / Endpoint Manager admin access\n' +
+    '  • macOS devices enrolled in Intune (via DEP/ABM or manual)\n\n' +
+    'STEP 1 — Download the install script\n' +
+    '  Download install-intune.sh from:\n' +
+    '    ' + srv + '/install/install-intune.sh\n\n' +
+    'STEP 2 — Edit the server URL and token into the script\n' +
+    '  Open install-intune.sh in a text editor.\n' +
+    '  After the while loop (around line 25), add these two lines:\n\n' +
+    '    SERVER_URL="' + srv + '"\n' +
+    '    AGENT_TOKEN="' + (token || 'YOUR_TOKEN') + '"\n\n' +
+    '  Save the file.\n\n' +
+    'STEP 3 — Upload to Intune\n' +
+    '  1. Go to https://endpoint.microsoft.com → Devices → macOS → Scripts → + Add\n' +
+    '  2. Upload the edited install-intune.sh\n\n' +
+    'STEP 4 — Script settings\n' +
+    '  Script name:              Arckon Agent Install\n' +
+    '  Run script as:            Root\n' +
+    '  Hide notifications:       Yes\n' +
+    '  Script frequency:         Not configured (runs once)\n' +
+    '  Max retries:              3\n\n' +
+    'STEP 5 — Assignments\n' +
+    '  Assign to the device group for this customer as Required.\n\n' +
+    'STEP 6 — Compliance check (optional)\n' +
+    '  Upload detect-intune.sh as a second script with\n' +
+    '  frequency "Every 1 day" to monitor ongoing compliance.\n' +
+    '  Download: ' + srv + '/install/detect-intune.sh\n\n' +
+    'STEP 7 — Uninstall (when needed)\n' +
+    '  Upload uninstall-intune.sh as a separate shell script\n' +
+    '  and assign to devices that should have the agent removed.\n' +
+    '  Download: ' + srv + '/install/uninstall-intune.sh\n\n' +
+    'POST-DEPLOYMENT VERIFICATION (macOS)\n' +
+    '  launchctl list | grep arckon          # should show daemon\n' +
+    '  ls -la /opt/arckon/agent              # should exist\n' +
+    '  cat /etc/arckon/agent_config.json     # should show server + token\n' +
+    '  tail -20 /var/log/arckon-agent.log    # check for errors\n\n';
+
+  document.getElementById('dm-int-win').textContent = intWinText;
+  document.getElementById('dm-int-mac').textContent = intMacText;
+
   showDTab('mac');
   document.getElementById('deployModal').style.display = 'block';
 }
@@ -420,7 +585,7 @@ function closeDeploy() {
   document.getElementById('deployModal').style.display = 'none';
 }
 function showDTab(t) {
-  ['mac','win','ans','tf','mdm','av'].forEach(function(n) {
+  ['mac','win','ans','tf','mdm','int','av'].forEach(function(n) {
     document.getElementById('dpane-' + n).style.display = n === t ? 'block' : 'none';
     document.getElementById('dtab-'  + n).classList.toggle('on', n === t);
   });
