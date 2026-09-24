@@ -1427,7 +1427,7 @@ _AI_TOOL_PROCESSES = {
     'otter.ai':       ('Otter.ai', 'transcription'),
 }
 
-_active_ai_sessions: dict[str, dict] = {}  # pid -> {tool_name, category, start_ts}
+_active_ai_sessions: dict[str, dict] = {}  # pid -> {tool_name, category, start_ts, last_report_ts}
 
 
 def _scan_ai_tool_processes() -> list[dict]:
@@ -1477,6 +1477,7 @@ def run_ai_session_cycle(config: dict) -> bool:
                 'tool_name': proc['tool_name'],
                 'tool_category': proc['tool_category'],
                 'start_ts': proc['create_time'] or now,
+                'last_report_ts': 0,
             }
 
     # Detect ended sessions (pid gone) — report them
@@ -1505,7 +1506,7 @@ def run_ai_session_cycle(config: dict) -> bool:
     for pid, sess in _active_ai_sessions.items():
         start = sess['start_ts']
         duration = now - start
-        if duration >= 60 and duration % 300 < 15:  # report every ~5 min
+        if duration >= 60 and now - sess['last_report_ts'] >= 300:
             completed.append({
                 'device_id': device_id,
                 'hostname': hostname,
@@ -1516,6 +1517,7 @@ def run_ai_session_cycle(config: dict) -> bool:
                 'duration_seconds': duration,
                 'period_date': today,
             })
+            sess['last_report_ts'] = now
 
     if completed:
         log.info('AI sessions: %d session(s) to report', len(completed))
@@ -1531,12 +1533,12 @@ def _report_ai_sessions(sessions: list, config: dict) -> bool:
         return False
     url = server + '/api/agent/ai-sessions'
     payload = json.dumps({'sessions': sessions}).encode()
-    req = urllib.request.Request(url, data=payload, method='POST')
+    req = _urlreq.Request(url, data=payload, method='POST')
     req.add_header('Content-Type', 'application/json')
     req.add_header('Authorization', f'Bearer {token}')
-    req.add_header('User-Agent', f'sentinel-agent/{_agent_version()}')
+    req.add_header('User-Agent', f'sentinel-agent/{VERSION}')
     try:
-        with urllib.request.urlopen(req, timeout=15) as resp:
+        with _urlopen(req, timeout=15) as resp:
             return resp.status == 200
     except Exception as e:
         log.warning('AI session report failed (non-fatal): %s', e)
