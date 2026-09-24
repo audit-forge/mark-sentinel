@@ -87,6 +87,9 @@ def _build_nuitka_binary(
         '--include-package=checks',
         '--include-package=connectors',
         '--include-package=output',
+        # AI session tracking imports psutil lazily so scan-only deployments do
+        # not pay its startup cost; explicitly include it in onefile releases.
+        '--include-package=psutil',
         '--assume-yes-for-downloads',
         f'--output-filename={output_name}{extension}',
         f'--output-dir={dist_dir}',
