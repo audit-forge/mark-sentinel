@@ -1887,10 +1887,17 @@ class AgentStore:
             for s in sessions:
                 try:
                     conn.execute(
-                        """INSERT OR IGNORE INTO ai_sessions
+                        """INSERT INTO ai_sessions
                                (device_id, hostname, tool_name, tool_category,
                                 start_ts, end_ts, duration_seconds, period_date, reported_at)
-                           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                           ON CONFLICT(device_id, tool_name, start_ts) DO UPDATE SET
+                               hostname=excluded.hostname,
+                               tool_category=excluded.tool_category,
+                               end_ts=excluded.end_ts,
+                               duration_seconds=excluded.duration_seconds,
+                               period_date=excluded.period_date,
+                               reported_at=excluded.reported_at""",
                         (
                             s.get('device_id', ''),
                             s.get('hostname', ''),
@@ -1903,8 +1910,7 @@ class AgentStore:
                             now,
                         ),
                     )
-                    if conn.total_changes:
-                        count += 1
+                    count += 1
                 except Exception:
                     pass
         return count

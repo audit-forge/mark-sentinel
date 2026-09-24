@@ -1406,6 +1406,7 @@ _AI_TOOL_PROCESSES = {
     'copilot':        ('GitHub Copilot', 'coding_assistant'),
     'codeium':        ('Codeium', 'coding_assistant'),
     'continue':       ('Continue', 'coding_assistant'),
+    'opencode':       ('OpenCode', 'coding_assistant'),
     'gemini':         ('Gemini CLI', 'coding_assistant'),
     'ollama':         ('Ollama', 'local_llm'),
     'lm-studio':      ('LM Studio', 'local_llm'),
@@ -1942,6 +1943,7 @@ def main() -> None:
         POLL_INTERVAL = 15    # seconds between command polls
         POLL_JITTER   = 5     # ±5 s per poll — agents drift apart over time
         SCAN_JITTER   = 120   # ±2 min per scan — prevents thundering herd on large fleets
+        AI_SESSION_INTERVAL = 30  # lightweight process-only session check
 
         device_id = _device_id()
         hostname  = os.environ.get('SENTINEL_HOSTNAME', '').strip() or socket.gethostname()
@@ -1966,6 +1968,7 @@ def main() -> None:
         last_scan = time.time() - interval + startup_delay  # first scan fires after delay
         last_success = 0.0
         last_update_check = 0.0
+        last_ai_session_check = 0.0
 
         # Stuck-update detector (Windows): if agent.exe.new exists from a
         # previous failed activation, retry the swap via a SYSTEM scheduled
@@ -1993,6 +1996,12 @@ def main() -> None:
                 except Exception as e:
                     # A failed update check must never stop local security scans.
                     log.warning('Scheduled update check failed: %s', e)
+            if now - last_ai_session_check >= AI_SESSION_INTERVAL:
+                last_ai_session_check = now
+                try:
+                    run_ai_session_cycle(cfg)
+                except Exception as e:
+                    log.warning('AI session tracking cycle error (non-fatal): %s', e)
             # Apply per-scan jitter so the effective interval drifts ± SCAN_JITTER
             effective_interval = interval + _random.uniform(-SCAN_JITTER, SCAN_JITTER)
             due = (now - last_scan >= effective_interval) or (last_success < last_scan and now - last_scan >= RETRY_INTERVAL)
@@ -2017,11 +2026,6 @@ def main() -> None:
                     run_ai_connections_cycle(cfg)
                 except Exception as e:
                     log.warning('AI connection scan cycle error (non-fatal): %s', e)
-                try:
-                    run_ai_session_cycle(cfg)
-                except Exception as e:
-                    log.warning('AI session tracking cycle error (non-fatal): %s', e)
-
                 # Drain and report protected-file access events (SI-4)
                 if _access_queue and len(_access_queue) > 0:
                     try:
