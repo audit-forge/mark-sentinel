@@ -1396,6 +1396,152 @@ def run_ai_connections_cycle(config: dict) -> bool:
     return True
 
 
+# ── AI tool session tracking ──────────────────────────────────────────────────
+
+_AI_TOOL_PROCESSES = {
+    # process name (lowercase): (tool_name, category)
+    'claude':         ('Claude Code', 'coding_assistant'),
+    'cursor':         ('Cursor', 'coding_assistant'),
+    'aider':          ('Aider', 'coding_assistant'),
+    'copilot':        ('GitHub Copilot', 'coding_assistant'),
+    'codeium':        ('Codeium', 'coding_assistant'),
+    'continue':       ('Continue', 'coding_assistant'),
+    'gemini':         ('Gemini CLI', 'coding_assistant'),
+    'ollama':         ('Ollama', 'local_llm'),
+    'lm-studio':      ('LM Studio', 'local_llm'),
+    'lmstudio':       ('LM Studio', 'local_llm'),
+    'llama-server':   ('llama.cpp', 'local_llm'),
+    'llamafile':      ('llamafile', 'local_llm'),
+    'koboldcpp':      ('KoboldCPP', 'local_llm'),
+    'jan':            ('Jan', 'local_llm'),
+    'vllm':           ('vLLM', 'local_llm'),
+    'localai':        ('LocalAI', 'local_llm'),
+    'comfyui':        ('ComfyUI', 'image_gen'),
+    'stable-diffusion-webui': ('Stable Diffusion WebUI', 'image_gen'),
+    'tabby':          ('TabbyML', 'coding_assistant'),
+    'mcp-server':     ('MCP Server', 'mcp'),
+    'fastmcp':        ('FastMCP', 'mcp'),
+    'chatgpt':        ('ChatGPT', 'saas_ai'),
+    'otter':          ('Otter.ai', 'transcription'),
+    'otter.ai':       ('Otter.ai', 'transcription'),
+}
+
+_active_ai_sessions: dict[str, dict] = {}  # pid -> {tool_name, category, start_ts}
+
+
+def _scan_ai_tool_processes() -> list[dict]:
+    """Detect running AI tool processes and return current snapshot."""
+    import psutil
+    found = []
+    for proc in psutil.process_iter(['pid', 'name', 'create_time']):
+        try:
+            pname = (proc.info['name'] or '').lower()
+            # Strip .exe on Windows
+            if pname.endswith('.exe'):
+                pname = pname[:-4]
+            for proc_key, (tool_name, category) in _AI_TOOL_PROCESSES.items():
+                if proc_key in pname:
+                    found.append({
+                        'pid': proc.info['pid'],
+                        'tool_name': tool_name,
+                        'tool_category': category,
+                        'create_time': int(proc.info['create_time'] or 0),
+                    })
+                    break
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            pass
+    return found
+
+
+def run_ai_session_cycle(config: dict) -> bool:
+    """Track AI tool process start/stop, report completed sessions to server."""
+    device_id = _device_id()
+    hostname  = os.environ.get('SENTINEL_HOSTNAME', '').strip() or socket.gethostname()
+    now = int(time.time())
+    today = time.strftime('%Y-%m-%d', time.gmtime(now))
+
+    try:
+        current = _scan_ai_tool_processes()
+    except Exception as e:
+        log.warning('AI session scan error (non-fatal): %s', e)
+        return True
+
+    current_pids = {p['pid'] for p in current}
+
+    # Detect newly started sessions
+    for proc in current:
+        pid = proc['pid']
+        if pid not in _active_ai_sessions:
+            _active_ai_sessions[pid] = {
+                'tool_name': proc['tool_name'],
+                'tool_category': proc['tool_category'],
+                'start_ts': proc['create_time'] or now,
+            }
+
+    # Detect ended sessions (pid gone) — report them
+    completed = []
+    ended_pids = set(_active_ai_sessions.keys()) - current_pids
+    for pid in ended_pids:
+        sess = _active_ai_sessions.pop(pid)
+        start = sess['start_ts']
+        end = now
+        duration = end - start
+        if duration < 5:  # ignore sub-5-second blips
+            continue
+        completed.append({
+            'device_id': device_id,
+            'hostname': hostname,
+            'tool_name': sess['tool_name'],
+            'tool_category': sess['tool_category'],
+            'start_ts': start,
+            'end_ts': end,
+            'duration_seconds': duration,
+            'period_date': today,
+        })
+
+    # Also report still-active sessions that have been running > 60s
+    # (so the dashboard shows current usage even if the tool hasn't closed)
+    for pid, sess in _active_ai_sessions.items():
+        start = sess['start_ts']
+        duration = now - start
+        if duration >= 60 and duration % 300 < 15:  # report every ~5 min
+            completed.append({
+                'device_id': device_id,
+                'hostname': hostname,
+                'tool_name': sess['tool_name'],
+                'tool_category': sess['tool_category'],
+                'start_ts': start,
+                'end_ts': now,
+                'duration_seconds': duration,
+                'period_date': today,
+            })
+
+    if completed:
+        log.info('AI sessions: %d session(s) to report', len(completed))
+        _report_ai_sessions(completed, config)
+    return True
+
+
+def _report_ai_sessions(sessions: list, config: dict) -> bool:
+    """POST AI session data to the server."""
+    server = config.get('server', '').rstrip('/')
+    token = config.get('token', '')
+    if not server or not token:
+        return False
+    url = server + '/api/agent/ai-sessions'
+    payload = json.dumps({'sessions': sessions}).encode()
+    req = urllib.request.Request(url, data=payload, method='POST')
+    req.add_header('Content-Type', 'application/json')
+    req.add_header('Authorization', f'Bearer {token}')
+    req.add_header('User-Agent', f'sentinel-agent/{_agent_version()}')
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            return resp.status == 200
+    except Exception as e:
+        log.warning('AI session report failed (non-fatal): %s', e)
+        return False
+
+
 def _merge_reports(reports: list[dict]) -> dict:
     """Merge multiple profile scan reports into one combined report."""
     if len(reports) == 1:
@@ -1871,6 +2017,10 @@ def main() -> None:
                     run_ai_connections_cycle(cfg)
                 except Exception as e:
                     log.warning('AI connection scan cycle error (non-fatal): %s', e)
+                try:
+                    run_ai_session_cycle(cfg)
+                except Exception as e:
+                    log.warning('AI session tracking cycle error (non-fatal): %s', e)
 
                 # Drain and report protected-file access events (SI-4)
                 if _access_queue and len(_access_queue) > 0:

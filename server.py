@@ -1535,6 +1535,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             '/api/spend/by-client-org':    self._api_spend_by_client_org,
             '/api/spend/by-api-key':       self._api_spend_by_api_key,
             '/api/spend/keys':             self._api_spend_keys_list,
+            '/api/ai-sessions':            self._api_get_ai_sessions,
             '/download/shortcut': self._serve_shortcut,
         }
         if path in static:
@@ -1634,6 +1635,12 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                 self._send(401, b'Unauthorized', 'text/plain')
                 return
             self._api_agent_access_events()
+            return
+        if path == '/api/agent/ai-sessions':
+            if not self._check_agent_bearer():
+                self._send(401, b'Unauthorized', 'text/plain')
+                return
+            self._api_agent_ai_sessions()
             return
         # CloudTrail forwarders use a dedicated ingest token. Never reuse an
         # endpoint-agent token for an external cloud integration.
@@ -5668,7 +5675,43 @@ load();
         except Exception as e:
             self._json({'ok': False, 'error': str(e)}, 500)
 
-    def _api_agent_access_events(self):
+    def _api_agent_ai_sessions(self):
+        """POST /api/agent/ai-sessions — ingest AI tool session data from an agent.
+        Agent-bearer auth is already verified by the caller."""
+        length = _content_length(self.headers)
+        if not length:
+            self._send(400, b'Empty body', 'text/plain')
+            return
+        if length > 524_288:
+            self._send(413, b'Payload too large', 'text/plain')
+            return
+        try:
+            body = json.loads(self.rfile.read(length))
+        except json.JSONDecodeError:
+            self._send(400, b'Invalid JSON', 'text/plain')
+            return
+        sessions = body.get('sessions', [])
+        if not sessions or not isinstance(sessions, list):
+            self._send(400, b'Missing sessions array', 'text/plain')
+            return
+        try:
+            store = self._store()
+            count = store.upsert_ai_sessions(sessions)
+            self._json({'ok': True, 'count': count})
+        except Exception as e:
+            log.error('AI session ingest error: %s', e)
+            self._json({'ok': False, 'error': str(e)}, 500)
+
+    def _api_get_ai_sessions(self):
+        """GET /api/ai-sessions?days=30 — return AI tool session summary for dashboard."""
+        import urllib.parse as _up
+        qs = _up.parse_qs(_up.urlparse(self.path).query)
+        days = int(qs.get('days', ['30'])[0])
+        try:
+            summary = self._store().get_ai_sessions_summary(days=days)
+            self._json(summary)
+        except Exception as e:
+            self._json({'error': str(e)}, 500)
         """POST /api/agent/access-events — ingest a batch of access events
         from an agent. Agent-bearer auth is already verified by the caller.
         Rate limited to 100 events per batch. Fires alerts for each event."""
@@ -7628,6 +7671,17 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
 
   <div id="spend-summary-cards" style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:16px"></div>
   <script>window._spendIsMsp = {('true' if current_user_is_msp else 'false')};</script>
+
+  <!-- AI Time Spent section -->
+  <div style="margin-bottom:20px">
+    <div style="font-size:12px;font-weight:600;color:#374151;text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">Time Spent Using AI Tools</div>
+    <div id="ai-sessions-cards" style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:12px">
+      <div style="color:#9CA3AF;font-size:13px;padding:12px 0">Loading…</div>
+    </div>
+    <div id="ai-sessions-by-tool" style="display:flex;flex-direction:column;gap:4px">
+      <div style="color:#9CA3AF;font-size:13px;padding:8px 0">Loading…</div>
+    </div>
+  </div>
 
   <div style="margin-bottom:20px">
     <div style="font-size:12px;font-weight:600;color:#374151;text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">Spend by Provider</div>
@@ -9626,11 +9680,59 @@ async function loadSpend(btn) {{
     // MSP-only sections: try to load by-client-org and by-api-key. These
     // 403 for client_viewers, which is the intended scoping — we hide them.
     loadSpendMspSections(days);
+    loadAiSessions(days);
   }} catch(e) {{
     document.getElementById('spend-by-provider').innerHTML =
       '<div style="color:#DC2626;font-size:13px;padding:12px 0">Error loading spend: ' + e + '</div>';
   }} finally {{
     if (btn) {{ btn.disabled = false; btn.textContent = orig; }}
+  }}
+}}
+
+async function loadAiSessions(days) {{
+  try {{
+    const r = await fetch('/api/ai-sessions?days=' + days);
+    if (!r.ok) return;
+    const data = await r.json();
+    const totalSec = data.total_seconds || 0;
+    const hours = Math.floor(totalSec / 3600);
+    const mins = Math.floor((totalSec % 3600) / 60);
+    const timeStr = hours > 0 ? hours + 'h ' + mins + 'm' : mins + 'm';
+
+    // Summary cards
+    const cards = document.getElementById('ai-sessions-cards');
+    cards.innerHTML = [
+      _spendCard('Total time', timeStr || '0m', '#16A34A'),
+      _spendCard('Sessions', (data.session_count || 0).toLocaleString(), '#4F46E5'),
+      _spendCard('AI tools', data.tool_count || 0, '#6B7280'),
+      _spendCard('Devices', data.device_count || 0, '#6B7280'),
+    ].join('');
+
+    // By tool bar chart
+    const toolDiv = document.getElementById('ai-sessions-by-tool');
+    const byTool = data.by_tool || [];
+    if (!byTool.length) {{
+      toolDiv.innerHTML = '<div style="color:#9CA3AF;font-size:13px;padding:8px 0">No AI tool usage detected yet. Data appears as agents report session activity.</div>';
+    }} else {{
+      const maxSec = Math.max(...byTool.map(t => t.total_seconds || 0), 1);
+      toolDiv.innerHTML = byTool.map(t => {{
+        const secs = t.total_seconds || 0;
+        const h = Math.floor(secs / 3600);
+        const m = Math.floor((secs % 3600) / 60);
+        const dur = h > 0 ? h + 'h ' + m + 'm' : m + 'm';
+        const pct = Math.round((secs / maxSec) * 100);
+        return '<div style="display:flex;align-items:center;gap:8px;font-size:12px">' +
+          '<div style="width:120px;color:#374151;font-weight:500">' + (t.tool_name||'') + '</div>' +
+          '<div style="flex:1;background:#F3F4F6;border-radius:4px;height:20px;overflow:hidden">' +
+            '<div style="width:' + pct + '%;height:100%;background:linear-gradient(90deg,#16A34A,#4F46E5);border-radius:4px"></div>' +
+          '</div>' +
+          '<div style="width:80px;text-align:right;color:#374151;font-weight:600">' + dur + '</div>' +
+          '<div style="width:60px;text-align:right;color:#6B7280">' + (t.session_count||0) + ' sessions</div>' +
+        '</div>';
+      }}).join('');
+    }}
+  }} catch(e) {{
+    // Non-fatal — session data is supplementary to spend data
   }}
 }}
 

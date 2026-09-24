@@ -250,6 +250,27 @@ class AgentStore:
                 CREATE INDEX IF NOT EXISTS idx_ai_spend_key
                     ON ai_spend(key_id, period_date DESC);
 
+                -- AI tool session tracking (time spent using AI tools)
+                CREATE TABLE IF NOT EXISTS ai_sessions (
+                    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                    device_id     TEXT NOT NULL,
+                    hostname      TEXT NOT NULL DEFAULT '',
+                    tool_name     TEXT NOT NULL,
+                    tool_category TEXT NOT NULL DEFAULT '',
+                    start_ts      INTEGER NOT NULL,
+                    end_ts        INTEGER NOT NULL,
+                    duration_seconds INTEGER NOT NULL DEFAULT 0,
+                    period_date   TEXT NOT NULL,
+                    reported_at   INTEGER NOT NULL DEFAULT 0,
+                    UNIQUE(device_id, tool_name, start_ts)
+                );
+                CREATE INDEX IF NOT EXISTS idx_ai_sessions_date
+                    ON ai_sessions(period_date DESC);
+                CREATE INDEX IF NOT EXISTS idx_ai_sessions_tool
+                    ON ai_sessions(tool_name, period_date DESC);
+                CREATE INDEX IF NOT EXISTS idx_ai_sessions_device
+                    ON ai_sessions(device_id, period_date DESC);
+
                 -- Protected Files monitoring (FedRAMP-aligned AI access detection)
                 -- SC-13: protected_paths.path is encrypted at rest (AES-256-GCM via crypto.py)
                 CREATE TABLE IF NOT EXISTS protected_paths (
@@ -1853,6 +1874,77 @@ class AgentStore:
     def _days_ago_iso(days: int) -> str:
         import datetime as _dt
         return (_dt.date.today() - _dt.timedelta(days=days)).isoformat()
+
+    # ── AI session tracking ────────────────────────────────────────────────────
+
+    def upsert_ai_sessions(self, sessions: list) -> int:
+        """Insert AI tool session records (one per tool-session detected by the agent)."""
+        if not sessions:
+            return 0
+        now = int(time.time())
+        count = 0
+        with self._lock, self._conn() as conn:
+            for s in sessions:
+                try:
+                    conn.execute(
+                        """INSERT OR IGNORE INTO ai_sessions
+                               (device_id, hostname, tool_name, tool_category,
+                                start_ts, end_ts, duration_seconds, period_date, reported_at)
+                           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                        (
+                            s.get('device_id', ''),
+                            s.get('hostname', ''),
+                            s.get('tool_name', ''),
+                            s.get('tool_category', ''),
+                            int(s.get('start_ts', 0)),
+                            int(s.get('end_ts', 0)),
+                            int(s.get('duration_seconds', 0)),
+                            s.get('period_date', ''),
+                            now,
+                        ),
+                    )
+                    if conn.total_changes:
+                        count += 1
+                except Exception:
+                    pass
+        return count
+
+    def get_ai_sessions_summary(self, days: int = 30) -> dict:
+        """Return rolled-up AI session data for the last N days."""
+        cutoff = self._days_ago_iso(days)
+        with self._lock, self._conn() as conn:
+            row = conn.execute(
+                """SELECT COUNT(*) as session_count,
+                          COALESCE(SUM(duration_seconds), 0) as total_seconds,
+                          COUNT(DISTINCT tool_name) as tool_count,
+                          COUNT(DISTINCT device_id) as device_count
+                   FROM ai_sessions WHERE period_date >= ?""",
+                (cutoff,),
+            ).fetchone()
+            by_tool = conn.execute(
+                """SELECT tool_name,
+                          COUNT(*) as session_count,
+                          SUM(duration_seconds) as total_seconds
+                   FROM ai_sessions WHERE period_date >= ?
+                   GROUP BY tool_name ORDER BY total_seconds DESC""",
+                (cutoff,),
+            ).fetchall()
+            by_date = conn.execute(
+                """SELECT period_date,
+                          COUNT(*) as session_count,
+                          SUM(duration_seconds) as total_seconds
+                   FROM ai_sessions WHERE period_date >= ?
+                   GROUP BY period_date ORDER BY period_date ASC""",
+                (cutoff,),
+            ).fetchall()
+        return {
+            'session_count': row[0],
+            'total_seconds': row[1],
+            'tool_count': row[2],
+            'device_count': row[3],
+            'by_tool': [dict(r) for r in by_tool],
+            'by_date': [dict(r) for r in by_date],
+        }
 
     def upsert_mcp_server(self, reporter_device_id: str, reporter_hostname: str,
                           host: str, port: int, server_name: str, tools: list,
