@@ -1,6 +1,7 @@
 import base64
 import hashlib
 import tarfile
+from pathlib import Path
 
 import pytest
 from cryptography.hazmat.primitives import serialization
@@ -8,6 +9,24 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 import agent
 from scripts import create_release, package_release
+
+
+def test_ai_session_runtime_dependency_is_declared_and_packaged(tmp_path, monkeypatch):
+    requirements = (Path(__file__).parents[1] / 'requirements.txt').read_text()
+    assert 'psutil==' in requirements
+
+    source = tmp_path / 'agent.py'
+    source.write_text('print("agent")')
+    monkeypatch.setattr(package_release, '_ensure_nuitka', lambda: None)
+    captured = {}
+    monkeypatch.setattr(
+        package_release.subprocess,
+        'run',
+        lambda command, **kwargs: captured.setdefault('command', command),
+    )
+
+    package_release._build_nuitka_binary(tmp_path, 'agent.py', 'agent', 'linux')
+    assert '--include-package=psutil' in captured['command']
 
 
 def test_release_package_is_allowlisted_and_signed_by_the_agent_key(tmp_path, monkeypatch):
