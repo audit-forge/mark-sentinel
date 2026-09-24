@@ -1907,11 +1907,21 @@ def main() -> None:
                     help='Seconds between daemon scans (default: 7200)')
     ap.add_argument('--once',      action='store_true',
                     help='Run one scan and exit (default without --daemon)')
+    ap.add_argument('--verify-ai-session-runtime', action='store_true',
+                    help=argparse.SUPPRESS)
     ap.add_argument('--install-service',   action='store_true',
                     help='Install as a background launchd service (macOS) or systemd unit (Linux)')
     ap.add_argument('--uninstall-service', action='store_true',
                     help='Remove the installed background service')
     args = ap.parse_args()
+
+    if args.verify_ai_session_runtime:
+        try:
+            _scan_ai_tool_processes()
+        except Exception as e:
+            log.error('AI session runtime check failed: %s', e)
+            sys.exit(1)
+        return
 
     cfg = load_config(args.config)
 
