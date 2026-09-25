@@ -1476,7 +1476,9 @@ def run_ai_session_cycle(config: dict) -> bool:
             _active_ai_sessions[pid] = {
                 'tool_name': proc['tool_name'],
                 'tool_category': proc['tool_category'],
-                'start_ts': proc['create_time'] or now,
+                # A process can predate this tracker by days or weeks. Count
+                # managed observation time, not historical process uptime.
+                'start_ts': now,
                 'last_report_ts': 0,
             }
 

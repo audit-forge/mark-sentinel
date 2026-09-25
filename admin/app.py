@@ -303,6 +303,18 @@ async def root():
 @app.get("/login", response_class=HTMLResponse)
 async def login_page(request: Request):
     next_url = request.query_params.get("next", "")
+    try:
+        user = get_current_user(request)
+        # An unscoped super-admin cannot be routed through the shared customer
+        # gateway. Send an already authenticated operator to the admin console
+        # instead of showing another login form.
+        if user.get("role") == "super_admin" and not user.get("customer_id"):
+            return RedirectResponse("/dashboard", status_code=303)
+        if (PUBLIC_DASHBOARD_URL and
+                next_url.startswith(f"{PUBLIC_DASHBOARD_URL}/")):
+            return RedirectResponse(next_url, status_code=303)
+    except HTTPException:
+        pass
     return templates.TemplateResponse("login.html", {"request": request, "error": None, "next": next_url})
 
 
@@ -331,7 +343,11 @@ async def login(
         })
     token = create_token(row["id"], row["role"], row["customer_id"], row["email"],
                           row["client_org_id"] if "client_org_id" in row.keys() else None)
-    if not next:
+    is_unscoped_super_admin = row["role"] == "super_admin" and not row["customer_id"]
+    if is_unscoped_super_admin:
+        # The shared portal requires a customer_id to choose its upstream.
+        destination = "/dashboard"
+    elif not next:
         destination = "/dashboard" if row["role"] == "super_admin" else _sentinel_url(row["customer_id"])
     else:
         destination = next
@@ -369,6 +385,10 @@ async def auth_verify(request: Request):
     try:
         user = get_current_user(request)
     except HTTPException:
+        return Response(status_code=401)
+    # The shared customer gateway can only route a session with a tenant claim.
+    # Its login redirect lands on the admin console for unscoped operators.
+    if user.get("role") == "super_admin" and not user.get("customer_id"):
         return Response(status_code=401)
     customer_id = request.headers.get("X-Customer-ID", "")
     if customer_id and user["role"] != "super_admin":

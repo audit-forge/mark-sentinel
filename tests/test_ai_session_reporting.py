@@ -45,13 +45,17 @@ def test_active_ai_sessions_report_after_one_minute_then_every_five(monkeypatch)
     monkeypatch.setattr(agent, '_report_ai_sessions', lambda sessions, _cfg: reports.append(sessions))
 
     agent.run_ai_session_cycle({})
-    assert reports[-1][0]['duration_seconds'] == 100
+    assert reports == []
+
+    now[0] = 1_060
+    agent.run_ai_session_cycle({})
+    assert reports[-1][0]['duration_seconds'] == 60
 
     now[0] = 1_100
     agent.run_ai_session_cycle({})
     assert len(reports) == 1
 
-    now[0] = 1_301
+    now[0] = 1_361
     agent.run_ai_session_cycle({})
-    assert reports[-1][0]['duration_seconds'] == 401
+    assert reports[-1][0]['duration_seconds'] == 361
     agent._active_ai_sessions.clear()

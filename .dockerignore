@@ -9,6 +9,10 @@ agent_token.txt
 *.env
 deploy/gcp/.env
 
+# Signed agent releases are mounted from the release host at runtime. Keeping
+# historical archives out of the server image avoids exhausting Docker storage.
+releases/
+
 # Ignore agent/dev files
 CLAUDE.md
 .claude/

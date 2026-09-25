@@ -5695,7 +5695,11 @@ load();
             self._send(400, b'Missing sessions array', 'text/plain')
             return
         try:
-            store = self._store()
+            # Agent endpoints authenticate with a bearer token, not a browser
+            # session. Route records to the token's customer rather than the
+            # unauthenticated default store.
+            cust = self._get_agent_customer()
+            store = _get_store(cust['id']) if cust else self._store()
             count = store.upsert_ai_sessions(sessions)
             self._json({'ok': True, 'count': count})
         except Exception as e:
