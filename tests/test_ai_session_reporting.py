@@ -1,4 +1,5 @@
 import agent
+from storage import AgentStore
 
 
 class _Response:
@@ -59,3 +60,20 @@ def test_active_ai_sessions_report_after_one_minute_then_every_five(monkeypatch)
     agent.run_ai_session_cycle({})
     assert reports[-1][0]['duration_seconds'] == 361
     agent._active_ai_sessions.clear()
+
+
+def test_ai_session_summary_merges_overlapping_device_intervals(tmp_path):
+    store = AgentStore(str(tmp_path / 'agents.db'))
+    today = store._days_ago_iso(0)
+    sessions = [
+        {'device_id': 'device-a', 'tool_name': 'OpenCode', 'start_ts': 100, 'end_ts': 200,
+         'duration_seconds': 100, 'period_date': today},
+        {'device_id': 'device-a', 'tool_name': 'Ollama', 'start_ts': 150, 'end_ts': 250,
+         'duration_seconds': 100, 'period_date': today},
+        {'device_id': 'device-a', 'tool_name': 'Claude Code', 'start_ts': 300, 'end_ts': 350,
+         'duration_seconds': 50, 'period_date': today},
+    ]
+    store.upsert_ai_sessions(sessions)
+    summary = store.get_ai_sessions_summary(days=1)
+    assert summary['session_count'] == 3
+    assert summary['total_seconds'] == 200

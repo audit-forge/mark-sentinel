@@ -189,7 +189,12 @@ def _get_store(customer_id: str = 'default'):
     with _store_cache_lock:
         if customer_id not in _store_cache:
             from storage import AgentStore
-            db_path = ROOT / 'data' / 'customers' / customer_id / 'agents.db'
+            # Production runs one container per customer, with that customer's
+            # database mounted directly at /app/data/agents.db. The nested path
+            # is retained for monolithic/local multi-tenant deployments.
+            dedicated_db = ROOT / 'data' / 'agents.db'
+            db_path = (dedicated_db if dedicated_db.exists()
+                       else ROOT / 'data' / 'customers' / customer_id / 'agents.db')
             _store_cache[customer_id] = AgentStore(db_path)
     return _store_cache[customer_id]
 

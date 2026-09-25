@@ -1921,12 +1921,17 @@ class AgentStore:
         with self._lock, self._conn() as conn:
             row = conn.execute(
                 """SELECT COUNT(*) as session_count,
-                          COALESCE(SUM(duration_seconds), 0) as total_seconds,
                           COUNT(DISTINCT tool_name) as tool_count,
                           COUNT(DISTINCT device_id) as device_count
                    FROM ai_sessions WHERE period_date >= ?""",
                 (cutoff,),
             ).fetchone()
+            intervals = conn.execute(
+                """SELECT device_id, start_ts, end_ts
+                   FROM ai_sessions WHERE period_date >= ?
+                   ORDER BY device_id, start_ts, end_ts""",
+                (cutoff,),
+            ).fetchall()
             by_tool = conn.execute(
                 """SELECT tool_name,
                           COUNT(*) as session_count,
@@ -1943,11 +1948,29 @@ class AgentStore:
                    GROUP BY period_date ORDER BY period_date ASC""",
                 (cutoff,),
             ).fetchall()
+        # Multiple AI tools may run concurrently on one device. The headline
+        # figure is elapsed AI-use time, so merge overlapping intervals rather
+        # than summing process runtimes.
+        total_seconds = 0
+        active_device = None
+        interval_start = interval_end = 0
+        for device_id, start_ts, end_ts in intervals:
+            if device_id != active_device:
+                total_seconds += max(0, interval_end - interval_start)
+                active_device = device_id
+                interval_start, interval_end = start_ts, end_ts
+            elif start_ts <= interval_end:
+                interval_end = max(interval_end, end_ts)
+            else:
+                total_seconds += max(0, interval_end - interval_start)
+                interval_start, interval_end = start_ts, end_ts
+        total_seconds += max(0, interval_end - interval_start)
+
         return {
             'session_count': row[0],
-            'total_seconds': row[1],
-            'tool_count': row[2],
-            'device_count': row[3],
+            'total_seconds': total_seconds,
+            'tool_count': row[1],
+            'device_count': row[2],
             'by_tool': [dict(r) for r in by_tool],
             'by_date': [dict(r) for r in by_date],
         }
