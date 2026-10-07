@@ -91,7 +91,7 @@ docker run -d \
    -v "${DATA_DIR}:/app/data" \
    -v "${SPEND_SECRET_DIR}:/opt/sentinel-secrets/spend" \
    -v /opt/sentinel/releases:/app/releases:ro \
-   mark-sentinel@sha256:68d00b946f062c1bb890bc39e327a76a5200f64ea855e1bac253f2ded76e8649 \
+   mark-sentinel:latest \
   python3 server.py --no-browser --port 7331
 
 # Connect to arckon-net so nginx can reach sentinel-admin for auth_request

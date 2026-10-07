@@ -70,6 +70,8 @@ def test_customer_containers_receive_the_central_logout_url():
 def test_deployer_rebuilds_the_customer_image_from_current_source():
     source = (REPO / 'deploy' / 'gcp' / 'deployer' / 'deploy.sh').read_text()
     assert 'docker build -t mark-sentinel:latest "$REPO_DIR"' in source
+    for script in ('provision_customer.sh', 'restart_customer.sh'):
+        assert 'mark-sentinel:latest' in (REPO / 'deploy' / 'gcp' / script).read_text()
 
 
 def test_installers_do_not_download_unauthenticated_legacy_bundles():
