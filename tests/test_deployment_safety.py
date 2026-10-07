@@ -74,6 +74,13 @@ def test_deployer_rebuilds_the_customer_image_from_current_source():
         assert 'mark-sentinel:latest' in (REPO / 'deploy' / 'gcp' / script).read_text()
 
 
+def test_runtime_and_source_control_artifacts_are_excluded_from_builds():
+    dockerignore = (REPO / '.dockerignore').read_text()
+    assert 'releases/' in dockerignore
+    assert '.git/' in dockerignore
+    assert '*.bak' in dockerignore
+
+
 def test_installers_do_not_download_unauthenticated_legacy_bundles():
     for installer in ('install.sh', 'admin/install.sh'):
         source = (REPO / installer).read_text()

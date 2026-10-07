@@ -13,6 +13,13 @@ deploy/gcp/.env
 # historical archives out of the server image avoids exhausting Docker storage.
 releases/
 
+# Source-control metadata, local backups, and interpreter caches do not belong
+# in runtime images and can make a build context unexpectedly large.
+.git/
+*.bak
+__pycache__/
+**/__pycache__/
+
 # Ignore agent/dev files
 CLAUDE.md
 .claude/
