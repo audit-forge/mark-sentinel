@@ -43,9 +43,15 @@ case "$BASELINE_PROFILE" in
   *) BASELINE_PROFILE="default" ;;
 esac
 printf '{"profile":"%s"}\n' "$BASELINE_PROFILE" > "${DATA_DIR}/baseline_profile.json"
-if [ -z "$AGENT_TOKEN" ] && [ -f "${DATA_DIR}/agent_token.txt" ]; then
-  AGENT_TOKEN=$(cat "${DATA_DIR}/agent_token.txt")
+if [ -z "$AGENT_TOKEN" ]; then
+  if [ -f "${DATA_DIR}/agent_token.txt" ]; then
+    AGENT_TOKEN=$(cat "${DATA_DIR}/agent_token.txt")
+  else
+    AGENT_TOKEN=$(python3 -c "import secrets; print(secrets.token_urlsafe(32))")
+  fi
 fi
+umask 077
+printf '%s\n' "$AGENT_TOKEN" > "${DATA_DIR}/agent_token.txt"
 
 # This capability is known only to nginx and its backend. The backend must not
 # accept caller-supplied identity headers merely because a proxy marker exists.
@@ -64,11 +70,6 @@ printf 'proxy_set_header X-Sentinel-Proxy-Token %s;\n' "$PROXY_TOKEN" \
   > "${NGINX_PROXY_TOKEN_DIR}/${CUSTOMER_ID}.conf"
 chown 101:101 "${NGINX_PROXY_TOKEN_DIR}/${CUSTOMER_ID}.conf"
 chmod 0400 "${NGINX_PROXY_TOKEN_DIR}/${CUSTOMER_ID}.conf"
-if [ -z "$AGENT_TOKEN" ]; then
-  AGENT_TOKEN=$(python3 -c "import secrets; print(secrets.token_urlsafe(32))")
-  echo "$AGENT_TOKEN" > "${DATA_DIR}/agent_token.txt"
-fi
-
 # Build docker run args — conditionally mount license.json only if it exists
 LICENSE_MOUNT=""
 if [ -f "$LICENSE_FILE" ]; then
