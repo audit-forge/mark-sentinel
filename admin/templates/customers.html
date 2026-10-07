@@ -91,18 +91,19 @@
     </div>
   </div>
   {% if customers %}
-  <table style="table-layout:fixed;width:100%;word-break:break-word">
+  <div class="customer-table-wrap">
+  <table class="customer-table">
     <colgroup>
-      <col style="width:9%">
-      <col style="width:11%">
-      <col style="width:8%">
-      <col style="width:9%">
-      <col style="width:7%">
-      <col style="width:6%">
-      <col style="width:13%">
-      <col style="width:9%">
-      <col style="width:7%">
-      <col style="width:21%">
+      <col style="width:105px">
+      <col style="width:150px">
+      <col style="width:145px">
+      <col style="width:180px">
+      <col style="width:150px">
+      <col style="width:120px">
+      <col style="width:245px">
+      <col style="width:135px">
+      <col style="width:125px">
+      <col style="width:380px">
     </colgroup>
     <thead>
       <tr>
@@ -176,7 +177,7 @@
       </td>
       <td>
         {% if c.port and c.active %}
-          <a class="url" href="{{ c.dashboard_url }}" target="_blank">{{ c.dashboard_url }}</a>
+          <a class="url customer-dashboard-url" href="{{ c.dashboard_url }}" target="_blank">{{ c.dashboard_url }}</a>
         {% else %}
           <span style="color:#6B7280">—</span>
         {% endif %}
@@ -207,7 +208,8 @@
           <span class="badge badge-green">active</span>
         {% endif %}
       </td>
-      <td style="display:flex;gap:6px;flex-wrap:wrap">
+      <td class="customer-actions">
+        <div class="customer-actions-list">
         {% if c.active %}
           <button type="button" class="btn btn-sm"
                   onclick="openDeploy('{{ c.id }}','{{ c.name | replace("'","\\x27") }}','{{ c.dashboard_url or '' }}','{{ c.agent_token or '' }}')"
@@ -249,17 +251,24 @@
             <button type="submit" class="btn btn-danger btn-sm">Delete</button>
           </form>
         {% endif %}
+        </div>
       </td>
     </tr>
     {% endfor %}
     </tbody>
   </table>
+  </div>
   {% else %}
   <div class="empty">No customers found.</div>
   {% endif %}
 </div>
 
 <style>
+.customer-table-wrap{overflow-x:auto;padding-bottom:4px}
+.customer-table{min-width:1735px;table-layout:fixed;word-break:normal}
+.customer-table th,.customer-table td{vertical-align:middle}
+.customer-dashboard-url{display:block;overflow-wrap:anywhere;word-break:normal}
+.customer-actions-list{display:flex;gap:6px;flex-wrap:wrap}
 .dtab{background:none;border:none;border-bottom:2px solid transparent;color:#6B7280;font-family:inherit;font-size:14px;padding:13px 22px;cursor:pointer;transition:color .15s,border-color .15s;font-weight:500}
 .dtab:hover{color:#111827}
 .dtab.on{color:#4F46E5;border-bottom-color:#4F46E5}

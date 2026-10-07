@@ -7,6 +7,7 @@ import sqlite3
 import string
 import subprocess
 import time
+import urllib.request
 from collections import defaultdict
 from datetime import datetime, date, timezone, timedelta
 from fastapi import FastAPI, Request, Form, HTTPException
@@ -758,7 +759,6 @@ async def add_customer(
         require_super_admin(request)
     except HTTPException:
         return RedirectResponse("/login")
-    _require_host_operations()
     cid = customer_id.lower().strip().replace(" ", "-")
     if not _is_valid_customer_id(cid):
         return RedirectResponse("/customers?error=invalid_id", status_code=303)
@@ -811,8 +811,10 @@ async def add_customer(
                 login_url = f"{PUBLIC_ADMIN_URL}/login"
                 from mailer import send_welcome_email
                 send_welcome_email(email, customer_name.strip(), login_url, temp_password)
-    _write_license_file(cid, customer_name.strip(), tier, expires, max_seats)
-    _run_script("provision_customer.sh", cid, PUBLIC_IP, tier, expires, str(max_seats), customer_name.strip(), str(port), agent_token, baseline_profile)
+    if not _lifecycle_request("provision", _customer_lifecycle_payload(
+        cid, customer_name.strip(), tier, expires, max_seats, port, agent_token, baseline_profile
+    )):
+        return RedirectResponse("/customers?error=lifecycle", status_code=303)
     return RedirectResponse("/customers", status_code=303)
 
 
@@ -854,7 +856,6 @@ async def renew_customer(request: Request, customer_id: str = Form(...)):
         require_super_admin(request)
     except HTTPException:
         return RedirectResponse("/login")
-    _require_host_operations()
     with get_conn() as conn:
         row = conn.execute("SELECT * FROM customers WHERE id=?", (customer_id,)).fetchone()
         if not row:
@@ -872,8 +873,10 @@ async def renew_customer(request: Request, customer_id: str = Form(...)):
         tier = row["tier"]
         max_seats = row["max_seats"]
         name = row["name"]
-    _write_license_file(customer_id, name, tier, new_expiry, max_seats)
-    _run_script("restart_customer.sh", customer_id)
+    if not _lifecycle_request("restart", _customer_lifecycle_payload(
+        customer_id, name, tier, new_expiry, max_seats
+    )):
+        return RedirectResponse("/customers?error=lifecycle", status_code=303)
     return RedirectResponse("/customers", status_code=303)
 
 
@@ -883,7 +886,6 @@ async def update_seats(request: Request, customer_id: str = Form(...), max_seats
         require_super_admin(request)
     except HTTPException:
         return RedirectResponse("/login")
-    _require_host_operations()
     if max_seats < 1:
         return RedirectResponse("/customers?error=invalid_seats", status_code=303)
     with get_conn() as conn:
@@ -894,8 +896,10 @@ async def update_seats(request: Request, customer_id: str = Form(...), max_seats
         name    = row["name"]
         tier    = row["tier"]
         expires = row["license_expires_at"]
-    _write_license_file(customer_id, name, tier, expires, max_seats)
-    _run_script("restart_customer.sh", customer_id)
+    if not _lifecycle_request("restart", _customer_lifecycle_payload(
+        customer_id, name, tier, expires, max_seats
+    )):
+        return RedirectResponse("/customers?error=lifecycle", status_code=303)
     return RedirectResponse("/customers?seats_updated=" + customer_id, status_code=303)
 
 
@@ -905,7 +909,6 @@ async def upgrade_customer(request: Request, customer_id: str = Form(...), tier:
         require_super_admin(request)
     except HTTPException:
         return RedirectResponse("/login")
-    _require_host_operations()
     if tier not in ("standard", "plus"):
         return RedirectResponse("/customers?error=invalid_tier", status_code=303)
     with get_conn() as conn:
@@ -916,8 +919,10 @@ async def upgrade_customer(request: Request, customer_id: str = Form(...), tier:
         name    = row["name"]
         expires = row["license_expires_at"]
         max_seats = row["max_seats"]
-    _write_license_file(customer_id, name, tier, expires, max_seats)
-    _run_script("restart_customer.sh", customer_id)
+    if not _lifecycle_request("restart", _customer_lifecycle_payload(
+        customer_id, name, tier, expires, max_seats
+    )):
+        return RedirectResponse("/customers?error=lifecycle", status_code=303)
     return RedirectResponse("/customers?plan_updated=" + customer_id, status_code=303)
 
 
@@ -927,11 +932,11 @@ async def remove_customer(request: Request, customer_id: str = Form(...)):
         require_super_admin(request)
     except HTTPException:
         return RedirectResponse("/login")
-    _require_host_operations()
     with get_conn() as conn:
         conn.execute("UPDATE customers SET active=0 WHERE id=?", (customer_id,))
         conn.execute("UPDATE users SET active=0 WHERE customer_id=?", (customer_id,))
-    _run_script("remove_customer.sh", customer_id)
+    if not _lifecycle_request("remove", {"customer_id": customer_id}):
+        return RedirectResponse("/customers?error=lifecycle", status_code=303)
     return RedirectResponse("/customers", status_code=303)
 
 
@@ -995,23 +1000,17 @@ async def restore_customer(request: Request, customer_id: str = Form(...)):
         require_super_admin(request)
     except HTTPException:
         return RedirectResponse("/login")
-    _require_host_operations()
     with get_conn() as conn:
         row = conn.execute("SELECT * FROM customers WHERE id=?", (customer_id,)).fetchone()
         if not row:
             return RedirectResponse("/customers?error=notfound", status_code=303)
         conn.execute("UPDATE customers SET active=1 WHERE id=?", (customer_id,))
-    _run_script(
-        "provision_customer.sh",
-        customer_id,
-        PUBLIC_IP,
-        row["tier"],
-        row["license_expires_at"],
-        str(row["max_seats"]),
-        row["name"],
-        str(row["port"]),
-        row["agent_token"],
-    )
+    if not _lifecycle_request("provision", _customer_lifecycle_payload(
+        customer_id, row["name"], row["tier"], row["license_expires_at"],
+        row["max_seats"], row["port"], row["agent_token"],
+        row["baseline_profile"] or "default",
+    )):
+        return RedirectResponse("/customers?error=lifecycle", status_code=303)
     return RedirectResponse("/customers", status_code=303)
 
 
@@ -1021,11 +1020,11 @@ async def delete_customer(request: Request, customer_id: str = Form(...)):
         require_super_admin(request)
     except HTTPException:
         return RedirectResponse("/login")
-    _require_host_operations()
     with get_conn() as conn:
         conn.execute("DELETE FROM customers WHERE id=? AND active=0", (customer_id,))
         conn.execute("DELETE FROM users WHERE customer_id=?", (customer_id,))
-    _run_script("remove_customer.sh", customer_id)
+    if not _lifecycle_request("remove", {"customer_id": customer_id}):
+        return RedirectResponse("/customers?error=lifecycle", status_code=303)
     return RedirectResponse("/customers?status=inactive", status_code=303)
 
 
@@ -1956,42 +1955,37 @@ def _generate_temp_password(length: int = 14) -> str:
             return pw
 
 
-def _run_script(name: str, *args: str):
-    script = f"/app/{name}"
-    if not os.path.exists(script):
-        raise RuntimeError(
-            "Customer lifecycle operations require the host-only sentinelctl "
-            "boundary and are disabled in the web admin service."
-        )
-    subprocess.Popen(["bash", script, *args])
-
-
-def _require_host_operations() -> None:
-    """Reject lifecycle writes until a host-only operator boundary exists."""
-    if not os.path.exists("/app/provision_customer.sh"):
-        raise HTTPException(
-            status_code=503,
-            detail="Customer lifecycle operations require the host-only sentinelctl boundary.",
-        )
-
-
-def _write_license_file(customer_id: str, name: str, tier: str, expires: str, max_seats: int):
-    licenses_dir = os.environ.get("LICENSES_DIR", "/licenses")
-    customer_dir = os.path.join(licenses_dir, customer_id)
-    os.makedirs(customer_dir, exist_ok=True)
-    telemetry_url = "http://sentinel-admin:8000/api/telemetry"
-    payload = {
-        "customer_id":        customer_id,
-        "licensed_to":        name,
-        "max_agents":         max_seats,
-        "grace_pct":          10,
-        "expires_at":         expires,
-        "issued_at":          date.today().isoformat(),
-        "issued_by":          "RiskRaven AI",
-        "plan":               tier,
-        "telemetry_url":      telemetry_url,
-        "telemetry_interval_h": 1,
+def _customer_lifecycle_payload(customer_id: str, customer_name: str, tier: str,
+                                expires: str, max_seats: int, port: int = 80,
+                                agent_token: str = "", baseline_profile: str = "default") -> dict:
+    return {
+        "customer_id": customer_id,
+        "customer_name": customer_name,
+        "tier": tier,
+        "expires": expires,
+        "max_seats": max_seats,
+        "port": port,
+        "agent_token": agent_token,
+        "baseline_profile": baseline_profile,
+        "issued_at": date.today().isoformat(),
     }
-    path = os.path.join(customer_dir, "license.json")
-    with open(path, "w") as f:
-        json.dump(payload, f, indent=2)
+
+
+def _lifecycle_request(operation: str, payload: dict) -> bool:
+    """Delegate host/Docker work to the internal, token-authenticated broker."""
+    if not DEPLOY_TOKEN:
+        return False
+    try:
+        request = urllib.request.Request(
+            f"http://sentinel-deployer:9000/lifecycle/{operation}",
+            data=json.dumps(payload).encode("utf-8"),
+            method="POST",
+            headers={
+                "Content-Type": "application/json",
+                "X-Arckon-Deploy-Token": DEPLOY_TOKEN,
+            },
+        )
+        with urllib.request.urlopen(request, timeout=100) as response:
+            return response.status == 204
+    except Exception:
+        return False

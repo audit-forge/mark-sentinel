@@ -19,6 +19,7 @@ apt-get install -y -qq docker-ce docker-ce-cli containerd.io docker-compose-plug
 
 systemctl enable docker
 systemctl start docker
+docker network inspect arckon-net >/dev/null 2>&1 || docker network create arckon-net
 
 # ── Clone repo ────────────────────────────────────────────────────────────────
 git clone --branch feat/user-manager \

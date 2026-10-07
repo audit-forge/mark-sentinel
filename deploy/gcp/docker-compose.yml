@@ -58,6 +58,8 @@ services:
       - /opt/licenses:/licenses:ro
     networks:
       - sentinel-net
+    depends_on:
+      - deployer
     restart: always
     read_only: true
     tmpfs:
@@ -91,7 +93,41 @@ services:
           memory: 128M
           cpus: '0.25'
 
+  deployer:
+    build:
+      context: ./deployer
+    image: arckon-deployer:hardened
+    container_name: sentinel-deployer
+    environment:
+      - DEPLOY_TOKEN_FILE=/run/secrets/deploy_token
+      - LIFECYCLE_DIR=/opt/sentinel/deploy/gcp
+      - LICENSES_DIR=/opt/licenses
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /opt/sentinel:/opt/sentinel
+      - /opt/sentinel-data:/opt/sentinel-data
+      - /opt/sentinel-nginx/conf.d:/opt/sentinel-nginx/conf.d
+      - /opt/sentinel-nginx/proxy-tokens:/opt/sentinel-nginx/proxy-tokens
+      - /opt/licenses:/opt/licenses
+      - /opt/sentinel-secrets/deployer-token:/run/secrets/deploy_token:ro
+    networks:
+      - sentinel-net
+      - arckon-net
+    restart: always
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /run/deployer
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: '0.5'
+
 networks:
   sentinel-net:
     name: sentinel-net
     driver: bridge
+  arckon-net:
+    name: arckon-net
+    external: true
