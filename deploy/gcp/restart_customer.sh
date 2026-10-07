@@ -37,10 +37,12 @@ if [ -z "$PROXY_TOKEN" ]; then
   umask 077
   printf '%s\n' "$PROXY_TOKEN" > "$PROXY_TOKEN_FILE"
 fi
-install -d -m 0750 "$NGINX_PROXY_TOKEN_DIR"
+install -d -o 101 -g 101 -m 0750 "$NGINX_PROXY_TOKEN_DIR"
 umask 077
 printf 'proxy_set_header X-Sentinel-Proxy-Token %s;\n' "$PROXY_TOKEN" \
   > "${NGINX_PROXY_TOKEN_DIR}/${CUSTOMER_ID}.conf"
+chown 101:101 "${NGINX_PROXY_TOKEN_DIR}/${CUSTOMER_ID}.conf"
+chmod 0400 "${NGINX_PROXY_TOKEN_DIR}/${CUSTOMER_ID}.conf"
 
 LICENSE_MOUNT=""
 if [ -f "$LICENSE_FILE" ]; then

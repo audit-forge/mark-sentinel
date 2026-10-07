@@ -53,6 +53,7 @@ def test_proxy_capabilities_are_mounted_outside_the_source_tree():
         source = (REPO / 'deploy' / 'gcp' / script).read_text()
         assert 'NGINX_PROXY_TOKEN_DIR' in source
         assert '/etc/nginx/proxy-tokens/' in source or 'proxy-tokens' in source
+        assert 'chown 101:101' in source
 
 
 def test_customer_vhosts_are_generated_outside_the_git_checkout():

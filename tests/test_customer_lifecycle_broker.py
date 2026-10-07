@@ -27,9 +27,10 @@ def test_lifecycle_broker_requires_full_provisioning_payload():
         broker._validate_payload({"customer_id": "acme"}, "provision")
 
 
-def test_lifecycle_broker_writes_a_restrictive_license(tmp_path):
+def test_lifecycle_broker_writes_a_restrictive_license(tmp_path, monkeypatch):
     broker = _load_broker()
     broker.LICENSES_DIR = str(tmp_path)
+    monkeypatch.setattr(broker.os, "chown", lambda *_args: None)
     payload = {
         "customer_id": "acme",
         "customer_name": "Acme",
@@ -41,7 +42,7 @@ def test_lifecycle_broker_writes_a_restrictive_license(tmp_path):
     broker._write_license(payload)
     license_path = tmp_path / "acme" / "license.json"
     assert license_path.exists()
-    assert license_path.stat().st_mode & 0o777 == 0o640
+    assert license_path.stat().st_mode & 0o777 == 0o400
 
 
 def test_admin_routes_lifecycle_work_to_internal_broker():

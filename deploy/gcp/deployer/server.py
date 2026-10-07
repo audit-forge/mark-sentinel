@@ -11,6 +11,8 @@ LOG = f"{STATE_DIR}/deploy.log"
 TOKEN_FILE = os.environ.get("DEPLOY_TOKEN_FILE", "/run/secrets/deploy_token")
 LIFECYCLE_DIR = os.environ.get("LIFECYCLE_DIR", "/opt/sentinel/deploy/gcp")
 LICENSES_DIR = os.environ.get("LICENSES_DIR", "/opt/licenses")
+PUBLIC_IP = os.environ.get("PUBLIC_IP", "")
+CUSTOMER_UID = int(os.environ.get("CUSTOMER_UID", "999"))
 _CUSTOMER_ID = re.compile(r"[a-z0-9][a-z0-9-]{0,62}\Z")
 _TIERS = {"standard", "plus"}
 _PROFILES = {
@@ -32,6 +34,8 @@ def _write_license(payload: dict) -> None:
     customer_id = payload["customer_id"]
     customer_dir = os.path.join(LICENSES_DIR, customer_id)
     os.makedirs(customer_dir, mode=0o750, exist_ok=True)
+    os.chown(customer_dir, CUSTOMER_UID, CUSTOMER_UID)
+    os.chmod(customer_dir, 0o700)
     license_path = os.path.join(customer_dir, "license.json")
     document = {
         "customer_id": customer_id,
@@ -49,7 +53,8 @@ def _write_license(payload: dict) -> None:
     with open(temporary_path, "w", encoding="utf-8") as license_file:
         json.dump(document, license_file)
         license_file.write("\n")
-    os.chmod(temporary_path, 0o640)
+    os.chown(temporary_path, CUSTOMER_UID, CUSTOMER_UID)
+    os.chmod(temporary_path, 0o400)
     os.replace(temporary_path, license_path)
 
 
@@ -113,7 +118,7 @@ def _run_lifecycle(operation: str, payload: object) -> None:
     else:
         _write_license(request)
         arguments = [
-            request["customer_id"], "", request["tier"], request["expires"],
+            request["customer_id"], PUBLIC_IP, request["tier"], request["expires"],
             str(request["max_seats"]), request["customer_name"], str(request["port"]),
             request["agent_token"], request["baseline_profile"],
         ]

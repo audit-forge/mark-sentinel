@@ -14,7 +14,7 @@ NGINX_PROXY_TOKEN_DIR="${NGINX_PROXY_TOKEN_DIR:-/opt/sentinel-nginx/proxy-tokens
 MAP_FILE="${NGINX_PROXY_TOKEN_MAP:-${NGINX_PROXY_TOKEN_DIR}/gateway-map.conf}"
 
 # Ensure the target directory exists (test environments may not have it).
-mkdir -p "$(dirname "$MAP_FILE")"
+install -d -o 101 -g 101 -m 0750 "$(dirname "$MAP_FILE")"
 
 umask 077
 tmp=$(mktemp)
@@ -37,4 +37,5 @@ tmp=$(mktemp)
 
 # Atomic move: nginx reads the old file until the rename completes.
 mv "$tmp" "$MAP_FILE"
-chmod 600 "$MAP_FILE"
+chown 101:101 "$MAP_FILE"
+chmod 0400 "$MAP_FILE"

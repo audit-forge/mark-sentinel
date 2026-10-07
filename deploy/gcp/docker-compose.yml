@@ -102,6 +102,7 @@ services:
       - DEPLOY_TOKEN_FILE=/run/secrets/deploy_token
       - LIFECYCLE_DIR=/opt/sentinel/deploy/gcp
       - LICENSES_DIR=/opt/licenses
+      - PUBLIC_IP=${PUBLIC_IP}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - /opt/sentinel:/opt/sentinel
