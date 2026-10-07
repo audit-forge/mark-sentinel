@@ -71,6 +71,7 @@ def test_customer_containers_receive_the_central_logout_url():
 def test_provisioner_persists_the_supplied_agent_token_for_restarts():
     source = (REPO / 'deploy' / 'gcp' / 'provision_customer.sh').read_text()
     assert 'printf \'%s\\n\' "$AGENT_TOKEN" > "${DATA_DIR}/agent_token.txt"' in source
+    assert 'chown 999:999 "${DATA_DIR}/agent_token.txt"' in source
 
 
 def test_deployer_rebuilds_the_customer_image_from_current_source():

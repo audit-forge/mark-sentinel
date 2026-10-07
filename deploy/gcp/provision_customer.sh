@@ -52,6 +52,8 @@ if [ -z "$AGENT_TOKEN" ]; then
 fi
 umask 077
 printf '%s\n' "$AGENT_TOKEN" > "${DATA_DIR}/agent_token.txt"
+chown 999:999 "${DATA_DIR}/agent_token.txt"
+chmod 0400 "${DATA_DIR}/agent_token.txt"
 
 # This capability is known only to nginx and its backend. The backend must not
 # accept caller-supplied identity headers merely because a proxy marker exists.
