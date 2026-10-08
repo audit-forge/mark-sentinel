@@ -121,6 +121,7 @@ def _handle_renewal_reminder(customer: dict) -> None:
 
 def _broker_request(path: str, method: str = "GET", payload: dict | None = None) -> dict | None:
     import json
+    import urllib.error
     import urllib.request
     token_path = os.environ.get("DEPLOY_TOKEN_FILE", "")
     try:
@@ -134,7 +135,11 @@ def _broker_request(path: str, method: str = "GET", payload: dict | None = None)
         )
         with urllib.request.urlopen(request, timeout=15) as response:
             return json.loads(response.read())
-    except Exception:
+    except urllib.error.HTTPError as e:
+        print(f"[monitor] broker {method} {path} rejected: HTTP {e.code}", flush=True)
+        return None
+    except Exception as e:
+        print(f"[monitor] broker {method} {path} unreachable: {e}", flush=True)
         return None
 
 

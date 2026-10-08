@@ -280,6 +280,37 @@ def _telemetry_loop(store) -> None:
         time.sleep(interval)
 
 
+def _telemetry_agent_token() -> str:
+    """Read this customer's agent token for authenticating telemetry posts.
+
+    Mirrors server.py's _agent_token resolution: prefer the secret-file env
+    var, then the mounted data file. The token proves which tenant is
+    reporting and prevents cross-tenant count spoofing at the admin endpoint.
+    """
+    tok_path = os.environ.get('SENTINEL_AGENT_TOKEN_FILE', '')
+    if tok_path:
+        try:
+            p = Path(tok_path)
+            if p.is_file():
+                return p.read_text(encoding='utf-8').strip()
+        except OSError:
+            pass
+    for candidate in (Path('agent_token.txt'), Path('data', 'agent_token.txt')):
+        if candidate.is_file():
+            try:
+                return candidate.read_text(encoding='utf-8').strip()
+            except OSError:
+                continue
+    return ''
+
+
+def _telemetry_auth_headers() -> dict:
+    token = _telemetry_agent_token()
+    if token:
+        return {'X-Sentinel-Agent-Token': token}
+    return {}
+
+
 def _send_telemetry(lic: License, store) -> None:
     current_count = store.device_count()
     status = lic.check(current_count)
@@ -309,7 +340,7 @@ def _send_telemetry(lic: License, store) -> None:
         ],
     }
 
-    ok = _post(lic.telemetry_url, payload)
+    ok = _post(lic.telemetry_url, payload, headers=_telemetry_auth_headers())
     if ok:
         log.info(
             'Telemetry sent — customer=%s agents=%d/%s status=%s',
@@ -434,11 +465,14 @@ def _now_iso() -> str:
     return time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
 
 
-def _post(url: str, payload: dict) -> bool:
+def _post(url: str, payload: dict, headers: dict | None = None) -> bool:
     data = json.dumps(payload).encode()
+    base_headers = {'Content-Type': 'application/json', 'User-Agent': 'sentinel-license/1.0'}
+    if headers:
+        base_headers.update(headers)
     req = urllib.request.Request(
         url, data=data,
-        headers={'Content-Type': 'application/json', 'User-Agent': 'sentinel-license/1.0'},
+        headers=base_headers,
         method='POST',
     )
     try:

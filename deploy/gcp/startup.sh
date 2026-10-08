@@ -35,6 +35,17 @@ PUBLIC_IP=$(curl -sf \
 
 SECRET_KEY=$(openssl rand -hex 32)
 
+# Per-customer secrets live in a root-owned directory; tokens are generated
+# with openssl and written mode 0400 so only the mounted container can read them.
+install -d -m 0700 /opt/sentinel-secrets
+[ -f /opt/sentinel-secrets/admin-secret-key ] || printf '%s\n' "$SECRET_KEY" > /opt/sentinel-secrets/admin-secret-key
+[ -f /opt/sentinel-secrets/deployer-token ] || openssl rand -hex 32 > /opt/sentinel-secrets/deployer-token
+# A separate, scoped token gates the /deploy route so the lifecycle token
+# cannot trigger a full git pull + rebuild + restart of every customer.
+[ -f /opt/sentinel-secrets/deployer-op-token ] || openssl rand -hex 32 > /opt/sentinel-secrets/deployer-op-token
+[ -f /opt/sentinel-secrets/admin-password ] || openssl rand -base64 16 > /opt/sentinel-secrets/admin-password
+chmod 0400 /opt/sentinel-secrets/*
+
 mkdir -p /opt/licenses
 
 cat > /opt/sentinel/deploy/gcp/.env <<EOF

@@ -179,10 +179,22 @@ def _load_deploy_token() -> str:
     except OSError:
         return ""
 
+
+def _load_deploy_op_token() -> str:
+    token_path = os.environ.get("DEPLOY_OP_TOKEN_FILE", "")
+    if not token_path:
+        return ""
+    try:
+        with open(token_path, encoding="utf-8") as token_file:
+            return token_file.read().strip()
+    except OSError:
+        return ""
+
 ADMIN_EMAIL    = os.environ.get("ADMIN_EMAIL", "admin@sentinel.local")
 MAX_CUSTOMERS  = int(os.environ.get("MAX_CUSTOMERS", "0"))  # 0 = unlimited
 ADMIN_PASSWORD = _load_admin_password()
 DEPLOY_TOKEN = _load_deploy_token()
+DEPLOY_OP_TOKEN = _load_deploy_op_token()
 PUBLIC_IP = os.environ.get("PUBLIC_IP", "34.58.90.147")
 PUBLIC_ADMIN_URL = os.environ.get("PUBLIC_ADMIN_URL", "").rstrip("/") or f"http://admin.{PUBLIC_IP}.nip.io"
 PUBLIC_DASHBOARD_URL = os.environ.get("PUBLIC_DASHBOARD_URL", "").rstrip("/")
@@ -539,13 +551,13 @@ async def deploy(request: Request):
         return RedirectResponse("/login")
     import urllib.request as urlreq
     try:
-        if not DEPLOY_TOKEN:
+        if not DEPLOY_OP_TOKEN:
             raise RuntimeError("deployment token is not configured")
         req = urlreq.Request(
             "http://sentinel-deployer:9000/deploy",
             method="POST",
             data=b"",
-            headers={"X-Arckon-Deploy-Token": DEPLOY_TOKEN},
+            headers={"X-Arckon-Deploy-Token": DEPLOY_OP_TOKEN},
         )
         with urlreq.urlopen(req, timeout=5) as r:
             code = r.status
@@ -1692,6 +1704,16 @@ async def api_users_password(request: Request, user_id: str):
 @app.post("/api/telemetry")
 async def receive_telemetry(request: Request):
     from fastapi.responses import JSONResponse
+    # Telemetry is machine-to-machine from customer containers, so it cannot
+    # present a browser session. Authenticate it with the caller's per-customer
+    # agent token and reject any mismatch between the token's tenant and the
+    # customer_id in the body — otherwise any container on the shared network
+    # could overwrite another tenant's seat count.
+    submitted = request.headers.get("X-Sentinel-Agent-Token", "")
+    if not submitted:
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    import hmac as _hmac
+    import time as _time
     try:
         payload = await request.json()
     except Exception:
@@ -1705,9 +1727,30 @@ async def receive_telemetry(request: Request):
     except (TypeError, ValueError):
         return JSONResponse({"error": "invalid_agent_count"}, status_code=400)
     with get_conn() as conn:
-        row = conn.execute("SELECT id, max_seats FROM customers WHERE id=? AND active=1", (customer_id,)).fetchone()
+        row = conn.execute(
+            "SELECT id, max_seats, agent_token FROM customers WHERE id=? AND active=1",
+            (customer_id,),
+        ).fetchone()
         if not row:
             return JSONResponse({"error": "unknown_customer"}, status_code=404)
+        stored = row["agent_token"] or ""
+        if not stored or not _hmac.compare_digest(submitted, stored):
+            # Honor the previous token during the 48h rollover window so a
+            # rolling agent update does not drop telemetry mid-rotation.
+            prev_ok = False
+            existing_cols = {r[1] for r in conn.execute("PRAGMA table_info(customers)").fetchall()}
+            if "agent_token_prev" in existing_cols:
+                prev = conn.execute(
+                    "SELECT token_prev_expires FROM customers WHERE id=?", (customer_id,)
+                ).fetchone()
+                if prev and prev["token_prev_expires"] and prev["token_prev_expires"] > int(_time.time()):
+                    prev_row = conn.execute(
+                        "SELECT 1 FROM customers WHERE id=? AND agent_token_prev=?",
+                        (customer_id, submitted),
+                    ).fetchone()
+                    prev_ok = prev_row is not None
+            if not prev_ok:
+                return JSONResponse({"error": "unauthorized"}, status_code=401)
         conn.execute("UPDATE customers SET current_agents=? WHERE id=?", (current_agents, customer_id))
     return JSONResponse({"status": "ok", "current_agents": current_agents, "max_seats": row["max_seats"]})
 
@@ -1974,7 +2017,9 @@ def _customer_lifecycle_payload(customer_id: str, customer_name: str, tier: str,
 def _lifecycle_request(operation: str, payload: dict) -> bool:
     """Delegate host/Docker work to the internal, token-authenticated broker."""
     if not DEPLOY_TOKEN:
+        print("[lifecycle] deploy token is not configured", flush=True)
         return False
+    import urllib.error
     try:
         request = urllib.request.Request(
             f"http://sentinel-deployer:9000/lifecycle/{operation}",
@@ -1987,5 +2032,9 @@ def _lifecycle_request(operation: str, payload: dict) -> bool:
         )
         with urllib.request.urlopen(request, timeout=100) as response:
             return response.status == 204
-    except Exception:
+    except urllib.error.HTTPError as e:
+        print(f"[lifecycle] broker rejected {operation}: HTTP {e.code}", flush=True)
+        return False
+    except Exception as e:
+        print(f"[lifecycle] broker unreachable for {operation}: {e}", flush=True)
         return False

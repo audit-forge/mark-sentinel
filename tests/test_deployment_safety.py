@@ -26,6 +26,14 @@ def test_deployed_workloads_do_not_mount_the_host_docker_socket():
             assert name == 'deployer'
             assert not service.get('ports')
             assert '/opt/sentinel-secrets/deployer-token:/run/secrets/deploy_token:ro' in service['volumes']
+            # The broker must not share a network with customer workloads.
+            assert 'arckon-net' not in service.get('networks', [])
+
+    deployer = compose['services']['deployer']
+    # A separate, scoped token gates the /deploy route so the lifecycle token
+    # cannot trigger a full git pull + rebuild + restart of every customer.
+    assert '/opt/sentinel-secrets/deployer-op-token:/run/secrets/deploy_op_token:ro' in deployer['volumes']
+    assert 'DEPLOY_OP_TOKEN_FILE=/run/secrets/deploy_op_token' in deployer['environment']
 
     manifests = REPO / 'deploy' / 'k8s'
     for manifest in manifests.rglob('*agent-daemonset.yaml'):

@@ -33,6 +33,7 @@ services:
     environment:
       - SECRET_KEY_FILE=/run/secrets/secret_key
       - DEPLOY_TOKEN_FILE=/run/secrets/deploy_token
+      - DEPLOY_OP_TOKEN_FILE=/run/secrets/deploy_op_token
       - ADMIN_EMAIL=${ADMIN_EMAIL}
       - ADMIN_PASSWORD_FILE=/run/secrets/admin_password
       - PUBLIC_IP=${PUBLIC_IP}
@@ -54,6 +55,7 @@ services:
       - /opt/sentinel-data:/data
       - /opt/sentinel-secrets/admin-secret-key:/run/secrets/secret_key:ro
       - /opt/sentinel-secrets/deployer-token:/run/secrets/deploy_token:ro
+      - /opt/sentinel-secrets/deployer-op-token:/run/secrets/deploy_op_token:ro
       - /opt/sentinel-secrets/admin-password:/run/secrets/admin_password:ro
       - /opt/licenses:/licenses:ro
     networks:
@@ -100,6 +102,7 @@ services:
     container_name: sentinel-deployer
     environment:
       - DEPLOY_TOKEN_FILE=/run/secrets/deploy_token
+      - DEPLOY_OP_TOKEN_FILE=/run/secrets/deploy_op_token
       - LIFECYCLE_DIR=/opt/sentinel/deploy/gcp
       - LICENSES_DIR=/opt/licenses
       - PUBLIC_IP=${PUBLIC_IP}
@@ -111,9 +114,12 @@ services:
       - /opt/sentinel-nginx/proxy-tokens:/opt/sentinel-nginx/proxy-tokens
       - /opt/licenses:/opt/licenses
       - /opt/sentinel-secrets/deployer-token:/run/secrets/deploy_token:ro
+      - /opt/sentinel-secrets/deployer-op-token:/run/secrets/deploy_op_token:ro
+    # The broker holds the host Docker socket, so it must not share a network
+    # with customer workloads. It stays on the admin-only sentinel-net; all
+    # Docker operations are performed through the socket, not the network.
     networks:
       - sentinel-net
-      - arckon-net
     restart: always
     read_only: true
     tmpfs:
