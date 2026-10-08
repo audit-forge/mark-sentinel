@@ -22,3 +22,5 @@ def test_stale_agents_get_a_grace_period_and_auditable_notifications():
     assert '"/stale/remove", "POST"' in source
     assert "stale_agent_lifecycle" in db_source
     assert "stale_agent_notifications" in db_source
+    assert "agents: list[dict]" in source
+    assert '"\\n".join(device_lines)' in source

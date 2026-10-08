@@ -158,37 +158,52 @@ def _stale_recipients(customer_id: str) -> list[tuple[str, str]]:
     return recipients
 
 
-def _send_stale_notice(customer: dict, agent: dict, event_type: str, removal_due_at: str) -> None:
-    last_seen = datetime.fromtimestamp(agent["last_seen"], timezone.utc).isoformat()
+def _send_stale_notice(customer: dict, agents: list[dict], event_type: str) -> None:
+    if not agents:
+        return
     if event_type == "warning":
-        subject = f"[Arckon] Stale agent warning - {customer['name']} / {agent['hostname']}"
+        subject = f"[Arckon] Stale agent warning - {customer['name']}"
         body = (
-            f"Arckon agent stale-device warning\n\nCustomer: {customer['name']}\n"
-            f"Device: {agent['hostname']}\nLast seen: {last_seen}\n\n"
-            f"The device has not reported for at least 26 hours. Its registration will be removed on "
-            f"{removal_due_at} unless it reports again. If the agent returns after removal, it will re-register automatically."
+            f"Arckon stale-device warning\n\nCustomer: {customer['name']}\n\n"
+            "The following devices have not reported for at least 26 hours:\n"
         )
     else:
-        subject = f"[Arckon] Stale agent removed - {customer['name']} / {agent['hostname']}"
+        subject = f"[Arckon] Stale agents removed - {customer['name']}"
         body = (
-            f"Arckon removed a stale agent registration after its 30-day grace period.\n\n"
-            f"Customer: {customer['name']}\nDevice: {agent['hostname']}\nLast seen: {last_seen}\n\n"
-            "If this device returns, its installed agent will re-register automatically."
+            f"Arckon removed stale agent registrations after their 30-day grace period.\n\n"
+            f"Customer: {customer['name']}\n\nRemoved devices:\n"
         )
-    for recipient_type, recipient in _stale_recipients(customer["id"]):
+    for _recipient_type, recipient in _stale_recipients(customer["id"]):
         with get_conn() as conn:
-            sent = conn.execute(
+            unsent = [agent for agent in agents if conn.execute(
                 "SELECT 1 FROM stale_agent_notifications WHERE customer_id=? AND device_id=? AND event_type=? AND recipient=?",
                 (customer["id"], agent["device_id"], event_type, recipient),
-            ).fetchone()
-        if sent or not send_renewal_reminder(recipient, subject, body):
+            ).fetchone() is None]
+        if not unsent:
+            continue
+        device_lines = []
+        for agent in unsent:
+            last_seen = datetime.fromtimestamp(agent["last_seen"], timezone.utc).isoformat()
+            if event_type == "warning":
+                device_lines.append(
+                    f"- {agent['hostname']} (last seen: {last_seen}; removal scheduled: {agent['removal_due_at']})"
+                )
+            else:
+                device_lines.append(f"- {agent['hostname']} (last seen: {last_seen})")
+        suffix = (
+            "\n\nIf an agent reports again before its removal date, its registration is retained. "
+            "If it returns after removal, it will re-register automatically."
+            if event_type == "warning" else
+            "\n\nIf a device returns, its installed agent will re-register automatically."
+        )
+        if not send_renewal_reminder(recipient, subject, body + "\n".join(device_lines) + suffix):
             continue
         with get_conn() as conn:
-            conn.execute(
+            conn.executemany(
                 "INSERT OR IGNORE INTO stale_agent_notifications "
                 "(customer_id, device_id, event_type, recipient, sent_at) VALUES (?,?,?,?,?)",
-                (customer["id"], agent["device_id"], event_type, recipient,
-                 datetime.now(timezone.utc).isoformat()),
+                [(customer["id"], agent["device_id"], event_type, recipient,
+                  datetime.now(timezone.utc).isoformat()) for agent in unsent],
             )
 
 
@@ -199,7 +214,7 @@ def _handle_stale_agents(customer: dict) -> None:
     stale_agents = response.get("agents", [])
     stale_by_id = {agent["device_id"]: agent for agent in stale_agents}
     now = datetime.now(timezone.utc)
-    warnings: list[tuple[dict, str]] = []
+    warnings: list[dict] = []
     with get_conn() as conn:
         tracked = conn.execute(
             "SELECT device_id, last_seen, removal_due_at, removed_at FROM stale_agent_lifecycle WHERE customer_id=?",
@@ -230,10 +245,9 @@ def _handle_stale_agents(customer: dict) -> None:
                 (customer["id"], agent["device_id"], agent["hostname"], agent["last_seen"],
                  now.isoformat(), due_at),
             )
-            warnings.append((agent, due_at))
+            warnings.append({**agent, "removal_due_at": due_at})
 
-    for agent, due_at in warnings:
-        _send_stale_notice(customer, agent, "warning", due_at)
+    _send_stale_notice(customer, warnings, "warning")
 
     with get_conn() as conn:
         due = conn.execute(
@@ -241,6 +255,7 @@ def _handle_stale_agents(customer: dict) -> None:
             "WHERE customer_id=? AND removed_at IS NULL AND removal_due_at <= ?",
             (customer["id"], now.isoformat()),
         ).fetchall()
+    removed: list[dict] = []
     for item in due:
         agent = dict(item)
         result = _broker_request("/stale/remove", "POST", {
@@ -253,7 +268,8 @@ def _handle_stale_agents(customer: dict) -> None:
                 "UPDATE stale_agent_lifecycle SET removed_at=? WHERE customer_id=? AND device_id=?",
                 (datetime.now(timezone.utc).isoformat(), customer["id"], agent["device_id"]),
             )
-        _send_stale_notice(customer, agent, "removal", agent["removal_due_at"])
+        removed.append(agent)
+    _send_stale_notice(customer, removed, "removal")
 
 
 def _store_agent_count(customer_id: str, count: int):
