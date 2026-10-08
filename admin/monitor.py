@@ -120,13 +120,10 @@ def _handle_renewal_reminder(customer: dict) -> None:
 def _query_agent_count(customer_id: str) -> int | None:
     import subprocess
     container = f"sentinel-{customer_id}"
-    # _get_store() in server.py always resolves the live per-customer DB to this exact
-    # path. Querying it directly (rather than globbing /app/data for any agents.db)
-    # matters because customer containers accumulate stale/orphaned agents.db files
-    # from old provisioning attempts (UUID-named dirs, default/, legacy /app/data/agents.db,
-    # etc.) — globbing and taking the first match silently counts the wrong database
-    # (almost always 0 devices), which is why overage alerts never fired.
-    db_path = f"/app/data/customers/{customer_id}/agents.db"
+    # Production runs one container per customer with its own database mounted
+    # directly at /app/data/agents.db. Do not query a nested local-dev path,
+    # which SQLite would create as an empty database and report as zero agents.
+    db_path = "/app/data/agents.db"
     try:
         # Count every device ever registered, not just ones active in a recent
         # window — a customer shouldn't be able to accumulate more registrations

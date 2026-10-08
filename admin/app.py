@@ -221,7 +221,7 @@ import json
 import sys
 try:
     customer_id = sys.argv[1]
-    db = sqlite3.connect(f'/app/data/customers/{customer_id}/agents.db')
+    db = sqlite3.connect('/app/data/agents.db')
     db.row_factory = sqlite3.Row
     rows = db.execute('SELECT reporter_hostname, host, service, models_json, source, last_seen FROM shadow_devices WHERE dismissed=0 ORDER BY last_seen DESC').fetchall()
     devices = [dict(r) for r in rows]
