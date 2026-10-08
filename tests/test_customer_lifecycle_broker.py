@@ -1,5 +1,6 @@
 import importlib.util
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -43,6 +44,14 @@ def test_lifecycle_broker_writes_a_restrictive_license(tmp_path, monkeypatch):
     license_path = tmp_path / "acme" / "license.json"
     assert license_path.exists()
     assert license_path.stat().st_mode & 0o777 == 0o400
+
+
+def test_lifecycle_broker_counts_agents_from_customer_runtime(monkeypatch):
+    broker = _load_broker()
+    monkeypatch.setattr(
+        broker.subprocess, "run", lambda *_args, **_kwargs: SimpleNamespace(stdout="9\n")
+    )
+    assert broker._agent_count("acme") == 9
 
 
 def test_admin_routes_lifecycle_work_to_internal_broker():

@@ -4,10 +4,10 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[1]
 
 
-def test_admin_monitor_queries_the_production_customer_database_path():
+def test_admin_monitor_queries_the_authenticated_host_broker():
     source = (REPO / "admin" / "monitor.py").read_text()
-    assert 'db_path = "/app/data/agents.db"' in source
-    assert "/app/data/customers/{customer_id}/agents.db" not in source
+    assert 'http://sentinel-deployer:9000/usage/{customer_id}' in source
+    assert 'X-Arckon-Deploy-Token' in source
 
 
 def test_shadow_ai_lookup_uses_the_customer_container_database_path():

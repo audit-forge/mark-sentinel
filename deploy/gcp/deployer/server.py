@@ -126,6 +126,18 @@ def _run_lifecycle(operation: str, payload: object) -> None:
                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
+def _agent_count(customer_id: str) -> int:
+    if not _CUSTOMER_ID.fullmatch(customer_id):
+        raise ValueError("invalid customer ID")
+    result = subprocess.run(
+        ["docker", "exec", f"sentinel-{customer_id}", "python3", "-c",
+         "import sqlite3; conn=sqlite3.connect('/app/data/agents.db'); "
+         "print(conn.execute('SELECT COUNT(*) FROM devices').fetchone()[0])"],
+        capture_output=True, text=True, timeout=10, check=True,
+    )
+    return int(result.stdout.strip())
+
+
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, *a):
         pass
@@ -193,6 +205,19 @@ class Handler(BaseHTTPRequestHandler):
             self.send_response(200)
             self.end_headers()
             self.wfile.write(b"busy" if os.path.exists(LOCK) else b"idle")
+        elif self.path.startswith("/usage/"):
+            try:
+                count = _agent_count(self.path.removeprefix("/usage/"))
+            except (OSError, ValueError, subprocess.SubprocessError):
+                self.send_response(404)
+                self.end_headers()
+                return
+            body = json.dumps({"current_agents": count}).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
         elif self.path == "/log":
             try:
                 body = open(LOG, "rb").read()[-8192:]

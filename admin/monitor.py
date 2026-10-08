@@ -118,25 +118,19 @@ def _handle_renewal_reminder(customer: dict) -> None:
 
 
 def _query_agent_count(customer_id: str) -> int | None:
-    import subprocess
-    container = f"sentinel-{customer_id}"
-    # Production runs one container per customer with its own database mounted
-    # directly at /app/data/agents.db. Do not query a nested local-dev path,
-    # which SQLite would create as an empty database and report as zero agents.
-    db_path = "/app/data/agents.db"
+    import json
+    import os
+    import urllib.request
+    token_path = os.environ.get("DEPLOY_TOKEN_FILE", "")
     try:
-        # Count every device ever registered, not just ones active in a recent
-        # window — a customer shouldn't be able to accumulate more registrations
-        # than their seat count without it surfacing as an overage, even if some
-        # of those devices have since gone offline/decommissioned.
-        result = subprocess.run(
-            ["docker", "exec", container, "python3", "-c",
-             f"import sqlite3; conn=sqlite3.connect('{db_path}'); "
-             "print(conn.execute('SELECT COUNT(*) FROM devices').fetchone()[0])"],
-            capture_output=True, text=True, timeout=10
+        with open(token_path, encoding="utf-8") as token_file:
+            token = token_file.read().strip()
+        request = urllib.request.Request(
+            f"http://sentinel-deployer:9000/usage/{customer_id}",
+            headers={"X-Arckon-Deploy-Token": token},
         )
-        if result.returncode == 0:
-            return int(result.stdout.strip())
+        with urllib.request.urlopen(request, timeout=15) as response:
+            return int(json.loads(response.read())["current_agents"])
     except Exception:
         pass
     return None
