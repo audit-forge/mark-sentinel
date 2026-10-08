@@ -52,6 +52,24 @@ def init_db():
                 sent_at TEXT NOT NULL,
                 UNIQUE(customer_id, days_before, recipient)
             );
+            CREATE TABLE IF NOT EXISTS stale_agent_lifecycle (
+                customer_id TEXT NOT NULL REFERENCES customers(id),
+                device_id TEXT NOT NULL,
+                hostname TEXT NOT NULL,
+                last_seen INTEGER NOT NULL,
+                notified_at TEXT NOT NULL,
+                removal_due_at TEXT NOT NULL,
+                removed_at TEXT,
+                PRIMARY KEY (customer_id, device_id)
+            );
+            CREATE TABLE IF NOT EXISTS stale_agent_notifications (
+                customer_id TEXT NOT NULL,
+                device_id TEXT NOT NULL,
+                event_type TEXT NOT NULL,
+                recipient TEXT NOT NULL,
+                sent_at TEXT NOT NULL,
+                PRIMARY KEY (customer_id, device_id, event_type, recipient)
+            );
             CREATE TABLE IF NOT EXISTS password_resets (
                 id TEXT PRIMARY KEY,
                 user_id TEXT NOT NULL,

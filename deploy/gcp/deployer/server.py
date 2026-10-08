@@ -1,7 +1,9 @@
 import os
 import json
 import re
+import sqlite3
 import subprocess
+import time
 from hmac import compare_digest
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
@@ -20,6 +22,8 @@ _PROFILES = {
     "cmmc", "biotech", "healthcare", "lifesciences", "owasp_agentic",
     "eu_ai_act", "professional_services",
 }
+STALE_AFTER_SECONDS = 26 * 3600
+STALE_REMOVAL_SECONDS = 30 * 24 * 3600
 
 
 def _read_token() -> str:
@@ -138,6 +142,42 @@ def _agent_count(customer_id: str) -> int:
     return int(result.stdout.strip())
 
 
+def _customer_db(customer_id: str) -> sqlite3.Connection:
+    if not _CUSTOMER_ID.fullmatch(customer_id):
+        raise ValueError("invalid customer ID")
+    return sqlite3.connect(f"/opt/sentinel-data/{customer_id}/agents.db", timeout=10)
+
+
+def _stale_agents(customer_id: str) -> list[dict]:
+    cutoff = int(time.time()) - STALE_AFTER_SECONDS
+    with _customer_db(customer_id) as conn:
+        rows = conn.execute(
+            "SELECT device_id, hostname, platform, last_seen FROM devices "
+            "WHERE last_seen < ? ORDER BY last_seen ASC", (cutoff,)
+        ).fetchall()
+    return [dict(zip(("device_id", "hostname", "platform", "last_seen"), row)) for row in rows]
+
+
+def _remove_stale_agent(payload: object) -> bool:
+    if not isinstance(payload, dict):
+        raise ValueError("invalid stale-agent removal request")
+    customer_id = str(payload.get("customer_id", "")).strip()
+    device_id = str(payload.get("device_id", "")).strip()
+    try:
+        last_seen = int(payload.get("last_seen"))
+    except (TypeError, ValueError) as exc:
+        raise ValueError("invalid last-seen value") from exc
+    if not _CUSTOMER_ID.fullmatch(customer_id) or not device_id or len(device_id) > 255:
+        raise ValueError("invalid stale-agent removal request")
+    cutoff = int(time.time()) - STALE_REMOVAL_SECONDS
+    with _customer_db(customer_id) as conn:
+        deleted = conn.execute(
+            "DELETE FROM devices WHERE device_id=? AND last_seen=? AND last_seen < ?",
+            (device_id, last_seen, cutoff),
+        ).rowcount
+    return bool(deleted)
+
+
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, *a):
         pass
@@ -148,6 +188,23 @@ class Handler(BaseHTTPRequestHandler):
         if not expected_token or not compare_digest(provided_token, expected_token):
             self.send_response(403)
             self.end_headers()
+            return
+        if self.path == "/stale/remove":
+            try:
+                length = int(self.headers.get("Content-Length", "0"))
+                if length < 1 or length > 16_384:
+                    raise ValueError("invalid request length")
+                removed = _remove_stale_agent(json.loads(self.rfile.read(length)))
+            except (OSError, ValueError, sqlite3.Error):
+                self.send_response(500)
+                self.end_headers()
+                return
+            body = json.dumps({"removed": removed}).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
             return
         if self.path.startswith("/lifecycle/"):
             operation = self.path.removeprefix("/lifecycle/")
@@ -205,6 +262,18 @@ class Handler(BaseHTTPRequestHandler):
             self.send_response(200)
             self.end_headers()
             self.wfile.write(b"busy" if os.path.exists(LOCK) else b"idle")
+        elif self.path.startswith("/stale/"):
+            try:
+                body = json.dumps({"agents": _stale_agents(self.path.removeprefix("/stale/"))}).encode("utf-8")
+            except (OSError, ValueError, sqlite3.Error):
+                self.send_response(404)
+                self.end_headers()
+                return
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
         elif self.path.startswith("/usage/"):
             try:
                 count = _agent_count(self.path.removeprefix("/usage/"))

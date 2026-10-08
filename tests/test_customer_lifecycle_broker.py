@@ -1,4 +1,5 @@
 import importlib.util
+import sqlite3
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -52,6 +53,29 @@ def test_lifecycle_broker_counts_agents_from_customer_runtime(monkeypatch):
         broker.subprocess, "run", lambda *_args, **_kwargs: SimpleNamespace(stdout="9\n")
     )
     assert broker._agent_count("acme") == 9
+
+
+def test_lifecycle_broker_rejects_invalid_stale_agent_customer_ids():
+    broker = _load_broker()
+    with pytest.raises(ValueError):
+        broker._stale_agents("../acme")
+
+
+def test_lifecycle_broker_only_removes_a_device_that_stayed_stale(tmp_path, monkeypatch):
+    broker = _load_broker()
+    database = tmp_path / "agents.db"
+    with sqlite3.connect(database) as conn:
+        conn.execute("CREATE TABLE devices (device_id TEXT, hostname TEXT, platform TEXT, last_seen INTEGER)")
+        conn.execute("INSERT INTO devices VALUES ('still-stale', 'old-host', 'linux', 1)")
+        conn.execute("INSERT INTO devices VALUES ('reported-again', 'new-host', 'linux', 2)")
+    monkeypatch.setattr(broker, "_customer_db", lambda _customer_id: sqlite3.connect(database))
+    monkeypatch.setattr(broker.time, "time", lambda: broker.STALE_REMOVAL_SECONDS + 100)
+
+    assert broker._remove_stale_agent({"customer_id": "acme", "device_id": "still-stale", "last_seen": 1})
+    assert not broker._remove_stale_agent({"customer_id": "acme", "device_id": "reported-again", "last_seen": 1})
+
+    with sqlite3.connect(database) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM devices").fetchone()[0] == 1
 
 
 def test_admin_routes_lifecycle_work_to_internal_broker():
