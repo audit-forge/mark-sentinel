@@ -98,9 +98,22 @@ def test_runtime_and_source_control_artifacts_are_excluded_from_builds():
 
 def test_installers_do_not_download_unauthenticated_legacy_bundles():
     for installer in ('install.sh', 'admin/install.sh'):
-        source = (REPO / installer).read_text()
+        source = (REPO / 'install.sh' if installer == 'install.sh' else REPO / 'admin' / 'install.sh').read_text()
         assert '/bundle.tar.gz' not in source
         # The new Nuitka-based installer uses signed release endpoints, not legacy bundles.
         # The old "Remote bootstrap is disabled" message is no longer present since
         # the installer now downloads signed Nuitka binaries with token auth.
         assert 'releases/' in source or 'Remote bootstrap' in source
+
+
+def test_startup_chowns_admin_secrets_to_uid_1000_but_not_cloudflared():
+    source = (REPO / 'deploy' / 'gcp' / 'startup.sh').read_text()
+    # Admin/deployer secrets must be owned by UID 1000 (the admin container user).
+    assert 'chown 1000:1000 "/opt/sentinel-secrets/$secret"' in source
+    for secret in ('admin-secret-key', 'deployer-token', 'deployer-op-token', 'admin-password'):
+        assert secret in source
+    # Cloudflared's token must stay owned by UID 65532, never chowned to 1000.
+    assert 'chown 65532:65532 /opt/sentinel-secrets/cloudflare-tunnel-token' in source
+    # A blanket chown of the whole directory must never appear.
+    assert 'chown 1000:1000 /opt/sentinel-secrets/*' not in source
+    assert 'chown 1000:1000 "/opt/sentinel-secrets/*"' not in source

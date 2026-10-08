@@ -44,7 +44,19 @@ install -d -m 0700 /opt/sentinel-secrets
 # cannot trigger a full git pull + rebuild + restart of every customer.
 [ -f /opt/sentinel-secrets/deployer-op-token ] || openssl rand -hex 32 > /opt/sentinel-secrets/deployer-op-token
 [ -f /opt/sentinel-secrets/admin-password ] || openssl rand -base64 16 > /opt/sentinel-secrets/admin-password
-chmod 0400 /opt/sentinel-secrets/*
+# The admin container runs as UID 1000 and must read these four files (mode
+# 0400 = owner-only). The deployer runs as root and can read them regardless.
+# chown selectively — never touch cloudflared's 65532-owned tunnel token.
+for secret in admin-secret-key deployer-token deployer-op-token admin-password; do
+  chmod 0400 "/opt/sentinel-secrets/$secret"
+  chown 1000:1000 "/opt/sentinel-secrets/$secret"
+done
+# Cloudflared runs as UID 65532 and owns its own token separately.
+[ -f /opt/sentinel-secrets/cloudflare-tunnel-token ] || true
+if [ -f /opt/sentinel-secrets/cloudflare-tunnel-token ]; then
+  chmod 0400 /opt/sentinel-secrets/cloudflare-tunnel-token
+  chown 65532:65532 /opt/sentinel-secrets/cloudflare-tunnel-token
+fi
 
 mkdir -p /opt/licenses
 
