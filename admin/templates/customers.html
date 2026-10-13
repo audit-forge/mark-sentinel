@@ -91,30 +91,14 @@
     </div>
   </div>
   {% if customers %}
-  <div class="customer-table-wrap">
   <table class="customer-table">
-    <colgroup>
-      <col style="width:105px">
-      <col style="width:150px">
-      <col style="width:145px">
-      <col style="width:180px">
-      <col style="width:150px">
-      <col style="width:120px">
-      <col style="width:245px">
-      <col style="width:135px">
-      <col style="width:125px">
-      <col style="width:380px">
-    </colgroup>
     <thead>
       <tr>
         <th>ID</th>
         <th>Name</th>
-        <th>Account Type</th>
-        <th>Reseller / Parent</th>
         <th>Plan</th>
-        <th>Licenses</th>
-        <th>Dashboard URL</th>
-        <th>License Expiry</th>
+        <th>Seats</th>
+        <th>Expiry</th>
         <th>Status</th>
         <th></th>
       </tr>
@@ -123,73 +107,26 @@
     {% for c in customers %}
     {% set days = c.days_remaining %}
     <tr>
-      <td>{{ c.id }}</td>
-      <td>{{ c.name }}</td>
-      <td style="white-space:nowrap;text-align:center">
-        {% if c.is_msp %}
-          <span class="badge badge-blue" style="font-size:11px">MSP</span>
-        {% else %}
-          <span style="color:#9CA3AF;font-size:12px">Standard</span>
-        {% endif %}
-        <form method="post" action="/customers/set-msp" style="margin-top:6px">
-          <input type="hidden" name="customer_id" value="{{ c.id }}">
-          <input type="hidden" name="is_msp" value="{{ 0 if c.is_msp else 1 }}">
-          <button type="submit" class="btn btn-sm" style="font-size:11px;padding:2px 8px;{% if c.is_msp %}background:#EFF6FF;border:1px solid #BFDBFE;color:#1D4ED8{% else %}background:#F0FDF4;border:1px solid #BBF7D0;color:#15803D{% endif %}">
-            {{ 'Remove MSP' if c.is_msp else 'Mark as MSP' }}
-          </button>
-        </form>
-      </td>
-      <td style="white-space:nowrap">
-        {% if c.parent_name %}
-          <span style="color:#6B7280;font-size:12px">Resold by</span><br>
-          <a href="/customers?parent={{ c.parent_customer_id }}" style="font-size:13px">{{ c.parent_name }}</a>
-        {% elif c.is_reseller %}
-          <span class="badge badge-blue">Reseller MSP</span>
-          <a href="/customers?parent={{ c.id }}" style="font-size:11px;display:block;margin-top:4px">View resold customers</a>
-        {% else %}
-          <span style="color:#9CA3AF;font-size:12px">Direct customer</span>
-        {% endif %}
-        <form method="post" action="/customers/set-reseller" style="margin-top:6px">
-          <input type="hidden" name="customer_id" value="{{ c.id }}">
-          <input type="hidden" name="is_reseller" value="{{ 0 if c.is_reseller else 1 }}">
-          <button type="submit" class="btn btn-sm" style="font-size:11px;padding:2px 6px;background:#F9FAFB;border:1px solid #E5E7EB;color:#6B7280">
-            {{ 'Unmark reseller' if c.is_reseller else 'Mark as reseller MSP' }}
-          </button>
-        </form>
-      </td>
+      <td style="font-family:monospace;font-size:12px">{{ c.id }}</td>
+      <td style="font-weight:600">{{ c.name }}</td>
       <td>
-        <form method="post" action="/customers/upgrade" style="display:flex;align-items:center;gap:6px">
-          <input type="hidden" name="customer_id" value="{{ c.id }}">
-          <select name="tier" style="width:100px;padding:3px 6px;font-size:13px;background:#F9FAFB;border:1px solid #E5E7EB;border-radius:4px;color:#111827">
-            <option value="standard" {% if c.tier != 'plus' %}selected{% endif %}>Standard</option>
-            <option value="plus"     {% if c.tier == 'plus' %}selected{% endif %}>Pro</option>
-          </select>
-          <button type="submit" class="btn btn-sm" style="padding:3px 8px;font-size:12px">Save</button>
-        </form>
-      </td>
-      <td>
-        <form method="post" action="/customers/seats" style="display:flex;align-items:center;gap:6px">
-          <input type="hidden" name="customer_id" value="{{ c.id }}">
-          <input type="number" name="max_seats" value="{{ c.max_seats }}" min="1" max="500"
-                 style="width:60px;padding:3px 6px;font-size:13px;background:#F9FAFB;border:1px solid #E5E7EB;border-radius:4px;color:#111827;text-align:center">
-          <button type="submit" class="btn btn-sm" style="padding:3px 8px;font-size:12px">Save</button>
-        </form>
-      </td>
-      <td>
-        {% if c.port and c.active %}
-          <a class="url customer-dashboard-url" href="{{ c.dashboard_url }}" target="_blank">{{ c.dashboard_url }}</a>
+        {% if c.tier == 'plus' %}
+          <span class="badge badge-blue">Pro</span>
         {% else %}
-          <span style="color:#6B7280">—</span>
+          <span style="color:#6B7280;font-size:13px">Standard</span>
         {% endif %}
+        {% if c.is_msp %}<span class="badge badge-blue" style="margin-left:4px;font-size:10px">MSP</span>{% endif %}
+        {% if c.is_reseller %}<span class="badge badge-blue" style="margin-left:4px;font-size:10px">Reseller</span>{% endif %}
       </td>
+      <td style="font-size:13px;color:#6B7280">{{ c.current_agents }}/{{ c.max_seats }}</td>
       <td>
         {% if c.license_expires_at %}
           {% if days is not none and days < 0 %}
-            <span style="color:#DC2626">{{ c.license_expires_at[:10] }} (expired)</span>
+            <span style="color:#DC2626;font-size:13px">{{ c.license_expires_at[:10] }} <span style="font-size:11px">(expired)</span></span>
           {% elif days is not none and days <= 30 %}
-            <span style="color:#ffbb33">{{ c.license_expires_at[:10] }} ({{ days }}d left)</span>
+            <span style="color:#ffbb33;font-size:13px">{{ c.license_expires_at[:10] }} <span style="font-size:11px">({{ days }}d)</span></span>
           {% else %}
-            <span style="color:#6B7280">{{ c.license_expires_at[:10] }}</span>
+            <span style="color:#6B7280;font-size:13px">{{ c.license_expires_at[:10] }}</span>
           {% endif %}
         {% else %}
           <span style="color:#9CA3AF">—</span>
@@ -199,7 +136,7 @@
         {% if not c.active %}
           <span class="badge badge-red">archived</span>
         {% elif c.service_suspended %}
-          <span class="badge badge-red">agents suspended</span>
+          <span class="badge badge-red">suspended</span>
         {% elif days is not none and days < 0 %}
           <span class="badge badge-red">expired</span>
         {% elif days is not none and days <= 30 %}
@@ -208,73 +145,160 @@
           <span class="badge badge-green">active</span>
         {% endif %}
       </td>
-      <td class="customer-actions">
-        <div class="customer-actions-list">
-        {% if c.active %}
-          <button type="button" class="btn btn-sm"
-                  onclick="openDeploy('{{ c.id }}','{{ c.name | replace("'","\\x27") }}','{{ c.dashboard_url or '' }}','{{ c.agent_token or '' }}')"
-                  style="background:#F9FAFB;color:#4488ff;border:1px solid #4488ff40">Deploy</button>
-          <a href="/customers/{{ c.id }}/installer/windows" class="btn btn-sm"
-             style="background:#F9FAFB;color:#0F766E;border:1px solid #0F766E40;text-decoration:none"
-             title="Download a Windows .exe installer with this customer's server and token baked in — just send it to the customer to double-click">Win .exe</a>
-          <a href="/customers/{{ c.id }}/installer/macos" class="btn btn-sm"
-             style="background:#F9FAFB;color:#0F766E;border:1px solid #0F766E40;text-decoration:none"
-             title="Download a macOS .app installer with this customer's server and token baked in — just send it to the customer to double-click">Mac .app</a>
-          <button type="button" class="btn btn-sm"
-                  onclick="openRotate('{{ c.id }}','{{ c.name | replace("'","\\x27") }}')"
-                  style="background:#F9FAFB;color:#DC2626;border:1px solid #DC262640">Rotate Token</button>
-           {% if not c.service_suspended %}
-           <button type="button" class="btn btn-sm" id="repush-btn-{{ c.id }}"
-                   onclick="repushAgents('{{ c.id }}','{{ c.name | replace("'","\\x27") }}')"
-                   style="background:#F9FAFB;color:#059669;border:1px solid #05966940">Push Agent Update</button>
-           {% endif %}
-           {% if c.service_suspended %}
-           <form method="post" action="/customers/resume-service" style="display:inline" onsubmit="return confirm('Resume all agents for {{ c.name }}?')">
-             <input type="hidden" name="customer_id" value="{{ c.id }}">
-             <button type="submit" class="btn btn-sm" style="background:#ECFDF5;color:#047857;border:1px solid #A7F3D0">Resume Agents</button>
-           </form>
-           {% else %}
-           <form method="post" action="/customers/suspend" style="display:inline" onsubmit="return confirm('Suspend all agents for {{ c.name }}? They will be blocked from reporting, polling, updating, and downloading releases until resumed. Customer data and dashboard access stay available.')">
-             <input type="hidden" name="customer_id" value="{{ c.id }}">
-             <button type="submit" class="btn btn-sm" style="background:#FEF2F2;color:#B91C1C;border:1px solid #FECACA">Suspend Agents</button>
-           </form>
-           {% endif %}
-          <form method="post" action="/customers/renew" style="display:inline">
-            <input type="hidden" name="customer_id" value="{{ c.id }}">
-            <button type="submit" class="btn btn-sm" style="background:#F9FAFB;color:#4F46E5;border:1px solid #4F46E540">Renew</button>
-          </form>
-          <form method="post" action="/customers/remove" style="display:inline" onsubmit="return confirm('Archive {{ c.name }}? Their container will be stopped but data is kept.')">
-            <input type="hidden" name="customer_id" value="{{ c.id }}">
-            <button type="submit" class="btn btn-sm" style="background:#F9FAFB;color:#ffbb33;border:1px solid #ffbb3340">Archive</button>
-          </form>
-        {% else %}
-          <form method="post" action="/customers/restore" style="display:inline">
-            <input type="hidden" name="customer_id" value="{{ c.id }}">
-            <button type="submit" class="btn btn-sm" style="background:#F9FAFB;color:#4F46E5;border:1px solid #4F46E540">Restore</button>
-          </form>
-          <form method="post" action="/customers/delete" style="display:inline" onsubmit="return confirm('Permanently delete {{ c.name }}? This cannot be undone.')">
-            <input type="hidden" name="customer_id" value="{{ c.id }}">
-            <button type="submit" class="btn btn-danger btn-sm">Delete</button>
-          </form>
-        {% endif %}
-        </div>
+      <td>
+        <button type="button" class="btn btn-sm" onclick="openManage('{{ c.id }}')"
+                style="background:#4F46E5;color:#fff;border:1px solid #4F46E5;font-weight:600">Manage</button>
       </td>
     </tr>
     {% endfor %}
     </tbody>
   </table>
-  </div>
   {% else %}
   <div class="empty">No customers found.</div>
   {% endif %}
 </div>
 
+{% for c in customers %}
+<div id="manageModal-{{ c.id }}" class="manage-modal" style="display:none;position:fixed;inset:0;z-index:9999;background:#000000cc;overflow-y:auto">
+  <div style="background:#fff;border-radius:10px;max-width:640px;margin:40px auto;overflow:hidden;box-shadow:0 8px 32px rgba(0,0,0,.2)">
+
+    <div style="padding:20px 24px;border-bottom:1px solid #E5E7EB;display:flex;align-items:center;justify-content:space-between">
+      <div>
+        <div style="font-size:12px;color:#6B7280;font-weight:600;letter-spacing:.5px;text-transform:uppercase">Customer</div>
+        <div style="font-size:20px;color:#111827;margin-top:2px;font-weight:700">{{ c.name }}</div>
+        <div style="font-size:12px;color:#9CA3AF;font-family:monospace;margin-top:2px">{{ c.id }}</div>
+      </div>
+      <button onclick="closeManage('{{ c.id }}')" style="background:none;border:none;color:#6B7280;font-size:26px;cursor:pointer;padding:2px 10px;line-height:1">&times;</button>
+    </div>
+
+    <div style="padding:24px;max-height:calc(100vh - 180px);overflow-y:auto">
+
+      {% if c.active %}
+
+      <div style="margin-bottom:28px">
+        <div style="font-size:13px;font-weight:700;color:#065F46;letter-spacing:.5px;margin-bottom:12px">INSTALLERS</div>
+        <div style="display:flex;gap:10px;flex-wrap:wrap">
+          <button type="button" class="btn btn-sm"
+                  onclick="closeManage('{{ c.id }}');openDeploy('{{ c.id }}','{{ c.name | replace("'","\\x27") }}','{{ c.dashboard_url or '' }}','{{ c.agent_token or '' }}')"
+                  style="background:#EFF6FF;color:#1D4ED8;border:1px solid #BFDBFE;padding:8px 16px;font-weight:600">Deploy (curl commands)</button>
+          <a href="/customers/{{ c.id }}/installer/windows" class="btn btn-sm"
+             style="background:#F0FDF4;color:#0F766E;border:1px solid #0F766E40;text-decoration:none;padding:8px 16px;font-weight:600">⬇ Windows .exe</a>
+          <a href="/customers/{{ c.id }}/installer/macos" class="btn btn-sm"
+             style="background:#F0FDF4;color:#0F766E;border:1px solid #0F766E40;text-decoration:none;padding:8px 16px;font-weight:600">⬇ macOS .app</a>
+        </div>
+        <p style="font-size:12px;color:#9CA3AF;margin-top:8px">One-click installers have the server URL and token baked in — just send to the customer to double-click.</p>
+      </div>
+
+      <div style="margin-bottom:28px">
+        <div style="font-size:13px;font-weight:700;color:#374151;letter-spacing:.5px;margin-bottom:12px">PLAN &amp; LICENSE</div>
+        <div style="display:flex;gap:16px;flex-wrap:wrap">
+          <form method="post" action="/customers/upgrade" style="display:flex;align-items:center;gap:6px">
+            <input type="hidden" name="customer_id" value="{{ c.id }}">
+            <label style="font-size:13px;color:#6B7280">Plan</label>
+            <select name="tier" style="padding:5px 10px;font-size:13px;border:1px solid #E5E7EB;border-radius:5px">
+              <option value="standard" {% if c.tier != 'plus' %}selected{% endif %}>Standard</option>
+              <option value="plus" {% if c.tier == 'plus' %}selected{% endif %}>Pro</option>
+            </select>
+            <button type="submit" class="btn btn-sm" style="padding:5px 12px;font-size:12px">Save</button>
+          </form>
+          <form method="post" action="/customers/seats" style="display:flex;align-items:center;gap:6px">
+            <input type="hidden" name="customer_id" value="{{ c.id }}">
+            <label style="font-size:13px;color:#6B7280">Max seats</label>
+            <input type="number" name="max_seats" value="{{ c.max_seats }}" min="1" max="500"
+                   style="width:60px;padding:5px 8px;font-size:13px;border:1px solid #E5E7EB;border-radius:5px;text-align:center">
+            <button type="submit" class="btn btn-sm" style="padding:5px 12px;font-size:12px">Save</button>
+          </form>
+          <form method="post" action="/customers/renew" style="display:inline">
+            <input type="hidden" name="customer_id" value="{{ c.id }}">
+            <button type="submit" class="btn btn-sm" style="padding:5px 12px;font-size:12px;background:#EFF6FF;color:#4F46E5;border:1px solid #C7D2FE">Renew License</button>
+          </form>
+        </div>
+        <div style="display:flex;gap:16px;flex-wrap:wrap;margin-top:12px">
+          <form method="post" action="/customers/set-msp" style="display:inline">
+            <input type="hidden" name="customer_id" value="{{ c.id }}">
+            <input type="hidden" name="is_msp" value="{{ 0 if c.is_msp else 1 }}">
+            <button type="submit" class="btn btn-sm" style="font-size:12px;padding:4px 10px;{% if c.is_msp %}background:#EFF6FF;border:1px solid #BFDBFE;color:#1D4ED8{% else %}background:#F0FDF4;border:1px solid #BBF7D0;color:#15803D{% endif %}">
+              {{ 'Remove MSP' if c.is_msp else 'Mark as MSP' }}
+            </button>
+          </form>
+          <form method="post" action="/customers/set-reseller" style="display:inline">
+            <input type="hidden" name="customer_id" value="{{ c.id }}">
+            <input type="hidden" name="is_reseller" value="{{ 0 if c.is_reseller else 1 }}">
+            <button type="submit" class="btn btn-sm" style="font-size:12px;padding:4px 10px;background:#F9FAFB;border:1px solid #E5E7EB;color:#6B7280">
+              {{ 'Unmark reseller' if c.is_reseller else 'Mark as reseller MSP' }}
+            </button>
+          </form>
+        </div>
+      </div>
+
+      <div style="margin-bottom:28px">
+        <div style="font-size:13px;font-weight:700;color:#374151;letter-spacing:.5px;margin-bottom:12px">AGENT OPERATIONS</div>
+        <div style="display:flex;gap:10px;flex-wrap:wrap">
+          <button type="button" class="btn btn-sm"
+                  onclick="closeManage('{{ c.id }}');openRotate('{{ c.id }}','{{ c.name | replace("'","\\x27") }}')"
+                  style="background:#FEF2F2;color:#DC2626;border:1px solid #FECACA;padding:8px 14px;font-weight:600">Rotate Token</button>
+          {% if not c.service_suspended %}
+          <button type="button" class="btn btn-sm" id="repush-btn-{{ c.id }}"
+                  onclick="repushAgents('{{ c.id }}','{{ c.name | replace("'","\\x27") }}')"
+                  style="background:#ECFDF5;color:#059669;border:1px solid #A7F3D0;padding:8px 14px;font-weight:600">Push Agent Update</button>
+          {% endif %}
+        </div>
+      </div>
+
+      <div style="margin-bottom:8px">
+        <div style="font-size:13px;font-weight:700;color:#DC2626;letter-spacing:.5px;margin-bottom:12px">DANGER ZONE</div>
+        {% if c.service_suspended %}
+        <form method="post" action="/customers/resume-service" style="display:inline" onsubmit="return confirm('Resume all agents for {{ c.name }}?')">
+          <input type="hidden" name="customer_id" value="{{ c.id }}">
+          <button type="submit" class="btn btn-sm" style="background:#ECFDF5;color:#047857;border:1px solid #A7F3D0;padding:8px 14px;font-weight:600">Resume Agents</button>
+        </form>
+        {% else %}
+        <form method="post" action="/customers/suspend" style="display:inline" onsubmit="return confirm('Suspend all agents for {{ c.name }}? They will be blocked from reporting, polling, updating, and downloading releases until resumed.')">
+          <input type="hidden" name="customer_id" value="{{ c.id }}">
+          <button type="submit" class="btn btn-sm" style="background:#FEF2F2;color:#B91C1C;border:1px solid #FECACA;padding:8px 14px;font-weight:600">Suspend Agents</button>
+        </form>
+        {% endif %}
+        <form method="post" action="/customers/remove" style="display:inline;margin-left:10px" onsubmit="return confirm('Archive {{ c.name }}? Their container will be stopped but data is kept.')">
+          <input type="hidden" name="customer_id" value="{{ c.id }}">
+          <button type="submit" class="btn btn-sm" style="background:#FFFBEB;color:#B45309;border:1px solid #FDE68A;padding:8px 14px;font-weight:600">Archive Customer</button>
+        </form>
+      </div>
+
+      {% else %}
+
+      <div style="margin-bottom:20px">
+        <div style="font-size:13px;font-weight:700;color:#DC2626;letter-spacing:.5px;margin-bottom:12px">ARCHIVED CUSTOMER</div>
+        <div style="display:flex;gap:10px;flex-wrap:wrap">
+          <form method="post" action="/customers/restore" style="display:inline">
+            <input type="hidden" name="customer_id" value="{{ c.id }}">
+            <button type="submit" class="btn btn-sm" style="background:#EFF6FF;color:#4F46E5;border:1px solid #C7D2FE;padding:8px 16px;font-weight:600">Restore</button>
+          </form>
+          <form method="post" action="/customers/delete" style="display:inline" onsubmit="return confirm('Permanently delete {{ c.name }}? This cannot be undone.')">
+            <input type="hidden" name="customer_id" value="{{ c.id }}">
+            <button type="submit" class="btn btn-danger btn-sm" style="padding:8px 16px;font-weight:600">Delete Permanently</button>
+          </form>
+        </div>
+      </div>
+
+      {% endif %}
+
+      {% if c.port and c.active %}
+      <div style="margin-top:20px;padding-top:16px;border-top:1px solid #F3F4F6">
+        <a href="{{ c.dashboard_url }}" target="_blank" style="font-size:13px;color:#4F46E5;text-decoration:none">{{ c.dashboard_url }} &nearr;</a>
+      </div>
+      {% endif %}
+
+    </div>
+  </div>
+</div>
+{% endfor %}
+
 <style>
-.customer-table-wrap{overflow-x:auto;padding-bottom:4px}
-.customer-table{min-width:1735px;table-layout:fixed;word-break:normal}
-.customer-table th,.customer-table td{vertical-align:middle}
-.customer-dashboard-url{display:block;overflow-wrap:anywhere;word-break:normal}
-.customer-actions-list{display:flex;gap:6px;flex-wrap:wrap}
+.customer-table{width:100%;border-collapse:collapse;table-layout:auto}
+.customer-table th{text-align:left;padding:10px 14px;font-size:12px;color:#6B7280;font-weight:600;border-bottom:1px solid #E5E7EB;text-transform:uppercase;letter-spacing:.5px}
+.customer-table td{padding:12px 14px;border-bottom:1px solid #F3F4F6;font-size:14px;color:#111827}
+.customer-table tr:hover{background:#F9FAFB}
+.manage-modal{font-family:inherit}
 .dtab{background:none;border:none;border-bottom:2px solid transparent;color:#6B7280;font-family:inherit;font-size:14px;padding:13px 22px;cursor:pointer;transition:color .15s,border-color .15s;font-weight:500}
 .dtab:hover{color:#111827}
 .dtab.on{color:#4F46E5;border-bottom-color:#4F46E5}
@@ -451,6 +475,12 @@ Service:  arckon-agent  (systemd unit)</pre>
 </div>
 
 <script>
+function openManage(cid) {
+  document.getElementById('manageModal-' + cid).style.display = 'block';
+}
+function closeManage(cid) {
+  document.getElementById('manageModal-' + cid).style.display = 'none';
+}
 function openDeploy(cid, name, server, token) {
   var ip   = '{{ ip }}';
   var srv  = server || ('http://' + ip + ':80');
