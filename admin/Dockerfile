@@ -1,5 +1,10 @@
 FROM python:3.12-slim
 WORKDIR /app
+
+# nsis (makensis) compiles per-customer Windows .exe installers on the server;
+# zip packages the macOS .app bundle. Both are used by installer_gen.py.
+RUN apt-get update && apt-get install -y --no-install-recommends nsis zip && rm -rf /var/lib/apt/lists/*
+
 COPY admin/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 COPY admin/ .

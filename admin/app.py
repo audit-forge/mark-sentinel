@@ -11,7 +11,7 @@ import urllib.request
 from collections import defaultdict
 from datetime import datetime, date, timezone, timedelta
 from fastapi import FastAPI, Request, Form, HTTPException
-from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse, FileResponse
 from fastapi.templating import Jinja2Templates
 
 from db import init_db, get_conn
@@ -1097,6 +1097,56 @@ async def rotate_customer_token(request: Request):
         "expires_at": expires_at,
         "push_queued": push_count,
     })
+
+
+# ── Per-customer installer downloads ──────────────────────────────────────────
+
+@app.get("/customers/{customer_id}/installer/{platform}")
+async def download_customer_installer(request: Request, customer_id: str, platform: str):
+    """Generate and serve a double-clickable installer with the customer's
+    server URL and agent token baked in."""
+    try:
+        require_super_admin(request)
+    except HTTPException:
+        return RedirectResponse("/login")
+    if platform not in ("windows", "macos"):
+        raise HTTPException(status_code=404)
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT id, name, agent_token FROM customers WHERE id=?", (customer_id,)
+        ).fetchone()
+    if not row:
+        raise HTTPException(status_code=404)
+    agent_token = row["agent_token"] or ""
+    if not agent_token:
+        raise HTTPException(status_code=400, detail="No agent token set for this customer")
+    server_url = _sentinel_url(customer_id)
+    from installer_gen import generate_windows_installer, generate_macos_installer
+    output_dir = "/tmp/arckon-installers"
+    os.makedirs(output_dir, exist_ok=True)
+    try:
+        if platform == "windows":
+            installer_path = generate_windows_installer(
+                server_url, agent_token, row["name"],
+                "/installers/install.ps1", output_dir,
+            )
+            return FileResponse(
+                installer_path,
+                media_type="application/vnd.microsoft.portable-executable",
+                filename=f"ArckonAgentSetup-{customer_id}.exe",
+            )
+        else:
+            installer_path = generate_macos_installer(
+                server_url, agent_token, row["name"],
+                "/installers/install.sh", output_dir,
+            )
+            return FileResponse(
+                installer_path,
+                media_type="application/zip",
+                filename=f"ArckonInstaller-{customer_id}-macOS.zip",
+            )
+    except RuntimeError as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 # ── Agent update push ─────────────────────────────────────────────────────────
