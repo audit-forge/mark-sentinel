@@ -8097,6 +8097,48 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
   <div id="siem-cards" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(480px,1fr));gap:20px"></div>
   </div>
 
+  <div class="content-panel" style="background:#ffffff;border:1px solid #F3F4F6;border-radius:8px;padding:20px;margin-bottom:16px">
+    <div class="panel-sub-hdr" style="font-size:12px;color:#6B7280;font-weight:600;text-transform:uppercase;letter-spacing:.06em;margin-bottom:14px">Agent token</div>
+    <p style="font-size:13px;color:#6B7280;margin:0 0 14px">Paste this token into your agent&apos;s config file (<code style="font-size:12px;background:#F3F4F6;padding:1px 4px;border-radius:3px">SENTINEL_TOKEN</code>). Keep it secret — anyone with this token can submit reports to your account.</p>
+    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+      <input id="agent-token-display" type="password" readonly
+             style="flex:1;min-width:240px;max-width:480px;font-family:monospace;font-size:13px;
+                    background:#F9FAFB;border:1px solid #E5E7EB;border-radius:6px;padding:8px 12px;color:#111827"
+             value="" placeholder="Loading…">
+      <button class="scan-btn" onclick="toggleTokenVisibility()" id="token-show-btn"
+              style="white-space:nowrap">Show</button>
+      <button class="scan-btn" onclick="copyToken()"
+              style="white-space:nowrap;color:#4F46E5;border-color:#E5E7EB">Copy</button>
+    </div>
+    <div id="token-company" style="font-size:12px;color:#9CA3AF;margin-top:8px"></div>
+  </div>
+  <div class="content-panel" style="background:#ffffff;border:1px solid #F3F4F6;border-radius:8px;padding:20px;margin-bottom:16px">
+    <div class="panel-sub-hdr" style="font-size:12px;color:#6B7280;font-weight:600;text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px">One-click installers</div>
+    <p style="font-size:13px;color:#6B7280;margin:0 0 14px">Download an installer with your server URL and token already baked in. Just run it on the target device — no command prompt or copy-pasting needed.</p>
+    <div style="display:flex;gap:10px;flex-wrap:wrap">
+      <a href="/api/installer/windows" class="scan-btn" style="text-decoration:none;color:#0F766E;border-color:#0F766E40;white-space:nowrap;font-weight:600">⬇ Windows (.exe)</a>
+      <a href="/api/installer/macos" class="scan-btn" style="text-decoration:none;color:#0F766E;border-color:#0F766E40;white-space:nowrap;font-weight:600">⬇ macOS (.app)</a>
+    </div>
+    <p style="font-size:12px;color:#9CA3AF;margin-top:10px">Windows: double-click the .exe and accept the admin prompt. macOS: unzip and double-click the app, then enter your Mac password.</p>
+  </div>
+  <div class="content-panel" style="background:#ffffff;border:1px solid #F3F4F6;border-radius:8px;padding:20px;margin-bottom:16px">
+    <div class="panel-sub-hdr" style="font-size:12px;color:#6B7280;font-weight:600;text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px">Linux (curl install)</div>
+    <p style="font-size:13px;color:#6B7280;margin:0 0 14px">Run as <strong>root</strong> or with <code style="font-size:12px;background:#F3F4F6;padding:1px 4px;border-radius:3px">sudo</code> on any systemd-based Linux distro. No Python required — downloads a native binary.</p>
+    <div style="position:relative">
+      <pre id="linux-curl-cmd" style="background:#F9FAFB;border:1px solid #E5E7EB;border-radius:6px;padding:16px;padding-right:70px;font-size:12.5px;font-family:'Menlo','Consolas',monospace;color:#4F46E5;white-space:pre-wrap;word-break:break-all;line-height:1.6"></pre>
+      <button onclick="copyTextById('linux-curl-cmd',this)" style="position:absolute;top:10px;right:10px;background:#F9FAFB;border:1px solid #E5E7EB;color:#6B7280;font-size:12px;padding:4px 10px;border-radius:4px;cursor:pointer;font-family:inherit">Copy</button>
+    </div>
+  </div>
+  <div class="content-panel" style="background:#ffffff;border:1px solid #F3F4F6;border-radius:8px;padding:20px;margin-bottom:16px">
+    <div class="panel-sub-hdr" style="font-size:12px;color:#6B7280;font-weight:600;text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px">MDM / Jamf deployment script</div>
+    <p style="font-size:13px;color:#6B7280;margin:0 0 14px">For Jamf Pro, Kandji, or other MDM — deploy as a shell script policy or .pkg. The agent auto-starts on first boot.</p>
+    <div style="position:relative">
+      <pre id="mdm-cmd" style="background:#F9FAFB;border:1px solid #E5E7EB;border-radius:6px;padding:16px;padding-right:70px;font-size:12.5px;font-family:'Menlo','Consolas',monospace;color:#4F46E5;white-space:pre-wrap;word-break:break-all;line-height:1.6"></pre>
+      <button onclick="copyTextById('mdm-cmd',this)" style="position:absolute;top:10px;right:10px;background:#F9FAFB;border:1px solid #E5E7EB;color:#6B7280;font-size:12px;padding:4px 10px;border-radius:4px;cursor:pointer;font-family:inherit">Copy</button>
+    </div>
+  </div>
+  </div>
+
   <div class="page" id="page-reports">
   <div class="sec-hdr" style="margin-top:0;padding-top:0">Reports</div>
 
@@ -8246,46 +8288,6 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
         <button class="scan-btn" onclick="addUser()" style="color:#16A34A;border-color:#E5E7EB;white-space:nowrap">Add user</button>
       </div>
       <div id="users-msg" style="font-size:12px;margin-top:8px"></div>
-    </div>
-  </div>
-  <div class="content-panel" style="background:#ffffff;border:1px solid #F3F4F6;border-radius:8px;padding:20px;margin-bottom:16px">
-    <div class="panel-sub-hdr" style="font-size:12px;color:#6B7280;font-weight:600;text-transform:uppercase;letter-spacing:.06em;margin-bottom:14px">Agent token</div>
-    <p style="font-size:13px;color:#6B7280;margin:0 0 14px">Paste this token into your agent&apos;s config file (<code style="font-size:12px;background:#F3F4F6;padding:1px 4px;border-radius:3px">SENTINEL_TOKEN</code>). Keep it secret — anyone with this token can submit reports to your account.</p>
-    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-      <input id="agent-token-display" type="password" readonly
-             style="flex:1;min-width:240px;max-width:480px;font-family:monospace;font-size:13px;
-                    background:#F9FAFB;border:1px solid #E5E7EB;border-radius:6px;padding:8px 12px;color:#111827"
-             value="" placeholder="Loading…">
-      <button class="scan-btn" onclick="toggleTokenVisibility()" id="token-show-btn"
-              style="white-space:nowrap">Show</button>
-      <button class="scan-btn" onclick="copyToken()"
-              style="white-space:nowrap;color:#4F46E5;border-color:#E5E7EB">Copy</button>
-    </div>
-    <div id="token-company" style="font-size:12px;color:#9CA3AF;margin-top:8px"></div>
-  </div>
-  <div class="content-panel" style="background:#ffffff;border:1px solid #F3F4F6;border-radius:8px;padding:20px;margin-bottom:16px">
-    <div class="panel-sub-hdr" style="font-size:12px;color:#6B7280;font-weight:600;text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px">One-click installers</div>
-    <p style="font-size:13px;color:#6B7280;margin:0 0 14px">Download an installer with your server URL and token already baked in. Just run it on the target device — no command prompt or copy-pasting needed.</p>
-    <div style="display:flex;gap:10px;flex-wrap:wrap">
-      <a href="/api/installer/windows" class="scan-btn" style="text-decoration:none;color:#0F766E;border-color:#0F766E40;white-space:nowrap;font-weight:600">⬇ Windows (.exe)</a>
-      <a href="/api/installer/macos" class="scan-btn" style="text-decoration:none;color:#0F766E;border-color:#0F766E40;white-space:nowrap;font-weight:600">⬇ macOS (.app)</a>
-    </div>
-    <p style="font-size:12px;color:#9CA3AF;margin-top:10px">Windows: double-click the .exe and accept the admin prompt. macOS: unzip and double-click the app, then enter your Mac password.</p>
-  </div>
-  <div class="content-panel" style="background:#ffffff;border:1px solid #F3F4F6;border-radius:8px;padding:20px;margin-bottom:16px">
-    <div class="panel-sub-hdr" style="font-size:12px;color:#6B7280;font-weight:600;text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px">Linux (curl install)</div>
-    <p style="font-size:13px;color:#6B7280;margin:0 0 14px">Run as <strong>root</strong> or with <code style="font-size:12px;background:#F3F4F6;padding:1px 4px;border-radius:3px">sudo</code> on any systemd-based Linux distro. No Python required — downloads a native binary.</p>
-    <div style="position:relative">
-      <pre id="linux-curl-cmd" style="background:#F9FAFB;border:1px solid #E5E7EB;border-radius:6px;padding:16px;padding-right:70px;font-size:12.5px;font-family:'Menlo','Consolas',monospace;color:#4F46E5;white-space:pre-wrap;word-break:break-all;line-height:1.6"></pre>
-      <button onclick="copyTextById('linux-curl-cmd',this)" style="position:absolute;top:10px;right:10px;background:#F9FAFB;border:1px solid #E5E7EB;color:#6B7280;font-size:12px;padding:4px 10px;border-radius:4px;cursor:pointer;font-family:inherit">Copy</button>
-    </div>
-  </div>
-  <div class="content-panel" style="background:#ffffff;border:1px solid #F3F4F6;border-radius:8px;padding:20px;margin-bottom:16px">
-    <div class="panel-sub-hdr" style="font-size:12px;color:#6B7280;font-weight:600;text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px">MDM / Jamf deployment script</div>
-    <p style="font-size:13px;color:#6B7280;margin:0 0 14px">For Jamf Pro, Kandji, or other MDM — deploy as a shell script policy or .pkg. The agent auto-starts on first boot.</p>
-    <div style="position:relative">
-      <pre id="mdm-cmd" style="background:#F9FAFB;border:1px solid #E5E7EB;border-radius:6px;padding:16px;padding-right:70px;font-size:12.5px;font-family:'Menlo','Consolas',monospace;color:#4F46E5;white-space:pre-wrap;word-break:break-all;line-height:1.6"></pre>
-      <button onclick="copyTextById('mdm-cmd',this)" style="position:absolute;top:10px;right:10px;background:#F9FAFB;border:1px solid #E5E7EB;color:#6B7280;font-size:12px;padding:4px 10px;border-radius:4px;cursor:pointer;font-family:inherit">Copy</button>
     </div>
   </div>
   </div>
