@@ -1104,11 +1104,19 @@ async def rotate_customer_token(request: Request):
 @app.get("/customers/{customer_id}/installer/{platform}")
 async def download_customer_installer(request: Request, customer_id: str, platform: str):
     """Generate and serve a double-clickable installer with the customer's
-    server URL and agent token baked in."""
+    server URL and agent token baked in.
+
+    Accessible to super_admin (any customer) and customer_admin (their own
+    customer_id only) so customers can download from the dashboard without
+    an admin login."""
     try:
-        require_super_admin(request)
+        user = get_current_user(request)
     except HTTPException:
         return RedirectResponse("/login")
+    is_super = user.get("role") == "super_admin"
+    is_self = user.get("role") == "customer_admin" and user.get("customer_id") == customer_id
+    if not (is_super or is_self):
+        raise HTTPException(status_code=403)
     if platform not in ("windows", "macos"):
         raise HTTPException(status_code=404)
     with get_conn() as conn:

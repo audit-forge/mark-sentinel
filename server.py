@@ -1583,6 +1583,8 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self._api_customers_me()
         elif path == '/api/verify' or path.startswith('/api/verify?'):
             self._api_verify_signature()
+        elif path.startswith('/api/installer/'):
+            self._api_installer_download(path[len('/api/installer/'):])
         else:
             self._not_found()
 
@@ -2057,6 +2059,46 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             with urllib.request.urlopen(req, timeout=5) as resp:
                 data = resp.read()
                 self._send(resp.status, data, 'application/json')
+        except urllib.error.HTTPError as e:
+            self._send(e.code, e.read(), 'application/json')
+        except Exception as ex:
+            self._json({'error': str(ex)}, 502)
+
+    def _api_installer_download(self, platform: str) -> None:
+        """Proxy the per-customer installer download to the admin panel.
+
+        The customer is authenticated by their session cookie (forwarded to
+        the admin), so they can download their own installer without an admin
+        login. The admin enforces that customer_admins can only get their own
+        customer_id's installer."""
+        import urllib.request
+        import urllib.error
+        me = self._session_user()
+        if not me:
+            self._json({'error': 'unauthorized'}, 401)
+            return
+        if platform not in ('windows', 'macos'):
+            self._not_found()
+            return
+        customer_id = me.get('customer_id', '')
+        if not customer_id:
+            self._json({'error': 'no customer context'}, 403)
+            return
+        admin_path = f'/customers/{customer_id}/installer/{platform}'
+        url = self._admin_panel_url() + admin_path
+        cookie = self.headers.get('Cookie', '')
+        try:
+            req = urllib.request.Request(url, method='GET', headers={'Cookie': cookie})
+            with urllib.request.urlopen(req, timeout=120) as resp:
+                data = resp.read()
+                ctype = resp.headers.get('Content-Type', 'application/octet-stream')
+                cd = resp.headers.get('Content-Disposition', '')
+                self.send_response(200)
+                self.send_header('Content-Type', ctype)
+                self.send_header('Content-Disposition', cd)
+                self.send_header('Content-Length', str(len(data)))
+                self.end_headers()
+                self.wfile.write(data)
         except urllib.error.HTTPError as e:
             self._send(e.code, e.read(), 'application/json')
         except Exception as ex:
@@ -7690,6 +7732,14 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
     <div id="ai-sessions-by-tool" style="display:flex;flex-direction:column;gap:4px">
       <div style="color:#9CA3AF;font-size:13px;padding:8px 0">Loading…</div>
     </div>
+    <div style="font-size:12px;font-weight:600;color:#374151;text-transform:uppercase;letter-spacing:.05em;margin:16px 0 8px">Monthly Usage</div>
+    <div id="ai-sessions-by-month" style="display:flex;flex-direction:column;gap:4px">
+      <div style="color:#9CA3AF;font-size:13px;padding:8px 0">Loading…</div>
+    </div>
+    <div style="font-size:12px;font-weight:600;color:#374151;text-transform:uppercase;letter-spacing:.05em;margin:16px 0 8px">Usage by Device</div>
+    <div id="ai-sessions-by-device" style="display:flex;flex-direction:column;gap:6px">
+      <div style="color:#9CA3AF;font-size:13px;padding:8px 0">Loading…</div>
+    </div>
   </div>
 
   <div style="margin-bottom:20px">
@@ -8212,6 +8262,15 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
               style="white-space:nowrap;color:#4F46E5;border-color:#E5E7EB">Copy</button>
     </div>
     <div id="token-company" style="font-size:12px;color:#9CA3AF;margin-top:8px"></div>
+  </div>
+  <div class="content-panel" style="background:#ffffff;border:1px solid #F3F4F6;border-radius:8px;padding:20px;margin-bottom:16px">
+    <div class="panel-sub-hdr" style="font-size:12px;color:#6B7280;font-weight:600;text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px">One-click installers</div>
+    <p style="font-size:13px;color:#6B7280;margin:0 0 14px">Download an installer with your server URL and token already baked in. Just run it on the target device — no command prompt or copy-pasting needed.</p>
+    <div style="display:flex;gap:10px;flex-wrap:wrap">
+      <a href="/api/installer/windows" class="scan-btn" style="text-decoration:none;color:#0F766E;border-color:#0F766E40;white-space:nowrap;font-weight:600">⬇ Windows (.exe)</a>
+      <a href="/api/installer/macos" class="scan-btn" style="text-decoration:none;color:#0F766E;border-color:#0F766E40;white-space:nowrap;font-weight:600">⬇ macOS (.app)</a>
+    </div>
+    <p style="font-size:12px;color:#9CA3AF;margin-top:10px">Windows: double-click the .exe and accept the admin prompt. macOS: unzip and double-click the app, then enter your Mac password.</p>
   </div>
   </div>
 
@@ -9737,6 +9796,57 @@ async function loadAiSessions(days) {{
           '</div>' +
           '<div style="width:80px;text-align:right;color:#374151;font-weight:600">' + dur + '</div>' +
           '<div style="width:60px;text-align:right;color:#6B7280">' + (t.session_count||0) + ' sessions</div>' +
+        '</div>';
+      }}).join('');
+    }}
+
+    // Daily session data is retained by the API; group it so long periods do
+    // not collapse into one lifetime total.
+    const monthDiv = document.getElementById('ai-sessions-by-month');
+    const months = Object.values((data.by_date || []).reduce((items, day) => {{
+      const month = (day.period_date || '').slice(0, 7);
+      if (!month) return items;
+      const item = items[month] || (items[month] = {{ month, total_seconds: 0, session_count: 0 }});
+      item.total_seconds += day.total_seconds || 0;
+      item.session_count += day.session_count || 0;
+      return items;
+    }}, {{}})).sort((a, b) => b.month.localeCompare(a.month));
+    if (!months.length) {{
+      monthDiv.innerHTML = '<div style="color:#9CA3AF;font-size:13px;padding:8px 0">No monthly usage data yet.</div>';
+    }} else {{
+      const maxSec = Math.max(...months.map(m => m.total_seconds), 1);
+      monthDiv.innerHTML = months.map(m => {{
+        const hours = Math.floor(m.total_seconds / 3600);
+        const minutes = Math.floor((m.total_seconds % 3600) / 60);
+        const duration = hours > 0 ? hours + 'h ' + minutes + 'm' : minutes + 'm';
+        const label = new Date(m.month + '-01T00:00:00Z').toLocaleString(undefined, {{ month: 'short', year: 'numeric', timeZone: 'UTC' }});
+        return '<div style="display:flex;align-items:center;gap:8px;font-size:12px">' +
+          '<div style="width:120px;color:#374151;font-weight:500">' + label + '</div>' +
+          '<div style="flex:1;background:#F3F4F6;border-radius:4px;height:20px;overflow:hidden">' +
+            '<div style="width:' + Math.round((m.total_seconds / maxSec) * 100) + '%;height:100%;background:linear-gradient(90deg,#16A34A,#4F46E5);border-radius:4px"></div>' +
+          '</div>' +
+          '<div style="width:80px;text-align:right;color:#374151;font-weight:600">' + duration + '</div>' +
+          '<div style="width:60px;text-align:right;color:#6B7280">' + m.session_count + ' sessions</div>' +
+        '</div>';
+      }}).join('');
+    }}
+
+    const deviceDiv = document.getElementById('ai-sessions-by-device');
+    const byDevice = data.by_device || [];
+    if (!byDevice.length) {{
+      deviceDiv.innerHTML = '<div style="color:#9CA3AF;font-size:13px;padding:8px 0">No device usage data yet.</div>';
+    }} else {{
+      deviceDiv.innerHTML = byDevice.map(d => {{
+        const secs = d.total_seconds || 0;
+        const h = Math.floor(secs / 3600);
+        const m = Math.floor((secs % 3600) / 60);
+        const dur = h > 0 ? h + 'h ' + m + 'm' : m + 'm';
+        const tools = (d.tools || []).join(', ');
+        return '<div style="display:flex;align-items:center;gap:12px;padding:9px 10px;border:1px solid #E5E7EB;border-radius:6px;font-size:12px;flex-wrap:wrap">' +
+          '<div style="min-width:180px;flex:1"><div style="font-weight:600;color:#111827">' + (d.hostname || d.device_id || 'Unknown device') + '</div>' +
+          '<div style="color:#6B7280;margin-top:2px">' + tools + '</div></div>' +
+          '<div style="text-align:right"><div style="font-weight:600;color:#16A34A">' + dur + '</div>' +
+          '<div style="color:#6B7280;margin-top:2px">' + (d.session_count || 0) + ' sessions</div></div>' +
         '</div>';
       }}).join('');
     }}
