@@ -8272,6 +8272,22 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
     </div>
     <p style="font-size:12px;color:#9CA3AF;margin-top:10px">Windows: double-click the .exe and accept the admin prompt. macOS: unzip and double-click the app, then enter your Mac password.</p>
   </div>
+  <div class="content-panel" style="background:#ffffff;border:1px solid #F3F4F6;border-radius:8px;padding:20px;margin-bottom:16px">
+    <div class="panel-sub-hdr" style="font-size:12px;color:#6B7280;font-weight:600;text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px">Linux (curl install)</div>
+    <p style="font-size:13px;color:#6B7280;margin:0 0 14px">Run as <strong>root</strong> or with <code style="font-size:12px;background:#F3F4F6;padding:1px 4px;border-radius:3px">sudo</code> on any systemd-based Linux distro. No Python required — downloads a native binary.</p>
+    <div style="position:relative">
+      <pre id="linux-curl-cmd" style="background:#F9FAFB;border:1px solid #E5E7EB;border-radius:6px;padding:16px;padding-right:70px;font-size:12.5px;font-family:'Menlo','Consolas',monospace;color:#4F46E5;white-space:pre-wrap;word-break:break-all;line-height:1.6"></pre>
+      <button onclick="copyTextById('linux-curl-cmd',this)" style="position:absolute;top:10px;right:10px;background:#F9FAFB;border:1px solid #E5E7EB;color:#6B7280;font-size:12px;padding:4px 10px;border-radius:4px;cursor:pointer;font-family:inherit">Copy</button>
+    </div>
+  </div>
+  <div class="content-panel" style="background:#ffffff;border:1px solid #F3F4F6;border-radius:8px;padding:20px;margin-bottom:16px">
+    <div class="panel-sub-hdr" style="font-size:12px;color:#6B7280;font-weight:600;text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px">MDM / Jamf deployment script</div>
+    <p style="font-size:13px;color:#6B7280;margin:0 0 14px">For Jamf Pro, Kandji, or other MDM — deploy as a shell script policy or .pkg. The agent auto-starts on first boot.</p>
+    <div style="position:relative">
+      <pre id="mdm-cmd" style="background:#F9FAFB;border:1px solid #E5E7EB;border-radius:6px;padding:16px;padding-right:70px;font-size:12.5px;font-family:'Menlo','Consolas',monospace;color:#4F46E5;white-space:pre-wrap;word-break:break-all;line-height:1.6"></pre>
+      <button onclick="copyTextById('mdm-cmd',this)" style="position:absolute;top:10px;right:10px;background:#F9FAFB;border:1px solid #E5E7EB;color:#6B7280;font-size:12px;padding:4px 10px;border-radius:4px;cursor:pointer;font-family:inherit">Copy</button>
+    </div>
+  </div>
   </div>
 
 </div>
@@ -10334,7 +10350,25 @@ async function loadCustomerInfo() {{
     const lbl = document.getElementById('token-company');
     if (inp) inp.value = d.agent_token || '';
     if (lbl) lbl.textContent = 'Company: ' + (d.name || '');
+    var srv = window.location.origin;
+    var tok = (inp && inp.value) ? inp.value : 'TOKEN';
+    var base = srv;
+    var linuxCmd = document.getElementById('linux-curl-cmd');
+    if (linuxCmd) linuxCmd.textContent = 'curl -fsSL ' + base + '/install/install.sh | sudo bash -s -- --server ' + srv + ' --token ' + tok;
+    var mdmCmd = document.getElementById('mdm-cmd');
+    if (mdmCmd) mdmCmd.textContent = '#!/bin/bash\\n# Arckon Agent MDM/Jamf deployment script\\ncurl -fsSL ' + base + '/install/install.sh | bash -s -- --server ' + srv + ' --token ' + tok + ' --target /';
   }} catch(e) {{}}
+}}
+
+function copyTextById(id, btn) {{
+  var el = document.getElementById(id);
+  if (!el) return;
+  var text = el.textContent || el.innerText;
+  navigator.clipboard.writeText(text).then(function() {{
+    var orig = btn.textContent;
+    btn.textContent = 'Copied!';
+    setTimeout(function() {{ btn.textContent = orig; }}, 1500);
+  }});
 }}
 
 let _tokenVisible = false;
