@@ -820,7 +820,7 @@ async def add_customer(
                     (str(uuid.uuid4()), email, hash_password(temp_password),
                      "customer_admin", cid, datetime.now(timezone.utc).isoformat())
                 )
-                login_url = f"{PUBLIC_ADMIN_URL}/login"
+                login_url = PUBLIC_DASHBOARD_URL or _sentinel_url(cid)
                 from mailer import send_welcome_email
                 send_welcome_email(email, customer_name.strip(), login_url, temp_password,
                                    dashboard_url=PUBLIC_DASHBOARD_URL or _sentinel_url(cid))
