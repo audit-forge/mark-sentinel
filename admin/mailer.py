@@ -138,8 +138,7 @@ You'll find everything you need there:
   - MDM / Jamf:            Copy a shell script for Jamf Pro, Kandji, or other
     MDM platforms to deploy across your fleet.
 
-{"Your dashboard: " + dashboard_url : ""
-}
+{f"Your dashboard: {dashboard_url}" if dashboard_url else ""}
 If you have any questions, contact your account administrator.
 
 — RiskRaven
