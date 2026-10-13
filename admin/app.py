@@ -822,7 +822,8 @@ async def add_customer(
                 )
                 login_url = f"{PUBLIC_ADMIN_URL}/login"
                 from mailer import send_welcome_email
-                send_welcome_email(email, customer_name.strip(), login_url, temp_password)
+                send_welcome_email(email, customer_name.strip(), login_url, temp_password,
+                                   dashboard_url=PUBLIC_DASHBOARD_URL or _sentinel_url(cid))
     if not _lifecycle_request("provision", _customer_lifecycle_payload(
         cid, customer_name.strip(), tier, expires, max_seats, port, agent_token, baseline_profile
     )):

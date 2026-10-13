@@ -113,7 +113,8 @@ If you did not request this, you can safely ignore this email.
     return _send(to, subject, body_text, body_html)
 
 
-def send_welcome_email(to: str, customer_name: str, login_url: str, temp_password: str) -> bool:
+def send_welcome_email(to: str, customer_name: str, login_url: str, temp_password: str,
+                       dashboard_url: str = "") -> bool:
     subject = "[RiskRaven Arckon] Your account is ready"
     body_text = f"""Welcome to RiskRaven Arckon, {customer_name}!
 
@@ -125,10 +126,25 @@ Password:   {temp_password}
 
 Please change your password immediately after your first login.
 
+DEPLOYING AGENTS
+After signing in, go to Settings to deploy the Arckon agent to your devices.
+You'll find everything you need there:
+
+  - One-click installers:  Download a Windows .exe or macOS .app with your
+    server URL and token already baked in. Just send the file to each device
+    and double-click — no command prompt needed.
+  - Linux (curl install):  Copy and paste a single curl command into any
+    systemd-based Linux terminal (root or sudo).
+  - MDM / Jamf:            Copy a shell script for Jamf Pro, Kandji, or other
+    MDM platforms to deploy across your fleet.
+
+{"Your dashboard: " + dashboard_url : ""
+}
 If you have any questions, contact your account administrator.
 
 — RiskRaven
 """
+    dashboard_line = f'Your dashboard: <a href="{dashboard_url}" style="color:#f5a623;text-decoration:none;font-weight:600">{dashboard_url}</a>' if dashboard_url else ""
     body_html = f"""
 <div style="font-family:'Segoe UI',system-ui,sans-serif;background:#f0f4ff;padding:40px 0;min-height:100vh">
   <div style="max-width:520px;margin:0 auto;background:#ffffff;border-radius:12px;overflow:hidden;border:1px solid #ccd3e8;box-shadow:0 4px 24px rgba(26,47,90,0.12)">
@@ -143,7 +159,7 @@ If you have any questions, contact your account administrator.
     <div style="padding:32px">
       <div style="font-size:20px;font-weight:700;color:#0a1428;margin-bottom:8px">Your account is ready</div>
       <div style="font-size:15px;color:#1e3060;margin-bottom:24px">Welcome, {customer_name}. Sign in with the credentials below.</div>
-      <div style="background:#f7f9ff;border:1px solid #ccd3e8;border-radius:8px;padding:20px;margin-bottom:24px">
+      <div style="background:#f7f9ff;border:1px solid #ccd3e8;border-radius:8px;padding:20px;margin-bottom:20px">
         <div style="margin-bottom:12px">
           <div style="font-size:12px;font-weight:700;color:#1e3060;text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">Login URL</div>
           <a href="{login_url}" style="font-size:14px;color:#f5a623;text-decoration:none;font-weight:600">{login_url}</a>
@@ -156,6 +172,18 @@ If you have any questions, contact your account administrator.
           <div style="font-size:12px;font-weight:700;color:#1e3060;text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">Temporary Password</div>
           <div style="font-size:16px;color:#0a1428;font-family:monospace;font-weight:700;letter-spacing:2px">{temp_password}</div>
         </div>
+      </div>
+      <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:18px;margin-bottom:20px">
+        <div style="font-size:14px;font-weight:700;color:#065f46;margin-bottom:10px">Deploying agents to your devices</div>
+        <div style="font-size:13px;color:#15803d;line-height:1.7">
+          After signing in, go to <strong>Settings</strong> to find everything you need:
+        </div>
+        <ul style="font-size:13px;color:#15803d;line-height:1.8;margin:10px 0 0 0;padding-left:20px">
+          <li><strong>One-click installers</strong> — Download a Windows .exe or macOS .app with your server and token baked in. Just double-click on the target device.</li>
+          <li><strong>Linux (curl)</strong> — Copy a single command to paste into any Linux terminal.</li>
+          <li><strong>MDM / Jamf</strong> — Copy a shell script for Jamf Pro, Kandji, or other MDM fleet deployment.</li>
+        </ul>
+        {('<div style="margin-top:12px;font-size:13px;color:#15803d">Your dashboard: ' + dashboard_line + '</div>') if dashboard_url else ''}
       </div>
       <div style="background:#fff8e8;border:1px solid #f5a623;border-radius:8px;padding:14px;font-size:13px;color:#7a4800">
         <strong>Action required:</strong> Please change your password immediately after your first login.
