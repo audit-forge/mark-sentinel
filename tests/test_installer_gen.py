@@ -23,6 +23,7 @@ def test_nsi_template_bakes_in_server_token_and_customer_name():
     assert "Acme Corp" in nsi
     assert "RequestExecutionLevel admin" in nsi
     assert "install.ps1" in nsi
+    assert "!include" in nsi and "LogicLib.nsh" in nsi
 
 
 def test_safe_strips_quotes_and_backslashes():

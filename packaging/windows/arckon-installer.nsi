@@ -8,6 +8,8 @@
 ; Build: makensis /DSERVER="https://..." /DTOKEN="..." /DCUSTOMER_NAME="..." arckon-installer.nsi
 ;   (the admin app generates the .nsi with these values inlined)
 
+!include "LogicLib.nsh"
+
 !ifndef SERVER
   !error "SERVER must be defined (e.g. /DSERVER=https://arckon.riskraven.ai)"
 !endif
