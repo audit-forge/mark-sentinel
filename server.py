@@ -8376,7 +8376,7 @@ function navTo(page) {{
   if (b) b.classList.add('sb-active');
   document.getElementById('main').scrollTop = 0;
   history.replaceState(null, '', '#' + page);
-  if (page === 'settings') {{ loadLiveScanConfig(); loadBranding(); }}
+  if (page === 'settings') {{ loadLiveScanConfig(); loadBranding(); loadCustomerInfo(); }}
   if (page === 'siem') {{ loadSiemConfig(); loadPsaClientOrgs(); loadPsaConfig(); }}
   if (page === 'users') {{ loadUsers(); loadCustomerInfo(); }}
   if (page === 'alerts') {{ loadActiveIssues(); loadAlertEvents(); }}
