@@ -913,7 +913,7 @@ class AgentStore:
 
     def is_known_device(self, device_id: str) -> bool:
         with self._lock, self._conn() as conn:
-            summary_row = conn.execute(
+            row = conn.execute(
                 "SELECT 1 FROM devices WHERE device_id = ? LIMIT 1", (device_id,)
             ).fetchone()
         return row is not None

@@ -433,6 +433,22 @@ def test_identity_headers_with_wrong_proxy_capability_are_ignored(wired):
     assert h._proxy_session_user() is None
 
 
+def test_proxy_capability_can_be_loaded_from_a_secret_file(wired, monkeypatch, tmp_path):
+    token_file = tmp_path / "proxy-token"
+    token_file.write_text("test-proxy-token\n", encoding="utf-8")
+    monkeypatch.delenv("SENTINEL_TRUSTED_PROXY_TOKEN")
+    monkeypatch.setenv("SENTINEL_TRUSTED_PROXY_TOKEN_FILE", str(token_file))
+    h = wired._Handler.__new__(wired._Handler)
+    h.headers = {
+        "X-Sentinel-Proxy-Token": "test-proxy-token",
+        "X-Sentinel-User-Email": "admin@acme.test",
+        "X-Sentinel-User-Role": "admin",
+        "X-Sentinel-Customer-ID": "acme",
+    }
+
+    assert h._proxy_session_user()["email"] == "admin@acme.test"
+
+
 def test_trusted_proxy_does_not_fallback_to_a_stale_customer_cookie(wired, monkeypatch):
     h = wired._Handler.__new__(wired._Handler)
     h.headers = {}

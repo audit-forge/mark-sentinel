@@ -480,6 +480,21 @@ def _get_cookie(headers, name: str) -> str:
             return v.strip()
     return ''
 
+
+def _trusted_proxy_token() -> str:
+    """Load the capability that proves identity headers came from nginx."""
+    token = os.environ.get('SENTINEL_TRUSTED_PROXY_TOKEN', '')
+    if token:
+        return token
+    token_file = os.environ.get('SENTINEL_TRUSTED_PROXY_TOKEN_FILE', '')
+    if not token_file:
+        return ''
+    try:
+        return Path(token_file).read_text(encoding='utf-8').strip()
+    except OSError:
+        return ''
+
+
 # ── per-device report rate limiting ──────────────────────────────────────────
 _report_last_seen: dict[str, float] = {}
 _report_lock = threading.Lock()
@@ -1218,7 +1233,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
     # ── auth helpers ──────────────────────────────────────────────────────────
 
     def _proxy_session_user(self) -> dict | None:
-        proxy_token = os.environ.get('SENTINEL_TRUSTED_PROXY_TOKEN', '')
+        proxy_token = _trusted_proxy_token()
         supplied_token = self.headers.get('X-Sentinel-Proxy-Token', '')
         # A marker alone is not proof that nginx authenticated this request:
         # callers could reach the backend directly if ingress is misconfigured.
@@ -1252,7 +1267,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             return proxy
         # Behind the trusted proxy, the admin-domain JWT is the only dashboard
         # session authority. Do not revive a stale host-only legacy session after logout.
-        if os.environ.get('SENTINEL_TRUSTED_PROXY_TOKEN'):
+        if _trusted_proxy_token():
             return None
         token = _get_session_cookie(self.headers)
         return _get_registry().get_session(token) if token else None
@@ -1944,7 +1959,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         self.send_response(302)
         self.send_header('Set-Cookie',
             'sentinel_session=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0')
-        if os.environ.get('SENTINEL_TRUSTED_PROXY_TOKEN'):
+        if _trusted_proxy_token():
             # Cloud mode: the shared dashboard JWT belongs to the admin app.
             # Send logout there so it clears the .riskraven.ai cookie.
             logout_url = os.environ.get('SENTINEL_ADMIN_LOGOUT_URL', '')
