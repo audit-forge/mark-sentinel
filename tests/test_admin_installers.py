@@ -9,7 +9,7 @@ def test_public_installer_prefers_canonical_root_script():
     dockerfile = (ROOT / 'admin' / 'Dockerfile').read_text(encoding='utf-8')
 
     assert '[f"/installers/{filename}"]' in source
-    assert 'COPY install.sh install.ps1 /installers/' in dockerfile
+    assert 'COPY install.sh install.ps1 uninstall.ps1 /installers/' in dockerfile
 
 
 def test_customer_installer_accepts_legacy_admin_role_with_tenant_scope():
@@ -42,3 +42,12 @@ def test_windows_installer_falls_back_to_a_system_startup_task_without_nssm():
     assert 'New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount' in installer
     assert 'Start-ScheduledTask -TaskName $ServiceName' in installer
     assert "& '$PythonExe' '$InstallDir\\agent.py' --daemon --config '$ConfigFile'" in installer
+
+
+def test_windows_uninstaller_removes_current_agent_paths_and_task_fallback():
+    uninstaller = (ROOT / 'uninstall.ps1').read_text(encoding='utf-8-sig')
+
+    assert 'C:\\Program Files\\Arckon' in uninstaller
+    assert 'C:\\ProgramData\\Arckon' in uninstaller
+    assert 'Unregister-ScheduledTask -TaskName $ServiceName' in uninstaller
+    assert 'Unregister-ScheduledTask -TaskName "ArckonRepairWatchdog"' in uninstaller

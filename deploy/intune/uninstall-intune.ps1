@@ -23,6 +23,7 @@ if ($svc) {
 
 # Remove the repair watchdog scheduled task
 Unregister-ScheduledTask -TaskName "ArckonRepairWatchdog" -Confirm:$false -ErrorAction SilentlyContinue
+Unregister-ScheduledTask -TaskName $ServiceName -Confirm:$false -ErrorAction SilentlyContinue
 
 # Remove install directory
 if (Test-Path $InstallDir) {

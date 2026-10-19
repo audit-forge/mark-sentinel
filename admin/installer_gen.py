@@ -54,11 +54,29 @@ Section "Install Arckon Agent"
   RMDir "$TEMP\\arckon-install"
 
   ${If} $0 == 0
+    SetOutPath "$INSTDIR"
+    File "uninstall.ps1"
+    WriteUninstaller "$INSTDIR\\Uninstall Arckon Agent.exe"
+    WriteRegStr HKLM "Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\ArckonAgent" "DisplayName" "Arckon Agent"
+    WriteRegStr HKLM "Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\ArckonAgent" "DisplayVersion" "1.0"
+    WriteRegStr HKLM "Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\ArckonAgent" "Publisher" "RiskRaven"
+    WriteRegStr HKLM "Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\ArckonAgent" "UninstallString" "$\\\"$INSTDIR\\Uninstall Arckon Agent.exe$\\\""
     MessageBox MB_OK "Arckon Agent installed successfully.$\\r$\\n$\\r$\\nThe service is running in the background."
   ${Else}
     MessageBox MB_OK|MB_ICONSTOP "Installation failed (exit code $0).$\\r$\\n$\\r$\\nPlease contact your IT administrator or RiskRaven support."
     SetErrorLevel $0
   ${EndIf}
+SectionEnd
+
+Section "Uninstall"
+  SetOutPath "$TEMP\\arckon-uninstall"
+  File "uninstall.ps1"
+  nsExec::ExecToLog 'powershell.exe -ExecutionPolicy Bypass -NoProfile -NonInteractive -File "$TEMP\\arckon-uninstall\\uninstall.ps1" -Force'
+  Pop $0
+  DeleteRegKey HKLM "Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\ArckonAgent"
+  Delete "$TEMP\\arckon-uninstall\\uninstall.ps1"
+  RMDir "$TEMP\\arckon-uninstall"
+  RMDir /r "$INSTDIR"
 SectionEnd
 """
 
@@ -141,6 +159,10 @@ def generate_windows_installer(
             f.write(nsi)
 
         shutil.copy2(install_ps1_path, os.path.join(work, "install.ps1"))
+        uninstall_ps1_path = os.path.join(os.path.dirname(install_ps1_path), "uninstall.ps1")
+        if not os.path.isfile(uninstall_ps1_path):
+            raise RuntimeError("uninstall.ps1 is missing from the installer directory")
+        shutil.copy2(uninstall_ps1_path, os.path.join(work, "uninstall.ps1"))
 
         result = subprocess.run(
             ["makensis", nsi_path],

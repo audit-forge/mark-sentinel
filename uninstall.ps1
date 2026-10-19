@@ -4,18 +4,18 @@
     RiskRaven Arckon Agent - Windows Uninstaller
 
 .DESCRIPTION
-    Stops and removes the Sentinel Windows Service, then deletes the install
-    directory (C:\Program Files\Sentinel) and config directory (C:\ProgramData\Sentinel).
+    Stops and removes the Arckon background service or scheduled-task fallback,
+    then deletes its configuration, logs, binaries, and repair watchdog.
 #>
 [CmdletBinding()]
-param()
+param([switch]$Force)
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-$InstallDir  = "C:\Program Files\Sentinel"
-$ConfigDir   = "C:\ProgramData\Sentinel"
-$ServiceName = "SentinelAgent"
+$InstallDir  = "C:\Program Files\Arckon"
+$ConfigDir   = "C:\ProgramData\Arckon"
+$ServiceName = "ArckonAgent"
 
 Write-Host ""
 Write-Host "RiskRaven Arckon Agent - Windows Uninstaller" -ForegroundColor White
@@ -27,41 +27,41 @@ Write-Host "  $ConfigDir"
 Write-Host "  Windows Service: $ServiceName"
 Write-Host ""
 
-$confirm = Read-Host "Are you sure? [y/N]"
-if ($confirm -notmatch '^[Yy]$') {
-    Write-Host "Aborted." -ForegroundColor Yellow
-    exit 0
+if (-not $Force) {
+    $confirm = Read-Host "Are you sure? [y/N]"
+    if ($confirm -notmatch '^[Yy]$') {
+        Write-Host "Aborted." -ForegroundColor Yellow
+        exit 0
+    }
 }
 
 # -- Stop and remove service ---------------------------------------------------
 
-$nssmCmd = Get-Command "nssm" -ErrorAction SilentlyContinue; $nssmPath = if ($nssmCmd) { $nssmCmd.Source } else { $null }
 $existingSvc = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
 
 if ($existingSvc) {
     Write-Host "  Stopping service '$ServiceName' ..." -ForegroundColor Cyan
-
-    if ($nssmPath) {
-        & nssm stop $ServiceName 2>$null
+    if ($existingSvc.Status -eq "Running") {
+        Stop-Service -Name $ServiceName -Force -ErrorAction SilentlyContinue
         Start-Sleep -Seconds 2
-        & nssm remove $ServiceName confirm 2>$null
-        Write-Host "  [OK] Service removed via NSSM" -ForegroundColor Green
-    } else {
-        if ($existingSvc.Status -eq "Running") {
-            Stop-Service -Name $ServiceName -Force -ErrorAction SilentlyContinue
-            Start-Sleep -Seconds 2
-        }
-        sc.exe delete $ServiceName | Out-Null
-        Write-Host "  [OK] Service removed via sc.exe" -ForegroundColor Green
     }
+    sc.exe delete $ServiceName | Out-Null
+    Write-Host "  [OK] Service removed" -ForegroundColor Green
 } else {
     Write-Host "  Service '$ServiceName' not found, skipping." -ForegroundColor DarkGray
 }
 
+# The installer falls back to this task when NSSM is blocked by EDR or a proxy.
+Unregister-ScheduledTask -TaskName $ServiceName -Confirm:$false -ErrorAction SilentlyContinue
+Unregister-ScheduledTask -TaskName "ArckonRepairWatchdog" -Confirm:$false -ErrorAction SilentlyContinue
+Write-Host "  [OK] Scheduled tasks removed" -ForegroundColor Green
+
 # -- Remove directories --------------------------------------------------------
 
 if (Test-Path $InstallDir) {
-    Remove-Item -Path $InstallDir -Recurse -Force
+    # The NSIS uninstaller executable can still be running from this directory.
+    # Ignore its locked file; NSIS removes it after this script exits.
+    Remove-Item -Path $InstallDir -Recurse -Force -ErrorAction SilentlyContinue
     Write-Host "  [OK] Removed $InstallDir" -ForegroundColor Green
 } else {
     Write-Host "  $InstallDir not found, skipping." -ForegroundColor DarkGray
