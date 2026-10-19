@@ -49,8 +49,8 @@ def test_windows_uninstaller_removes_current_agent_paths_and_task_fallback():
 
     assert 'C:\\Program Files\\Arckon' in uninstaller
     assert 'C:\\ProgramData\\Arckon' in uninstaller
-    assert 'Unregister-ScheduledTask -TaskName $ServiceName' in uninstaller
-    assert 'Unregister-ScheduledTask -TaskName "ArckonRepairWatchdog"' in uninstaller
+    assert 'foreach ($taskName in @($ServiceName, $WatchdogTask))' in uninstaller
+    assert 'param([switch]$Force)' in uninstaller
 
 
 def test_current_windows_uninstaller_is_available_to_existing_agents():

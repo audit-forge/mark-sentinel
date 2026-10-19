@@ -12,7 +12,7 @@
     .\uninstall.ps1
 #>
 [CmdletBinding()]
-param()
+param([switch]$Force)
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
@@ -31,16 +31,18 @@ Write-Host "This will remove:"
 Write-Host "  $InstallDir"
 Write-Host "  $ConfigDir"
 Write-Host "  Windows Service: $ServiceName"
-Write-Host "  Scheduled Task:  $WatchdogTask"
+Write-Host "  Scheduled Tasks: $ServiceName, $WatchdogTask"
 if (Get-Service -Name $LegacyService -ErrorAction SilentlyContinue) {
     Write-Host "  Legacy Service:  $LegacyService (will also be removed)" -ForegroundColor DarkYellow
 }
 Write-Host ""
 
-$confirm = Read-Host "Are you sure? [y/N]"
-if ($confirm -notmatch '^[Yy]$') {
-    Write-Host "Aborted." -ForegroundColor Yellow
-    exit 0
+if (-not $Force) {
+    $confirm = Read-Host "Are you sure? [y/N]"
+    if ($confirm -notmatch '^[Yy]$') {
+        Write-Host "Aborted." -ForegroundColor Yellow
+        exit 0
+    }
 }
 
 # -- Stop and remove services --------------------------------------------------
@@ -66,21 +68,23 @@ foreach ($svc in @($ServiceName, $LegacyService)) {
     Write-Host "  [OK] Service '$svc' removed" -ForegroundColor Green
 }
 
-# -- Remove repair watchdog scheduled task --------------------------------------
+# -- Remove scheduled-task fallback and repair watchdog -------------------------
 
-$task = Get-ScheduledTask -TaskName $WatchdogTask -ErrorAction SilentlyContinue
-if ($task) {
-    Write-Host "  Removing scheduled task '$WatchdogTask' ..." -ForegroundColor Cyan
-    Unregister-ScheduledTask -TaskName $WatchdogTask -Confirm:$false
-    Write-Host "  [OK] Scheduled task removed" -ForegroundColor Green
-} else {
-    Write-Host "  Scheduled task '$WatchdogTask' not found, skipping." -ForegroundColor DarkGray
+foreach ($taskName in @($ServiceName, $WatchdogTask)) {
+    $task = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+    if ($task) {
+        Write-Host "  Removing scheduled task '$taskName' ..." -ForegroundColor Cyan
+        Unregister-ScheduledTask -TaskName $taskName -Confirm:$false
+        Write-Host "  [OK] Scheduled task removed" -ForegroundColor Green
+    }
 }
 
 # -- Remove directories --------------------------------------------------------
 
 if (Test-Path $InstallDir) {
-    Remove-Item -Path $InstallDir -Recurse -Force
+    # The NSIS uninstaller executable can still be running from this directory.
+    # Ignore its locked file; NSIS removes it after this script exits.
+    Remove-Item -Path $InstallDir -Recurse -Force -ErrorAction SilentlyContinue
     Write-Host "  [OK] Removed $InstallDir" -ForegroundColor Green
 } else {
     Write-Host "  $InstallDir not found, skipping." -ForegroundColor DarkGray
