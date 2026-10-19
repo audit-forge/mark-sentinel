@@ -51,8 +51,9 @@ fi
 
 echo "Restarting ${CONTAINER_NAME}..."
 
-docker stop "$CONTAINER_NAME" 2>/dev/null || true
-docker rm   "$CONTAINER_NAME" 2>/dev/null || true
+# --restart=always may revive a container after `docker stop`; force removal
+# makes the replacement atomic from the caller's perspective.
+docker rm -f "$CONTAINER_NAME" 2>/dev/null || true
 
 docker run -d \
   --name "$CONTAINER_NAME" \

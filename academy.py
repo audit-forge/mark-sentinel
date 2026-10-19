@@ -28,6 +28,7 @@ SECTIONS = [
     ("settings", "Settings"),
     ("alerts", "Alerts & Notifications"),
     ("protected-files", "Protected Files Monitoring"),
+    ("protected-cloud-assets", "Protected Cloud Assets"),
     ("siem-tools", "SIEM & Tool Integrations"),
     ("ai-spend", "AI Spend"),
     ("catalog", "Check Catalog"),
@@ -1306,6 +1307,98 @@ def build(root: pathlib.Path, page: str | None = None) -> bytes:
         "</table>"
     )
 
+    protected_cloud_assets = (
+        "<p><b>Protected Cloud Assets</b> alerts when a configured cloud audit source reports "
+        "access to an explicitly protected S3 bucket, Azure Blob container, Google Cloud Storage "
+        "bucket, or Google Workspace Drive file. Arckon stores normalized access metadata, not "
+        "file contents or raw provider audit logs.</p>"
+
+        "<h3>How alerts work</h3>"
+        "<ol>"
+        "<li>An administrator adds a narrow resource policy in <b>Protected Cloud Assets</b>.</li>"
+        "<li>A customer-managed forwarder reads the provider's audit events and sends matching "
+        "metadata to the tenant's authenticated Arckon endpoint.</li>"
+        "<li>Arckon matches the event to the policy, records it in a tamper-evident audit chain, "
+        "and sends a CRITICAL <code>PROTECTED-CLOUD-ASSET-ACCESS</code> alert.</li>"
+        "</ol>"
+
+        "<p><b>Who accessed the asset:</b> Arckon displays the identity in the provider's audit "
+        "event, not the delegated administrator or service account used to collect logs. If a "
+        "person accesses Drive directly, their Workspace account is shown. If automation accesses "
+        "it using a service identity, that service identity is shown. Shared credentials cannot be "
+        "attributed to an individual beyond what the provider records.</p>"
+
+        "<div style='background:#fff7ed;border:1px solid #fed7aa;border-radius:6px;padding:12px 14px;margin:14px 0'>"
+        "<b>Timing:</b> protected endpoint files can be observed at the operating-system level. "
+        "Cloud assets depend on the provider publishing an audit event and the forwarder polling or "
+        "receiving it. Arckon polls every 30 seconds, but Google publishes audit events on a "
+        "variable asynchronous schedule. Do not represent this as instantaneous prevention or a "
+        "guaranteed sub-minute alert."
+        "</div>"
+
+        "<h3>Add a cloud policy</h3>"
+        "<ol>"
+        "<li>Open <b>Protected Cloud Assets</b> and select <b>Add Cloud Policy</b>.</li>"
+        "<li>Select the provider and enter an explicit scope. Wildcards, console URLs, ARNs, and "
+        "bare IDs are rejected.</li>"
+        "<li>Add the optional account, subscription, project, or Workspace domain to prevent an "
+        "event from another environment matching.</li>"
+        "<li>Leave <b>AI only</b> off to alert on both person and automated access. Turn it on only "
+        "when human access should be excluded.</li>"
+        "<li>Save the policy, then select <b>Show Cloud Ingest Token</b>. Store that token in the "
+        "customer's secret manager; it authenticates the forwarder to this tenant only.</li>"
+        "</ol>"
+
+        "<table style='width:100%;border-collapse:collapse;font-size:13px'>"
+        "<tr style='background:#f3f4f6'><th style='padding:8px;text-align:left;border:1px solid #e5e7eb'>Provider</th>"
+        "<th style='padding:8px;text-align:left;border:1px solid #e5e7eb'>Scope to enter</th>"
+        "<th style='padding:8px;text-align:left;border:1px solid #e5e7eb'>Audit source</th></tr>"
+        "<tr><td style='padding:8px;border:1px solid #e5e7eb'>AWS S3</td><td style='padding:8px;border:1px solid #e5e7eb'><code>s3://bucket/prefix</code></td><td style='padding:8px;border:1px solid #e5e7eb'>CloudTrail S3 data events</td></tr>"
+        "<tr><td style='padding:8px;border:1px solid #e5e7eb'>Azure Blob</td><td style='padding:8px;border:1px solid #e5e7eb'><code>azure://storage-account/container/prefix</code></td><td style='padding:8px;border:1px solid #e5e7eb'>Storage diagnostic data-plane logs</td></tr>"
+        "<tr><td style='padding:8px;border:1px solid #e5e7eb'>GCP Cloud Storage</td><td style='padding:8px;border:1px solid #e5e7eb'><code>gs://bucket/prefix</code></td><td style='padding:8px;border:1px solid #e5e7eb'>Cloud Audit Logs Data Access</td></tr>"
+        "<tr><td style='padding:8px;border:1px solid #e5e7eb'>Google Workspace Drive</td><td style='padding:8px;border:1px solid #e5e7eb'><code>gworkspace://DOCUMENT_ID</code></td><td style='padding:8px;border:1px solid #e5e7eb'>Admin SDK Reports API Drive audit log</td></tr>"
+        "</table>"
+
+        "<h3>Google Workspace Drive setup</h3>"
+        "<p>Use this procedure for Google Docs, Sheets, Slides, and Drive files. It requires a "
+        "customer-owned Google Cloud project and a Google Workspace Super Admin.</p>"
+        "<ol>"
+        "<li>Open the Drive document. Copy the ID between <code>/d/</code> and the next "
+        "<code>/</code> in its URL, then create the policy as "
+        "<code>gworkspace://DOCUMENT_ID</code>.</li>"
+        "<li>In the customer Google Cloud project, enable the <b>Admin SDK API</b> and create a "
+        "dedicated service account with domain-wide delegation enabled.</li>"
+        "<li>In Google Admin Console, go to <b>Security</b> &gt; <b>Access and data control</b> "
+        "&gt; <b>API controls</b> &gt; <b>Manage Domain Wide Delegation</b>. Add the service "
+        "account's numeric OAuth client ID and authorize only "
+        "<code>https://www.googleapis.com/auth/admin.reports.audit.readonly</code>.</li>"
+        "<li>Run the bundled <code>gworkspace_drive_forwarder.py</code> in the customer "
+        "environment every 30 seconds. Use <code>--arckon-token-file</code>, not a token in the "
+        "command line.</li>"
+        "<li>Access the protected document, wait for the provider audit event and one forwarder "
+        "poll, then confirm the Cloud Access Event and CRITICAL alert in Arckon.</li>"
+        "</ol>"
+
+        "<p><b>Folder policies:</b> the bundled Drive forwarder sends individual document IDs. "
+        "A folder policy such as <code>gworkspace://Protected/Financial</code> requires a "
+        "customer-managed enrichment step that supplies the normalized folder path for every "
+        "audit event.</p>"
+
+        "<h3>Troubleshooting</h3>"
+        "<ul>"
+        "<li><b>Policy exists but no cloud event:</b> verify the provider audit source and the "
+        "forwarder are running. A policy alone does not observe cloud access.</li>"
+        "<li><b>Drive forwarder returns 403:</b> confirm the numeric client ID and exact "
+        "audit-read scope in Domain Wide Delegation, then allow for Google authorization propagation.</li>"
+        "<li><b>Drive forwarder returns 401:</b> replace the per-tenant Arckon ingest-token file.</li>"
+        "<li><b>Event appears but no notification:</b> verify the protected-cloud-asset alert "
+        "trigger and a notification channel under <b>Settings</b>.</li>"
+        "</ul>"
+
+        "<p>For the complete deployment command, secret storage requirements, and ownership "
+        "model, see <code>docs/GOOGLE_WORKSPACE_DRIVE_FORWARDER.md</code> in the Arckon release.</p>"
+    )
+
     siem_tools = (
         "<p>The <b>SIEM &amp; Tool Integrations</b> tab connects Arckon to your security stack. "
         "Each integration has its own card. Enable it, fill in the required fields, click <b>Test</b>, then click <b>Save</b>. "
@@ -1750,6 +1843,7 @@ def build(root: pathlib.Path, page: str | None = None) -> bytes:
         'settings': settings,
         'alerts': alerts,
         'protected-files': protected_files,
+        'protected-cloud-assets': protected_cloud_assets,
         'siem-tools': siem_tools,
         'ai-spend': ai_spend,
         'catalog': catalog_html,

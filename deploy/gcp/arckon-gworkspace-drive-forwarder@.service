@@ -1,0 +1,10 @@
+[Unit]
+Description=Arckon Google Workspace Drive audit forwarder for %i
+After=docker.service network-online.target
+Requires=docker.service
+ConditionPathExists=/etc/arckon-drive-forwarder/%i.env
+
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/arckon-drive-forwarder/%i.env
+ExecStart=/usr/bin/docker run --rm --name arckon-drive-audit-forwarder-%i --network sentinel-net --read-only --tmpfs /tmp --cap-drop ALL --security-opt no-new-privileges --memory 256m --cpus 0.25 -v /opt/sentinel-secrets/%i/drive-forwarder-service-account.json:/run/secrets/service-account.json:ro -v /opt/sentinel-secrets/%i/drive-forwarder-ingest-token:/run/secrets/arckon-ingest-token:ro -v /opt/sentinel-data/%i/drive-forwarder-state:/var/lib/arckon-drive-forwarder:rw arckon-drive-audit-forwarder:latest --service-account-key /run/secrets/service-account.json --admin-email ${ADMIN_EMAIL} --arckon-url http://sentinel-%i:7331 --arckon-token-file /run/secrets/arckon-ingest-token --domain ${WORKSPACE_DOMAIN} --state-file /var/lib/arckon-drive-forwarder/state

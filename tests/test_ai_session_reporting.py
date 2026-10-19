@@ -66,14 +66,26 @@ def test_ai_session_summary_merges_overlapping_device_intervals(tmp_path):
     store = AgentStore(str(tmp_path / 'agents.db'))
     today = store._days_ago_iso(0)
     sessions = [
-        {'device_id': 'device-a', 'tool_name': 'OpenCode', 'start_ts': 100, 'end_ts': 200,
+        {'device_id': 'device-a', 'hostname': 'workstation-a', 'tool_name': 'OpenCode', 'start_ts': 100, 'end_ts': 200,
          'duration_seconds': 100, 'period_date': today},
-        {'device_id': 'device-a', 'tool_name': 'Ollama', 'start_ts': 150, 'end_ts': 250,
+        {'device_id': 'device-a', 'hostname': 'workstation-a', 'tool_name': 'Ollama', 'start_ts': 150, 'end_ts': 250,
          'duration_seconds': 100, 'period_date': today},
-        {'device_id': 'device-a', 'tool_name': 'Claude Code', 'start_ts': 300, 'end_ts': 350,
+        {'device_id': 'device-a', 'hostname': 'workstation-a', 'tool_name': 'Claude Code', 'start_ts': 300, 'end_ts': 350,
          'duration_seconds': 50, 'period_date': today},
     ]
     store.upsert_ai_sessions(sessions)
     summary = store.get_ai_sessions_summary(days=1)
     assert summary['session_count'] == 3
     assert summary['total_seconds'] == 200
+    assert summary['by_device'] == [{
+        'device_id': 'device-a',
+        'hostname': 'workstation-a',
+        'session_count': 3,
+        'total_seconds': 250,
+        'tools': ['OpenCode', 'Ollama', 'Claude Code'],
+        'tool_usage': [
+            {'device_id': 'device-a', 'tool_name': 'Ollama', 'session_count': 1, 'total_seconds': 100},
+            {'device_id': 'device-a', 'tool_name': 'OpenCode', 'session_count': 1, 'total_seconds': 100},
+            {'device_id': 'device-a', 'tool_name': 'Claude Code', 'session_count': 1, 'total_seconds': 50},
+        ],
+    }]

@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from alerts import (is_valid_gchat_webhook, is_valid_slack_webhook,
-                    is_valid_teams_webhook, is_valid_url, load_alert_config,
+                    is_valid_teams_webhook, is_valid_url, fire_cloud_asset_alert, load_alert_config,
                     load_alert_config_for_ui, save_alert_config, send_test_alert)
 
 
@@ -27,6 +27,19 @@ class TestLoadAlertConfig(unittest.TestCase):
             self.assertEqual(cfg['webhook_url'], 'https://example.com')
         finally:
             os.unlink(name)
+
+
+class TestProtectedCloudAlerts(unittest.TestCase):
+    @patch('alerts._dispatch', return_value=[])
+    def test_includes_provider_access_time(self, dispatch):
+        fire_cloud_asset_alert({
+            'provider': 'gworkspace', 'resource': 'gworkspace://document-id',
+            'actor': 'user@example.com', 'action': 'read',
+            'accessed_at': '2026-10-13T20:19:00.000Z',
+        }, {})
+
+        title = dispatch.call_args.args[1]['title']
+        self.assertIn('at 2026-10-13T20:19:00.000Z', title)
 
 
 class TestSlackWebhookConfig(unittest.TestCase):

@@ -769,7 +769,7 @@ class AgentStore:
     def get_device(self, device_id: str) -> dict | None:
         """Return device metadata row or None."""
         with self._lock, self._conn() as conn:
-            row = conn.execute(
+            summary_row = conn.execute(
                 "SELECT * FROM devices WHERE device_id = ?", (device_id,)
             ).fetchone()
         return dict(row) if row else None
@@ -866,7 +866,9 @@ class AgentStore:
                         'check_id':   check_id,
                         'title':      f.get('title', ''),
                         'severity':   f.get('severity', '').upper(),
-                        'description': f.get('description', ''),
+                        'details':    f.get('details', ''),
+                        'evidence':   f.get('evidence', []),
+                        'remediation': f.get('remediation', ''),
                         'override_action': ov_action,
                         'override_note':   ov.get('note', ''),
                         'override_by':     ov.get('created_by', ''),
@@ -911,7 +913,7 @@ class AgentStore:
 
     def is_known_device(self, device_id: str) -> bool:
         with self._lock, self._conn() as conn:
-            row = conn.execute(
+            summary_row = conn.execute(
                 "SELECT 1 FROM devices WHERE device_id = ? LIMIT 1", (device_id,)
             ).fetchone()
         return row is not None
@@ -1919,7 +1921,7 @@ class AgentStore:
         """Return rolled-up AI session data for the last N days."""
         cutoff = self._days_ago_iso(days)
         with self._lock, self._conn() as conn:
-            row = conn.execute(
+            summary_row = conn.execute(
                 """SELECT COUNT(*) as session_count,
                           COUNT(DISTINCT tool_name) as tool_count,
                           COUNT(DISTINCT device_id) as device_count
@@ -1948,6 +1950,25 @@ class AgentStore:
                    GROUP BY period_date ORDER BY period_date ASC""",
                 (cutoff,),
             ).fetchall()
+            by_device = conn.execute(
+                """SELECT device_id,
+                          MAX(hostname) as hostname,
+                          COUNT(*) as session_count,
+                          SUM(duration_seconds) as total_seconds,
+                          GROUP_CONCAT(DISTINCT tool_name) as tools
+                   FROM ai_sessions WHERE period_date >= ?
+                   GROUP BY device_id ORDER BY total_seconds DESC""",
+                (cutoff,),
+            ).fetchall()
+            device_tools = conn.execute(
+                """SELECT device_id, tool_name,
+                          COUNT(*) as session_count,
+                          SUM(duration_seconds) as total_seconds
+                   FROM ai_sessions WHERE period_date >= ?
+                   GROUP BY device_id, tool_name
+                   ORDER BY device_id, total_seconds DESC, tool_name ASC""",
+                (cutoff,),
+            ).fetchall()
         # Multiple AI tools may run concurrently on one device. The headline
         # figure is elapsed AI-use time, so merge overlapping intervals rather
         # than summing process runtimes.
@@ -1965,14 +1986,25 @@ class AgentStore:
                 total_seconds += max(0, interval_end - interval_start)
                 interval_start, interval_end = start_ts, end_ts
         total_seconds += max(0, interval_end - interval_start)
+        tool_usage_by_device: dict[str, list[dict]] = {}
+        for item in device_tools:
+            row = dict(item)
+            tool_usage_by_device.setdefault(row['device_id'], []).append(row)
+        device_summary = []
+        for item in by_device:
+            device = dict(item)
+            device['tools'] = (device['tools'] or '').split(',') if device['tools'] else []
+            device['tool_usage'] = tool_usage_by_device.get(device['device_id'], [])
+            device_summary.append(device)
 
         return {
-            'session_count': row[0],
+            'session_count': summary_row[0],
             'total_seconds': total_seconds,
-            'tool_count': row[1],
-            'device_count': row[2],
+            'tool_count': summary_row[1],
+            'device_count': summary_row[2],
             'by_tool': [dict(r) for r in by_tool],
             'by_date': [dict(r) for r in by_date],
+            'by_device': device_summary,
         }
 
     def upsert_mcp_server(self, reporter_device_id: str, reporter_hostname: str,

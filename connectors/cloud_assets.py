@@ -87,6 +87,7 @@ def normalize_cloudtrail_s3_event(payload: dict[str, Any]) -> dict[str, Any] | N
         'actor_type': detect_actor_type(actor),
         'action': action, 'event_name': name,
         'event_id': str(event.get('eventID', ''))[:256],
+        'accessed_at': str(event.get('eventTime', ''))[:64],
         'source_ip': source_ip, 'device_name': device_name,
         'resource_tags': event.get('arckonResourceTags', {}) if isinstance(
             event.get('arckonResourceTags', {}), dict) else {},
@@ -125,6 +126,7 @@ def normalize_gcp_storage_event(payload: dict[str, Any]) -> dict[str, Any] | Non
         'actor_type': detect_actor_type(str(auth.get('principalEmail') or 'unknown')),
         'action': action, 'event_name': method,
         'event_id': str(payload.get('insertId', ''))[:256],
+        'accessed_at': str(payload.get('timestamp', proto.get('timestamp', '')))[:64],
         'source_ip': source_ip, 'device_name': device_name,
         'resource_tags': payload.get('arckonResourceLabels', {}) if isinstance(
             payload.get('arckonResourceLabels', {}), dict) else {},
@@ -163,6 +165,7 @@ def normalize_azure_blob_event(payload: dict[str, Any]) -> dict[str, Any] | None
         'actor_type': detect_actor_type(str(record.get('identity') or record.get('caller') or '')),
         'action': action, 'event_name': operation[:256],
         'event_id': str(record.get('correlationId') or record.get('eventId') or '')[:256],
+        'accessed_at': str(record.get('time') or record.get('timeGenerated') or record.get('eventTime') or '')[:64],
         'source_ip': source_ip, 'device_name': device_name,
         'resource_tags': record.get('arckonResourceTags', {}) if isinstance(
             record.get('arckonResourceTags', {}), dict) else {},
@@ -197,7 +200,7 @@ def normalize_google_workspace_drive_event(payload: dict[str, Any]) -> dict[str,
         return None
     # Map Drive audit event names to canonical actions
     action = (
-        'read' if name in ('view', 'download', 'preview') else
+        'read' if name in ('view', 'download', 'preview', 'access_item_content') else
         'write' if name in ('edit', 'create', 'upload', 'rename', 'move',
                             'add_to_folder', 'change_document_visibility',
                             'share', 'change_user_access') else
@@ -218,7 +221,8 @@ def normalize_google_workspace_drive_event(payload: dict[str, Any]) -> dict[str,
     doc_title = str(fields.get('doc_title', '')).strip()
     if not doc_id or '\x00' in doc_id:
         return None
-    # Actor is at the top level of the activity, not inside the inner event
+    # This is the identity recorded by Google for the access, not the delegated
+    # administrator used by the forwarder to read the Reports API.
     top_actor = payload.get('actor', {}) if isinstance(payload, dict) else {}
     actor_email = str(top_actor.get('email', ''))[:512] if isinstance(top_actor, dict) else ''
     if not actor_email:
@@ -231,12 +235,13 @@ def normalize_google_workspace_drive_event(payload: dict[str, Any]) -> dict[str,
     domain = str(payload.get('arckonDomain', ''))[:128]
     # Event ID: use arckonEventId if supplied, else the Reports API id.time
     event_id = str(payload.get('arckonEventId', '')).strip()
+    top_id = payload.get('id', {})
     if not event_id:
-        top_id = payload.get('id', {})
         if isinstance(top_id, dict):
             event_id = str(top_id.get('time', ''))
         else:
             event_id = str(top_id)
+    accessed_at = str(top_id.get('time', ''))[:64] if isinstance(top_id, dict) else ''
     # Device name: the forwarder can enrich events with the device hostname
     # (e.g., by correlating the source IP with the endpoint inventory).
     device_name = str(payload.get('arckonDeviceName', ''))[:128]
@@ -247,6 +252,7 @@ def normalize_google_workspace_drive_event(payload: dict[str, Any]) -> dict[str,
         'actor_type': detect_actor_type(actor_email),
         'action': action, 'event_name': name,
         'event_id': event_id[:256],
+        'accessed_at': accessed_at,
         'source_ip': '', 'device_name': device_name,
         'resource_tags': payload.get('arckonResourceTags', {}) if isinstance(
             payload.get('arckonResourceTags', {}), dict) else {},

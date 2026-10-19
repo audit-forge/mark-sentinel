@@ -30,6 +30,7 @@ def test_normalizes_s3_object_metadata_without_contents():
         'resource': 's3://records/payroll/2026.csv',
         'actor': 'arn:aws:sts::123456789012:assumed-role/ai/worker',
         'action': 'read', 'event_name': 'GetObject', 'event_id': 'evt-1',
+        'accessed_at': '',
         'resource_tags': {}, 'actor_type': 'ai', 'device_name': '', 'source_ip': '',
     }
 
@@ -91,7 +92,8 @@ def test_normalizes_azure_blob_diagnostic_event():
 
 def test_normalizes_google_workspace_drive_audit_event():
     event = normalize_google_workspace_drive_event({
-        'id': {'time': '2026-09-06T12:00:00.000Z'}, 'arckonDomain': 'company.com',
+        'id': {'time': '2026-09-06T12:00:00.000Z'}, 'arckonEventId': 'forwarded-event-1',
+        'arckonDomain': 'company.com',
         'actor': {'email': 'user@company.com'},
         'events': [{'name': 'view', 'parameters': [
             {'name': 'doc_id', 'value': '1aB2cD'},
@@ -103,6 +105,19 @@ def test_normalizes_google_workspace_drive_audit_event():
     assert event['action'] == 'read'
     assert event['actor'] == 'user@company.com'
     assert event['account_id'] == 'company.com'
+    assert event['accessed_at'] == '2026-09-06T12:00:00.000Z'
+
+
+def test_normalizes_google_workspace_content_access_as_read():
+    event = normalize_google_workspace_drive_event({
+        'arckonDomain': 'company.com', 'actor': {'email': 'user@company.com'},
+        'events': [{'name': 'access_item_content', 'parameters': [
+            {'name': 'doc_id', 'value': '1aB2cD'},
+        ]}],
+    })
+
+    assert event is not None
+    assert event['action'] == 'read'
 
 
 def test_google_workspace_policy_matches_folder_prefix():

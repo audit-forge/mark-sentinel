@@ -499,6 +499,7 @@ def fire_cloud_asset_alert(event: dict, alert_cfg: dict, store=None) -> None:
     account = event.get('account_id', '')
     device_name = event.get('device_name', '')
     source_ip = event.get('source_ip', '')
+    accessed_at = str(event.get('accessed_at', '')).strip()
     # Build a device label that shows the actor's email + device name + IP
     # so the alert recipient can immediately see who accessed the asset and
     # from which machine.
@@ -516,6 +517,8 @@ def fire_cloud_asset_alert(event: dict, alert_cfg: dict, store=None) -> None:
         title += f" on {device_name}"
     elif source_ip:
         title += f" from {source_ip}"
+    if accessed_at:
+        title += f" at {accessed_at}"
     payload = {
         'event': 'protected_cloud_asset_access', 'severity': 'CRITICAL',
         'device': device_label, 'host': account, 'service': actor,

@@ -19,6 +19,18 @@ Open **Home** in Arckon and review the summary cards first.
 
 The Home page refreshes automatically. After **Scan All**, it refreshes at approximately 15, 30, and 60 seconds. A scan can take longer than a refresh cycle; the Profile column changes after the device uploads a completed report.
 
+## Protected Cloud Assets
+
+Protected Cloud Assets records authenticated cloud audit metadata for the
+specific buckets, containers, prefixes, and Drive files configured in the
+dashboard. Adding a policy does not by itself grant Arckon access to a cloud
+provider or create alerts. A customer-managed audit forwarder must send the
+provider's audit events to Arckon.
+
+For Google Docs and Drive files, follow the complete [Google Workspace Drive
+audit forwarding setup](GOOGLE_WORKSPACE_DRIVE_FORWARDER.md) before relying on
+protected-asset alerts.
+
 ## Understanding Devices
 
 The device table is grouped by scan type.

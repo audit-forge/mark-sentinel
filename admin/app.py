@@ -1104,7 +1104,7 @@ async def rotate_customer_token(request: Request):
 
 @app.get("/customers/{customer_id}/installer/{platform}")
 async def download_customer_installer(request: Request, customer_id: str, platform: str):
-    """Generate and serve a double-clickable installer with the customer's
+    """Generate and serve a Windows installer with the customer's
     server URL and agent token baked in.
 
     Accessible to super_admin (any customer) and customer_admin (their own
@@ -1115,10 +1115,12 @@ async def download_customer_installer(request: Request, customer_id: str, platfo
     except HTTPException:
         return RedirectResponse("/login")
     is_super = user.get("role") == "super_admin"
-    is_self = user.get("role") == "customer_admin" and user.get("customer_id") == customer_id
+    # Dashboard sessions created before the role migration still identify a
+    # tenant administrator as `admin`; retain the same tenant-only scope.
+    is_self = user.get("role") in ("customer_admin", "admin") and user.get("customer_id") == customer_id
     if not (is_super or is_self):
         raise HTTPException(status_code=403)
-    if platform not in ("windows", "macos"):
+    if platform != "windows":
         raise HTTPException(status_code=404)
     with get_conn() as conn:
         row = conn.execute(
@@ -1130,30 +1132,19 @@ async def download_customer_installer(request: Request, customer_id: str, platfo
     if not agent_token:
         raise HTTPException(status_code=400, detail="No agent token set for this customer")
     server_url = _sentinel_url(customer_id)
-    from installer_gen import generate_windows_installer, generate_macos_installer
+    from installer_gen import generate_windows_installer
     output_dir = "/tmp/arckon-installers"
     os.makedirs(output_dir, exist_ok=True)
     try:
-        if platform == "windows":
-            installer_path = generate_windows_installer(
-                server_url, agent_token, row["name"],
-                "/installers/install.ps1", output_dir,
-            )
-            return FileResponse(
-                installer_path,
-                media_type="application/vnd.microsoft.portable-executable",
-                filename=f"ArckonAgentSetup-{customer_id}.exe",
-            )
-        else:
-            installer_path = generate_macos_installer(
-                server_url, agent_token, row["name"],
-                "/installers/install.sh", output_dir,
-            )
-            return FileResponse(
-                installer_path,
-                media_type="application/zip",
-                filename=f"ArckonInstaller-{customer_id}-macOS.zip",
-            )
+        installer_path = generate_windows_installer(
+            server_url, agent_token, row["name"],
+            "/installers/install.ps1", output_dir,
+        )
+        return FileResponse(
+            installer_path,
+            media_type="application/vnd.microsoft.portable-executable",
+            filename=f"ArckonAgentSetup-{customer_id}.exe",
+        )
     except RuntimeError as e:
         raise HTTPException(status_code=500, detail=str(e))
 

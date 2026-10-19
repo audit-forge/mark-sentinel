@@ -2077,7 +2077,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         if not me:
             self._json({'error': 'unauthorized'}, 401)
             return
-        if platform not in ('windows', 'macos'):
+        if platform != 'windows':
             self._not_found()
             return
         customer_id = me.get('customer_id', '')
@@ -5349,7 +5349,35 @@ load();
         store = self._store()
         try:
             issues = store.get_active_critical_high_findings()
-            self._json({'issues': issues})
+            # Cloud access is event-driven rather than a scanner finding. Keep
+            # unreviewed CRITICAL access events visible beside active findings.
+            for event in store.get_alert_events(limit=300, unreviewed_only=True):
+                if event.get('event_type') != 'protected_cloud_asset_access':
+                    continue
+                issues.append({
+                    'alert_event_id': event['id'],
+                    'device_id': '',
+                    'hostname': event.get('host') or event.get('device') or 'Cloud asset',
+                    'last_seen': event.get('ts', 0),
+                    'check_id': event.get('check_id') or 'PROTECTED-CLOUD-ASSET-ACCESS',
+                    'title': event.get('title') or 'Protected cloud asset accessed',
+                    'severity': event.get('severity', 'CRITICAL').upper(),
+                    'details': 'This access event remains active until it is reviewed.',
+                    'evidence': [],
+                    'remediation': '',
+                })
+            issues.sort(key=lambda issue: (
+                0 if issue.get('severity') == 'CRITICAL' else 1,
+                -issue.get('last_seen', 0),
+            ))
+            # Gate remediation behind PRO tier — standard customers see full
+            # details and evidence but not the fix steps, matching the existing
+            # pattern in alerts.py for chat/PSA/webhook notifications.
+            has_remediation = _has_technical_reports()
+            if not has_remediation:
+                for iss in issues:
+                    iss['remediation'] = ''
+            self._json({'issues': issues, 'has_remediation': has_remediation})
         except Exception as e:
             self._json({'issues': [], 'error': str(e)})
 
@@ -5386,17 +5414,37 @@ load();
         except Exception as e:
             self._json({'error': str(e)}, 500)
             return
+        # Also include active issues (CRITICAL/HIGH findings from latest scans)
+        # so the CSV covers everything visible on the alerts page.
+        try:
+            active_issues = store.get_active_critical_high_findings()
+        except Exception:
+            active_issues = []
+        has_remediation = _has_technical_reports()
         buf = _io.StringIO()
         writer = csv.writer(buf)
-        writer.writerow(['ID', 'Timestamp', 'Type', 'Severity', 'Device',
-                         'Service', 'Host', 'Check ID', 'Title', 'Source',
+        writer.writerow(['Type', 'ID', 'Timestamp', 'Severity', 'Device',
+                         'Service', 'Host', 'Check ID', 'Title', 'Details',
+                         'Evidence', 'Remediation', 'Source',
                          'Channels', 'Reviewed'])
+        for iss in active_issues:
+            ts_str = time.strftime('%Y-%m-%d %H:%M:%S UTC', time.gmtime(iss['last_seen']))
+            evidence = '; '.join(iss.get('evidence', [])) if iss.get('evidence') else ''
+            remediation = iss.get('remediation', '') if has_remediation else ''
+            writer.writerow([
+                'Active Issue', '', ts_str, iss['severity'],
+                iss.get('hostname', ''), '', iss.get('hostname', ''),
+                iss.get('check_id', ''), iss.get('title', ''),
+                iss.get('details', ''), evidence, remediation,
+                '', '', '',
+            ])
         for ev in events:
             ts_str = time.strftime('%Y-%m-%d %H:%M:%S UTC', time.gmtime(ev['ts']))
             writer.writerow([
-                ev['id'], ts_str, ev['event_type'], ev['severity'],
+                'Alert Event', ev['id'], ts_str, ev['severity'],
                 ev['device'], ev.get('service', ''), ev.get('host', ''),
                 ev.get('check_id', ''), ev.get('title', ''),
+                '', '', '',
                 ev.get('source', ''), ev.get('channels', ''),
                 'Yes' if ev['reviewed'] else 'No',
             ])
@@ -7677,6 +7725,7 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
       <label style="font-size:12px;display:flex;align-items:center;gap:4px;cursor:pointer" title="Only alert when an AI/automated identity accesses the asset"><input type="checkbox" id="ca-ai-only"> AI only</label>
       <button onclick="addCloudAssetPolicy()" style="background:#16A34A;color:#fff;border:none;border-radius:4px;padding:6px 16px;cursor:pointer;font-size:13px">Add</button>
     </div>
+    <div id="ca-scope-help" style="display:none;margin-top:10px;font-size:12px;line-height:1.5;color:#374151"></div>
   </div>
   <div id="cloud-assets-list" style="color:#6B7280;font-size:13px;padding:16px 0">Loading policies...</div>
   <div style="margin-top:24px"><div class="sec-hdr" style="font-size:15px;margin-bottom:10px">Cloud Access Events</div><div id="cloud-events-list" style="color:#6B7280;font-size:13px;padding:16px 0">Loading events...</div></div>
@@ -8067,6 +8116,52 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
 
   {_live_scan_settings_html()}
 
+  <div class="content-panel" style="background:#ffffff;border:1px solid #F3F4F6;border-radius:8px;padding:20px;margin-bottom:16px">
+    <div class="panel-sub-hdr" style="font-size:12px;color:#6B7280;font-weight:600;text-transform:uppercase;letter-spacing:.06em;margin-bottom:14px">Agent token</div>
+    <p style="font-size:13px;color:#6B7280;margin:0 0 14px">Paste this token into your agent&apos;s config file (<code style="font-size:12px;background:#F3F4F6;padding:1px 4px;border-radius:3px">SENTINEL_TOKEN</code>). Keep it secret — anyone with this token can submit reports to your account.</p>
+    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+      <input id="agent-token-display" type="password" readonly
+             style="flex:1;min-width:240px;max-width:480px;font-family:monospace;font-size:13px;
+                    background:#F9FAFB;border:1px solid #E5E7EB;border-radius:6px;padding:8px 12px;color:#111827"
+             value="" placeholder="Loading…">
+      <button class="scan-btn" onclick="toggleTokenVisibility()" id="token-show-btn"
+              style="white-space:nowrap">Show</button>
+      <button class="scan-btn" onclick="copyToken()"
+              style="white-space:nowrap;color:#4F46E5;border-color:#E5E7EB">Copy</button>
+    </div>
+    <div id="token-company" style="font-size:12px;color:#9CA3AF;margin-top:8px"></div>
+  </div>
+  <div class="content-panel" style="background:#ffffff;border:1px solid #F3F4F6;border-radius:8px;padding:20px;margin-bottom:16px">
+    <div class="panel-sub-hdr" style="font-size:12px;color:#6B7280;font-weight:600;text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px">Windows installer</div>
+    <p style="font-size:13px;color:#6B7280;margin:0 0 14px">Download an installer with your server URL and token already baked in. Double-click it on the target device and accept the admin prompt.</p>
+    <div style="display:flex;gap:10px;flex-wrap:wrap">
+      <a href="/api/installer/windows" class="scan-btn" style="text-decoration:none;color:#0F766E;border-color:#0F766E40;white-space:nowrap;font-weight:600">⬇ Windows (.exe)</a>
+    </div>
+  </div>
+  <div class="content-panel" style="background:#ffffff;border:1px solid #F3F4F6;border-radius:8px;padding:20px;margin-bottom:16px">
+    <div class="panel-sub-hdr" style="font-size:12px;color:#6B7280;font-weight:600;text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px">macOS (Terminal install)</div>
+    <p style="font-size:13px;color:#6B7280;margin:0 0 14px">Open Terminal, paste this command, and enter your Mac password when prompted. The agent installs and starts automatically.</p>
+    <div style="position:relative">
+      <pre id="macos-curl-cmd" style="background:#F9FAFB;border:1px solid #E5E7EB;border-radius:6px;padding:16px;padding-right:70px;font-size:12.5px;font-family:'Menlo','Consolas',monospace;color:#4F46E5;white-space:pre-wrap;word-break:break-all;line-height:1.6"></pre>
+      <button onclick="copyTextById('macos-curl-cmd',this)" style="position:absolute;top:10px;right:10px;background:#F9FAFB;border:1px solid #E5E7EB;color:#6B7280;font-size:12px;padding:4px 10px;border-radius:4px;cursor:pointer;font-family:inherit">Copy</button>
+    </div>
+  </div>
+  <div class="content-panel" style="background:#ffffff;border:1px solid #F3F4F6;border-radius:8px;padding:20px;margin-bottom:16px">
+    <div class="panel-sub-hdr" style="font-size:12px;color:#6B7280;font-weight:600;text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px">Linux (curl install)</div>
+    <p style="font-size:13px;color:#6B7280;margin:0 0 14px">Run as <strong>root</strong> or with <code style="font-size:12px;background:#F3F4F6;padding:1px 4px;border-radius:3px">sudo</code> on any systemd-based Linux distro. No Python required — downloads a native binary.</p>
+    <div style="position:relative">
+      <pre id="linux-curl-cmd" style="background:#F9FAFB;border:1px solid #E5E7EB;border-radius:6px;padding:16px;padding-right:70px;font-size:12.5px;font-family:'Menlo','Consolas',monospace;color:#4F46E5;white-space:pre-wrap;word-break:break-all;line-height:1.6"></pre>
+      <button onclick="copyTextById('linux-curl-cmd',this)" style="position:absolute;top:10px;right:10px;background:#F9FAFB;border:1px solid #E5E7EB;color:#6B7280;font-size:12px;padding:4px 10px;border-radius:4px;cursor:pointer;font-family:inherit">Copy</button>
+    </div>
+  </div>
+  <div class="content-panel" style="background:#ffffff;border:1px solid #F3F4F6;border-radius:8px;padding:20px;margin-bottom:16px">
+    <div class="panel-sub-hdr" style="font-size:12px;color:#6B7280;font-weight:600;text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px">MDM / Jamf deployment script</div>
+    <p style="font-size:13px;color:#6B7280;margin:0 0 14px">For Jamf Pro, Kandji, or other MDM — deploy as a shell script policy or .pkg. The agent auto-starts on first boot.</p>
+    <div style="position:relative">
+      <pre id="mdm-cmd" style="background:#F9FAFB;border:1px solid #E5E7EB;border-radius:6px;padding:16px;padding-right:70px;font-size:12.5px;font-family:'Menlo','Consolas',monospace;color:#4F46E5;white-space:pre-wrap;word-break:break-all;line-height:1.6"></pre>
+      <button onclick="copyTextById('mdm-cmd',this)" style="position:absolute;top:10px;right:10px;background:#F9FAFB;border:1px solid #E5E7EB;color:#6B7280;font-size:12px;padding:4px 10px;border-radius:4px;cursor:pointer;font-family:inherit">Copy</button>
+    </div>
+  </div>
   </div>
 
   <div class="page" id="page-siem">
@@ -8095,48 +8190,6 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
   <div style="font-size:11px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:#6B7280;margin-bottom:12px">SIEM &amp; Log Management</div>
   <div id="siem-save-banner" style="display:none;background:#D1FAE5;color:#065F46;border:1px solid #6EE7B7;border-radius:6px;padding:10px 16px;margin-bottom:16px;font-size:13px">&#10003; Settings saved</div>
   <div id="siem-cards" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(480px,1fr));gap:20px"></div>
-  </div>
-
-  <div class="content-panel" style="background:#ffffff;border:1px solid #F3F4F6;border-radius:8px;padding:20px;margin-bottom:16px">
-    <div class="panel-sub-hdr" style="font-size:12px;color:#6B7280;font-weight:600;text-transform:uppercase;letter-spacing:.06em;margin-bottom:14px">Agent token</div>
-    <p style="font-size:13px;color:#6B7280;margin:0 0 14px">Paste this token into your agent&apos;s config file (<code style="font-size:12px;background:#F3F4F6;padding:1px 4px;border-radius:3px">SENTINEL_TOKEN</code>). Keep it secret — anyone with this token can submit reports to your account.</p>
-    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-      <input id="agent-token-display" type="password" readonly
-             style="flex:1;min-width:240px;max-width:480px;font-family:monospace;font-size:13px;
-                    background:#F9FAFB;border:1px solid #E5E7EB;border-radius:6px;padding:8px 12px;color:#111827"
-             value="" placeholder="Loading…">
-      <button class="scan-btn" onclick="toggleTokenVisibility()" id="token-show-btn"
-              style="white-space:nowrap">Show</button>
-      <button class="scan-btn" onclick="copyToken()"
-              style="white-space:nowrap;color:#4F46E5;border-color:#E5E7EB">Copy</button>
-    </div>
-    <div id="token-company" style="font-size:12px;color:#9CA3AF;margin-top:8px"></div>
-  </div>
-  <div class="content-panel" style="background:#ffffff;border:1px solid #F3F4F6;border-radius:8px;padding:20px;margin-bottom:16px">
-    <div class="panel-sub-hdr" style="font-size:12px;color:#6B7280;font-weight:600;text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px">One-click installers</div>
-    <p style="font-size:13px;color:#6B7280;margin:0 0 14px">Download an installer with your server URL and token already baked in. Just run it on the target device — no command prompt or copy-pasting needed.</p>
-    <div style="display:flex;gap:10px;flex-wrap:wrap">
-      <a href="/api/installer/windows" class="scan-btn" style="text-decoration:none;color:#0F766E;border-color:#0F766E40;white-space:nowrap;font-weight:600">⬇ Windows (.exe)</a>
-      <a href="/api/installer/macos" class="scan-btn" style="text-decoration:none;color:#0F766E;border-color:#0F766E40;white-space:nowrap;font-weight:600">⬇ macOS (.app)</a>
-    </div>
-    <p style="font-size:12px;color:#9CA3AF;margin-top:10px">Windows: double-click the .exe and accept the admin prompt. macOS: unzip and double-click the app, then enter your Mac password.</p>
-  </div>
-  <div class="content-panel" style="background:#ffffff;border:1px solid #F3F4F6;border-radius:8px;padding:20px;margin-bottom:16px">
-    <div class="panel-sub-hdr" style="font-size:12px;color:#6B7280;font-weight:600;text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px">Linux (curl install)</div>
-    <p style="font-size:13px;color:#6B7280;margin:0 0 14px">Run as <strong>root</strong> or with <code style="font-size:12px;background:#F3F4F6;padding:1px 4px;border-radius:3px">sudo</code> on any systemd-based Linux distro. No Python required — downloads a native binary.</p>
-    <div style="position:relative">
-      <pre id="linux-curl-cmd" style="background:#F9FAFB;border:1px solid #E5E7EB;border-radius:6px;padding:16px;padding-right:70px;font-size:12.5px;font-family:'Menlo','Consolas',monospace;color:#4F46E5;white-space:pre-wrap;word-break:break-all;line-height:1.6"></pre>
-      <button onclick="copyTextById('linux-curl-cmd',this)" style="position:absolute;top:10px;right:10px;background:#F9FAFB;border:1px solid #E5E7EB;color:#6B7280;font-size:12px;padding:4px 10px;border-radius:4px;cursor:pointer;font-family:inherit">Copy</button>
-    </div>
-  </div>
-  <div class="content-panel" style="background:#ffffff;border:1px solid #F3F4F6;border-radius:8px;padding:20px;margin-bottom:16px">
-    <div class="panel-sub-hdr" style="font-size:12px;color:#6B7280;font-weight:600;text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px">MDM / Jamf deployment script</div>
-    <p style="font-size:13px;color:#6B7280;margin:0 0 14px">For Jamf Pro, Kandji, or other MDM — deploy as a shell script policy or .pkg. The agent auto-starts on first boot.</p>
-    <div style="position:relative">
-      <pre id="mdm-cmd" style="background:#F9FAFB;border:1px solid #E5E7EB;border-radius:6px;padding:16px;padding-right:70px;font-size:12.5px;font-family:'Menlo','Consolas',monospace;color:#4F46E5;white-space:pre-wrap;word-break:break-all;line-height:1.6"></pre>
-      <button onclick="copyTextById('mdm-cmd',this)" style="position:absolute;top:10px;right:10px;background:#F9FAFB;border:1px solid #E5E7EB;color:#6B7280;font-size:12px;padding:4px 10px;border-radius:4px;cursor:pointer;font-family:inherit">Copy</button>
-    </div>
-  </div>
   </div>
 
   <div class="page" id="page-reports">
@@ -8399,6 +8452,11 @@ function navTo(page) {{
     }}
   }}
 }}
+setInterval(function() {{
+  const alertsPage = document.getElementById('page-alerts');
+  if (document.hidden || !alertsPage?.classList.contains('active')) return;
+  refreshAlertsPage();
+}}, 30000);
 (function() {{
   const hash = window.location.hash.replace('#', '');
   const valid = ['overview','shadow','alerts','mcp','riskregister','inventory','spend','schedules',
@@ -9860,11 +9918,18 @@ async function loadAiSessions(days) {{
         const m = Math.floor((secs % 3600) / 60);
         const dur = h > 0 ? h + 'h ' + m + 'm' : m + 'm';
         const tools = (d.tools || []).join(', ');
+        const toolUsage = (d.tool_usage || []).map(t => {{
+          const toolHours = Math.floor((t.total_seconds || 0) / 3600);
+          const toolMinutes = Math.floor(((t.total_seconds || 0) % 3600) / 60);
+          const toolDuration = toolHours > 0 ? toolHours + 'h ' + toolMinutes + 'm' : toolMinutes + 'm';
+          return '<span style="display:inline-block;background:#F3F4F6;color:#374151;border-radius:3px;padding:2px 5px;margin:4px 4px 0 0">' +
+            (t.tool_name || 'Unknown tool') + ': ' + toolDuration + ' (' + (t.session_count || 0) + ')</span>';
+        }}).join('') || tools;
         return '<div style="display:flex;align-items:center;gap:12px;padding:9px 10px;border:1px solid #E5E7EB;border-radius:6px;font-size:12px;flex-wrap:wrap">' +
           '<div style="min-width:180px;flex:1"><div style="font-weight:600;color:#111827">' + (d.hostname || d.device_id || 'Unknown device') + '</div>' +
-          '<div style="color:#6B7280;margin-top:2px">' + tools + '</div></div>' +
+          '<div style="color:#6B7280;margin-top:2px">' + toolUsage + '</div></div>' +
           '<div style="text-align:right"><div style="font-weight:600;color:#16A34A">' + dur + '</div>' +
-          '<div style="color:#6B7280;margin-top:2px">' + (d.session_count || 0) + ' sessions</div></div>' +
+          '<div style="color:#6B7280;margin-top:2px">tracked process time · ' + (d.session_count || 0) + ' sessions</div></div>' +
         '</div>';
       }}).join('');
     }}
@@ -10357,6 +10422,8 @@ async function loadCustomerInfo() {{
     var base = srv;
     var linuxCmd = document.getElementById('linux-curl-cmd');
     if (linuxCmd) linuxCmd.textContent = 'curl -fsSL ' + base + '/install/install.sh | sudo bash -s -- --server ' + srv + ' --token ' + tok;
+    var macosCmd = document.getElementById('macos-curl-cmd');
+    if (macosCmd) macosCmd.textContent = 'curl -fsSL ' + base + '/install/install.sh | sudo bash -s -- --server ' + srv + ' --token ' + tok + ' --target /';
     var mdmCmd = document.getElementById('mdm-cmd');
     if (mdmCmd) mdmCmd.textContent = '#!/bin/bash\\n# Arckon Agent MDM/Jamf deployment script\\ncurl -fsSL ' + base + '/install/install.sh | bash -s -- --server ' + srv + ' --token ' + tok + ' --target /';
   }} catch(e) {{}}
@@ -11583,6 +11650,7 @@ async function loadActiveIssues() {{
     const d = await r.json();
     const issues = d.issues || [];
     _activeIssuesCache = issues;
+    _hasRemediationAccess = d.has_remediation !== false;
     if (!issues.length) {{
       feed.innerHTML = '<div style="color:#16A34A;font-size:13px;padding:12px 0;display:flex;align-items:center;gap:6px"><span style="font-size:16px">✓</span> No active critical or high issues across your fleet.</div>';
       return;
@@ -11591,10 +11659,16 @@ async function loadActiveIssues() {{
       const sev = iss.severity || 'HIGH';
       const sevColor = sev === 'CRITICAL' ? '#DC2626' : '#CA8A04';
       const sevBg    = sev === 'CRITICAL' ? '#FEF2F2' : '#FFFBEB';
+      const isAlertEvent = Boolean(iss.alert_event_id);
       const ts = new Date(iss.last_seen * 1000);
       const timeStr = 'Last seen ' + ts.toLocaleDateString() + ' ' + ts.toLocaleTimeString([], {{hour:'2-digit',minute:'2-digit'}});
       const cid = iss.check_id.replace(/'/g, '');
       const idx = issues.indexOf(iss);
+      const actions = isAlertEvent
+        ? `<button onclick="event.stopPropagation();reviewActiveAlert(${{iss.alert_event_id}})" style="font-size:11px;padding:3px 10px;border-radius:4px;border:1px solid #16A34A;background:#F0FDF4;cursor:pointer;color:#16A34A;font-weight:600">Mark reviewed</button>`
+        : `<button onclick="event.stopPropagation();issueAction('${{cid}}','resolved')" style="font-size:11px;padding:3px 10px;border-radius:4px;border:1px solid #16A34A;background:#F0FDF4;cursor:pointer;color:#16A34A;font-weight:600">Resolved</button>
+           <button onclick="event.stopPropagation();issueAction('${{cid}}','false_positive')" style="font-size:11px;padding:3px 10px;border-radius:4px;border:1px solid #D1D5DB;background:#F9FAFB;cursor:pointer;color:#374151">False Positive</button>
+           <button onclick="event.stopPropagation();issueAction('${{cid}}','accepted')" style="font-size:11px;padding:3px 10px;border-radius:4px;border:1px solid #D1D5DB;background:#F9FAFB;cursor:pointer;color:#374151">Accept Risk</button>`;
       return `<div onclick="openActiveIssueDetail(${{idx}})" style="cursor:pointer;background:#fff;border:1px solid ${{sevBg}};border-left:3px solid ${{sevColor}};border-radius:6px;padding:10px 14px;display:flex;gap:10px;align-items:flex-start;transition:border-color .15s" onmouseover="this.style.borderColor='#D1D5DB'" onmouseout="this.style.borderColor='${{sevBg}}'">
         <div style="min-width:64px;text-align:center;flex-shrink:0">
           <div style="font-size:10px;font-weight:700;color:${{sevColor}};background:${{sevBg}};border-radius:4px;padding:2px 6px;white-space:nowrap">${{sev}}</div>
@@ -11604,9 +11678,7 @@ async function loadActiveIssues() {{
           <div style="font-size:13px;color:#111827"><strong>${{iss.check_id}}</strong> on <strong>${{iss.hostname}}</strong> — ${{iss.title}}</div>
           <div style="font-size:11px;color:#9CA3AF;margin-top:4px">${{timeStr}}</div>
           <div style="margin-top:8px;display:flex;gap:6px">
-            <button onclick="event.stopPropagation();issueAction('${{cid}}','resolved')" style="font-size:11px;padding:3px 10px;border-radius:4px;border:1px solid #16A34A;background:#F0FDF4;cursor:pointer;color:#16A34A;font-weight:600">Resolved</button>
-            <button onclick="event.stopPropagation();issueAction('${{cid}}','false_positive')" style="font-size:11px;padding:3px 10px;border-radius:4px;border:1px solid #D1D5DB;background:#F9FAFB;cursor:pointer;color:#374151">False Positive</button>
-            <button onclick="event.stopPropagation();issueAction('${{cid}}','accepted')" style="font-size:11px;padding:3px 10px;border-radius:4px;border:1px solid #D1D5DB;background:#F9FAFB;cursor:pointer;color:#374151">Accept Risk</button>
+            ${{actions}}
           </div>
         </div>
       </div>`;
@@ -11637,6 +11709,15 @@ async function issueAction(checkId, action) {{
   }}
 }}
 
+async function reviewActiveAlert(eventId) {{
+  const r = await fetch('/api/alerts/events/' + eventId + '/review', {{method:'POST'}});
+  if (r.ok) {{
+    await Promise.all([loadActiveIssues(), loadAlertEvents()]);
+  }} else {{
+    alert('Failed to mark alert reviewed (' + r.status + ')');
+  }}
+}}
+
 function openActiveIssueDetail(idx) {{
   const iss = _activeIssuesCache[idx];
   if (!iss) return;
@@ -11648,6 +11729,7 @@ function openActiveIssueDetail(idx) {{
   const ts = new Date(iss.last_seen * 1000);
   const timeStr = ts.toLocaleDateString() + ' ' + ts.toLocaleTimeString();
   const cid = iss.check_id || '';
+  const isAlertEvent = Boolean(iss.alert_event_id);
   const fields = [
     ['Check ID', iss.check_id || ''],
     ['Device', iss.hostname || ''],
@@ -11660,7 +11742,9 @@ function openActiveIssueDetail(idx) {{
        <div style="font-size:12px;color:#111827;word-break:break-word;flex:1">${{esc(String(v))}}</div>
      </div>`
   ).join('');
-  const descRow = iss.description ? `<div style="padding:10px 0 0 0"><div style="font-size:12px;color:#6B7280;font-weight:500;margin-bottom:6px">Description</div><div style="font-size:12px;color:#374151;line-height:1.5;white-space:pre-wrap">${{esc(iss.description)}}</div></div>` : '';
+  const descRow = iss.details ? `<div style="padding:10px 0 0 0"><div style="font-size:12px;color:#6B7280;font-weight:500;margin-bottom:6px">Details</div><div style="font-size:12px;color:#374151;line-height:1.5;white-space:pre-wrap">${{esc(iss.details)}}</div></div>` : '';
+  const evidenceRows = (iss.evidence && iss.evidence.length) ? `<div style="padding:10px 0 0 0"><div style="font-size:12px;color:#6B7280;font-weight:500;margin-bottom:6px">Evidence</div><ul style="margin:0;padding-left:20px;list-style:disc">${{iss.evidence.map(ev => `<li style="font-size:12px;color:#374151;line-height:1.5;word-break:break-word;margin-bottom:4px">${{esc(String(ev))}}</li>`).join('')}}</ul></div>` : '';
+  const remediationRow = iss.remediation ? `<div style="padding:10px 0 0 0"><div style="font-size:12px;color:#6B7280;font-weight:500;margin-bottom:6px">How to Fix</div><div style="font-size:12px;color:#374151;line-height:1.5;white-space:pre-wrap">${{esc(iss.remediation)}}</div></div>` : (!_hasRemediationAccess ? `<div style="padding:10px 0 0 0;border-top:1px solid #F3F4F6;margin-top:8px"><div style="background:#F0F4FF;border:1px solid #C7D2FE;border-radius:6px;padding:12px 14px"><div style="font-size:12px;font-weight:600;color:#4F46E5;margin-bottom:4px">Upgrade to Pro for remediation steps</div><div style="font-size:11px;color:#6B7280;line-height:1.5">Your plan includes full alert details and evidence. Step-by-step fix instructions are available on the Pro plan.</div></div></div>` : '');
   const overlay = document.createElement('div');
   overlay.id = 'alert-detail-overlay';
   overlay.style.cssText = 'position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center';
@@ -11671,7 +11755,7 @@ function openActiveIssueDetail(idx) {{
     <div style="display:flex;align-items:flex-start;gap:12px;margin-bottom:16px;flex-shrink:0">
       <div style="min-width:72px;text-align:center">
         <div style="font-size:11px;font-weight:700;color:${{sevColor}};background:${{sevBg}};border-radius:4px;padding:3px 8px;white-space:nowrap">${{sev}}</div>
-        <div style="font-size:10px;color:#6B7280;margin-top:4px">Active Issue</div>
+        <div style="font-size:10px;color:#6B7280;margin-top:4px">${{isAlertEvent ? 'Unreviewed alert' : 'Active Issue'}}</div>
       </div>
       <div style="flex:1;min-width:0">
         <div style="font-size:15px;font-weight:600;color:#111827;line-height:1.3;margin-bottom:4px">${{esc(iss.title || iss.check_id)}}</div>
@@ -11681,11 +11765,13 @@ function openActiveIssueDetail(idx) {{
     <div style="overflow-y:auto;flex:1;margin-bottom:16px">
       ${{detailRows}}
       ${{descRow}}
+      ${{evidenceRows}}
+      ${{remediationRow}}
     </div>
     <div style="display:flex;gap:8px;justify-content:flex-end;flex-shrink:0">
-      <button onclick="event.stopPropagation();document.getElementById('alert-detail-overlay').remove();issueAction('${{cid.replace(/'/g,'')}}','resolved')" style="font-size:12px;padding:5px 14px;border:1px solid #16A34A;background:#F0FDF4;color:#16A34A;border-radius:4px;cursor:pointer;font-weight:600">Resolved</button>
+      ${{isAlertEvent ? `<button onclick="event.stopPropagation();document.getElementById('alert-detail-overlay').remove();reviewActiveAlert(${{iss.alert_event_id}})" style="font-size:12px;padding:5px 14px;border:1px solid #16A34A;background:#F0FDF4;color:#16A34A;border-radius:4px;cursor:pointer;font-weight:600">Mark reviewed</button>` : `<button onclick="event.stopPropagation();document.getElementById('alert-detail-overlay').remove();issueAction('${{cid.replace(/'/g,'')}}','resolved')" style="font-size:12px;padding:5px 14px;border:1px solid #16A34A;background:#F0FDF4;color:#16A34A;border-radius:4px;cursor:pointer;font-weight:600">Resolved</button>
       <button onclick="event.stopPropagation();document.getElementById('alert-detail-overlay').remove();issueAction('${{cid.replace(/'/g,'')}}','false_positive')" style="font-size:12px;padding:5px 14px;border:1px solid #D1D5DB;background:#F9FAFB;color:#374151;border-radius:4px;cursor:pointer">False Positive</button>
-      <button onclick="event.stopPropagation();document.getElementById('alert-detail-overlay').remove();issueAction('${{cid.replace(/'/g,'')}}','accepted')" style="font-size:12px;padding:5px 14px;border:1px solid #D1D5DB;background:#F9FAFB;color:#374151;border-radius:4px;cursor:pointer">Accept Risk</button>
+      <button onclick="event.stopPropagation();document.getElementById('alert-detail-overlay').remove();issueAction('${{cid.replace(/'/g,'')}}','accepted')" style="font-size:12px;padding:5px 14px;border:1px solid #D1D5DB;background:#F9FAFB;color:#374151;border-radius:4px;cursor:pointer">Accept Risk</button>`}}
       <button onclick="document.getElementById('alert-detail-overlay').remove()" style="background:#111827;border:1px solid #111827;color:#fff;border-radius:4px;padding:5px 16px;font-size:12px;cursor:pointer;font-weight:600">Close</button>
     </div>`;
   overlay.appendChild(modal);
@@ -11697,6 +11783,7 @@ function openActiveIssueDetail(idx) {{
 // ── Alert history feed ────────────────────────────────────────────────────────
 let _alertEventsCache = [];
 let _activeIssuesCache = [];
+let _hasRemediationAccess = true;
 async function loadAlertEvents() {{
   const unreviewedOnly = document.getElementById('alerts-unreviewed-only')?.checked;
   const feed = document.getElementById('alerts-feed');
@@ -11871,15 +11958,28 @@ updateAlertBadge();
 // ── Protected Cloud Assets ─────────────────────────────────────────────────
 function showCloudAssetForm() {{
   const f = document.getElementById('cloud-asset-form');
-  if (f) f.style.display = f.style.display === 'none' ? 'block' : 'none';
+  if (f) {{
+    f.style.display = f.style.display === 'none' ? 'block' : 'none';
+    if (f.style.display !== 'none') updateCloudScopeHint();
+  }}
 }}
 function updateCloudScopeHint() {{
   const p = document.getElementById('ca-provider').value;
   const hints = {{aws:['S3 bucket or prefix','s3://customer-records/payroll','AWS account ID','123456789012'],azure:['Storage account/container/prefix','azure://records/payroll','Azure subscription ID','subscription-id'],gcp:['Bucket or prefix','gs://customer-records/payroll','GCP project ID','project-id'],gworkspace:['Drive folder path or file ID','gworkspace://Protected/Financial','Workspace domain','yourdomain.com']}};
+  const helpText = {{
+    aws: '<strong>S3 bucket or prefix:</strong> In the AWS console, open the bucket and copy its name. Enter <code>s3://BUCKET</code> to monitor the bucket, or append a path such as <code>s3://BUCKET/payroll</code>. Do not use an ARN, console URL, or wildcard.',
+    azure: '<strong>Blob container or prefix:</strong> In the Azure portal, open the storage account and then Containers. Enter <code>azure://STORAGE_ACCOUNT/CONTAINER</code>, or append a blob prefix such as <code>azure://STORAGE_ACCOUNT/CONTAINER/payroll</code>. Do not use the <code>https://</code> Blob URL or a wildcard.',
+    gcp: '<strong>Cloud Storage bucket or prefix:</strong> In Google Cloud Console, open Cloud Storage and copy the bucket name. Enter <code>gs://BUCKET</code> to monitor the bucket, or append a path such as <code>gs://BUCKET/payroll</code>. Do not use a console URL or wildcard.',
+    gworkspace: '<strong>Google Drive document:</strong> Open the document and copy the text between <code>/d/</code> and the next <code>/</code> in its URL. Enter <code>gworkspace://DOCUMENT_ID</code>, not the complete Google URL or a bare ID. <strong>Folder:</strong> enter <code>gworkspace://Parent/Folder</code> only when your Drive audit forwarder supplies that folder path; the bundled forwarder reports individual document IDs.'
+  }};
   document.getElementById('ca-scope-label').textContent = hints[p][0];
   document.getElementById('ca-scope').placeholder = hints[p][1];
   document.getElementById('ca-account-label').textContent = hints[p][2];
   document.getElementById('ca-account').placeholder = hints[p][3];
+  const help = document.getElementById('ca-scope-help');
+  if (!help) return;
+  help.style.display = 'block';
+  help.innerHTML = helpText[p];
 }}
 function cloudEsc(v) {{ return esc(String(v || '')); }}
 async function loadProtectedCloudAssets() {{
@@ -11919,7 +12019,7 @@ async function loadProtectedCloudEvents() {{
   try {{
     const r = await fetch('/api/protected-cloud-assets/events'); const d = await r.json(); const events = d.events || [];
     if (!events.length) {{ list.innerHTML = '<div style="color:#6B7280">No protected cloud-asset access events yet.</div>'; return; }}
-    list.innerHTML = events.map(e => `<div style="background:#fff;border:1px solid #FECACA;border-left:3px solid #DC2626;border-radius:6px;padding:11px 14px;margin-bottom:8px"><div style="font-size:13px"><strong>CRITICAL</strong> · ${{cloudEsc(e.action)}} <code>${{cloudEsc(e.resource)}}</code></div><div style="font-size:11px;color:#6B7280;margin-top:5px">${{cloudEsc(e.provider)}} · account ${{cloudEsc(e.account_id)}} · actor ${{cloudEsc(e.actor)}}${{e.actor_type === 'ai' ? ' <span style="color:#4F46E5;font-weight:600">[AI]</span>' : ' <span style="color:#6B7280">[User]</span>'}} · ${{new Date(e.ts * 1000).toLocaleString()}}</div></div>`).join('');
+    list.innerHTML = events.map(e => `<div style="background:#fff;border:1px solid #FECACA;border-left:3px solid #DC2626;border-radius:6px;padding:11px 14px;margin-bottom:8px"><div style="font-size:13px"><strong>CRITICAL</strong> · ${{cloudEsc(e.action)}} <code>${{cloudEsc(e.resource)}}</code></div><div style="font-size:11px;color:#6B7280;margin-top:5px">${{cloudEsc(e.provider)}} · account ${{cloudEsc(e.account_id)}} · <strong>provider audit actor</strong> ${{cloudEsc(e.actor)}}${{e.actor_type === 'ai' ? ' <span style="color:#4F46E5;font-weight:600">[AI]</span>' : ' <span style="color:#6B7280">[User]</span>'}} · ${{new Date(e.ts * 1000).toLocaleString()}}</div></div>`).join('');
   }} catch (e) {{ list.innerHTML = '<div style="color:#DC2626">Failed to load cloud events.</div>'; }}
 }}
 

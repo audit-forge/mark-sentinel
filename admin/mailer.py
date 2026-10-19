@@ -178,7 +178,7 @@ If you have any questions, contact your account administrator.
           After signing in, go to <strong>Settings</strong> to find everything you need:
         </div>
         <ul style="font-size:13px;color:#15803d;line-height:1.8;margin:10px 0 0 0;padding-left:20px">
-          <li><strong>One-click installers</strong> — Download a Windows .exe or macOS .app with your server and token baked in. Just double-click on the target device.</li>
+          <li><strong>Installers</strong> — Download a Windows .exe or macOS .app with your server and token baked in. Windows: double-click it. macOS: Control-click the unzipped app, choose Open, then enter the Mac password.</li>
           <li><strong>Linux (curl)</strong> — Copy a single command to paste into any Linux terminal.</li>
           <li><strong>MDM / Jamf</strong> — Copy a shell script for Jamf Pro, Kandji, or other MDM fleet deployment.</li>
         </ul>
