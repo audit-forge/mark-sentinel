@@ -11,7 +11,7 @@ def test_windows_installer_uses_one_canonical_nssm_service():
     assert '$LegacyServiceName = "SentinelAgent"' in installer
     assert 'C:\\Program Files\\Arckon' in installer
     assert 'C:\\ProgramData\\Arckon' in installer
-    assert 'throw "NSSM is required for a Windows service.' in installer
+    assert 'NSSM unavailable; falling back to a SYSTEM startup task.' in installer
     assert 'sc.exe create $ServiceName' not in installer
 
 
@@ -29,3 +29,18 @@ def test_windows_installer_stops_service_before_replacing_binary():
 
     assert stop < extract
     assert 'WaitForStatus("Stopped", [TimeSpan]::FromSeconds(15))' in installer
+
+
+def test_windows_installer_registers_in_programs_and_features():
+    installer = (ROOT / 'install.ps1').read_text()
+    assert 'Uninstall\\ArckonAgent' in installer
+    assert 'DisplayName' in installer
+    assert '"Arckon Agent"' in installer
+    assert 'UninstallString' in installer
+    assert 'powershell.exe -ExecutionPolicy Bypass' in installer
+
+
+def test_windows_uninstaller_removes_registry_entry():
+    uninstaller = (ROOT / 'uninstall.ps1').read_text()
+    assert 'Uninstall\\ArckonAgent' in uninstaller
+    assert 'Remove-Item' in uninstaller

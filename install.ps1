@@ -532,6 +532,47 @@ Set-Location '$InstallDir'
     Write-Host "  To start manually: & '$PythonExe' '$InstallDir\agent.py' --config '$ConfigFile' --daemon" -ForegroundColor DarkGray
 }
 
+# -- Register in Programs and Features (Add/Remove Programs) -------------------
+# So the customer can uninstall Arckon from Windows Settings -> Apps without
+# needing to run a PowerShell command. The UninstallString runs a self-contained
+# script that stops the service, removes it, deletes files, and cleans up.
+$UninstallScript = @"
+#Requires -RunAsAdministrator
+`$ErrorActionPreference = 'Stop'
+`$svc = Get-Service -Name 'ArckonAgent' -ErrorAction SilentlyContinue
+if (`$svc) {
+    nssm stop ArckonAgent 2>`$null; Start-Sleep 2
+    nssm remove ArckonAgent confirm 2>`$null
+    if (Get-Service -Name 'ArckonAgent' -ErrorAction SilentlyContinue) { sc.exe delete ArckonAgent | Out-Null }
+}
+`$legacy = Get-Service -Name 'SentinelAgent' -ErrorAction SilentlyContinue
+if (`$legacy) { nssm stop SentinelAgent 2>`$null; nssm remove SentinelAgent confirm 2>`$null; sc.exe delete SentinelAgent | Out-Null }
+`$task = Get-ScheduledTask -TaskName 'ArckonRepairWatchdog' -ErrorAction SilentlyContinue
+if (`$task) { Unregister-ScheduledTask -TaskName 'ArckonRepairWatchdog' -Confirm:`$false }
+Remove-Item 'C:\Program Files\Arckon' -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item 'C:\ProgramData\Arckon' -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\ArckonAgent' -Force -ErrorAction SilentlyContinue
+Write-Host 'Arckon Agent uninstalled.' -ForegroundColor Green
+"@
+$UninstallScriptPath = "$ConfigDir\uninstall.ps1"
+[System.IO.File]::WriteAllText($UninstallScriptPath, $UninstallScript, $Utf8NoBom)
+
+$RegKey = "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\ArckonAgent"
+try {
+    New-Item -Path $RegKey -Force | Out-Null
+    Set-ItemProperty -Path $RegKey -Name "DisplayName"     -Value "Arckon Agent"
+    Set-ItemProperty -Path $RegKey -Name "DisplayVersion"  -Value "1.0"
+    Set-ItemProperty -Path $RegKey -Name "Publisher"       -Value "RiskRaven"
+    Set-ItemProperty -Path $RegKey -Name "DisplayIcon"     -Value "$InstallDir\agent.exe"
+    Set-ItemProperty -Path $RegKey -Name "InstallDate"     -Value (Get-Date -Format "yyyyMMdd")
+    Set-ItemProperty -Path $RegKey -Name "UninstallString" -Value "powershell.exe -ExecutionPolicy Bypass -NoProfile -File `"$UninstallScriptPath`""
+    Set-ItemProperty -Path $RegKey -Name "NoModify"        -Value 1 -Type DWord
+    Set-ItemProperty -Path $RegKey -Name "NoRepair"        -Value 1 -Type DWord
+    Write-OK "Registered in Programs and Features (uninstall via Windows Settings > Apps)"
+} catch {
+    Write-Warn "Could not register uninstall entry: $_"
+}
+
 # -- Desktop shortcut -> opens fleet dashboard in browser ----------------------
 $ShortcutPath = [Environment]::GetFolderPath('Desktop') + '\Arckon Dashboard.url'
 $DashUrl = if ($Server) { $Server.TrimEnd('/') + '/fleet' } else { 'http://localhost:7331/fleet' }

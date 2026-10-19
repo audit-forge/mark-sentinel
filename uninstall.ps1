@@ -102,3 +102,11 @@ if ($needReboot) {
 } else {
     Write-Host "RiskRaven Arckon Agent has been uninstalled." -ForegroundColor Green
 }
+
+# -- Remove the uninstall registry entry ----------------------------------------
+
+$RegKey = "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\ArckonAgent"
+if (Test-Path $RegKey) {
+    Remove-Item -Path $RegKey -Force -ErrorAction SilentlyContinue
+    Write-Host "  [OK] Removed Programs and Features entry" -ForegroundColor Green
+}
