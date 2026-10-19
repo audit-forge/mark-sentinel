@@ -12,7 +12,7 @@
     .\uninstall.ps1
 #>
 [CmdletBinding()]
-param([switch]$Force)
+param()
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
@@ -31,18 +31,16 @@ Write-Host "This will remove:"
 Write-Host "  $InstallDir"
 Write-Host "  $ConfigDir"
 Write-Host "  Windows Service: $ServiceName"
-Write-Host "  Scheduled Tasks: $ServiceName, $WatchdogTask"
+Write-Host "  Scheduled Task:  $WatchdogTask"
 if (Get-Service -Name $LegacyService -ErrorAction SilentlyContinue) {
     Write-Host "  Legacy Service:  $LegacyService (will also be removed)" -ForegroundColor DarkYellow
 }
 Write-Host ""
 
-if (-not $Force) {
-    $confirm = Read-Host "Are you sure? [y/N]"
-    if ($confirm -notmatch '^[Yy]$') {
-        Write-Host "Aborted." -ForegroundColor Yellow
-        exit 0
-    }
+$confirm = Read-Host "Are you sure? [y/N]"
+if ($confirm -notmatch '^[Yy]$') {
+    Write-Host "Aborted." -ForegroundColor Yellow
+    exit 0
 }
 
 # -- Stop and remove services --------------------------------------------------
@@ -68,34 +66,39 @@ foreach ($svc in @($ServiceName, $LegacyService)) {
     Write-Host "  [OK] Service '$svc' removed" -ForegroundColor Green
 }
 
-# -- Remove scheduled-task fallback and repair watchdog -------------------------
+# -- Remove repair watchdog scheduled task --------------------------------------
 
-foreach ($taskName in @($ServiceName, $WatchdogTask)) {
-    $task = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
-    if ($task) {
-        Write-Host "  Removing scheduled task '$taskName' ..." -ForegroundColor Cyan
-        Unregister-ScheduledTask -TaskName $taskName -Confirm:$false
-        Write-Host "  [OK] Scheduled task removed" -ForegroundColor Green
-    }
+$task = Get-ScheduledTask -TaskName $WatchdogTask -ErrorAction SilentlyContinue
+if ($task) {
+    Write-Host "  Removing scheduled task '$WatchdogTask' ..." -ForegroundColor Cyan
+    Unregister-ScheduledTask -TaskName $WatchdogTask -Confirm:$false
+    Write-Host "  [OK] Scheduled task removed" -ForegroundColor Green
+} else {
+    Write-Host "  Scheduled task '$WatchdogTask' not found, skipping." -ForegroundColor DarkGray
 }
 
 # -- Remove directories --------------------------------------------------------
 
-if (Test-Path $InstallDir) {
-    # The NSIS uninstaller executable can still be running from this directory.
-    # Ignore its locked file; NSIS removes it after this script exits.
-    Remove-Item -Path $InstallDir -Recurse -Force -ErrorAction SilentlyContinue
-    Write-Host "  [OK] Removed $InstallDir" -ForegroundColor Green
-} else {
-    Write-Host "  $InstallDir not found, skipping." -ForegroundColor DarkGray
-}
+$needReboot = $false
 
-if (Test-Path $ConfigDir) {
-    Remove-Item -Path $ConfigDir -Recurse -Force
-    Write-Host "  [OK] Removed $ConfigDir" -ForegroundColor Green
-} else {
-    Write-Host "  $ConfigDir not found, skipping." -ForegroundColor DarkGray
+foreach ($dir in @($InstallDir, $ConfigDir)) {
+    if (Test-Path $dir) {
+        try {
+            Remove-Item -Path $dir -Recurse -Force -ErrorAction Stop
+            Write-Host "  [OK] Removed $dir" -ForegroundColor Green
+        } catch {
+            Write-Host "  [WARN] Could not fully delete $dir (file may be locked by AV/EDR)." -ForegroundColor Yellow
+            Write-Host "         Reboot the computer, then delete $dir manually." -ForegroundColor Yellow
+            $needReboot = $true
+        }
+    } else {
+        Write-Host "  $dir not found, skipping." -ForegroundColor DarkGray
+    }
 }
 
 Write-Host ""
-Write-Host "RiskRaven Arckon Agent has been uninstalled." -ForegroundColor Green
+if ($needReboot) {
+    Write-Host "RiskRaven Arckon Agent uninstalled. Please reboot to complete file cleanup." -ForegroundColor Yellow
+} else {
+    Write-Host "RiskRaven Arckon Agent has been uninstalled." -ForegroundColor Green
+}
