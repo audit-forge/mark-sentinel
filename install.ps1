@@ -399,7 +399,53 @@ if (-not $NoService) {
         }
 
     } else {
-        throw "NSSM is required for a Windows service. Installation stopped rather than creating a non-SCM-compliant PowerShell service wrapper."
+        # Customer EDR or a proxy can block nssm.cc. A startup task running as
+        # SYSTEM provides the same persistent-agent behavior without requiring
+        # an external service wrapper download.
+        Write-Warn "NSSM unavailable; falling back to a SYSTEM startup task."
+        $WrapperScript = "$ConfigDir\arckon-agent-task.ps1"
+        if (Test-Path $AgentExe) {
+            $WrapperBody = @"
+Set-Location '$InstallDir'
+`$env:PYTHONUTF8 = '1'
+& '$AgentExe' --daemon --config '$ConfigFile' 2>&1 |
+    Tee-Object -FilePath '$ConfigDir\arckon-agent.log' -Append
+"@
+        } else {
+            if (-not $PythonExe) {
+                throw "agent.exe was not installed and Python 3.11+ is unavailable for the source fallback."
+            }
+            $WrapperBody = @"
+Set-Location '$InstallDir'
+`$env:PYTHONUTF8 = '1'
+& '$PythonExe' '$InstallDir\agent.py' --daemon --config '$ConfigFile' 2>&1 |
+    Tee-Object -FilePath '$ConfigDir\arckon-agent.log' -Append
+"@
+        }
+        Write-FileNoBOM $WrapperScript $WrapperBody
+
+        # Remove an incomplete legacy service before creating a task with the
+        # same name. A normal PowerShell process cannot be registered directly
+        # with the Windows Service Control Manager.
+        $existingSvc = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
+        if ($existingSvc) {
+            Stop-Service -Name $ServiceName -Force -ErrorAction SilentlyContinue
+            sc.exe delete $ServiceName | Out-Null
+            Start-Sleep -Seconds 2
+        }
+
+        Unregister-ScheduledTask -TaskName $ServiceName -Confirm:$false -ErrorAction SilentlyContinue
+        $taskAction = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-NonInteractive -NoProfile -WindowStyle Hidden -File `"$WrapperScript`""
+        $taskTrigger = New-ScheduledTaskTrigger -AtStartup
+        $taskPrincipal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount -RunLevel Highest
+        $taskSettings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
+            -StartWhenAvailable -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1) `
+            -ExecutionTimeLimit ([TimeSpan]::Zero)
+        Register-ScheduledTask -TaskName $ServiceName -Action $taskAction -Trigger $taskTrigger `
+            -Principal $taskPrincipal -Settings $taskSettings `
+            -Description "Arckon security audit agent" | Out-Null
+        Start-ScheduledTask -TaskName $ServiceName
+        Write-OK "Startup task registered and started"
     }
 
 
@@ -407,8 +453,10 @@ if (-not $NoService) {
     # service after the canonical ArckonAgent service has been registered.
     $legacySvc = Get-Service -Name $LegacyServiceName -ErrorAction SilentlyContinue
     if ($legacySvc) {
-        & $nssmPath stop $LegacyServiceName 2>&1 | Out-Null
-        & $nssmPath remove $LegacyServiceName confirm 2>&1 | Out-Null
+        if ($nssmPath) {
+            & $nssmPath stop $LegacyServiceName 2>&1 | Out-Null
+            & $nssmPath remove $LegacyServiceName confirm 2>&1 | Out-Null
+        }
         if (Get-Service -Name $LegacyServiceName -ErrorAction SilentlyContinue) {
             sc.exe stop $LegacyServiceName | Out-Null
             sc.exe delete $LegacyServiceName | Out-Null
@@ -420,14 +468,26 @@ if (-not $NoService) {
     $started = $false
     for ($attempt = 1; $attempt -le 3; $attempt++) {
         Start-Sleep -Seconds 5
-        $svc = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
-        if ($svc -and $svc.Status -eq "Running") {
-            $started = $true
-            break
+        if ($nssmPath) {
+            $svc = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
+            if ($svc -and $svc.Status -eq "Running") {
+                $started = $true
+                break
+            }
+        } else {
+            $task = Get-ScheduledTask -TaskName $ServiceName -ErrorAction SilentlyContinue
+            if ($task -and $task.State -eq "Running") {
+                $started = $true
+                break
+            }
         }
         if ($attempt -lt 3) {
             Write-Warn "Service not yet running (attempt $attempt/3) - retrying ..."
-            try { Start-Service -Name $ServiceName -ErrorAction SilentlyContinue } catch {}
+            if ($nssmPath) {
+                try { Start-Service -Name $ServiceName -ErrorAction SilentlyContinue } catch {}
+            } else {
+                try { Start-ScheduledTask -TaskName $ServiceName -ErrorAction SilentlyContinue } catch {}
+            }
         }
     }
 

@@ -33,3 +33,12 @@ def test_canonical_windows_installer_is_ascii_safe():
     installer = (ROOT / 'install.ps1').read_text(encoding='utf-8-sig')
 
     assert installer.isascii()
+
+
+def test_windows_installer_falls_back_to_a_system_startup_task_without_nssm():
+    installer = (ROOT / 'install.ps1').read_text(encoding='utf-8-sig')
+
+    assert 'NSSM unavailable; falling back to a SYSTEM startup task.' in installer
+    assert 'New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount' in installer
+    assert 'Start-ScheduledTask -TaskName $ServiceName' in installer
+    assert "& '$PythonExe' '$InstallDir\\agent.py' --daemon --config '$ConfigFile'" in installer
