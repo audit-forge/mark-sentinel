@@ -695,7 +695,7 @@ async def communications_test_email(request: Request):
 async def serve_installer(filename: str):
     from fastapi.responses import PlainTextResponse
     allowed = {
-        "install.sh", "install.ps1", "install.bat",
+        "install.sh", "install.ps1", "install.bat", "uninstall.ps1",
         "install-intune.ps1", "detect-intune.ps1", "uninstall-intune.ps1",
         "install-intune.sh", "detect-intune.sh", "uninstall-intune.sh",
     }
