@@ -54,6 +54,7 @@ import subprocess
 import tarfile
 import time
 import shutil
+import threading
 from pathlib import Path, PurePosixPath
 from urllib import error as _urlerr
 from urllib import request as _urlreq
@@ -451,13 +452,45 @@ def post_access_events(events: list, config: dict) -> bool:
     return False
 
 
+def _start_access_event_reporter(queue, config: dict) -> threading.Thread:
+    """Start a background thread that posts access events immediately.
+
+    Protected-files alerts must be near-instant — waiting for the next scan
+    cycle (up to 15 minutes) defeats the purpose of real-time AI access
+    monitoring. This thread drains the queue every 3 seconds and posts
+    any matching events to the server without waiting for a scan.
+    """
+    stop = threading.Event()
+
+    def _reporter_loop():
+        while not stop.is_set():
+            try:
+                if queue and len(queue) > 0:
+                    events = queue.drain(limit=100)
+                    if events:
+                        post_access_events(events, config)
+            except Exception as e:
+                log.warning('Access event reporter error (non-fatal): %s', e)
+            stop.wait(3)
+
+    t = threading.Thread(target=_reporter_loop, name='access-event-reporter', daemon=True)
+    t.start()
+    t._stop_event = stop  # noqa: SLF001 — caller stops via _stop_access_event_reporter
+    return t
+
+
+def _stop_access_event_reporter(t: threading.Thread | None) -> None:
+    if t and hasattr(t, '_stop_event'):
+        t._stop_event.set()  # noqa: SLF001
+
+
 def start_access_collector(config: dict, device_id: str, hostname: str):
     """Start the platform-appropriate protected-files access collector.
 
     Returns (collector, queue) or (None, None) if the platform is not
     supported or no protected paths are configured. The collector runs
-    in a daemon thread; events are drained from the queue and posted to
-    the server on each scan cycle.
+    in a daemon thread; a separate reporter thread drains and posts
+    events to the server every 3 seconds for near-instant alerting.
 
     FedRAMP SI-4: continuous system monitoring for AI access to protected
     resources. The collector is purely additive — if it fails to start,
@@ -2026,6 +2059,11 @@ def main() -> None:
         # configured). Purely additive — failure doesn't affect scans.
         _access_collector, _access_queue = start_access_collector(
             cfg, device_id, os.environ.get('SENTINEL_HOSTNAME', '').strip() or socket.gethostname())
+        # Start the immediate access-event reporter thread so alerts fire
+        # within seconds of AI access, not on the next scan cycle.
+        _access_reporter = None
+        if _access_queue:
+            _access_reporter = _start_access_event_reporter(_access_queue, cfg)
 
         while True:
             now = time.time()
@@ -2066,14 +2104,8 @@ def main() -> None:
                     run_ai_connections_cycle(cfg)
                 except Exception as e:
                     log.warning('AI connection scan cycle error (non-fatal): %s', e)
-                # Drain and report protected-file access events (SI-4)
-                if _access_queue and len(_access_queue) > 0:
-                    try:
-                        events = _access_queue.drain(limit=100)
-                        if events:
-                            post_access_events(events, cfg)
-                    except Exception as e:
-                        log.warning('Access event reporting error (non-fatal): %s', e)
+                # Access events are now posted in near-real-time by the
+                # _access_reporter thread (every 3 seconds), not here.
 
             # Poll for on-demand command
             cmd = poll_for_command(cfg, device_id)
@@ -2255,6 +2287,8 @@ def main() -> None:
                         # Collector wasn't running (no paths before) — start it
                         _access_collector, _access_queue = start_access_collector(
                             cfg, device_id, os.environ.get('SENTINEL_HOSTNAME', '').strip() or socket.gethostname())
+                        if _access_queue and not _access_reporter:
+                            _access_reporter = _start_access_event_reporter(_access_queue, cfg)
                     # Persist to config
                     config_path = Path(cfg.get('_config_path', DEFAULT_CONFIG))
                     existing = json.loads(config_path.read_text(encoding='utf-8')) if config_path.exists() else {}
