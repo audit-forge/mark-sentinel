@@ -43,6 +43,14 @@ def test_windows_installer_falls_back_to_a_system_startup_task_without_nssm():
     assert 'Start-ScheduledTask -TaskName $ServiceName' in installer
     assert "& '$PythonExe' '$InstallDir\\agent.py' --daemon --config '$ConfigFile'" in installer
     assert installer.rstrip().endswith('exit 0')
+    assert '[switch]$NoPrompt' in installer
+    assert '-not $NoPrompt -and [Environment]::UserInteractive' in installer
+
+
+def test_packaged_windows_installer_suppresses_script_prompts():
+    template = (ROOT / 'admin' / 'installer_gen.py').read_text(encoding='utf-8')
+
+    assert '-Token "__TOKEN__" -NoPrompt' in template
 
 
 def test_windows_uninstaller_removes_current_agent_paths_and_task_fallback():

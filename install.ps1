@@ -16,6 +16,9 @@
 .PARAMETER NoService
     Skip Windows Service registration
 
+.PARAMETER NoPrompt
+    Do not wait for keyboard input before exiting. Used by the packaged installer.
+
 .EXAMPLE
     .\install.ps1 -Server http://10.0.1.50:7331 -Token mysecrettoken
 #>
@@ -23,7 +26,8 @@
 param(
     [string]$Server     = "",
     [string]$Token      = "",
-    [switch]$NoService
+    [switch]$NoService,
+    [switch]$NoPrompt
 )
 
 Set-StrictMode -Version Latest
@@ -299,7 +303,7 @@ if (-not (Test-Path $AgentExe) -and -not (Test-Path $AgentScript)) {
     Write-Host "  [FAIL] Neither agent.exe nor agent.py found at $InstallDir" -ForegroundColor Red
     Write-Host "         Download may have failed. Check network connectivity and token." -ForegroundColor Yellow
     Stop-Transcript | Out-Null
-    if ([Environment]::UserInteractive) { Read-Host "`n  Press Enter to close" }
+    if (-not $NoPrompt -and [Environment]::UserInteractive) { Read-Host "`n  Press Enter to close" }
     exit 1
 }
 if (Test-Path $AgentExe) {
@@ -506,7 +510,7 @@ Set-Location '$InstallDir'
         Write-Host ""
         Write-Host "  To diagnose: Get-Content '$logFile' -Tail 50" -ForegroundColor DarkGray
         Stop-Transcript | Out-Null
-        if ([Environment]::UserInteractive) { Read-Host "`n  Press Enter to close" }
+        if (-not $NoPrompt -and [Environment]::UserInteractive) { Read-Host "`n  Press Enter to close" }
         exit 1
     }
 
@@ -598,5 +602,5 @@ Write-Host "Or open the fleet dashboard and use Settings to update the config wi
 Write-Host "  Install log : $InstallLog"
 
 Stop-Transcript | Out-Null
-if ([Environment]::UserInteractive) { Read-Host "`n  Press Enter to close" }
+if (-not $NoPrompt -and [Environment]::UserInteractive) { Read-Host "`n  Press Enter to close" }
 exit 0

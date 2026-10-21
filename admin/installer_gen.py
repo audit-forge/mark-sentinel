@@ -46,7 +46,7 @@ Section "Install Arckon Agent"
   DetailPrint "Server: __SERVER__"
   DetailPrint ""
 
-  nsExec::ExecToLog 'powershell.exe -ExecutionPolicy Bypass -NoProfile -NonInteractive -File "$TEMP\\arckon-install\\install.ps1" -Server "__SERVER__" -Token "__TOKEN__"'
+  nsExec::ExecToLog 'powershell.exe -ExecutionPolicy Bypass -NoProfile -NonInteractive -File "$TEMP\\arckon-install\\install.ps1" -Server "__SERVER__" -Token "__TOKEN__" -NoPrompt'
   Pop $0
 
   DetailPrint ""
