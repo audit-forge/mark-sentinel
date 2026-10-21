@@ -63,6 +63,7 @@ def test_windows_uninstaller_removes_current_agent_paths_and_task_fallback():
     assert '[switch]$Force' in uninstaller
     assert 'RegistryView]::Registry64' in uninstaller
     assert 'RegistryView]::Registry32' in uninstaller
+    assert uninstaller.index('Remove-ProgramsAndFeaturesEntry') < uninstaller.index('# -- Stop and remove services')
 
 
 def test_current_windows_uninstaller_is_available_to_existing_agents():

@@ -27,7 +27,9 @@ def test_nsi_template_bakes_in_server_token_and_customer_name():
     assert "WriteUninstaller" in nsi
     assert "UninstallString" in nsi
     assert 'InstallDir "$PROGRAMFILES64\\Arckon"' in nsi
-    assert nsi.count("SetRegView 64") == 2
+    assert nsi.count("SetRegView 64") == 3
+    assert "SetRegView 32" in nsi
+    assert nsi.count("DeleteRegKey HKLM") == 2
     assert "!include" in nsi and "LogicLib.nsh" in nsi
 
 

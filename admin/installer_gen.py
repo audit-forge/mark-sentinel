@@ -72,11 +72,14 @@ SectionEnd
 
 Section "Uninstall"
   SetRegView 64
+  DeleteRegKey HKLM "Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\ArckonAgent"
+  SetRegView 32
+  DeleteRegKey HKLM "Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\ArckonAgent"
+  SetRegView 64
   SetOutPath "$TEMP\\arckon-uninstall"
   File "uninstall.ps1"
   nsExec::ExecToLog 'powershell.exe -ExecutionPolicy Bypass -NoProfile -NonInteractive -File "$TEMP\\arckon-uninstall\\uninstall.ps1" -Force'
   Pop $0
-  DeleteRegKey HKLM "Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\ArckonAgent"
   Delete "$TEMP\\arckon-uninstall\\uninstall.ps1"
   RMDir "$TEMP\\arckon-uninstall"
   RMDir /r "$INSTDIR"

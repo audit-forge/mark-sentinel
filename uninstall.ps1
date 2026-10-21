@@ -25,6 +25,30 @@ $ServiceName     = "ArckonAgent"
 $LegacyService   = "SentinelAgent"
 $WatchdogTask    = "ArckonRepairWatchdog"
 
+function Remove-ProgramsAndFeaturesEntry {
+    # The PowerShell installer writes the native registry view while older NSIS
+    # installers wrote the 32-bit view. Remove both before file/service cleanup
+    # so a partial cleanup cannot leave a stale Settings entry behind.
+    $UninstallKey = "SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\ArckonAgent"
+    $removed = $false
+    foreach ($view in @([Microsoft.Win32.RegistryView]::Registry64, [Microsoft.Win32.RegistryView]::Registry32)) {
+        try {
+            $baseKey = [Microsoft.Win32.RegistryKey]::OpenBaseKey(
+                [Microsoft.Win32.RegistryHive]::LocalMachine, $view)
+            if ($baseKey.OpenSubKey($UninstallKey)) {
+                $baseKey.DeleteSubKeyTree($UninstallKey, $false)
+                $removed = $true
+            }
+            $baseKey.Dispose()
+        } catch {
+            # The 64-bit view is unavailable on 32-bit Windows; the other view is sufficient.
+        }
+    }
+    if ($removed) {
+        Write-Host "  [OK] Removed Programs and Features entry" -ForegroundColor Green
+    }
+}
+
 Write-Host ""
 Write-Host "RiskRaven Arckon Agent - Windows Uninstaller" -ForegroundColor White
 Write-Host "===============================================" -ForegroundColor DarkGray
@@ -46,6 +70,8 @@ if (-not $Force) {
         exit 0
     }
 }
+
+Remove-ProgramsAndFeaturesEntry
 
 # -- Stop and remove services --------------------------------------------------
 
@@ -113,28 +139,4 @@ if ($needReboot) {
     Write-Host "RiskRaven Arckon Agent uninstalled. Please reboot to complete file cleanup." -ForegroundColor Yellow
 } else {
     Write-Host "RiskRaven Arckon Agent has been uninstalled." -ForegroundColor Green
-}
-
-# -- Remove Programs and Features entries ---------------------------------------
-# The PowerShell installer writes the native registry view while older NSIS
-# installers wrote the 32-bit view. Remove both so Settings cannot retain a
-# stale Arckon Agent entry after uninstall.
-
-$UninstallKey = "SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\ArckonAgent"
-$removedRegistryEntry = $false
-foreach ($view in @([Microsoft.Win32.RegistryView]::Registry64, [Microsoft.Win32.RegistryView]::Registry32)) {
-    try {
-        $baseKey = [Microsoft.Win32.RegistryKey]::OpenBaseKey(
-            [Microsoft.Win32.RegistryHive]::LocalMachine, $view)
-        if ($baseKey.OpenSubKey($UninstallKey)) {
-            $baseKey.DeleteSubKeyTree($UninstallKey, $false)
-            $removedRegistryEntry = $true
-        }
-        $baseKey.Dispose()
-    } catch {
-        # The 64-bit view is unavailable on 32-bit Windows; the other view is sufficient.
-    }
-}
-if ($removedRegistryEntry) {
-    Write-Host "  [OK] Removed Programs and Features entry" -ForegroundColor Green
 }
