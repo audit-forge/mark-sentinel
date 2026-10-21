@@ -390,6 +390,32 @@ def report_network_assets(results: list, config: dict, device_id: str, hostname:
     return False
 
 
+def collect_and_report_passive_network_assets(config: dict, device_id: str, hostname: str,
+                                              collector=None) -> bool:
+    """Collect neighbor-cache observations and always report the scan outcome."""
+    try:
+        if collector is None:
+            from network_inventory import collect_passive_neighbors
+            collector = collect_passive_neighbors
+        results = collector()
+        count = len(results)
+        scan = {
+            'type': 'passive_neighbors',
+            'scope': 'local neighbor cache',
+            'status': 'complete',
+            'detail': f'{count} host(s) observed' if count else 'No hosts in the local neighbor cache',
+        }
+        return report_network_assets(results, config, device_id, hostname, scan)
+    except Exception as e:
+        log.error('Passive network asset discovery error: %s', e)
+        return report_network_assets([], config, device_id, hostname, {
+            'type': 'passive_neighbors',
+            'scope': 'local neighbor cache',
+            'status': 'failed',
+            'detail': f'Passive collection failed: {e}'[:500],
+        })
+
+
 # ── Protected Files access-event reporting ───────────────────────────────────
 
 def post_access_events(events: list, config: dict) -> bool:
@@ -2152,12 +2178,8 @@ def main() -> None:
                 except Exception as e:
                     log.error('Network discovery error: %s', e)
             elif cmd == 'discover_network_assets':
-                try:
-                    from network_inventory import collect_passive_neighbors
-                    log.info('Passive network asset discovery triggered by server')
-                    report_network_assets(collect_passive_neighbors(), cfg, device_id, hostname)
-                except Exception as e:
-                    log.error('Passive network asset discovery error: %s', e)
+                log.info('Passive network asset discovery triggered by server')
+                collect_and_report_passive_network_assets(cfg, device_id, hostname)
             elif cmd and cmd.startswith('discover_network_assets_active:'):
                 try:
                     from network_inventory import collect_active_ai_services

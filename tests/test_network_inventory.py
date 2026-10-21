@@ -2,6 +2,7 @@
 from network_inventory import (collect_active_ai_services, collect_passive_neighbors, parse_arp,
                                parse_ip_neighbors, parse_ndp, parse_windows_neighbors)
 from storage import AgentStore
+from agent import collect_and_report_passive_network_assets
 
 
 def _report():
@@ -30,6 +31,28 @@ def test_collector_only_runs_neighbor_cache_commands():
     assets = collect_passive_neighbors(run=run, system='Linux')
     assert assets
     assert commands == [['arp', '-an'], ['ip', 'neigh', 'show'], ['ip', '-6', 'neigh', 'show']]
+
+
+def test_passive_collection_reports_empty_and_failed_scan_outcomes(monkeypatch):
+    reports = []
+    monkeypatch.setattr('agent.report_network_assets',
+                        lambda results, _cfg, _id, _host, scan: reports.append((results, scan)) or True)
+
+    assert collect_and_report_passive_network_assets({}, 'device-1', 'host', collector=lambda: [])
+    assert reports[-1] == ([], {
+        'type': 'passive_neighbors',
+        'scope': 'local neighbor cache',
+        'status': 'complete',
+        'detail': 'No hosts in the local neighbor cache',
+    })
+
+    def broken_collector():
+        raise RuntimeError('netsh unavailable')
+
+    assert collect_and_report_passive_network_assets({}, 'device-1', 'host', collector=broken_collector)
+    assert reports[-1][0] == []
+    assert reports[-1][1]['status'] == 'failed'
+    assert 'netsh unavailable' in reports[-1][1]['detail']
 
 
 def test_network_assets_upsert_and_scope_through_reporting_device(tmp_path):
