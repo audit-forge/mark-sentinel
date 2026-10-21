@@ -249,7 +249,12 @@ async function pushAllAgentUpdates(btn) {
   status.style.color = '#6B7280';
   try {
     const r = await fetch('/api/agents/update-all', {method: 'POST'});
-    const data = await r.json();
+    const text = await r.text();
+    let data;
+    try { data = JSON.parse(text); } catch (e) {
+      throw new Error(r.ok ? 'Unexpected response: ' + text.slice(0, 120) : 'Server error (HTTP ' + r.status + ')');
+    }
+    if (!r.ok) throw new Error(data.error || 'Server error (HTTP ' + r.status + ')');
     status.textContent = `Queued for ${data.total_devices_queued} device(s) across ${data.customers_succeeded}/${data.customers_attempted} customer(s).`;
     status.style.color = data.customers_succeeded === data.customers_attempted ? '#16A34A' : '#CA8A04';
   } catch (e) {

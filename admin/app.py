@@ -8,6 +8,7 @@ import string
 import subprocess
 import time
 import urllib.request
+import urllib.error
 from collections import defaultdict
 from datetime import datetime, date, timezone, timedelta
 from fastapi import FastAPI, Request, Form, HTTPException
@@ -1082,11 +1083,10 @@ async def rotate_customer_token(request: Request):
     push_count = 0
     sentinel_url = f"http://sentinel-{customer_id}:7331/api/fleet/push-token"
     try:
-        import httpx
-        async with httpx.AsyncClient(timeout=5) as client:
-            r = await client.post(sentinel_url)
-            if r.status_code == 200:
-                push_count = r.json().get("device_count", 0)
+        req = urllib.request.Request(sentinel_url, method='POST')
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            if resp.status == 200:
+                push_count = json.loads(resp.read().decode()).get("device_count", 0)
     except Exception:
         pass  # push is best-effort; in-band delivery still works
 
@@ -1166,19 +1166,20 @@ async def download_customer_installer(request: Request, customer_id: str, platfo
 # authenticates instead of quietly 401'ing.
 
 async def _push_customer_update_all(customer_id: str, port: int, actor_email: str) -> dict:
-    import httpx
     url = f"http://sentinel-{customer_id}:7331/api/fleet/update/all"
     try:
-        async with httpx.AsyncClient(timeout=10) as client:
-            r = await client.post(url, headers={
-                "X-Sentinel-User-Email": actor_email or "super_admin@system",
-                "X-Sentinel-User-Role": "admin",
-                "X-Sentinel-Customer-ID": customer_id,
-            })
-        if r.status_code == 200:
-            data = r.json()
-            return {"customer_id": customer_id, "ok": True, "device_count": data.get("count", 0)}
-        return {"customer_id": customer_id, "ok": False, "error": f"HTTP {r.status_code}"}
+        req = urllib.request.Request(url, method='POST', headers={
+            "X-Sentinel-User-Email": actor_email or "super_admin@system",
+            "X-Sentinel-User-Role": "admin",
+            "X-Sentinel-Customer-ID": customer_id,
+        })
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            if resp.status == 200:
+                data = json.loads(resp.read().decode())
+                return {"customer_id": customer_id, "ok": True, "device_count": data.get("count", 0)}
+            return {"customer_id": customer_id, "ok": False, "error": f"HTTP {resp.status}"}
+    except urllib.error.HTTPError as e:
+        return {"customer_id": customer_id, "ok": False, "error": f"HTTP {e.code}"}
     except Exception as e:
         return {"customer_id": customer_id, "ok": False, "error": str(e)}
 
