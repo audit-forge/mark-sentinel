@@ -8370,6 +8370,21 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
 window.addEventListener('pageshow', function(e) {{
   if (e.persisted) window.location.reload();
 }});
+// The gateway returns 401 to API calls after the shared dashboard session
+// expires. Turn that background failure into the same login flow as a page
+// navigation instead of leaving the single-page UI in an error state.
+const _dashboardFetch = window.fetch.bind(window);
+let _sessionRedirecting = false;
+window.fetch = async function(...args) {{
+  const response = await _dashboardFetch(...args);
+  if (response.status === 401 && !_sessionRedirecting) {{
+    _sessionRedirecting = true;
+    const login = 'https://admin.riskraven.ai/login?next=' + encodeURIComponent(window.location.href);
+    window.location.replace(login);
+    throw new Error('Dashboard session expired');
+  }}
+  return response;
+}};
 // ── Theme ──
 function _applyTheme(light) {{
   document.documentElement.classList.toggle('light', light);

@@ -831,6 +831,14 @@ def test_api_auth_returns_http_errors_instead_of_cross_port_login_redirect(rende
     assert not any(line.startswith("error_page ") for line in block)
 
 
+def test_dashboard_redirects_expired_api_sessions_to_login():
+    source = (REPO / "server.py").read_text(encoding="utf-8")
+
+    assert "response.status === 401" in source
+    assert "Dashboard session expired" in source
+    assert "https://admin.riskraven.ai/login?next=" in source
+
+
 def test_the_authenticated_location_uses_no_undefined_variables(rendered_vhost):
     """An identity header set from a variable nobody assigns renders empty --
     which fails open on any consumer that treats "absent" as "unrestricted"."""
