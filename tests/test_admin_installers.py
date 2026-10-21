@@ -57,3 +57,10 @@ def test_current_windows_uninstaller_is_available_to_existing_agents():
     source = (ROOT / 'admin' / 'app.py').read_text(encoding='utf-8')
 
     assert '"uninstall.ps1"' in source
+
+
+def test_windows_download_includes_smartscreen_guidance():
+    dashboard = (ROOT / 'server.py').read_text(encoding='utf-8')
+
+    assert 'Windows SmartScreen notice:' in dashboard
+    assert 'More info</strong>, then <strong>Run anyway' in dashboard

@@ -8152,6 +8152,9 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
     <div style="display:flex;gap:10px;flex-wrap:wrap">
       <a href="/api/installer/windows" class="scan-btn" style="text-decoration:none;color:#0F766E;border-color:#0F766E40;white-space:nowrap;font-weight:600">⬇ Windows (.exe)</a>
     </div>
+    <div style="margin-top:12px;background:#FFFBEB;border:1px solid #FDE68A;border-radius:6px;padding:10px 12px;font-size:12px;color:#92400E;line-height:1.5">
+      <strong>Windows SmartScreen notice:</strong> Windows may show “Windows protected your PC” for this tenant-specific installer. Download it only from this signed-in dashboard. To continue, select <strong>More info</strong>, then <strong>Run anyway</strong>, and accept the administrator prompt.
+    </div>
   </div>
   <div class="content-panel" style="background:#ffffff;border:1px solid #F3F4F6;border-radius:8px;padding:20px;margin-bottom:16px">
     <div class="panel-sub-hdr" style="font-size:12px;color:#6B7280;font-weight:600;text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px">macOS (Terminal install)</div>
