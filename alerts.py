@@ -36,7 +36,9 @@ import logging
 import smtplib
 import time
 import urllib.request
+from datetime import datetime, timezone
 from urllib.parse import parse_qs, urlparse
+from zoneinfo import ZoneInfo
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from email.mime.application import MIMEApplication
@@ -521,7 +523,10 @@ def fire_cloud_asset_alert(event: dict, alert_cfg: dict, store=None) -> None:
     if store is not None and store.was_alert_recently_fired(
             'protected_cloud_asset_access', provider, dedup_key):
         return
+    accessed_at = _format_alert_timestamp(str(event.get('accessed_at', '')).strip())
     title = f"{provider.upper()} {actor_label} {actor!r} {event.get('action', 'accessed')} protected asset {resource}"
+    if accessed_at:
+        title += f" at {accessed_at}"
     if device_name:
         title += f" on {device_name}"
     elif source_ip:
@@ -960,3 +965,18 @@ def _alert_subject(payload: dict) -> str:
 
 def _now_iso() -> str:
     return time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
+
+
+def _format_alert_timestamp(value: str) -> str:
+    """Format provider UTC timestamps for human-facing alert notifications."""
+    if not value:
+        return ''
+    try:
+        parsed = datetime.fromisoformat(value.replace('Z', '+00:00'))
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        eastern = parsed.astimezone(ZoneInfo('America/New_York'))
+    except (TypeError, ValueError):
+        return value
+    hour = eastern.hour % 12 or 12
+    return f'{eastern.month:02d}/{eastern.day:02d}/{eastern.year:04d} {hour}:{eastern:%M:%S} {eastern:%p} {eastern:%Z}'

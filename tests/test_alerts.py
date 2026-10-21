@@ -39,7 +39,7 @@ class TestProtectedCloudAlerts(unittest.TestCase):
         }, {})
 
         title = dispatch.call_args.args[1]['title']
-        self.assertIn('at 2026-10-13T20:19:00.000Z', title)
+        self.assertIn('at 10/13/2026 4:19:00 PM EDT', title)
 
 
 class TestAcademyTemplateRemediation(unittest.TestCase):
