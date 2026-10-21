@@ -599,3 +599,4 @@ Write-Host "  Install log : $InstallLog"
 
 Stop-Transcript | Out-Null
 if ([Environment]::UserInteractive) { Read-Host "`n  Press Enter to close" }
+exit 0

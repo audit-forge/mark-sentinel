@@ -42,6 +42,7 @@ def test_windows_installer_falls_back_to_a_system_startup_task_without_nssm():
     assert 'New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount' in installer
     assert 'Start-ScheduledTask -TaskName $ServiceName' in installer
     assert "& '$PythonExe' '$InstallDir\\agent.py' --daemon --config '$ConfigFile'" in installer
+    assert installer.rstrip().endswith('exit 0')
 
 
 def test_windows_uninstaller_removes_current_agent_paths_and_task_fallback():
