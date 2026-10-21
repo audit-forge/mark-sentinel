@@ -463,11 +463,13 @@ def _start_access_event_reporter(queue, config: dict) -> threading.Thread:
     stop = threading.Event()
 
     def _reporter_loop():
+        log.info('Access event reporter thread started (3s poll)')
         while not stop.is_set():
             try:
-                if queue and len(queue) > 0:
+                if queue is not None and len(queue) > 0:
                     events = queue.drain(limit=100)
                     if events:
+                        log.info('Posting %d access event(s) to server', len(events))
                         post_access_events(events, config)
             except Exception as e:
                 log.warning('Access event reporter error (non-fatal): %s', e)
@@ -2059,11 +2061,15 @@ def main() -> None:
         # configured). Purely additive — failure doesn't affect scans.
         _access_collector, _access_queue = start_access_collector(
             cfg, device_id, os.environ.get('SENTINEL_HOSTNAME', '').strip() or socket.gethostname())
+        print(f'[REPORTER] collector={_access_collector} queue={_access_queue}', flush=True)
         # Start the immediate access-event reporter thread so alerts fire
         # within seconds of AI access, not on the next scan cycle.
         _access_reporter = None
-        if _access_queue:
+        if _access_queue is not None:
+            print(f'[REPORTER] starting access event reporter, queue={type(_access_queue)}', flush=True)
             _access_reporter = _start_access_event_reporter(_access_queue, cfg)
+        else:
+            print(f'[REPORTER] no access queue — reporter not started', flush=True)
 
         while True:
             now = time.time()
@@ -2287,7 +2293,7 @@ def main() -> None:
                         # Collector wasn't running (no paths before) — start it
                         _access_collector, _access_queue = start_access_collector(
                             cfg, device_id, os.environ.get('SENTINEL_HOSTNAME', '').strip() or socket.gethostname())
-                        if _access_queue and not _access_reporter:
+                        if _access_queue is not None and not _access_reporter:
                             _access_reporter = _start_access_event_reporter(_access_queue, cfg)
                     # Persist to config
                     config_path = Path(cfg.get('_config_path', DEFAULT_CONFIG))

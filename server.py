@@ -5762,6 +5762,45 @@ load();
         except Exception:
             self._json({'count': 0})
 
+    def _api_agent_access_events(self):
+        """POST /api/agent/access-events — ingest protected-file access events."""
+        length = _content_length(self.headers)
+        if not length or length > 2_097_152:
+            self._send(400, b'Bad request', 'text/plain')
+            return
+        try:
+            body = json.loads(self.rfile.read(length))
+        except json.JSONDecodeError:
+            self._send(400, b'Invalid JSON', 'text/plain')
+            return
+        events = body.get('events', [])
+        if not isinstance(events, list) or len(events) > 10000:
+            self._send(400, b'Invalid events', 'text/plain')
+            return
+        cust = self._get_agent_customer()
+        store = _get_store(cust['id'] if cust else 'default')
+        stored = store.ingest_access_events(events)
+        # Fire alerts for each AI access to a protected file
+        from alerts import fire_access_alert, load_alert_config
+        alert_cfg = load_alert_config(ROOT / 'data' / 'alerts_config.json') or {}
+        for evt in events:
+            if not isinstance(evt, dict):
+                continue
+            try:
+                fire_access_alert(
+                    device_id=str(evt.get('device_id', '')),
+                    hostname=str(evt.get('hostname', '')),
+                    process=str(evt.get('process', '')),
+                    path=str(evt.get('path', '')),
+                    action=str(evt.get('action', 'open')),
+                    platform=str(evt.get('platform', '')),
+                    alert_cfg=alert_cfg, store=store,
+                )
+            except Exception as e:
+                log.error('access alert fire error: %s', e)
+        log.info('access events ingested: %d stored, %d events from agent', stored, len(events))
+        self._json({'status': 'accepted', 'stored': stored})
+
     def _api_verify_access_chain(self):
         store = self._store()
         try:

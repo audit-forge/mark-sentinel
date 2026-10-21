@@ -200,6 +200,9 @@ class AccessCollector:
               action: str, source: str) -> None:
         """Format and queue an event if it passes the filter."""
         if not self._should_report(process, path, action):
+            log.info('event filtered: process=%s path=%s action=%s ai=%s match=%s',
+                     process, path, action, is_ai_process(process),
+                     path_matches_protected(path, self.protected_paths) is not None)
             return
         event = format_event(
             ts=ts, device_id=self.device_id, hostname=self.hostname,

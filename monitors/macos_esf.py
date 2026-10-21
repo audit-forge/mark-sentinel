@@ -213,6 +213,7 @@ class MacOSESCollector(AccessCollector):
         ts = self._parse_timestamp(evt.get('timestamp', ''))
         if evt_type == 'file_access':
             path = evt.get('path', '')
+            log.info('ES event: process=%s path=%s action=%s', process, path, evt.get('action', 'open'))
             action = evt.get('action', 'open')
             self._emit(ts=ts, process=process, pid=pid,
                        path=path, action=action, source='esf')
