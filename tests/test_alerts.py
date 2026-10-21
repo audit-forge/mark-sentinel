@@ -7,7 +7,7 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from alerts import (is_valid_gchat_webhook, is_valid_slack_webhook,
                     is_valid_teams_webhook, is_valid_url, fire_cloud_asset_alert, load_alert_config,
-                    load_alert_config_for_ui, save_alert_config, send_test_alert)
+                    load_alert_config_for_ui, save_alert_config, send_test_alert, _finding_payload)
 
 
 class TestLoadAlertConfig(unittest.TestCase):
@@ -40,6 +40,20 @@ class TestProtectedCloudAlerts(unittest.TestCase):
 
         title = dispatch.call_args.args[1]['title']
         self.assertIn('at 2026-10-13T20:19:00.000Z', title)
+
+
+class TestAcademyTemplateRemediation(unittest.TestCase):
+    def test_governance_alert_uses_academy_template_link(self):
+        payload = _finding_payload('new_high_finding', 'HIGH', 'host', {
+            'check_id': 'AI-GOV-003',
+            'remediation': 'obsolete local path',
+        })
+
+        self.assertEqual(
+            payload['remediation'],
+            'Use the customer-safe AI Incident Response Plan template in Academy: '
+            'https://arckon.riskraven.ai/academy/templates#ai-incident-response-plan',
+        )
 
 
 class TestSlackWebhookConfig(unittest.TestCase):

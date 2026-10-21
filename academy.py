@@ -26,6 +26,7 @@ SECTIONS = [
     ("tabs", "Dashboard Tabs"),
     ("command", "Command Center"),
     ("settings", "Settings"),
+    ("templates", "Policy Templates"),
     ("alerts", "Alerts & Notifications"),
     ("protected-files", "Protected Files Monitoring"),
     ("protected-cloud-assets", "Protected Cloud Assets"),
@@ -1399,6 +1400,22 @@ def build(root: pathlib.Path, page: str | None = None) -> bytes:
         "model, see <code>docs/GOOGLE_WORKSPACE_DRIVE_FORWARDER.md</code> in the Arckon release.</p>"
     )
 
+    templates = (
+        "<p>These customer-safe starter templates are designed to be adapted to your organization. "
+        "They are not completed compliance documents. Have the responsible owner review and approve each one before relying on it.</p>"
+        "<h3 id='ai-usage-policy'>AI Usage Policy</h3>"
+        "<pre><code># AI Usage Policy\n\nOrganization: [ORGANIZATION]\nOwner: [OWNER]\nReview date: [DATE]\n\n## Approved AI tools\n[List approved tools and permitted use cases.]\n\n## Prohibited data\n[Define data that must not be entered into AI tools.]\n\n## Responsibilities\n[Assign approval, monitoring, and exception responsibilities.]</code></pre>"
+        "<h3 id='data-retention-policy'>AI Data Retention Policy</h3>"
+        "<pre><code># AI Data Retention Policy\n\nOrganization: [ORGANIZATION]\nOwner: [OWNER]\nReview date: [DATE]\n\n| Data category | Storage location | Retention period | Deletion method | Owner |\n| --- | --- | --- | --- | --- |\n| Prompt and response logs | [LOCATION] | [PERIOD] | [METHOD] | [OWNER] |\n| Vector embeddings | [LOCATION] | [PERIOD] | [METHOD] | [OWNER] |\n| Provider-side data | [LOCATION] | [PERIOD] | [METHOD] | [OWNER] |</code></pre>"
+        "<h3 id='ai-incident-response-plan'>AI Incident Response Plan</h3>"
+        "<pre><code># AI Incident Response Plan\n\nOrganization: [ORGANIZATION]\nIncident owner: [OWNER]\nVendor security contact: [CONTACT]\n\n## AI incident definition\n[Define data leakage, prompt injection, unsafe output, and unauthorized tool use.]\n\n## Containment\n[Document the AI kill switch and who may invoke it.]\n\n## Evidence\n[Identify logs, prompts, model settings, and access records to preserve.]\n\n## Notification\n[Identify internal, customer, legal, vendor, and regulator notifications.]</code></pre>"
+        "<h3 id='ai-asset-inventory'>AI Asset Inventory</h3>"
+        "<pre><code># AI Asset Inventory\n\n| System | Provider | Model | Purpose | Owner | Data processed |\n| --- | --- | --- | --- | --- | --- |\n| [NAME] | [PROVIDER] | [MODEL] | [PURPOSE] | [OWNER] | [DATA] |</code></pre>"
+        "<h3 id='ai-runtime-config'>AI Runtime Audit Configuration</h3>"
+        "<p>Enable only controls that are genuinely operated and reviewed by your organization.</p>"
+        "<pre><code>{\n  \"monitoring\": {\n    \"enabled\": true,\n    \"retention_days\": 30,\n    \"prompt_audit\": true\n  }\n}</code></pre>"
+    )
+
     siem_tools = (
         "<p>The <b>SIEM &amp; Tool Integrations</b> tab connects Arckon to your security stack. "
         "Each integration has its own card. Enable it, fill in the required fields, click <b>Test</b>, then click <b>Save</b>. "
@@ -1841,6 +1858,7 @@ def build(root: pathlib.Path, page: str | None = None) -> bytes:
         'tabs': tabs,
         'command': command_center,
         'settings': settings,
+        'templates': templates,
         'alerts': alerts,
         'protected-files': protected_files,
         'protected-cloud-assets': protected_cloud_assets,

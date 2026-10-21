@@ -217,6 +217,14 @@ def save_alert_config(path: Path, new_data: dict, existing_path: Path) -> None:
 
 # ── Alert firing ──────────────────────────────────────────────────────────────
 
+_ACADEMY_TEMPLATE_REMEDIATION = {
+    'AI-GOV-001': 'Use the customer-safe AI Usage Policy template in Academy: https://arckon.riskraven.ai/academy/templates#ai-usage-policy',
+    'AI-GOV-002': 'Use the customer-safe AI Data Retention Policy template in Academy: https://arckon.riskraven.ai/academy/templates#data-retention-policy',
+    'AI-GOV-003': 'Use the customer-safe AI Incident Response Plan template in Academy: https://arckon.riskraven.ai/academy/templates#ai-incident-response-plan',
+    'AI-GOV-005': 'Use the customer-safe AI Asset Inventory template in Academy: https://arckon.riskraven.ai/academy/templates#ai-asset-inventory',
+    'AI-RUNTIME-005': 'Review the AI Runtime Audit Configuration example in Academy: https://arckon.riskraven.ai/academy/templates#ai-runtime-config',
+}
+
 def _finding_payload(event: str, severity: str, hostname: str, finding: dict) -> dict:
     """Builds the alert payload for one finding — carries remediation/
     details/category/frameworks through from the raw finding dict (same
@@ -234,7 +242,8 @@ def _finding_payload(event: str, severity: str, hostname: str, finding: dict) ->
         'title':       finding.get('title', ''),
         'category':    finding.get('category', ''),
         'details':     finding.get('details', ''),
-        'remediation': finding.get('remediation', ''),
+        'remediation': _ACADEMY_TEMPLATE_REMEDIATION.get(
+            finding.get('check_id', ''), finding.get('remediation', '')),
         'frameworks':  finding.get('frameworks') or {},
     }
 
