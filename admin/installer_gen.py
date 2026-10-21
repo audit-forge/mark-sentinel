@@ -32,11 +32,13 @@ Unicode true
 RequestExecutionLevel admin
 ShowInstDetails show
 SetCompressor /SOLID lzma
+InstallDir "$PROGRAMFILES64\\Arckon"
 
 Page instfiles
 UninstPage instfiles
 
 Section "Install Arckon Agent"
+  SetRegView 64
   SetOutPath "$TEMP\\arckon-install"
   File "install.ps1"
 
@@ -69,6 +71,7 @@ Section "Install Arckon Agent"
 SectionEnd
 
 Section "Uninstall"
+  SetRegView 64
   SetOutPath "$TEMP\\arckon-uninstall"
   File "uninstall.ps1"
   nsExec::ExecToLog 'powershell.exe -ExecutionPolicy Bypass -NoProfile -NonInteractive -File "$TEMP\\arckon-uninstall\\uninstall.ps1" -Force'

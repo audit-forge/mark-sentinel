@@ -12,7 +12,9 @@
     .\uninstall.ps1
 #>
 [CmdletBinding()]
-param()
+param(
+    [switch]$Force
+)
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
@@ -37,10 +39,12 @@ if (Get-Service -Name $LegacyService -ErrorAction SilentlyContinue) {
 }
 Write-Host ""
 
-$confirm = Read-Host "Are you sure? [y/N]"
-if ($confirm -notmatch '^[Yy]$') {
-    Write-Host "Aborted." -ForegroundColor Yellow
-    exit 0
+if (-not $Force) {
+    $confirm = Read-Host "Are you sure? [y/N]"
+    if ($confirm -notmatch '^[Yy]$') {
+        Write-Host "Aborted." -ForegroundColor Yellow
+        exit 0
+    }
 }
 
 # -- Stop and remove services --------------------------------------------------
@@ -77,6 +81,14 @@ if ($task) {
     Write-Host "  Scheduled task '$WatchdogTask' not found, skipping." -ForegroundColor DarkGray
 }
 
+# Installations where NSSM was unavailable use this startup task instead of a
+# Windows service. Remove it too so it cannot recreate the agent after reboot.
+$agentTask = Get-ScheduledTask -TaskName $ServiceName -ErrorAction SilentlyContinue
+if ($agentTask) {
+    Unregister-ScheduledTask -TaskName $ServiceName -Confirm:$false
+    Write-Host "  [OK] Startup task removed" -ForegroundColor Green
+}
+
 # -- Remove directories --------------------------------------------------------
 
 $needReboot = $false
@@ -103,10 +115,26 @@ if ($needReboot) {
     Write-Host "RiskRaven Arckon Agent has been uninstalled." -ForegroundColor Green
 }
 
-# -- Remove the uninstall registry entry ----------------------------------------
+# -- Remove Programs and Features entries ---------------------------------------
+# The PowerShell installer writes the native registry view while older NSIS
+# installers wrote the 32-bit view. Remove both so Settings cannot retain a
+# stale Arckon Agent entry after uninstall.
 
-$RegKey = "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\ArckonAgent"
-if (Test-Path $RegKey) {
-    Remove-Item -Path $RegKey -Force -ErrorAction SilentlyContinue
+$UninstallKey = "SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\ArckonAgent"
+$removedRegistryEntry = $false
+foreach ($view in @([Microsoft.Win32.RegistryView]::Registry64, [Microsoft.Win32.RegistryView]::Registry32)) {
+    try {
+        $baseKey = [Microsoft.Win32.RegistryKey]::OpenBaseKey(
+            [Microsoft.Win32.RegistryHive]::LocalMachine, $view)
+        if ($baseKey.OpenSubKey($UninstallKey)) {
+            $baseKey.DeleteSubKeyTree($UninstallKey, $false)
+            $removedRegistryEntry = $true
+        }
+        $baseKey.Dispose()
+    } catch {
+        # The 64-bit view is unavailable on 32-bit Windows; the other view is sufficient.
+    }
+}
+if ($removedRegistryEntry) {
     Write-Host "  [OK] Removed Programs and Features entry" -ForegroundColor Green
 }

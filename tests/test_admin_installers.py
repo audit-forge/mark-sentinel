@@ -52,6 +52,9 @@ def test_windows_uninstaller_removes_current_agent_paths_and_task_fallback():
     assert 'C:\\ProgramData\\Arckon' in uninstaller
     assert 'ArckonRepairWatchdog' in uninstaller
     assert 'Uninstall\\ArckonAgent' in uninstaller
+    assert '[switch]$Force' in uninstaller
+    assert 'RegistryView]::Registry64' in uninstaller
+    assert 'RegistryView]::Registry32' in uninstaller
 
 
 def test_current_windows_uninstaller_is_available_to_existing_agents():
