@@ -2061,15 +2061,11 @@ def main() -> None:
         # configured). Purely additive — failure doesn't affect scans.
         _access_collector, _access_queue = start_access_collector(
             cfg, device_id, os.environ.get('SENTINEL_HOSTNAME', '').strip() or socket.gethostname())
-        print(f'[REPORTER] collector={_access_collector} queue={_access_queue}', flush=True)
         # Start the immediate access-event reporter thread so alerts fire
         # within seconds of AI access, not on the next scan cycle.
         _access_reporter = None
         if _access_queue is not None:
-            print(f'[REPORTER] starting access event reporter, queue={type(_access_queue)}', flush=True)
             _access_reporter = _start_access_event_reporter(_access_queue, cfg)
-        else:
-            print(f'[REPORTER] no access queue — reporter not started', flush=True)
 
         while True:
             now = time.time()
