@@ -6259,6 +6259,27 @@ async function moveSelectedDevices(){
             network_assets = []
         try:
             user = self._session_user()
+            deployment_token = ''
+            deployment_linux = ''
+            deployment_macos = ''
+            deployment_mdm = ''
+            if user and user.get('role') in ('admin', 'customer_admin', 'super_admin'):
+                if _trusted_proxy_token():
+                    deployment_token = os.environ.get('SENTINEL_AGENT_TOKEN', '')
+                    if not deployment_token:
+                        token_file = ROOT / 'data' / 'agent_token.txt'
+                        if token_file.exists():
+                            deployment_token = token_file.read_text().strip()
+                else:
+                    customer = _get_registry().get_by_id(user.get('customer_id', ''))
+                    deployment_token = customer.get('agent_token', '') if customer else ''
+                host = self.headers.get('Host', '').strip()
+                if deployment_token and host and all(c.isalnum() or c in '.:-' for c in host):
+                    scheme = 'https' if _trusted_proxy_token() else 'http'
+                    server_url = f'{scheme}://{host}'
+                    deployment_linux = f'curl -fsSL {server_url}/install/install.sh | sudo bash -s -- --server {server_url} --token {deployment_token}'
+                    deployment_macos = deployment_linux + ' --target /'
+                    deployment_mdm = f'#!/bin/bash\n# Arckon Agent MDM/Jamf deployment script\ncurl -fsSL {server_url}/install/install.sh | bash -s -- --server {server_url} --token {deployment_token} --target /'
             body = _build_fleet_html(
                 devices, shadow, mcp, network_assets,
                 current_user_email=user['email'] if user else '',
@@ -6266,6 +6287,10 @@ async function moveSelectedDevices(){
                 current_user_is_reseller=bool(user.get('is_reseller')) if user else False,
                 current_user_is_msp=bool(user.get('is_msp')) if user else False,
                 current_user_impersonated_by=(user.get('impersonated_by') or '') if user else '',
+                deployment_agent_token=deployment_token,
+                deployment_linux_command=deployment_linux,
+                deployment_macos_command=deployment_macos,
+                deployment_mdm_command=deployment_mdm,
                 store=store,
             ).encode('utf-8')
             print(f'[SENTINEL] _serve_fleet: body built {len(body)} bytes', flush=True)
@@ -7105,15 +7130,23 @@ def _build_fleet_html(devices: list[dict], shadow: list[dict] | None = None,
                       network_assets: list[dict] | None = None,
                       current_user_email: str = '',
                       current_user_role: str = '',
-                      current_user_is_reseller: bool = False,
-                      current_user_is_msp: bool = False,
-                      current_user_impersonated_by: str = '',
-                      store=None) -> str:
+                       current_user_is_reseller: bool = False,
+                       current_user_is_msp: bool = False,
+                       current_user_impersonated_by: str = '',
+                       deployment_agent_token: str = '',
+                       deployment_linux_command: str = '',
+                       deployment_macos_command: str = '',
+                       deployment_mdm_command: str = '',
+                       store=None) -> str:
     shadow = shadow or []
     mcp    = mcp    or []
     network_assets = network_assets or []
     ts_now = int(time.time())
     import html as _html
+    deployment_agent_token = _html.escape(deployment_agent_token, quote=True)
+    deployment_linux_command = _html.escape(deployment_linux_command)
+    deployment_macos_command = _html.escape(deployment_macos_command)
+    deployment_mdm_command = _html.escape(deployment_mdm_command)
 
     def _age(ts: int | None) -> str:
         if not ts:
@@ -8139,7 +8172,7 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
       <input id="agent-token-display" type="password" readonly
              style="flex:1;min-width:240px;max-width:480px;font-family:monospace;font-size:13px;
                     background:#F9FAFB;border:1px solid #E5E7EB;border-radius:6px;padding:8px 12px;color:#111827"
-             value="" placeholder="Loading…">
+              value="{deployment_agent_token}" placeholder="Loading…">
       <button class="scan-btn" onclick="toggleTokenVisibility()" id="token-show-btn"
               style="white-space:nowrap">Show</button>
       <button class="scan-btn" onclick="copyToken()"
@@ -8161,7 +8194,7 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
     <div class="panel-sub-hdr" style="font-size:12px;color:#6B7280;font-weight:600;text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px">macOS (Terminal install)</div>
     <p style="font-size:13px;color:#6B7280;margin:0 0 14px">Open Terminal, paste this command, and enter your Mac password when prompted. The agent installs and starts automatically.</p>
     <div style="position:relative">
-      <pre id="macos-curl-cmd" style="background:#F9FAFB;border:1px solid #E5E7EB;border-radius:6px;padding:16px;padding-right:70px;font-size:12.5px;font-family:'Menlo','Consolas',monospace;color:#4F46E5;white-space:pre-wrap;word-break:break-all;line-height:1.6"></pre>
+      <pre id="macos-curl-cmd" style="background:#F9FAFB;border:1px solid #E5E7EB;border-radius:6px;padding:16px;padding-right:70px;font-size:12.5px;font-family:'Menlo','Consolas',monospace;color:#4F46E5;white-space:pre-wrap;word-break:break-all;line-height:1.6">{deployment_macos_command}</pre>
       <button onclick="copyTextById('macos-curl-cmd',this)" style="position:absolute;top:10px;right:10px;background:#F9FAFB;border:1px solid #E5E7EB;color:#6B7280;font-size:12px;padding:4px 10px;border-radius:4px;cursor:pointer;font-family:inherit">Copy</button>
     </div>
   </div>
@@ -8169,7 +8202,7 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
     <div class="panel-sub-hdr" style="font-size:12px;color:#6B7280;font-weight:600;text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px">Linux (curl install)</div>
     <p style="font-size:13px;color:#6B7280;margin:0 0 14px">Run as <strong>root</strong> or with <code style="font-size:12px;background:#F3F4F6;padding:1px 4px;border-radius:3px">sudo</code> on any systemd-based Linux distro. No Python required — downloads a native binary.</p>
     <div style="position:relative">
-      <pre id="linux-curl-cmd" style="background:#F9FAFB;border:1px solid #E5E7EB;border-radius:6px;padding:16px;padding-right:70px;font-size:12.5px;font-family:'Menlo','Consolas',monospace;color:#4F46E5;white-space:pre-wrap;word-break:break-all;line-height:1.6"></pre>
+      <pre id="linux-curl-cmd" style="background:#F9FAFB;border:1px solid #E5E7EB;border-radius:6px;padding:16px;padding-right:70px;font-size:12.5px;font-family:'Menlo','Consolas',monospace;color:#4F46E5;white-space:pre-wrap;word-break:break-all;line-height:1.6">{deployment_linux_command}</pre>
       <button onclick="copyTextById('linux-curl-cmd',this)" style="position:absolute;top:10px;right:10px;background:#F9FAFB;border:1px solid #E5E7EB;color:#6B7280;font-size:12px;padding:4px 10px;border-radius:4px;cursor:pointer;font-family:inherit">Copy</button>
     </div>
   </div>
@@ -8177,7 +8210,7 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
     <div class="panel-sub-hdr" style="font-size:12px;color:#6B7280;font-weight:600;text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px">MDM / Jamf deployment script</div>
     <p style="font-size:13px;color:#6B7280;margin:0 0 14px">For Jamf Pro, Kandji, or other MDM — deploy as a shell script policy or .pkg. The agent auto-starts on first boot.</p>
     <div style="position:relative">
-      <pre id="mdm-cmd" style="background:#F9FAFB;border:1px solid #E5E7EB;border-radius:6px;padding:16px;padding-right:70px;font-size:12.5px;font-family:'Menlo','Consolas',monospace;color:#4F46E5;white-space:pre-wrap;word-break:break-all;line-height:1.6"></pre>
+      <pre id="mdm-cmd" style="background:#F9FAFB;border:1px solid #E5E7EB;border-radius:6px;padding:16px;padding-right:70px;font-size:12.5px;font-family:'Menlo','Consolas',monospace;color:#4F46E5;white-space:pre-wrap;word-break:break-all;line-height:1.6">{deployment_mdm_command}</pre>
       <button onclick="copyTextById('mdm-cmd',this)" style="position:absolute;top:10px;right:10px;background:#F9FAFB;border:1px solid #E5E7EB;color:#6B7280;font-size:12px;padding:4px 10px;border-radius:4px;cursor:pointer;font-family:inherit">Copy</button>
     </div>
   </div>

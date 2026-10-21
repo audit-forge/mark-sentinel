@@ -27,6 +27,9 @@ def test_macos_uses_terminal_install_not_app_download():
     assert "'/install/install.sh | sudo bash -s -- --server '" in dashboard
     assert 'href="/api/installer/macos"' not in dashboard
     assert 'if platform != "windows":' in admin
+    assert 'deployment_macos_command' in dashboard
+    assert 'deployment_linux_command' in dashboard
+    assert 'deployment_mdm_command' in dashboard
 
 
 def test_canonical_windows_installer_is_ascii_safe():
