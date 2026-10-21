@@ -77,3 +77,11 @@ def test_windows_download_includes_smartscreen_guidance():
 
     assert 'Windows SmartScreen notice:' in dashboard
     assert 'More info</strong>, then <strong>Run anyway' in dashboard
+
+
+def test_windows_download_shows_current_installer_version():
+    dashboard = (ROOT / 'server.py').read_text(encoding='utf-8')
+    admin = (ROOT / 'admin' / 'app.py').read_text(encoding='utf-8')
+
+    assert 'Current installer version: <strong>v{INSTALLER_VERSION}</strong>' in dashboard
+    assert 'ArckonAgentSetup-{INSTALLER_VERSION}-{customer_id}.exe' in admin

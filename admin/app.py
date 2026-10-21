@@ -1132,7 +1132,7 @@ async def download_customer_installer(request: Request, customer_id: str, platfo
     if not agent_token:
         raise HTTPException(status_code=400, detail="No agent token set for this customer")
     server_url = _sentinel_url(customer_id)
-    from installer_gen import generate_windows_installer
+    from installer_gen import INSTALLER_VERSION, generate_windows_installer
     output_dir = "/tmp/arckon-installers"
     os.makedirs(output_dir, exist_ok=True)
     try:
@@ -1143,7 +1143,7 @@ async def download_customer_installer(request: Request, customer_id: str, platfo
         return FileResponse(
             installer_path,
             media_type="application/vnd.microsoft.portable-executable",
-            filename=f"ArckonAgentSetup-{customer_id}.exe",
+            filename=f"ArckonAgentSetup-{INSTALLER_VERSION}-{customer_id}.exe",
         )
     except RuntimeError as e:
         raise HTTPException(status_code=500, detail=str(e))

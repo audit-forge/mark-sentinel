@@ -8,6 +8,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends nsis zip && rm 
 COPY admin/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 COPY admin/ .
+COPY arckon_version.py .
 COPY connectors/dns_connector.py connectors/dns_connector.py
 # Public installers must come from the canonical root scripts, not the legacy
 # admin-local copies retained for historical development environments.

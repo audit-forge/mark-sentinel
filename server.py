@@ -70,6 +70,7 @@ from collections import defaultdict
 from datetime import date, datetime, timezone
 from pathlib import Path
 from urllib.parse import unquote, urlparse
+from arckon_version import INSTALLER_VERSION
 
 PORT = 7001
 
@@ -8148,9 +8149,9 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
   </div>
   <div class="content-panel" style="background:#ffffff;border:1px solid #F3F4F6;border-radius:8px;padding:20px;margin-bottom:16px">
     <div class="panel-sub-hdr" style="font-size:12px;color:#6B7280;font-weight:600;text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px">Windows installer</div>
-    <p style="font-size:13px;color:#6B7280;margin:0 0 14px">Download an installer with your server URL and token already baked in. Double-click it on the target device and accept the admin prompt.</p>
+    <p style="font-size:13px;color:#6B7280;margin:0 0 14px">Download an installer with your server URL and token already baked in. Double-click it on the target device and accept the admin prompt. Current installer version: <strong>v{INSTALLER_VERSION}</strong>.</p>
     <div style="display:flex;gap:10px;flex-wrap:wrap">
-      <a href="/api/installer/windows" class="scan-btn" style="text-decoration:none;color:#0F766E;border-color:#0F766E40;white-space:nowrap;font-weight:600">⬇ Windows (.exe)</a>
+      <a href="/api/installer/windows" class="scan-btn" style="text-decoration:none;color:#0F766E;border-color:#0F766E40;white-space:nowrap;font-weight:600">⬇ Windows v{INSTALLER_VERSION} (.exe)</a>
     </div>
     <div style="margin-top:12px;background:#FFFBEB;border:1px solid #FDE68A;border-radius:6px;padding:10px 12px;font-size:12px;color:#92400E;line-height:1.5">
       <strong>Windows SmartScreen notice:</strong> Windows may show &quot;Windows protected your PC&quot; for this tenant-specific installer. Download it only from this signed-in dashboard. To continue, select <strong>More info</strong>, then <strong>Run anyway</strong>, and accept the administrator prompt.
