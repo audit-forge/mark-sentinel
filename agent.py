@@ -1003,14 +1003,11 @@ def _reinstall_agent(config: dict) -> None:
                            check=True, capture_output=True, timeout=30)
             log.info('reinstall: Windows installer launched via SYSTEM task')
         else:
-            # macOS/Linux: download and run install.sh
-            import urllib.request
+            # macOS/Linux: download and run install.sh using certifi-pinned HTTPS
             install_url = f'{server}/install/install.sh'
-            req = urllib.request.Request(install_url)
-            if token:
-                req.add_header('Authorization', f'Bearer {token}')
-            with urllib.request.urlopen(req, timeout=60) as resp:
-                install_text = resp.read()
+            install_text = _read_update_url(install_url,
+                                            {'Authorization': f'Bearer {token}'} if token else {},
+                                            timeout=60)
             script_path = ROOT / 'reinstall-agent.sh'
             script_path.write_bytes(install_text)
             script_path.chmod(0o755)

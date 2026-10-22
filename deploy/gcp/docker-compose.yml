@@ -47,7 +47,7 @@ services:
       - SMTP_HOST=${SMTP_HOST:-}
       - SMTP_PORT=${SMTP_PORT:-587}
       - SMTP_USER=${SMTP_USER:-}
-      - SMTP_PASS=${SMTP_PASS:-}
+      - SMTP_PASS_FILE=/run/secrets/smtp_pass
       - ALERT_FROM=${ALERT_FROM:-}
       - ALERT_TO=${ALERT_TO:-}
       - MONITOR_INTERVAL_H=${MONITOR_INTERVAL_H:-24}
@@ -57,6 +57,7 @@ services:
       - /opt/sentinel-secrets/deployer-token:/run/secrets/deploy_token:ro
       - /opt/sentinel-secrets/deployer-op-token:/run/secrets/deploy_op_token:ro
       - /opt/sentinel-secrets/admin-password:/run/secrets/admin_password:ro
+      - /opt/sentinel-secrets/smtp-pass:/run/secrets/smtp_pass:ro
       - /opt/licenses:/licenses:ro
     networks:
       - sentinel-net

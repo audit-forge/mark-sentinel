@@ -140,7 +140,7 @@ _INFO_PLIST = """\
 
 def _safe(value: str) -> str:
     """Escape characters that would break the NSIS script or shell script."""
-    return value.replace('"', '').replace("'", "").replace("\\", "")
+    return value.replace('"', '').replace("'", "").replace("\\", "").replace("$", "").replace("{", "").replace("}", "")
 
 
 def generate_windows_installer(

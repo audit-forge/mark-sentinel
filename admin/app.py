@@ -167,7 +167,7 @@ def _load_admin_password() -> str:
                 pw = p.read_text().strip() if p.is_file() else ""
             except Exception:
                 pw = ""
-    return pw or "changeme"
+    return pw or ""
 
 
 def _load_deploy_token() -> str:
@@ -196,16 +196,24 @@ MAX_CUSTOMERS  = int(os.environ.get("MAX_CUSTOMERS", "0"))  # 0 = unlimited
 ADMIN_PASSWORD = _load_admin_password()
 DEPLOY_TOKEN = _load_deploy_token()
 DEPLOY_OP_TOKEN = _load_deploy_op_token()
-PUBLIC_IP = os.environ.get("PUBLIC_IP", "34.58.90.147")
-PUBLIC_ADMIN_URL = os.environ.get("PUBLIC_ADMIN_URL", "").rstrip("/") or f"http://admin.{PUBLIC_IP}.nip.io"
+PUBLIC_IP = os.environ.get("PUBLIC_IP", "")
+PUBLIC_ADMIN_URL = os.environ.get("PUBLIC_ADMIN_URL", "").rstrip("/") or (f"http://admin.{PUBLIC_IP}.nip.io" if PUBLIC_IP else "")
 PUBLIC_DASHBOARD_URL = os.environ.get("PUBLIC_DASHBOARD_URL", "").rstrip("/")
 PUBLIC_DASHBOARD_PORT = int(os.environ.get("PUBLIC_DASHBOARD_PORT", "80"))
 AUTH_COOKIE_DOMAIN = os.environ.get("AUTH_COOKIE_DOMAIN", "").strip() or None
+
+_WEAK_PASSWORDS = frozenset({'changeme', 'password', 'admin', 'secret', ''})
 
 
 @app.on_event("startup")
 def startup():
     init_db()
+    if ADMIN_PASSWORD in _WEAK_PASSWORDS:
+        import sys
+        print('FATAL: ADMIN_PASSWORD is not set or is a known weak value. '
+              'Set ADMIN_PASSWORD_FILE to a strong password and restart.',
+              file=sys.stderr)
+        raise SystemExit(1)
     _ensure_super_admin()
     start_monitor()
 
@@ -1308,6 +1316,11 @@ async def forgot_password_page(request: Request):
 
 @app.post("/forgot-password", response_class=HTMLResponse)
 async def forgot_password_submit(request: Request, email: str = Form(...)):
+    client_ip = request.client.host if request.client else "unknown"
+    if not _check_rate_limit(client_ip):
+        return templates.TemplateResponse("forgot_password.html", {
+            "request": request, "sent": True,
+        }, status_code=429)
     with get_conn() as conn:
         row = conn.execute(
             "SELECT id FROM users WHERE email=? AND active=1", (email.strip().lower(),)

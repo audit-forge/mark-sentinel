@@ -8,6 +8,14 @@ SMTP_HOST = os.environ.get("SMTP_HOST", "")
 SMTP_PORT = int(os.environ.get("SMTP_PORT", "587"))
 SMTP_USER = os.environ.get("SMTP_USER", "")
 SMTP_PASS = os.environ.get("SMTP_PASS", "")
+if not SMTP_PASS:
+    _smtp_pass_file = os.environ.get("SMTP_PASS_FILE", "")
+    if _smtp_pass_file:
+        try:
+            from pathlib import Path
+            SMTP_PASS = Path(_smtp_pass_file).read_text().strip()
+        except Exception:
+            pass
 ALERT_FROM = os.environ.get("ALERT_FROM", SMTP_USER)
 ALERT_TO   = os.environ.get("ALERT_TO", "")
 

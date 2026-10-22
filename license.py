@@ -44,7 +44,8 @@ def _sign(data: dict) -> str:
 def _verify(data: dict) -> bool:
     """Return True if the license sig field matches the computed HMAC, or signing is disabled."""
     if not _SIGNING_KEY:
-        return True   # signing not enforced — dev/internal mode
+        log.warning('LICENSE_SIGNING_KEY not set — license signature verification disabled (dev mode)')
+        return True
     expected = _sign(data)
     provided = data.get('sig', '')
     return hmac.compare_digest(expected, provided)

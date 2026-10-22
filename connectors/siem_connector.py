@@ -42,12 +42,23 @@ _SIEM_CONFIG_PATH = Path(__file__).parent.parent / 'siem_config.json'
 
 # ── Config ────────────────────────────────────────────────────────────────────
 
+_SIEM_SECRET_FIELDS = frozenset({'hec_token', 'shared_key', 'api_key', 'vsa_api_key',
+                                 'bms_api_key', 'itglue_api_key', 'password'})
+
+
 def load_siem_config(path: Path | None = None) -> dict:
     p = path or _SIEM_CONFIG_PATH
     if not p.exists():
         return {}
     try:
-        return json.loads(p.read_text(encoding='utf-8'))
+        from crypto import decrypt_field
+        cfg = json.loads(p.read_text(encoding='utf-8'))
+        for _siem, vals in cfg.items():
+            if isinstance(vals, dict):
+                for k in list(vals):
+                    if k in _SIEM_SECRET_FIELDS and isinstance(vals[k], str) and vals[k].startswith('enc:'):
+                        vals[k] = decrypt_field(vals[k])
+        return cfg
     except Exception as e:
         log.error('siem config load error: %s', e)
         return {}
@@ -55,17 +66,27 @@ def load_siem_config(path: Path | None = None) -> dict:
 
 def save_siem_config(data: dict, path: Path | None = None) -> None:
     p = path or _SIEM_CONFIG_PATH
-    p.write_text(json.dumps(data, indent=2), encoding='utf-8')
+    from crypto import encrypt_field
+    out = {}
+    for siem, vals in data.items():
+        if isinstance(vals, dict):
+            out[siem] = {}
+            for k, v in vals.items():
+                if k in _SIEM_SECRET_FIELDS and v and not str(v).startswith('enc:'):
+                    out[siem][k] = encrypt_field(str(v))
+                else:
+                    out[siem][k] = v
+        else:
+            out[siem] = vals
+    p.write_text(json.dumps(out, indent=2), encoding='utf-8')
 
 
 def load_siem_config_for_ui(path: Path | None = None) -> dict:
     """Return config with secrets masked for browser display."""
     cfg = load_siem_config(path)
-    _SECRETS = {'hec_token', 'shared_key', 'api_key', 'vsa_api_key',
-                'bms_api_key', 'itglue_api_key', 'password'}
     def mask(obj):
         if isinstance(obj, dict):
-            return {k: ('__set__' if k in _SECRETS and v else v if k not in _SECRETS else '')
+            return {k: ('__set__' if k in _SIEM_SECRET_FIELDS and v else v if k not in _SIEM_SECRET_FIELDS else '')
                     for k, v in obj.items()}
         return obj
     return {siem: mask(vals) for siem, vals in cfg.items()}

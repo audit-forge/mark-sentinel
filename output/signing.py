@@ -23,6 +23,7 @@ def get_signing_key() -> bytes:
             pass
     key = secrets.token_bytes(32)
     _KEY_PATH.write_text(key.hex())
+    _KEY_PATH.chmod(0o600)
     return key
 
 

@@ -1435,7 +1435,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             print(f'[SENTINEL] GET {self.path} EXCEPTION: {_e}\n{_tb.format_exc()}', flush=True)
             log.error('Unhandled GET error for %s: %s', self.path, _e, exc_info=True)
             try:
-                body = ('Internal server error:\n' + _tb.format_exc()).encode('utf-8', errors='replace')
+                body = b'Internal server error'
                 self.send_response(500)
                 self.send_header('Content-Type', 'text/plain; charset=utf-8')
                 self.send_header('Content-Length', len(body))
@@ -1611,7 +1611,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             log.error('Unhandled POST error for %s: %s', self.path, _e, exc_info=True)
             try:
                 import traceback as _tb
-                body = ('Internal server error:\n' + _tb.format_exc()).encode('utf-8', errors='replace')
+                body = b'Internal server error'
                 self.send_response(500)
                 self.send_header('Content-Type', 'text/plain; charset=utf-8')
                 self.send_header('Content-Length', len(body))
@@ -2723,6 +2723,8 @@ load();
             results = [_R(r) for r in results_raw]
             pdf_bytes = format_pdf(results, profile, target, mode)
             hostname = report.get('target', device_id).replace('/', '_').replace(' ', '_')
+            import re as _re
+            hostname = _re.sub(r'[^A-Za-z0-9._-]', '_', hostname)
             filename = f'sentinel_{hostname}.pdf'
             self.send_response(200)
             self.send_header('Content-Type', 'application/pdf')
@@ -3609,7 +3611,7 @@ load();
                 import traceback
                 tb = traceback.format_exc()
                 log.error('MCP PDF generation error:\n%s', tb)
-                self._send(500, f'PDF generation failed: {pdf_err}\n\n{tb}'.encode(), 'text/plain')
+                self._send(500, b'PDF generation failed', 'text/plain')
             return
         html = _build_mcp_report_html(servers, tier)
         body = html.encode('utf-8')
@@ -3713,7 +3715,7 @@ load();
                     import traceback
                     tb = traceback.format_exc()
                     log.error('fleet PDF generation error:\n%s', tb)
-                    self._send(500, f'PDF generation failed: {pdf_err}\n\n{tb}'.encode(), 'text/plain')
+                    self._send(500, b'PDF generation failed', 'text/plain')
                     return
 
             html = _build_fleet_report_html(devices, tier, profile=profile, profiles=profiles, status_filter=status_filter, sev_filter=sev_filter, demo=_is_demo())
