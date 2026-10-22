@@ -2734,7 +2734,7 @@ load();
             self.wfile.write(pdf_bytes)
         except Exception as e:
             log.error('device pdf generation error for %s: %s', device_id, e)
-            self._send(500, f'PDF generation failed: {e}'.encode(), 'text/plain')
+            self._send(500, b'PDF generation failed', 'text/plain')
 
     def _api_events(self):
         self.send_response(200)

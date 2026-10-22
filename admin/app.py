@@ -1321,6 +1321,7 @@ async def forgot_password_submit(request: Request, email: str = Form(...)):
         return templates.TemplateResponse("forgot_password.html", {
             "request": request, "sent": True,
         }, status_code=429)
+    _record_failed_login(client_ip)
     with get_conn() as conn:
         row = conn.execute(
             "SELECT id FROM users WHERE email=? AND active=1", (email.strip().lower(),)
