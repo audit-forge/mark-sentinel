@@ -231,6 +231,9 @@ def test_rollback_proof_restores_failed_recreate_and_previous_admin(setup, failu
     assert all(v == OLD for k, v in docker.images.items() if k != 'sentinel-admin')
     state = json.loads((args.state_dir / 'transaction.json').read_text())
     assert state['status'] == 'rolled_back'
+    assert state['failure']['stage'] == {'admin': 'admin.recreate', 'opco': 'opco.restart',
+                                         'mfd': 'mfd.restart', 'smoke': 'public-smoke.canary'}[failure]
+    assert state['failure']['message'] == 'Command failed (exit 1)'
     assert not (args.state_dir / 'successful.json').exists()
     # Rollback only recreates images; no DB/key restore or Docker copy occurs.
     assert not any('cp' in c[0] or 'build' in c[0] or 'pull' in c[0] for c in docker.calls)
@@ -259,6 +262,8 @@ def test_alias_publication_failure_restores_aliases_and_containers(setup, monkey
     assert all(image == OLD for name, image in docker.images.items() if name != 'sentinel-admin')
     assert json.loads((args.state_dir / 'successful.json').read_text()) == previous_success
     assert json.loads((args.state_dir / 'transaction.json').read_text())['status'] == 'rolled_back'
+    assert json.loads((args.state_dir / 'transaction.json').read_text())['failure'] == {
+        'stage': 'alias.promote:' + alias, 'message': 'Command failed (exit 1)'}
 
 
 def test_alias_restore_failure_blocks_next_deployment_without_publishing_success(setup):
@@ -307,6 +312,122 @@ def test_command_failure_does_not_leak_output(setup):
     with pytest.raises(deploy.DeploymentError) as error:
         deploy.run(['bash', 'restart', 'opco'], env={'SENTINEL_IMAGE': NEW})
     assert 'SECRET' not in str(error.value)
+
+
+@pytest.mark.parametrize('stage', ['zeta.restart', 'zeta.verify', 'zeta.runtime',
+                                   'public-smoke.canary', 'public-smoke.final'])
+def test_failure_diagnosis_is_saved_before_rollback(setup, monkeypatch, capsys, stage):
+    docker, args, engine = setup
+    original = docker.run
+    failed = False
+    smoke_count = 0
+    message = 'Command failed (exit 1)'
+
+    def fail_at_stage(argv, **kwargs):
+        nonlocal failed, smoke_count, message
+        if failed:
+            # The first rollback command must see the original failure on disk.
+            journal = json.loads((args.state_dir / 'transaction.json').read_text())
+            assert journal['failure'] == {'stage': stage, 'message': message}
+        result = original(argv, **kwargs)
+        if failed:
+            return result
+        is_smoke = (argv[:4] == ['docker', 'exec', '-i', 'sentinel-admin']
+                    and kwargs.get('input') != deploy.ADMIN_INVENTORY)
+        if is_smoke:
+            smoke_count += 1
+        if ((stage == 'zeta.restart' and argv[0] == 'bash' and argv[-1] == 'zeta')
+                or (stage == 'zeta.runtime' and argv[:4] == ['docker', 'exec', '-i', 'sentinel-zeta']
+                    and docker.images['sentinel-zeta'] == NEW)
+                or (stage == 'public-smoke.canary' and is_smoke and smoke_count == 1)
+                or (stage == 'public-smoke.final' and is_smoke and smoke_count == 2)):
+            failed = True
+            return subprocess.CompletedProcess(argv, 1, 'SECRET stdout', 'SECRET stderr')
+        if (stage == 'zeta.verify' and argv == ['docker', 'inspect', 'sentinel-zeta']
+                and docker.images['sentinel-zeta'] == NEW):
+            failed = True
+            message = 'Tenant image/running verification failed: zeta'
+            info = json.loads(result.stdout)
+            info[0]['State']['Running'] = False
+            return subprocess.CompletedProcess(argv, 0, json.dumps(info), '')
+        return result
+
+    monkeypatch.setattr(deploy.subprocess, 'run', fail_at_stage)
+    with pytest.raises(deploy.DeploymentError) as error:
+        engine.deploy()
+    assert failed
+    assert stage in str(error.value) and message in str(error.value)
+    journal = json.loads((args.state_dir / 'transaction.json').read_text())
+    assert journal['status'] == 'rolled_back'
+    assert journal['failure'] == {'stage': stage, 'message': message}
+    assert docker.images['sentinel-admin'] == OLD_ADMIN
+    assert docker.aliases == OLD_ALIASES
+    assert all(image == OLD for name, image in docker.images.items() if name != 'sentinel-admin')
+    assert not (args.state_dir / 'successful.json').exists()
+    captured = capsys.readouterr()
+    assert 'SECRET' not in str(error.value) + json.dumps(journal) + captured.out + captured.err
+
+
+def test_unexpected_exception_is_not_persisted_or_printed(setup, monkeypatch):
+    _, args, engine = setup
+    original = engine.smoke
+    failed = False
+
+    def fail_once(tenants):
+        nonlocal failed
+        if not failed:
+            failed = True
+            raise ValueError('SECRET raw exception')
+        original(tenants)
+
+    monkeypatch.setattr(engine, 'smoke', fail_once)
+    with pytest.raises(deploy.DeploymentError) as error:
+        engine.deploy()
+    journal = json.loads((args.state_dir / 'transaction.json').read_text())
+    assert journal['failure'] == {'stage': 'public-smoke.canary',
+                                  'message': 'Unexpected deployment failure'}
+    assert journal['status'] == 'rolled_back'
+    assert 'SECRET' not in str(error.value) + json.dumps(journal)
+
+
+def test_diagnostic_write_failure_does_not_prevent_rollback(setup, monkeypatch):
+    docker, args, engine = setup
+    docker.fail_tenant = 'mfd'
+    original = deploy.save
+    failed = False
+
+    def fail_diagnostic_write(path, value):
+        nonlocal failed
+        if 'failure' in value and not failed:
+            failed = True
+            raise OSError('SECRET filesystem error')
+        original(path, value)
+
+    monkeypatch.setattr(deploy, 'save', fail_diagnostic_write)
+    with pytest.raises(deploy.DeploymentError, match='rolled_back'):
+        engine.deploy()
+    assert failed
+    journal = json.loads((args.state_dir / 'transaction.json').read_text())
+    assert journal['failure'] == {'stage': 'mfd.restart', 'message': 'Command failed (exit 1)'}
+    assert journal['status'] == 'rolled_back'
+    assert docker.images['sentinel-admin'] == OLD_ADMIN
+    assert all(image == OLD for name, image in docker.images.items() if name != 'sentinel-admin')
+
+
+@pytest.mark.parametrize('failure', ['exit', 'timeout', 'oserror'])
+def test_command_diagnostics_exclude_arguments_output_and_exception_text(monkeypatch, failure):
+    def fail(argv, **kwargs):
+        if failure == 'timeout':
+            raise subprocess.TimeoutExpired(argv, 600, output='SECRET stdout', stderr='SECRET stderr')
+        if failure == 'oserror':
+            raise OSError('SECRET exception')
+        return subprocess.CompletedProcess(argv, 7, 'SECRET stdout', 'SECRET stderr')
+
+    monkeypatch.setattr(deploy.subprocess, 'run', fail)
+    with pytest.raises(deploy.DeploymentError) as error:
+        deploy.run(['SECRET executable', 'SECRET argument'], input='SECRET input')
+    assert str(error.value) == ('Command failed (exit 7)' if failure == 'exit'
+                                else 'Command could not complete')
 
 
 def test_main_takes_exclusive_flock_before_engine(tmp_path, monkeypatch):

@@ -82,7 +82,7 @@ if config.exists():
 
 
 class DeploymentError(RuntimeError):
-    pass
+    """Operator-safe message only; never include subprocess output or secrets."""
 
 
 def run(argv, *, env=None, input=None):
@@ -91,9 +91,9 @@ def run(argv, *, env=None, input=None):
         result = subprocess.run(argv, env=env, input=input, text=True,
                                 capture_output=True, timeout=600)
     except (OSError, subprocess.TimeoutExpired):
-        raise DeploymentError('Command could not complete: ' + argv[0]) from None
+        raise DeploymentError('Command could not complete') from None
     if result.returncode:
-        raise DeploymentError('Command failed: ' + ' '.join(argv[:3]))
+        raise DeploymentError('Command failed (exit ' + str(result.returncode) + ')')
     return result.stdout
 
 
@@ -159,17 +159,21 @@ class Engine:
             raise DeploymentError('Local image identity mismatch')
 
     def runtime(self, name, fingerprint=None):
+        self.stage = name.removeprefix('sentinel-') + '.runtime'
         code = RUNTIME_CHECK
         if fingerprint:
             code += '\nimport hashlib\nassert hashlib.sha256(key).hexdigest() == ' + repr(fingerprint)
         run(['docker', 'exec', '-i', name, 'python3', '-'], input=code)
 
     def admin(self, image):
+        self.stage = 'admin.recreate'
         env = dict(os.environ, ARCKON_ADMIN_IMAGE=image)
         run(self.compose + ['up', '-d', '--no-build', '--pull', 'never', '--no-deps',
                             '--force-recreate', 'user-manager'], env=env)
+        self.stage = 'admin.verify'
         if self.inspect('sentinel-admin')['Image'] != image:
             raise DeploymentError('Admin image override was not applied')
+        self.stage = 'admin.readiness'
         for attempt in range(30):
             try:
                 run(['docker', 'exec', 'sentinel-admin', 'python3', '-c',
@@ -180,12 +184,16 @@ class Engine:
                     raise DeploymentError('Admin readiness exhausted') from None
                 time.sleep(1)
         # Reload nginx after admin replacement so it resolves the new admin IP.
+        self.stage = 'admin.nginx-test'
         run(['docker', 'exec', 'sentinel-nginx', 'nginx', '-t'])
+        self.stage = 'admin.nginx-reload'
         run(['docker', 'exec', 'sentinel-nginx', 'nginx', '-s', 'reload'])
 
     def tenant(self, tenant, image):
+        self.stage = tenant + '.restart'
         run(['bash', str(ROOT / 'deploy/gcp/restart_customer.sh'), tenant],
             env=dict(os.environ, SENTINEL_IMAGE=image))
+        self.stage = tenant + '.verify'
         info = self.inspect('sentinel-' + tenant)
         if info['Image'] != image or not info['State']['Running']:
             raise DeploymentError('Tenant image/running verification failed: ' + tenant)
@@ -270,6 +278,7 @@ class Engine:
                    'changed': [], 'status': 'deploying'}
         save(journal_path, journal)
         admin_changed = False
+        self.stage = 'admin.intent'
         try:
             # Journal intent BEFORE a destructive command, including failed recreates.
             admin_changed = True
@@ -278,22 +287,37 @@ class Engine:
             self.admin(args.admin_image)
             order = sorted(tenants, key=lambda t: (t != 'opco', t))
             for index, tenant in enumerate(order):
+                self.stage = tenant + '.intent'
                 journal['changed'].append(tenant)
                 save(journal_path, journal)
                 self.tenant(tenant, args.tenant_image)
                 if index == 0 and len(order) > 1:
+                    self.stage = 'public-smoke.canary'
                     self.smoke(tenants)
+            self.stage = 'public-smoke.final'
             self.smoke(tenants)
             # Promote defaults only after all runtime/public gates. Docker cannot
             # atomically update two tags, so journal intent and compensate failures.
             for alias, image in aliases.items():
+                self.stage = 'alias.promote:' + alias
                 journal['aliases_changed'].append(alias)
                 save(journal_path, journal)
                 run(['docker', 'image', 'tag', image, alias])
                 actual = json.loads(run(['docker', 'image', 'inspect', alias]))[0]['Id']
                 if actual != image:
                     raise DeploymentError('Lifecycle alias promotion verification failed: ' + alias)
-        except BaseException:
+        except BaseException as exc:
+            # Only DeploymentError messages are safe; never persist raw exceptions
+            # or captured output. Preserve the original failure before rollback.
+            journal['failure'] = {
+                'stage': self.stage,
+                'message': str(exc) if isinstance(exc, DeploymentError) else 'Unexpected deployment failure',
+            }
+            try:
+                save(journal_path, journal)
+            except OSError:
+                # A diagnostic write failure must not prevent workload rollback.
+                pass
             errors = []
             for alias in reversed(journal['aliases_changed']):
                 try:
@@ -321,7 +345,9 @@ class Engine:
             journal['status'] = 'rollback_failed' if errors else 'rolled_back'
             journal['rollback_errors'] = errors
             save(journal_path, journal)
-            raise DeploymentError('Deployment failed; rollback status: ' + journal['status']) from None
+            raise DeploymentError('Deployment failed at ' + journal['failure']['stage'] + ': '
+                                  + journal['failure']['message'] + '; rollback status: '
+                                  + journal['status']) from None
         # Publication errors must not trigger rollback after a success marker may
         # already have been atomically replaced. An unfinished journal fails shut.
         journal['status'] = 'succeeded'
