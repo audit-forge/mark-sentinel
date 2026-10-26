@@ -594,3 +594,11 @@ def test_workflow_run_blocks_are_valid_bash():
         if 'run' in step:
             result = subprocess.run(['bash', '-n'], input=step['run'], text=True, capture_output=True)
             assert result.returncode == 0, step['name'] + ': ' + result.stderr
+
+
+def test_host_service_uses_supported_executable_condition():
+    from pathlib import Path
+    root = Path(__file__).resolve().parents[1]
+    source = (root / 'deploy/gcp/arckon-deploy.service').read_text()
+    assert 'ConditionFileIsExecutable=/opt/sentinel/venv/bin/python' in source
+    assert 'ConditionPathIsExecutable' not in source

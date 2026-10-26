@@ -3,7 +3,7 @@ Description=Verify signed Arckon images and perform health-gated deployment
 Wants=network-online.target
 After=network-online.target docker.service
 Requires=docker.service
-ConditionPathIsExecutable=/opt/sentinel/venv/bin/python
+ConditionFileIsExecutable=/opt/sentinel/venv/bin/python
 
 [Service]
 Type=oneshot
