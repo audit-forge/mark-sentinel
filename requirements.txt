@@ -7,7 +7,7 @@ google-auth==2.40.0
 # PDF report generation
 fpdf2==2.8.3
 # Signed agent release manifest verification and release signing helper.
-cryptography==50.0.0
+cryptography==50.0.1
 # AWS Marketplace SaaS fulfillment and entitlement resolution. Credentials use
 # the workload's IAM role/default credential chain, never customer API keys.
 boto3>=1.34.0,<2.0.0
