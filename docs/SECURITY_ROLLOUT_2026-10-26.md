@@ -106,3 +106,36 @@ directory. Exact backup locations are recorded privately, not in source control.
 Backups contain sensitive old data and must remain private. The old hot-patch
 poller is replaced by signed image/catalog promotion with failure quarantine,
 health gates, lifecycle-alias promotion, and image rollback.
+
+## Release And Automation Closure
+
+- The owner approved committing/pushing the reviewed changes and retiring the
+  orphaned test integration. Active local and tenant configurations no longer
+  contain that test receiver or its credential; private evidence is retained.
+- `v1.0.69` was cancelled before publication after the dependency audit found
+  advisories. Its tag was not moved or reused.
+- `v1.0.70` was published at revision
+  `9236358827a2f68db792ec21f1e652e9528f0dc5`, with all three signed update
+  manifests, artifact hash checks, extracted-runtime checks, and 866 passing
+  tests on the exact release revision. Server and admin dependencies both passed
+  the known-vulnerability audit.
+- The signed full-image/catalog deployment was applied and verified on the host.
+  All public platform manifests serve `1.0.70`. The replacement systemd timer is
+  enabled; subsequent polls succeed without redeploying an unchanged revision.
+- Host bootstrap fixes retain `NoNewPrivileges` and `PrivateTmp`; the service
+  uses the Cloud CLI executable directly, not its privilege-changing Snap launcher.
+- A failed manual image rollout exercised rollback successfully. A subsequent
+  canary/full rollout succeeded, followed by repeated public single-login checks.
+- Enrollment smoke now validates the actual displayed token against gateway
+  authority, including its tenant binding. A stale persisted token file was
+  reconciled to its existing authoritative record; no credential was rotated.
+- Final local verification: 877 tests passed, Ruff passed, and the combined
+  server/admin dependency audit reported no known vulnerabilities. Security CI
+  passed. Online macOS/Linux agents reported `1.0.70`; offline endpoints have
+  update commands queued and cannot be claimed installed until they reconnect.
+
+Release: https://github.com/audit-forge/mark-sentinel/releases/tag/v1.0.70
+
+Signed build: https://github.com/audit-forge/mark-sentinel/actions/runs/40373547333
+
+Immutable promotion: https://github.com/audit-forge/mark-sentinel/actions/runs/40382504468

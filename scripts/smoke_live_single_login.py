@@ -54,6 +54,11 @@ def main():
                         assert 'token' not in payload and 'api_key' not in payload, 'config credential disclosure'
                     if path == '/api/customers/me':
                         assert payload.get('agent_token'), 'administrator enrollment broken'
+                        lookup = requests.get('http://127.0.0.1:8000/auth/agent-lookup', headers={
+                            'Authorization': 'Bearer ' + payload['agent_token'],
+                        }, allow_redirects=False, timeout=30)
+                        assert lookup.status_code == 200, 'enrollment token not accepted by gateway authority'
+                        assert lookup.headers.get('X-Sentinel-Customer-ID') == tenant, 'wrong enrollment tenant'
                     if path == '/api/protected-paths':
                         assert 'enc:' not in response.text, 'policy decryption failure'
                 denied = session.post(dashboard + '/api/config', json={},
