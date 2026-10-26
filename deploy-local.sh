@@ -30,6 +30,22 @@ echo '  -> Loading image...'
 sudo docker load < /tmp/arckon.tar.gz
 sudo rm -f /tmp/arckon.tar.gz
 
+# Preserve the existing credential without putting it in source, output or argv.
+# Refuse replacement if it cannot be recovered BEFORE stopping the old container.
+TOKEN_ENV=\$(sudo mktemp /run/arckon-agent-env.XXXXXX)
+trap 'sudo rm -f \"\$TOKEN_ENV\"' EXIT
+sudo docker inspect $CONTAINER | sudo python3 -c '
+import json, os, sys
+items = json.load(sys.stdin)[0][\"Config\"][\"Env\"]
+values = [v for v in items if v.startswith(\"ARCKON_AGENT_TOKEN=\")]
+if len(values) != 1 or not values[0].split(\"=\", 1)[1] or any(c in values[0] for c in \"\\r\\n\"):
+    sys.exit(\"Existing agent credential unavailable; refusing replacement\")
+fd = os.open(sys.argv[1], os.O_WRONLY | os.O_TRUNC | os.O_NOFOLLOW)
+with os.fdopen(fd, \"w\") as stream:
+    os.fchmod(stream.fileno(), 0o600)
+    stream.write(values[0] + \"\\n\")
+' \"\$TOKEN_ENV\"
+
 echo '  -> Stopping old container...'
 sudo docker stop $CONTAINER 2>/dev/null || true
 sudo docker rm   $CONTAINER 2>/dev/null || true
@@ -40,7 +56,7 @@ sudo docker run -d \
     --network arckon-net \
     --restart always \
     -e ARCKON_TRUSTED_PROXY=1 \
-    -e ARCKON_AGENT_TOKEN=3rn1MGzsh3KgNc1NuopD7LJk-isKoxmk3Pwv_QsC6NY \
+    --env-file \"\$TOKEN_ENV\" \
     -e ARCKON_ADMIN_URL=http://arckon-admin:8000 \
     -v /opt/licenses/mfdynamicsllc/license.json:/app/license.json \
     -v /opt/arckon-data/mfdynamicsllc:/app/data \

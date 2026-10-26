@@ -27,7 +27,7 @@ services:
     build:
       context: ../..
       dockerfile: admin/Dockerfile
-    image: gcp-user-manager:hardened
+    image: ${ARCKON_ADMIN_IMAGE:-gcp-user-manager:hardened}
     container_name: sentinel-admin
     user: 1000:1000
     environment:

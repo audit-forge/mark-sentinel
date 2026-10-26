@@ -38,6 +38,7 @@ import logging
 import urllib.error
 import urllib.parse
 import urllib.request
+import outbound_http
 from typing import Optional
 
 log = logging.getLogger('sentinel.psa')
@@ -120,8 +121,8 @@ def _cw_test(cfg: dict) -> tuple[bool, str]:
     if missing := [k for k in ('company_id', 'public_key', 'private_key', 'client_id') if not cfg.get(k)]:
         return False, f'ConnectWise config missing: {", ".join(missing)}'
     try:
-        req = urllib.request.Request(f'{_cw_base_url(cfg)}/system/info', headers=_cw_headers(cfg))
-        with urllib.request.urlopen(req, timeout=10) as r:
+        req = outbound_http.Request(f'{_cw_base_url(cfg)}/system/info', headers=_cw_headers(cfg))
+        with outbound_http.urlopen(req, timeout=10) as r:
             return (True, 'ConnectWise connection successful') if 200 <= r.status < 300 \
                 else (False, f'ConnectWise returned HTTP {r.status}')
     except Exception as e:
@@ -175,8 +176,8 @@ def _at_test(cfg: dict) -> tuple[bool, str]:
         return False, f'Autotask config missing: {", ".join(missing)}'
     url = f'{_at_base_url(cfg)}/zoneInformation?user={urllib.parse.quote(cfg["username"])}'
     try:
-        req = urllib.request.Request(url, headers=_at_headers(cfg))
-        with urllib.request.urlopen(req, timeout=10) as r:
+        req = outbound_http.Request(url, headers=_at_headers(cfg))
+        with outbound_http.urlopen(req, timeout=10) as r:
             return (True, 'Autotask connection successful') if 200 <= r.status < 300 \
                 else (False, f'Autotask returned HTTP {r.status}')
     except Exception as e:
@@ -212,12 +213,12 @@ def _halo_get_token(cfg: dict) -> Optional[str]:
         'scope':         'read:tickets edit:tickets',
     }).encode()
     try:
-        req = urllib.request.Request(
+        req = outbound_http.Request(
             url, data=data,
             headers={'Content-Type': 'application/x-www-form-urlencoded'},
             method='POST',
         )
-        with urllib.request.urlopen(req, timeout=10) as r:
+        with outbound_http.urlopen(req, timeout=10) as r:
             return json.loads(r.read().decode()).get('access_token')
     except Exception as e:
         log.error('HaloPSA token fetch failed: %s', e)
@@ -265,11 +266,11 @@ def _halo_test(cfg: dict) -> tuple[bool, str]:
     if not token:
         return False, 'HaloPSA authentication failed — check client_id and client_secret'
     try:
-        req = urllib.request.Request(
+        req = outbound_http.Request(
             f'{_halo_base_url(cfg)}/TicketType',
             headers={'Authorization': f'Bearer {token}', 'Content-Type': 'application/json'},
         )
-        with urllib.request.urlopen(req, timeout=10) as r:
+        with outbound_http.urlopen(req, timeout=10) as r:
             return (True, 'HaloPSA connection successful') if 200 <= r.status < 300 \
                 else (False, f'HaloPSA returned HTTP {r.status}')
     except Exception as e:
@@ -337,11 +338,11 @@ def _jira_test(cfg: dict) -> tuple[bool, str]:
     if missing := [k for k in required if not cfg.get(k)]:
         return False, f'Jira config missing: {", ".join(missing)}'
     try:
-        req = urllib.request.Request(
+        req = outbound_http.Request(
             f'{_jira_base_url(cfg)}/myself',
             headers=_jira_headers(cfg),
         )
-        with urllib.request.urlopen(req, timeout=10) as r:
+        with outbound_http.urlopen(req, timeout=10) as r:
             if 200 <= r.status < 300:
                 data = json.loads(r.read().decode())
                 name = data.get('displayName') or data.get('emailAddress', '')
@@ -355,9 +356,9 @@ def _jira_test(cfg: dict) -> tuple[bool, str]:
 
 def _http_post(url: str, body, headers: dict, label: str) -> tuple[bool, str]:
     data = json.dumps(body).encode()
-    req  = urllib.request.Request(url, data=data, headers=headers, method='POST')
+    req  = outbound_http.Request(url, data=data, headers=headers, method='POST')
     try:
-        with urllib.request.urlopen(req, timeout=15) as r:
+        with outbound_http.urlopen(req, timeout=15) as r:
             if 200 <= r.status < 300:
                 return True, f'{label} ticket created'
             return False, f'{label} returned HTTP {r.status}'

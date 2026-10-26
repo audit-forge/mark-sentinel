@@ -7,6 +7,16 @@ credentials*
 secrets*
 *.key
 *.pem
+.field-secrets/
+.spend-secrets/
+master-key
+master-key.*
+runtime.env
+outbound-private-origins.json
+siem_config.json
+license.json
+/data/siem_config.json
+/data/license.json
 
 # Python
 __pycache__/

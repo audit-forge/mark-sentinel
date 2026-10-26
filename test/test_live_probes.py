@@ -12,6 +12,7 @@ import sys
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import pytest
 
@@ -92,22 +93,36 @@ def _start_mock_server() -> tuple[HTTPServer, str]:
     return server, f"http://127.0.0.1:{port}/v1"
 
 
-@pytest.fixture(scope="module")
+@pytest.fixture(scope="class")
 def safe_server():
     """Mock server that always returns a safe refusal — simulates a hardened model."""
     _MockHandler.echo_canary = False
     server, endpoint = _start_mock_server()
-    yield endpoint
-    server.shutdown()
+    try:
+        with pytest.MonkeyPatch.context() as monkeypatch:
+            origin = urlsplit(endpoint)
+            monkeypatch.setenv("ARCKON_OUTBOUND_PRIVATE_ORIGINS", json.dumps({
+                f"{origin.scheme}://{origin.netloc}": ["127.0.0.1/32"],
+            }))
+            yield endpoint
+    finally:
+        server.shutdown()
 
 
-@pytest.fixture(scope="module")
+@pytest.fixture(scope="class")
 def vulnerable_server():
     """Mock server that echoes canary strings back — simulates a vulnerable model."""
     _MockHandler.echo_canary = True
     server, endpoint = _start_mock_server()
-    yield endpoint
-    server.shutdown()
+    try:
+        with pytest.MonkeyPatch.context() as monkeypatch:
+            origin = urlsplit(endpoint)
+            monkeypatch.setenv("ARCKON_OUTBOUND_PRIVATE_ORIGINS", json.dumps({
+                f"{origin.scheme}://{origin.netloc}": ["127.0.0.1/32"],
+            }))
+            yield endpoint
+    finally:
+        server.shutdown()
 
 
 # ---------------------------------------------------------------------------

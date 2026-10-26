@@ -14,7 +14,7 @@ RUN pip install --no-cache-dir --upgrade pip setuptools wheel && \
 
 # Copy source files while preserving Python package directories. A multi-source
 # COPY into ./ flattens directory contents and breaks Nuitka package discovery.
-COPY audit.py arckon_version.py ./
+COPY audit.py arckon_version.py outbound_http.py crypto.py ./
 COPY checks/ ./checks/
 COPY profiles/ ./profiles/
 COPY output/ ./output/
@@ -25,6 +25,8 @@ COPY connectors/ ./connectors/
 # directory, not the source checkout used during compilation.
 RUN python -m nuitka --onefile --assume-yes-for-downloads \
     --include-module=arckon_version \
+    --include-module=outbound_http \
+    --include-module=crypto \
     --include-package=checks \
     --include-package=connectors \
     --include-package=output \
@@ -33,11 +35,16 @@ RUN python -m nuitka --onefile --assume-yes-for-downloads \
 
 # Copy remaining agent source files
 COPY agent.py discovery.py network_inventory.py ./
+COPY monitors/ ./monitors/
 
 # Compile agent binary (agent.py + passive network inventory + connectors/)
 RUN python -m nuitka --onefile --assume-yes-for-downloads \
     --include-module=discovery \
     --include-module=network_inventory \
+    --include-module=outbound_http \
+    --include-module=crypto \
+    --include-package=monitors \
+    --include-package=psutil \
     --include-package=checks \
     --include-package=connectors \
     --include-package=output \

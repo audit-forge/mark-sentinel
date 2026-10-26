@@ -11,6 +11,8 @@ import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 
+import pytest
+
 
 ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT))
@@ -73,14 +75,22 @@ class _GeminiHandler(BaseHTTPRequestHandler):
         self.wfile.write(data)
 
 
-def _start_mock_gemini(echo: bool = False) -> tuple[HTTPServer, str]:
-    _GeminiHandler.echo_canary = echo
-    server = HTTPServer(("127.0.0.1", 0), _GeminiHandler)
-    port = server.server_address[1]
-    t = threading.Thread(target=server.serve_forever)
-    t.daemon = True
-    t.start()
-    return server, f"http://127.0.0.1:{port}"
+@pytest.fixture
+def _start_mock_gemini(monkeypatch):
+    def start(echo: bool = False) -> tuple[HTTPServer, str]:
+        _GeminiHandler.echo_canary = echo
+        server = HTTPServer(("127.0.0.1", 0), _GeminiHandler)
+        port = server.server_address[1]
+        base = f"http://127.0.0.1:{port}"
+        monkeypatch.setenv("ARCKON_OUTBOUND_PRIVATE_ORIGINS", json.dumps({
+            base: ["127.0.0.1/32"],
+        }))
+        t = threading.Thread(target=server.serve_forever)
+        t.daemon = True
+        t.start()
+        return server, base
+
+    return start
 
 
 # ---------------------------------------------------------------------------
@@ -117,14 +127,22 @@ class _HashHandler(BaseHTTPRequestHandler):
         self.wfile.write(data)
 
 
-def _start_mock_hash(echo: bool = False) -> tuple[HTTPServer, str]:
-    _HashHandler.echo_canary = echo
-    server = HTTPServer(("127.0.0.1", 0), _HashHandler)
-    port = server.server_address[1]
-    t = threading.Thread(target=server.serve_forever)
-    t.daemon = True
-    t.start()
-    return server, f"http://127.0.0.1:{port}"
+@pytest.fixture
+def _start_mock_hash(monkeypatch):
+    def start(echo: bool = False) -> tuple[HTTPServer, str]:
+        _HashHandler.echo_canary = echo
+        server = HTTPServer(("127.0.0.1", 0), _HashHandler)
+        port = server.server_address[1]
+        host = f"http://127.0.0.1:{port}"
+        monkeypatch.setenv("ARCKON_OUTBOUND_PRIVATE_ORIGINS", json.dumps({
+            host: ["127.0.0.1/32"],
+        }))
+        t = threading.Thread(target=server.serve_forever)
+        t.daemon = True
+        t.start()
+        return server, host
+
+    return start
 
 
 # ===========================================================================
@@ -132,7 +150,7 @@ def _start_mock_hash(echo: bool = False) -> tuple[HTTPServer, str]:
 # ===========================================================================
 
 class TestGeminiChatRequest:
-    def test_safe_response_returned(self):
+    def test_safe_response_returned(self, _start_mock_gemini):
         server, base = _start_mock_gemini(echo=False)
         try:
             # Patch the base URL so it points at our mock
@@ -157,7 +175,7 @@ class TestGeminiChatRequest:
 
 
 class TestGeminiRunProbes:
-    def test_safe_server_all_probes_pass(self):
+    def test_safe_server_all_probes_pass(self, _start_mock_gemini):
         server, base = _start_mock_gemini(echo=False)
         import connectors.gemini_connector as gc
         orig = gc._GEMINI_API_BASE
@@ -170,7 +188,7 @@ class TestGeminiRunProbes:
         assert len(results) == len(PROBES)
         assert all(r.passed for r in results.values())
 
-    def test_vulnerable_server_canary_probes_fail(self):
+    def test_vulnerable_server_canary_probes_fail(self, _start_mock_gemini):
         server, base = _start_mock_gemini(echo=True)
         import connectors.gemini_connector as gc
         orig = gc._GEMINI_API_BASE
@@ -183,7 +201,7 @@ class TestGeminiRunProbes:
         canary_probes = [pid for pid, r in results.items() if not r.passed]
         assert len(canary_probes) > 0
 
-    def test_all_probes_executed(self):
+    def test_all_probes_executed(self, _start_mock_gemini):
         server, base = _start_mock_gemini(echo=False)
         import connectors.gemini_connector as gc
         orig = gc._GEMINI_API_BASE
@@ -197,7 +215,7 @@ class TestGeminiRunProbes:
 
 
 class TestGeminiConnect:
-    def test_connect_returns_scan_context(self):
+    def test_connect_returns_scan_context(self, _start_mock_gemini):
         server, base = _start_mock_gemini(echo=False)
         import connectors.gemini_connector as gc
         orig = gc._GEMINI_API_BASE
@@ -217,7 +235,7 @@ class TestGeminiConnect:
 # ===========================================================================
 
 class TestHashChatRequest:
-    def test_safe_response_returned(self):
+    def test_safe_response_returned(self, _start_mock_hash):
         server, host = _start_mock_hash(echo=False)
         try:
             text, err = hash_request(host, "", "arckon-test", "Hello")
@@ -231,7 +249,7 @@ class TestHashChatRequest:
         assert text == ""
         assert err != ""
 
-    def test_bearer_token_accepted(self):
+    def test_bearer_token_accepted(self, _start_mock_hash):
         server, host = _start_mock_hash(echo=False)
         try:
             text, err = hash_request(host, "my-secret-token", "arckon-test", "Hello")
@@ -241,7 +259,7 @@ class TestHashChatRequest:
 
 
 class TestHashSystemPromptProbes:
-    def test_system_prompt_probes_are_skipped(self):
+    def test_system_prompt_probes_are_skipped(self, _start_mock_hash):
         server, host = _start_mock_hash(echo=False)
         try:
             results = hash_run_probes(host, "")
@@ -253,7 +271,7 @@ class TestHashSystemPromptProbes:
             assert r.passed is True
             assert "SKIP" in r.error
 
-    def test_skipped_probes_contain_explanation(self):
+    def test_skipped_probes_contain_explanation(self, _start_mock_hash):
         server, host = _start_mock_hash(echo=False)
         try:
             results = hash_run_probes(host, "")
@@ -263,7 +281,7 @@ class TestHashSystemPromptProbes:
             assert "system prompt" in results[pid].error.lower()
             assert "system.md" in results[pid].error
 
-    def test_non_skipped_probes_all_executed(self):
+    def test_non_skipped_probes_all_executed(self, _start_mock_hash):
         server, host = _start_mock_hash(echo=False)
         try:
             results = hash_run_probes(host, "")
@@ -277,7 +295,7 @@ class TestHashSystemPromptProbes:
 
 
 class TestHashRunProbes:
-    def test_safe_server_all_probes_pass(self):
+    def test_safe_server_all_probes_pass(self, _start_mock_hash):
         server, host = _start_mock_hash(echo=False)
         try:
             results = hash_run_probes(host, "")
@@ -285,7 +303,7 @@ class TestHashRunProbes:
             server.shutdown()
         assert all(r.passed for r in results.values())
 
-    def test_vulnerable_server_user_message_canaries_fail(self):
+    def test_vulnerable_server_user_message_canaries_fail(self, _start_mock_hash):
         server, host = _start_mock_hash(echo=True)
         try:
             results = hash_run_probes(host, "")
@@ -295,7 +313,7 @@ class TestHashRunProbes:
         failed = [pid for pid, r in results.items() if not r.passed]
         assert len(failed) > 0
 
-    def test_total_probe_count(self):
+    def test_total_probe_count(self, _start_mock_hash):
         server, host = _start_mock_hash(echo=False)
         try:
             results = hash_run_probes(host, "")
@@ -306,7 +324,7 @@ class TestHashRunProbes:
 
 
 class TestHashConnect:
-    def test_connect_returns_scan_context(self):
+    def test_connect_returns_scan_context(self, _start_mock_hash):
         server, host = _start_mock_hash(echo=False)
         try:
             from connectors.hash_connector import connect as hash_connect
@@ -317,7 +335,7 @@ class TestHashConnect:
         assert ctx.live_model == "hash"
         assert ctx.live_endpoint == host
 
-    def test_connect_with_token(self):
+    def test_connect_with_token(self, _start_mock_hash):
         server, host = _start_mock_hash(echo=False)
         try:
             from connectors.hash_connector import connect as hash_connect

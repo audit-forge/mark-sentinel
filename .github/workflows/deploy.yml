@@ -1,5 +1,10 @@
 name: Build & Deploy
 
+# Never publish the pointer concurrently with another promotion.
+concurrency:
+  group: arckon-server-deployment
+  cancel-in-progress: false
+
 on:
   workflow_dispatch:
     inputs:
@@ -23,7 +28,27 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.release_tag }}
+          ref: refs/tags/${{ inputs.release_tag }}
+
+      - name: Validate exact tagged checkout
+        env:
+          TAG: ${{ inputs.release_tag }}
+        run: |
+          [[ "$TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
+          test "$(git rev-parse HEAD)" = "$(git rev-parse "refs/tags/$TAG^{commit}")"
+          test "${TAG#v}" = "$(python -c 'from arckon_version import VERSION; print(VERSION)')"
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Full test suite
+        env:
+          SECRET_KEY: ci-only-synthetic-secret-key-not-for-production
+        run: |
+          python -m pip install -r requirements.txt -r admin/requirements.txt pytest httpx
+          python -m pytest -q
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -47,48 +72,52 @@ jobs:
           VERSION="${TAG#v}"
           test "$VERSION" = "$(python -c 'from arckon_version import VERSION; print(VERSION)')"
 
-          mkdir release-assets
-          gh release download "$TAG" --dir release-assets \
+          ASSETS="$RUNNER_TEMP/release-assets"
+          CATALOG="$RUNNER_TEMP/catalog"
+          mkdir "$ASSETS"
+          gh release download "$TAG" --dir "$ASSETS" \
             --pattern 'arckon-agent-*.tar.gz' \
             --pattern '*-manifest.json' \
             --pattern '*-manifest.sig'
 
           for platform in linux macos windows; do
-            mkdir -p "releases/$platform"
-            cp "release-assets/${platform}-manifest.json" "releases/$platform/manifest.json"
-            cp "release-assets/${platform}-manifest.sig" "releases/$platform/manifest.sig"
-            cp "release-assets/arckon-agent-${VERSION}-${platform}"*.tar.gz "releases/$platform/"
+            mkdir -p "$CATALOG/$platform"
+            cp "$ASSETS/${platform}-manifest.json" "$CATALOG/$platform/manifest.json"
+            cp "$ASSETS/${platform}-manifest.sig" "$CATALOG/$platform/manifest.sig"
+            cp "$ASSETS/arckon-agent-${VERSION}-${platform}"*.tar.gz "$CATALOG/$platform/"
           done
 
-          # Unknown platforms use /releases/current as a Linux-compatible
-          # fallback. Never retain a stale generic manifest alongside the
-          # promoted platform-specific release.
-          rm -rf releases/current
-          cp -a releases/linux releases/current
-
+          mkdir -p "$RUNNER_TEMP/deployment"
           python - <<'PY'
           from pathlib import Path
-          import agent
-
-          expected = __import__('arckon_version').VERSION
-          for platform in ('linux', 'macos', 'windows'):
-              release = Path('releases') / platform
-              manifest = agent._validate_update_manifest(
-                  (release / 'manifest.json').read_bytes(),
-                  (release / 'manifest.sig').read_bytes(),
-              )
-              assert manifest['version'] == expected
-              assert manifest['platform'] == platform
-              assert (release / manifest['artifact']).is_file()
+          import os
+          from arckon_version import VERSION
+          from scripts.promote_deployment import pack_catalog
+          root = Path(os.environ['RUNNER_TEMP'])
+          pack_catalog(root / 'catalog', root / 'deployment/catalog.tar.gz', VERSION)
           PY
 
-          tar \
-            --exclude=.git \
-            --exclude=dist \
-            --exclude=release-assets \
-            --exclude=__pycache__ \
-            --exclude='*/__pycache__' \
-            -czf "$RUNNER_TEMP/app.tar.gz" .
+      - name: Build and archive complete tenant and admin images
+        run: |
+          set -euo pipefail
+          REVISION="$(git rev-parse HEAD)"
+          docker buildx build --platform linux/amd64 --load -f Dockerfile -t "arckon-tenant:$REVISION" .
+          docker buildx build --platform linux/amd64 --load -f admin/Dockerfile -t "arckon-admin:$REVISION" .
+          mkdir -p "$RUNNER_TEMP/deployment"
+          docker image inspect --format '{{.Id}}' "arckon-tenant:$REVISION" > "$RUNNER_TEMP/tenant-id"
+          docker image inspect --format '{{.Id}}' "arckon-admin:$REVISION" > "$RUNNER_TEMP/admin-id"
+          docker save "$(<"$RUNNER_TEMP/tenant-id")" | gzip -n > "$RUNNER_TEMP/deployment/tenant.docker.tar.gz"
+          docker save "$(<"$RUNNER_TEMP/admin-id")" | gzip -n > "$RUNNER_TEMP/deployment/admin.docker.tar.gz"
+
+      - name: Sign and verify complete deployment
+        env:
+          ARCKON_RELEASE_SIGNING_KEY: ${{ secrets.ARCKON_RELEASE_SIGNING_KEY }}
+        run: |
+          python scripts/promote_deployment.py create --directory "$RUNNER_TEMP/deployment" \
+            --revision "$(git rev-parse HEAD)" \
+            --version "$(python -c 'from arckon_version import VERSION; print(VERSION)')" \
+            --tenant-image "$(<"$RUNNER_TEMP/tenant-id")" --admin-image "$(<"$RUNNER_TEMP/admin-id")"
+          python scripts/promote_deployment.py verify --directory "$RUNNER_TEMP/deployment"
 
       - name: Authenticate to GCP
         uses: google-github-actions/auth@v2
@@ -100,18 +129,12 @@ jobs:
 
       - name: Upload to GCS deploy bucket
         run: |
-          # Upload artifacts before the manifest. The VM deployer only acts
-          # after this manifest changes, so it never reads a partial release.
-          gsutil cp dist/agent dist/audit "$RUNNER_TEMP/app.tar.gz" \
-            gs://arckon-deploy-artifacts/latest/
-
-          # Write the promotion manifest last so the VM deployer sees a
-          # complete, one-version server and agent release set.
-          # github.sha is the workflow-dispatch default-branch revision, not
-          # necessarily inputs.release_tag. Use the checked-out tag SHA so the
-          # VM reliably sees every promoted tagged release as a new deploy.
-          echo "{\"sha\":\"$(git rev-parse HEAD)\",\"ref\":\"${{ inputs.release_tag }}\",\"version\":\"${{ inputs.release_tag }}\",\"ts\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}" \
-            | gsutil cp - gs://arckon-deploy-artifacts/latest/manifest.json
-
-          echo "=== Uploaded to gs://arckon-deploy-artifacts/latest/ ==="
-          gsutil ls -l gs://arckon-deploy-artifacts/latest/
+          set -euo pipefail
+          PREFIX="gs://arckon-deploy-artifacts/deployments/$(git rev-parse HEAD)"
+          # A duplicate revision is an error, never silently skipped/overwritten.
+          for artifact in tenant.docker.tar.gz admin.docker.tar.gz catalog.tar.gz manifest.json manifest.sig; do
+            gcloud storage cp --if-generation-match=0 "$RUNNER_TEMP/deployment/$artifact" "$PREFIX/$artifact"
+          done
+          # Mutable pointer contains only a revision, not URLs or executable code.
+          # Publish last, only after every immutable object upload succeeds.
+          gcloud storage cp "$RUNNER_TEMP/deployment/deployment.json" gs://arckon-deploy-artifacts/latest/deployment.json

@@ -31,6 +31,10 @@ LICENSE_FILE="${HOST_LICENSES_DIR}/${CUSTOMER_ID}/license.json"
 DATA_DIR="${SENTINEL_DATA_ROOT:-/opt/sentinel-data}/${CUSTOMER_ID}"
 SPEND_SECRET_DIR="${SENTINEL_SPEND_SECRET_ROOT:-${SENTINEL_DATA_ROOT:-/opt/sentinel-data}/.spend-secrets}/${CUSTOMER_ID}/spend"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+FIELD_SECRET_DIR="${SENTINEL_FIELD_SECRET_ROOT:-${SENTINEL_DATA_ROOT:-/opt/sentinel-data}/.field-secrets}/${CUSTOMER_ID}"
+
+# Must run before creating tokens/config: only an empty new tenant may get a key.
+python3 "$SCRIPT_DIR/prepare_customer_security.py" "$CUSTOMER_ID" --provision
 
 mkdir -p "$DATA_DIR"
 chown -R 999:999 "$DATA_DIR"
@@ -65,6 +69,8 @@ else
   umask 077
   printf '%s\n' "$PROXY_TOKEN" > "$PROXY_TOKEN_FILE"
 fi
+chown 999:999 "$PROXY_TOKEN_FILE"
+chmod 0400 "$PROXY_TOKEN_FILE"
 install -d -o 101 -g 101 -m 0750 "$NGINX_PROXY_TOKEN_DIR"
 umask 077
 # Keep the per-customer file for restart_customer.sh and migrate scripts.
@@ -92,6 +98,11 @@ docker run -d \
    -v "${PROXY_TOKEN_FILE}:/run/secrets/proxy_token:ro" \
    -e "SENTINEL_TRUSTED_PROXY_TOKEN_FILE=/run/secrets/proxy_token" \
    -e "SENTINEL_ADMIN_LOGOUT_URL=${PUBLIC_ADMIN_URL}/logout" \
+   -e "PUBLIC_ADMIN_URL=${PUBLIC_ADMIN_URL}" \
+   -e "PUBLIC_DASHBOARD_URL=${PUBLIC_DASHBOARD_URL}" \
+   --env-file "${FIELD_SECRET_DIR}/runtime.env" \
+   --mount "type=bind,src=${FIELD_SECRET_DIR}/master-key,dst=/run/secrets/arckon_master_key,readonly" \
+   -e "ARCKON_MASTER_KEY_FILE=/run/secrets/arckon_master_key" \
    ${LICENSE_MOUNT} \
    -v "${DATA_DIR}:/app/data" \
    -v "${SPEND_SECRET_DIR}:/opt/sentinel-secrets/spend" \

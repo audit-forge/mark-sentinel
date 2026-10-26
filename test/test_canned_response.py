@@ -98,7 +98,7 @@ class TestBuildCannedResponse:
 class TestFindingPayload:
     def test_carries_all_enrichment_fields_from_finding_dict(self):
         finding = {
-            'check_id': 'AI-GOV-003', 'title': 'No logging enabled',
+            'check_id': 'TEST-ENRICHMENT-001', 'title': 'No logging enabled',
             'category': 'AI-GOV', 'details': 'No logs.', 'remediation': 'Enable logging.',
             'frameworks': {'EU AI Act': 'Art. 12'},
         }

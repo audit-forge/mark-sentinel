@@ -203,27 +203,10 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_response(403)
                 self.end_headers()
                 return
-            os.makedirs(STATE_DIR, mode=0o700, exist_ok=True)
-            try:
-                lock_fd = os.open(LOCK, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
-                os.close(lock_fd)
-            except FileExistsError:
-                self.send_response(409)
-                self.end_headers()
-                self.wfile.write(b"Deploy already in progress")
-                return
-            try:
-                log_fd = os.open(LOG, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-                with os.fdopen(log_fd, "w") as log_file:
-                    subprocess.Popen(["/deploy.sh"], stdout=log_file, stderr=subprocess.STDOUT)
-            except OSError:
-                os.unlink(LOCK)
-                self.send_response(500)
-                self.end_headers()
-                return
-            self.send_response(202)
+            # Image promotion is a signed host operation, never an API hot-patch.
+            self.send_response(410)
             self.end_headers()
-            self.wfile.write(b"Deploy started")
+            self.wfile.write(b"Use the approved signed-image promotion workflow; hot-patch deployment is retired")
             return
         # All remaining POST routes (lifecycle, stale removal) require the
         # lifecycle-scoped token, not the deploy token.

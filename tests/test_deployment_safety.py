@@ -82,9 +82,15 @@ def test_provisioner_persists_the_supplied_agent_token_for_restarts():
     assert 'chown 999:999 "${DATA_DIR}/agent_token.txt"' in source
 
 
-def test_deployer_rebuilds_the_customer_image_from_current_source():
+def test_deployer_uses_signed_image_promotion_not_source_hotpatches():
     source = (REPO / 'deploy' / 'gcp' / 'deployer' / 'deploy.sh').read_text()
-    assert 'docker build -t mark-sentinel:latest "$REPO_DIR"' in source
+    assert 'approved signed-image promotion workflow' in source
+    assert 'docker cp' not in source
+    assert 'git fetch' not in source
+    workflow = (REPO / '.github' / 'workflows' / 'deploy.yml').read_text()
+    assert 'Sign and verify complete deployment' in workflow
+    engine = (REPO / 'scripts' / 'deploy_images.py').read_text()
+    assert 'mark-sentinel:latest' in engine
     for script in ('provision_customer.sh', 'restart_customer.sh'):
         assert 'mark-sentinel:latest' in (REPO / 'deploy' / 'gcp' / script).read_text()
 
@@ -117,3 +123,10 @@ def test_startup_chowns_admin_secrets_to_uid_1000_but_not_cloudflared():
     # A blanket chown of the whole directory must never appear.
     assert 'chown 1000:1000 /opt/sentinel-secrets/*' not in source
     assert 'chown 1000:1000 "/opt/sentinel-secrets/*"' not in source
+def test_backend_can_read_its_proxy_capability_after_each_lifecycle_action():
+    from pathlib import Path
+    root = Path(__file__).resolve().parents[1]
+    for name in ('provision_customer.sh', 'restart_customer.sh'):
+        source = (root / 'deploy' / 'gcp' / name).read_text()
+        assert 'chown 999:999 "$PROXY_TOKEN_FILE"' in source
+        assert 'chmod 0400 "$PROXY_TOKEN_FILE"' in source

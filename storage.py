@@ -769,7 +769,7 @@ class AgentStore:
     def get_device(self, device_id: str) -> dict | None:
         """Return device metadata row or None."""
         with self._lock, self._conn() as conn:
-            summary_row = conn.execute(
+            row = conn.execute(
                 "SELECT * FROM devices WHERE device_id = ?", (device_id,)
             ).fetchone()
         return dict(row) if row else None
@@ -1442,7 +1442,7 @@ class AgentStore:
             try:
                 d['path'] = crypto.decrypt_field(d['path'])
             except Exception:
-                pass  # legacy plaintext
+                raise RuntimeError('Unable to decrypt protected path; policy unavailable') from None
             d['recursive'] = bool(d['recursive'])
             out.append(d)
         return out
@@ -1470,7 +1470,7 @@ class AgentStore:
             try:
                 d['path'] = crypto.decrypt_field(d['path'])
             except Exception:
-                pass
+                raise RuntimeError('Unable to decrypt protected-path audit history') from None
             out.append(d)
         return out
 

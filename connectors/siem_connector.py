@@ -4,7 +4,7 @@ Arckon by RiskRaven — SIEM & Tool Integration Connectors
 Skeleton + dispatch layer. Each connector class defines the interface;
 Hash implements the send() and test() methods per task spec in docs/HASH_SIEM_TASKS/.
 
-Config file: siem_config.json (sits next to server.py)
+Config file: data/siem_config.json (private runtime configuration)
 See siem_config.json.example for the full schema.
 
 Connector classes:
@@ -31,13 +31,14 @@ import socket
 import ssl
 import time
 import urllib.request
+import outbound_http
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 log = logging.getLogger('arckon.siem')
 
-_SIEM_CONFIG_PATH = Path(__file__).parent.parent / 'siem_config.json'
+_SIEM_CONFIG_PATH = Path(__file__).parent.parent / 'data' / 'siem_config.json'
 
 
 # ── Config ────────────────────────────────────────────────────────────────────
@@ -53,32 +54,57 @@ def load_siem_config(path: Path | None = None) -> dict:
     try:
         from crypto import decrypt_field
         cfg = json.loads(p.read_text(encoding='utf-8'))
+        if not isinstance(cfg, dict):
+            raise ValueError('SIEM config must be an object')
         for _siem, vals in cfg.items():
             if isinstance(vals, dict):
                 for k in list(vals):
-                    if k in _SIEM_SECRET_FIELDS and isinstance(vals[k], str) and vals[k].startswith('enc:'):
+                    if k in _SIEM_SECRET_FIELDS:
+                        if not isinstance(vals[k], str):
+                            raise ValueError('SIEM secret must be a string')
                         vals[k] = decrypt_field(vals[k])
         return cfg
-    except Exception as e:
-        log.error('siem config load error: %s', e)
-        return {}
+    except Exception:
+        raise RuntimeError('Unable to load/decrypt SIEM configuration') from None
 
 
 def save_siem_config(data: dict, path: Path | None = None) -> None:
     p = path or _SIEM_CONFIG_PATH
-    from crypto import encrypt_field
+    import os
+    import tempfile
+    from crypto import decrypt_field, encrypt_field
+    if not isinstance(data, dict):
+        raise ValueError('SIEM config must be an object')
     out = {}
     for siem, vals in data.items():
         if isinstance(vals, dict):
             out[siem] = {}
             for k, v in vals.items():
-                if k in _SIEM_SECRET_FIELDS and v and not str(v).startswith('enc:'):
-                    out[siem][k] = encrypt_field(str(v))
+                if k in _SIEM_SECRET_FIELDS:
+                    if not isinstance(v, str):
+                        raise ValueError('SIEM secret must be a string')
+                    if v.startswith('enc:'):
+                        decrypt_field(v)  # Reject corrupt/wrong-key ciphertext before replacing anything.
+                        out[siem][k] = v
+                    else:
+                        out[siem][k] = encrypt_field(v)
                 else:
                     out[siem][k] = v
         else:
             out[siem] = vals
-    p.write_text(json.dumps(out, indent=2), encoding='utf-8')
+    payload = json.dumps(out, indent=2)
+    staged = None
+    try:
+        with tempfile.NamedTemporaryFile(mode='w', encoding='utf-8', dir=p.parent,
+                                         prefix='.siem-', delete=False) as stream:
+            staged = Path(stream.name)
+            stream.write(payload)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(staged, p)
+    finally:
+        if staged is not None:
+            staged.unlink(missing_ok=True)
 
 
 def load_siem_config_for_ui(path: Path | None = None) -> dict:
@@ -283,12 +309,11 @@ class SplunkHECConnector(BaseSiemConnector):
     def _post(self, payload: dict) -> tuple[int, str]:
         url = f"{self.cfg['hec_url'].rstrip('/')}/services/collector/event"
         data = json.dumps(payload).encode('utf-8')
-        req = urllib.request.Request(url, data=data, method='POST')
+        req = outbound_http.Request(url, data=data, method='POST')
         req.add_header('Authorization', f"Splunk {self.cfg['hec_token']}")
         req.add_header('Content-Type', 'application/json')
-        ctx = self._ssl_context()
         try:
-            resp = urllib.request.urlopen(req, context=ctx, timeout=10)
+            resp = outbound_http.urlopen(req, timeout=10)
             return resp.status, resp.read().decode('utf-8', errors='replace')
         except urllib.error.HTTPError as e:
             body = e.read().decode('utf-8', errors='replace') if e.fp else ''
@@ -371,13 +396,13 @@ class SentinelConnector(BaseSiemConnector):
         date_string = time.strftime('%a, %d %b %Y %H:%M:%S GMT', time.gmtime())
         signature = self._build_signature(date_string, len(data))
         url = f"https://{workspace_id}.ods.opinsights.azure.com/api/logs?api-version=2016-04-01"
-        req = urllib.request.Request(url, data=data, method='POST')
+        req = outbound_http.Request(url, data=data, method='POST')
         req.add_header('Content-Type', 'application/json')
         req.add_header('Log-Type', log_type)
         req.add_header('x-ms-date', date_string)
         req.add_header('Authorization', f'SharedKey {workspace_id}:{signature}')
         try:
-            resp = urllib.request.urlopen(req)
+            resp = outbound_http.urlopen(req, timeout=15)
             return resp.status, resp.read().decode('utf-8', errors='replace')
         except urllib.error.HTTPError as e:
             resp_body = e.read().decode('utf-8', errors='replace') if e.fp else ''
@@ -500,12 +525,11 @@ class ElasticConnector(BaseSiemConnector):
 
     def _request(self, method: str, path: str, body: bytes | None = None) -> tuple[int, str]:
         url = f"{self.cfg['endpoint'].rstrip('/')}{path}"
-        req = urllib.request.Request(url, data=body, method=method)
+        req = outbound_http.Request(url, data=body, method=method)
         req.add_header('Content-Type', 'application/json')
         req.add_header('Authorization', f"ApiKey {self.cfg['api_key']}")
-        ctx = self._ssl_context()
         try:
-            resp = urllib.request.urlopen(req, context=ctx)
+            resp = outbound_http.urlopen(req, timeout=15)
             return resp.status, resp.read().decode('utf-8', errors='replace')
         except urllib.error.HTTPError as e:
             resp_body = e.read().decode('utf-8', errors='replace') if e.fp else ''
@@ -596,11 +620,11 @@ class KaseyaConnector(BaseSiemConnector):
 
     def _kaseya_request(self, method: str, url: str, headers: dict, body: dict | None = None) -> tuple[int, str]:
         data = json.dumps(body).encode('utf-8') if body else None
-        req = urllib.request.Request(url, data=data, method=method)
+        req = outbound_http.Request(url, data=data, method=method)
         for k, v in headers.items():
             req.add_header(k, v)
         try:
-            resp = urllib.request.urlopen(req)
+            resp = outbound_http.urlopen(req, timeout=15)
             return resp.status, resp.read().decode('utf-8', errors='replace')
         except urllib.error.HTTPError as e:
             resp_body = e.read().decode('utf-8', errors='replace') if e.fp else ''

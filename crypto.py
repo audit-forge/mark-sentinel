@@ -4,14 +4,12 @@
 FedRAMP controls implemented:
   SC-13 (cryptographic protection) — AES-256-GCM authenticated encryption
   AU-2  (audit events)              — SHA-256 hash chain for tamper detection
-  SC-8  (transmission confidentiality) — keys never written to disk
 
 Key management:
-  The master key is read from the ARCKON_MASTER_KEY environment variable.
-  It is NEVER written to disk. If the env var is absent (e.g. dev mode),
-  a derived dev key is used so the feature still works locally — but a
-  warning is logged. Production deployments MUST set ARCKON_MASTER_KEY to
-  a 32-byte (256-bit) random value stored in a KMS / secret manager.
+  Set exactly one of ARCKON_MASTER_KEY or ARCKON_MASTER_KEY_FILE.
+  Both accept a base64- or hex-encoded 32-byte key. Key files must be regular,
+  owned by the current user, and inaccessible to group/other users.
+  Missing or invalid configuration fails closed; there is no default key.
 
 Encryption:
   AES-256-GCM (FIPS 140-2 validated when the cryptography library is built
@@ -32,6 +30,7 @@ import json
 import logging
 import os
 import secrets
+import stat
 from typing import Any, Optional
 
 log = logging.getLogger('arckon.crypto')
@@ -41,37 +40,50 @@ _GCM_TAG_LEN = 16     # 128-bit authentication tag
 _KEY_LEN = 32         # 256-bit key for AES-256
 
 
+def _validate_key(key: bytes) -> bytes:
+    if not isinstance(key, bytes) or len(key) != _KEY_LEN:
+        raise ValueError('Encryption key must be exactly 32 bytes')
+    return key
+
+
+def _decode_master_key(raw: str) -> bytes:
+    """Decode only explicit, unambiguous encoded AES-256 keys."""
+    if len(raw) == 64 and all(c in '0123456789abcdefABCDEF' for c in raw):
+        return _validate_key(bytes.fromhex(raw))
+    try:
+        return _validate_key(base64.b64decode(raw, validate=True))
+    except (ValueError, TypeError):
+        raise ValueError('Master key must encode exactly 32 bytes as base64 or hex') from None
+
+
+def _load_key_file(path: str) -> bytes:
+    """Read a private key file without following symlinks."""
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    with os.fdopen(fd, 'rb') as stream:
+        info = os.fstat(stream.fileno())
+        if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.geteuid()
+                or stat.S_IMODE(info.st_mode) & 0o077):
+            raise ValueError('Master key file must be owner-only and owned by the current user')
+        try:
+            raw = stream.read(1024).decode('ascii').rstrip('\r\n')
+        except UnicodeError:
+            raise ValueError('Master key file must contain an ASCII encoded key') from None
+        return _decode_master_key(raw)
+
+
 def _load_master_key() -> bytes:
-    """Load the 256-bit master key from ARCKON_MASTER_KEY env var.
-
-    In production this must be set to a 32-byte random value (base64-encoded
-    or hex-encoded). If unset, a deterministic dev-only key is derived so
-    local testing works — but a warning is emitted.
-    """
+    """Load exactly one configured source; never substitute another key."""
     raw = os.environ.get('ARCKON_MASTER_KEY')
-    if raw:
-        # Accept base64 or hex encoding for operational convenience.
-        try:
-            key = base64.b64decode(raw, validate=True)
-            if len(key) == _KEY_LEN:
-                return key
-        except Exception:
-            pass
-        try:
-            key = bytes.fromhex(raw)
-            if len(key) == _KEY_LEN:
-                return key
-        except Exception:
-            pass
-        # If raw is exactly 32 chars, use it directly (legacy / simple).
-        if len(raw) == _KEY_LEN:
-            return raw.encode('utf-8')
-        log.warning('ARCKON_MASTER_KEY present but not 32 bytes after '
-                    'decode — falling back to dev key')
-
-    log.warning('ARCKON_MASTER_KEY not set — using derived dev key. '
-                'DO NOT use in production/FedRAMP deployments.')
-    return hashlib.sha256(b'arckon-dev-key-DO-NOT-USE-IN-PROD').digest()
+    path = os.environ.get('ARCKON_MASTER_KEY_FILE')
+    if raw is not None and path is not None:
+        raise ValueError('Configure only one master key source')
+    if raw is not None:
+        return _decode_master_key(raw)
+    if path is not None:
+        if not path:
+            raise ValueError('ARCKON_MASTER_KEY_FILE must not be empty')
+        return _load_key_file(path)
+    raise ValueError('Set ARCKON_MASTER_KEY or ARCKON_MASTER_KEY_FILE')
 
 
 def _get_aesgcm():
@@ -95,9 +107,9 @@ def encrypt_field(plaintext: str, key: Optional[bytes] = None) -> str:
 
     FedRAMP SC-13: AES-256-GCM provides confidentiality + integrity.
     """
+    k = _load_master_key() if key is None else _validate_key(key)
     if not plaintext:
         return ''
-    k = key or _load_master_key()
     AESGCM = _get_aesgcm()
     nonce = secrets.token_bytes(_GCM_NONCE_LEN)
     ct = AESGCM(k).encrypt(nonce, plaintext.encode('utf-8'), None)
@@ -111,11 +123,15 @@ def decrypt_field(encrypted: str, key: Optional[bytes] = None) -> str:
     Returns the original plaintext. Raises if the ciphertext was tampered
     with (GCM tag verification fails) — this is the tamper-detection property.
     """
+    if key is not None:
+        _validate_key(key)
     if not encrypted or not encrypted.startswith('enc:'):
         return encrypted  # plaintext passthrough (legacy data)
-    k = key or _load_master_key()
+    k = _load_master_key() if key is None else key
     AESGCM = _get_aesgcm()
-    blob = base64.b64decode(encrypted[4:])
+    blob = base64.b64decode(encrypted[4:], validate=True)
+    if len(blob) < _GCM_NONCE_LEN + _GCM_TAG_LEN:
+        raise ValueError('Invalid encrypted field')
     nonce = blob[:_GCM_NONCE_LEN]
     ct = blob[_GCM_NONCE_LEN:]
     pt = AESGCM(k).decrypt(nonce, ct, None)

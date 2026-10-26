@@ -23,6 +23,24 @@ def test_lifecycle_broker_rejects_invalid_customer_ids():
         broker._validate_payload({"customer_id": "../../host"}, "remove")
 
 
+def test_legacy_deploy_returns_gone_without_launching_or_creating_lock(monkeypatch, tmp_path):
+    import io
+    broker = _load_broker()
+    monkeypatch.setattr(broker, 'LOCK', str(tmp_path / 'deploy.lock'))
+    monkeypatch.setattr(broker, '_read_op_token', lambda: 'synthetic-operator-token')
+    handler = object.__new__(broker.Handler)
+    handler.path = '/deploy'
+    handler.headers = {'X-Arckon-Deploy-Token': 'synthetic-operator-token'}
+    handler.wfile = io.BytesIO()
+    responses = []
+    handler.send_response = responses.append
+    handler.end_headers = lambda: None
+    monkeypatch.setattr(broker.subprocess, 'Popen', lambda *a, **k: pytest.fail('retired deploy launched'))
+    handler.do_POST()
+    assert responses == [410]
+    assert not (tmp_path / 'deploy.lock').exists()
+
+
 def test_lifecycle_broker_requires_full_provisioning_payload():
     broker = _load_broker()
     with pytest.raises(ValueError):

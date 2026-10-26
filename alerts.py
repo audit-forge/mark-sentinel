@@ -36,6 +36,7 @@ import logging
 import smtplib
 import time
 import urllib.request
+import outbound_http
 from datetime import datetime, timezone
 from urllib.parse import parse_qs, urlparse
 from zoneinfo import ZoneInfo
@@ -733,13 +734,13 @@ def _post_slack(webhook_url: str, text: str, payload: dict) -> bool:
             'ts':        int(time.time()),
         }]
     }).encode()
-    req = urllib.request.Request(
+    req = outbound_http.Request(
         webhook_url, data=data,
         headers={'Content-Type': 'application/json'},
         method='POST',
     )
     try:
-        with urllib.request.urlopen(req, timeout=10) as r:
+        with outbound_http.urlopen(req, timeout=10) as r:
             return 200 <= r.status < 300
     except Exception as e:
         log.error('Slack POST failed: %s', e)
@@ -804,13 +805,13 @@ def is_valid_teams_webhook(url: str) -> bool:
 
 def _post_gchat(url: str, text: str) -> bool:
     data = json.dumps({'text': text}).encode()
-    req = urllib.request.Request(
+    req = outbound_http.Request(
         url, data=data,
         headers={'Content-Type': 'application/json'},
         method='POST',
     )
     try:
-        with urllib.request.urlopen(req, timeout=10) as r:
+        with outbound_http.urlopen(req, timeout=10) as r:
             return 200 <= r.status < 300
     except Exception as e:
         log.error('Google Chat POST failed: %s', e)
@@ -828,13 +829,13 @@ def _post_teams(url: str, text: str) -> bool:
         'summary': title,
         'sections': [{'activityTitle': title, 'text': body}],
     }).encode()
-    req = urllib.request.Request(
+    req = outbound_http.Request(
         url, data=data,
         headers={'Content-Type': 'application/json'},
         method='POST',
     )
     try:
-        with urllib.request.urlopen(req, timeout=10) as r:
+        with outbound_http.urlopen(req, timeout=10) as r:
             return 200 <= r.status < 300
     except Exception as e:
         log.error('Teams POST failed: %s', e)
@@ -847,13 +848,13 @@ def _post_webhook(url: str, payload: dict) -> bool:
         'timestamp': _now_iso(),
         'source':    'sentinel',
     }).encode()
-    req = urllib.request.Request(
+    req = outbound_http.Request(
         url, data=data,
         headers={'Content-Type': 'application/json', 'User-Agent': 'sentinel-alerts/1.0'},
         method='POST',
     )
     try:
-        with urllib.request.urlopen(req, timeout=10) as r:
+        with outbound_http.urlopen(req, timeout=10) as r:
             return 200 <= r.status < 300
     except Exception as e:
         log.error('webhook POST failed: %s', e)

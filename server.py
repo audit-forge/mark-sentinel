@@ -69,8 +69,10 @@ import webbrowser
 from collections import defaultdict
 from datetime import date, datetime, timezone
 from pathlib import Path
+from types import SimpleNamespace
 from urllib.parse import unquote, urlparse
 from arckon_version import INSTALLER_VERSION
+from admin.browser_security import browser_mutation_allowed
 
 PORT = 7001
 
@@ -238,7 +240,9 @@ def _get_store_for_device(device_id: str):
 # ── license (loaded once at startup) ─────────────────────────────────────────
 def _load_license() -> None:
     from license import load_license
-    load_license(ROOT / 'license.json')
+    # Deployed customer mounts take precedence over standalone local data.
+    mounted = ROOT / 'license.json'
+    load_license(mounted if mounted.exists() else ROOT / 'data' / 'license.json')
 
 def _has_technical_reports() -> bool:
     """Return True if this license includes Technical reports and remediation. Defaults True."""
@@ -1227,6 +1231,31 @@ class _TenantScopeError(Exception):
 class _Handler(http.server.BaseHTTPRequestHandler):
     def log_message(self, *_): pass
 
+    def _browser_origin_allowed(self) -> bool:
+        class Headers:
+            def getlist(_, name):
+                return self.headers.get_all(name, [])
+
+        origins = [os.environ.get('PUBLIC_ADMIN_URL', 'https://admin.riskraven.ai'),
+                   os.environ.get('PUBLIC_DASHBOARD_URL', 'https://arckon.riskraven.ai')]
+        if not _trusted_proxy_token():
+            import ssl
+            scheme = 'https' if isinstance(self.connection, ssl.SSLSocket) else 'http'
+            port = self.server.server_port
+            origins.extend(f'{scheme}://{host}:{port}' for host in ('localhost', '127.0.0.1', '[::1]'))
+        # This helper runs only for login or an authenticated dashboard mutation.
+        # Mark both local sessions and proxy-authenticated sessions as browser calls.
+        request = SimpleNamespace(method=self.command, url=SimpleNamespace(path=urlparse(self.path).path),
+                                  headers=Headers(), cookies={'token': ''})
+        return browser_mutation_allowed(request, origins)
+
+    def _admin_relay_headers(self) -> dict:
+        headers = {'Cookie': self.headers.get('Cookie', ''), 'Content-Type': 'application/json'}
+        for name in ('Origin', 'Referer'):
+            if self.headers.get(name) is not None:
+                headers[name] = self.headers[name]
+        return headers
+
     def handle_error(self, *_):
         import traceback as _tb
         log.error('HTTP handler thread error: %s', _tb.format_exc())
@@ -1625,6 +1654,9 @@ class _Handler(http.server.BaseHTTPRequestHandler):
 
         # Login / setup — no auth needed
         if path == '/login':
+            if not self._browser_origin_allowed():
+                self._json({'error': 'untrusted_browser_origin'}, 403)
+                return
             self._handle_login_post()
             return
         if path == '/setup':
@@ -1673,6 +1705,9 @@ class _Handler(http.server.BaseHTTPRequestHandler):
 
         # All other POST endpoints require dashboard auth
         if not self._require_dashboard_auth():
+            return
+        if not self._browser_origin_allowed():
+            self._json({'error': 'untrusted_browser_origin'}, 403)
             return
 
         try:
@@ -2068,9 +2103,8 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         import urllib.request
         import urllib.error
         url = self._admin_panel_url() + path
-        cookie = self.headers.get('Cookie', '')
         req = urllib.request.Request(url, data=body or None, method=method,
-                                     headers={'Cookie': cookie, 'Content-Type': 'application/json'})
+                                     headers=self._admin_relay_headers())
         try:
             with urllib.request.urlopen(req, timeout=5) as resp:
                 data = resp.read()
@@ -2239,9 +2273,8 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         raw = self.rfile.read(cl) if cl else b'{}'
         import urllib.request, urllib.error
         url = self._admin_panel_url() + '/api/reseller/impersonate'
-        cookie = self.headers.get('Cookie', '')
         req = urllib.request.Request(url, data=raw, method='POST',
-                                     headers={'Cookie': cookie, 'Content-Type': 'application/json'})
+                                     headers=self._admin_relay_headers())
         try:
             with urllib.request.urlopen(req, timeout=5) as resp:
                 data = json.loads(resp.read())
@@ -2276,9 +2309,8 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         import urllib.request, urllib.error
         try:
             url = self._admin_panel_url() + '/api/reseller/impersonate/end'
-            cookie = self.headers.get('Cookie', '')
             req = urllib.request.Request(url, data=b'{}', method='POST',
-                                         headers={'Cookie': cookie, 'Content-Type': 'application/json'})
+                                         headers=self._admin_relay_headers())
             with urllib.request.urlopen(req, timeout=5):
                 pass
         except Exception:
@@ -2549,14 +2581,10 @@ load();
         if not me:
             self._json({'error': 'unauthorized'}, 401)
             return
-        if os.environ.get('SENTINEL_TRUSTED_PROXY'):
+        can_enroll = me.get('role') in ('admin', 'customer_admin', 'super_admin')
+        if _trusted_proxy_token():
             # Cloud mode: each container is one customer.
-            # Agent token is the env var set at provision time.
-            agent_token = os.environ.get('SENTINEL_AGENT_TOKEN', '')
-            if not agent_token:
-                tok_file = ROOT / 'data' / 'agent_token.txt'
-                if tok_file.exists():
-                    agent_token = tok_file.read_text().strip()
+            agent_token = _agent_token() if can_enroll else ''
             # Company name: first (only) customer in registry, else env var
             name = os.environ.get('SENTINEL_CUSTOMER_NAME', '')
             if not name:
@@ -2565,17 +2593,22 @@ load();
                     name = custs[0]['name'] if custs else ''
                 except Exception:
                     pass
-            self._json({'id': 'default', 'name': name, 'agent_token': agent_token})
+            result = {'id': 'default', 'name': name}
+            if can_enroll:
+                result['agent_token'] = agent_token
+            self._json(result)
             return
         cust = _get_registry().get_by_id(me['customer_id'])
         if not cust:
             self._json({'error': 'customer not found'}, 404)
             return
-        self._json({
+        result = {
             'id':          cust['id'],
             'name':        cust['name'],
-            'agent_token': cust['agent_token'],
-        })
+        }
+        if can_enroll:
+            result['agent_token'] = cust['agent_token']
+        self._json(result)
 
     # ── endpoints ─────────────────────────────────────────────────────────────
 
@@ -2740,7 +2773,6 @@ load();
         self.send_response(200)
         self.send_header('Content-Type', 'text/event-stream')
         self.send_header('Cache-Control', 'no-cache')
-        self.send_header('Access-Control-Allow-Origin', '*')
         self.end_headers()
         sent = 0
         try:
@@ -2955,7 +2987,7 @@ load();
 
         try:
             from connectors.siem_connector import load_siem_config, send_report as siem_send
-            _siem_cfg = load_siem_config(ROOT / 'siem_config.json')
+            _siem_cfg = load_siem_config(ROOT / 'data' / 'siem_config.json')
             if _siem_cfg:
                 _cid = store._customer_id if hasattr(store, '_customer_id') else 'default'
                 threading.Thread(
@@ -4750,7 +4782,9 @@ load();
             self._json({})
             return
         try:
-            self._json(json.loads(config_path.read_text(encoding='utf-8')))
+            config = json.loads(config_path.read_text(encoding='utf-8'))
+            self._json({k: v for k, v in config.items()
+                        if k in {'profile', 'target', 'interval', 'extra_subnets', 'server'}})
         except Exception as e:
             self._json({'error': str(e)}, 500)
 
@@ -4798,7 +4832,7 @@ load();
         except json.JSONDecodeError:
             self._send(400, b'Invalid JSON', 'text/plain')
             return
-        allowed = {'server', 'token', 'target', 'profile', 'interval', 'extra_subnets'}
+        allowed = {'server', 'target', 'profile', 'interval', 'extra_subnets'}
         clean = {k: v for k, v in body.items() if k in allowed}
         config_path = ROOT / 'agent_config.json'
         try:
@@ -5907,7 +5941,7 @@ load();
     def _api_get_siem_config(self):
         try:
             from connectors.siem_connector import load_siem_config_for_ui
-            self._json(load_siem_config_for_ui(ROOT / 'siem_config.json'))
+            self._json(load_siem_config_for_ui(ROOT / 'data' / 'siem_config.json'))
         except Exception as e:
             self._json({'error': str(e)}, 500)
 
@@ -5923,7 +5957,7 @@ load();
             return
         try:
             from connectors.siem_connector import load_siem_config, save_siem_config
-            existing = load_siem_config(ROOT / 'siem_config.json')
+            existing = load_siem_config(ROOT / 'data' / 'siem_config.json')
             _SECRETS = {'hec_token', 'shared_key', 'api_key', 'vsa_api_key',
                         'bms_api_key', 'itglue_api_key', 'password'}
             for siem_id, vals in body.items():
@@ -5935,7 +5969,7 @@ load();
                     if k in _SECRETS and v == '__set__':
                         continue  # masked — keep existing secret
                     existing[siem_id][k] = v
-            save_siem_config(existing, ROOT / 'siem_config.json')
+            save_siem_config(existing, ROOT / 'data' / 'siem_config.json')
             self._json({'status': 'saved'})
         except Exception as e:
             self._json({'error': str(e)}, 500)
@@ -5943,7 +5977,7 @@ load();
     def _api_test_siem(self, siem_id: str):
         try:
             from connectors.siem_connector import load_siem_config, test_connection
-            cfg = load_siem_config(ROOT / 'siem_config.json')
+            cfg = load_siem_config(ROOT / 'data' / 'siem_config.json')
             ok, msg = test_connection(siem_id, cfg)
             self._json({'ok': ok, 'message': msg})
         except Exception as e:
@@ -6306,11 +6340,7 @@ async function moveSelectedDevices(){
             deployment_mdm = ''
             if user and user.get('role') in ('admin', 'customer_admin', 'super_admin'):
                 if _trusted_proxy_token():
-                    deployment_token = os.environ.get('SENTINEL_AGENT_TOKEN', '')
-                    if not deployment_token:
-                        token_file = ROOT / 'data' / 'agent_token.txt'
-                        if token_file.exists():
-                            deployment_token = token_file.read_text().strip()
+                    deployment_token = _agent_token()
                 else:
                     customer = _get_registry().get_by_id(user.get('customer_id', ''))
                     deployment_token = customer.get('agent_token', '') if customer else ''
@@ -6340,16 +6370,14 @@ async function moveSelectedDevices(){
             log.error('_build_fleet_html failed: %s', _e, exc_info=True)
             body = (
                 b'<html><body style="font:14px monospace;background:#0d1117;color:#f85149;padding:40px">'
-                b'<h2>Dashboard render error</h2><pre>' +
-                __import__('traceback').format_exc().encode('utf-8', errors='replace') +
-                b'</pre></body></html>'
+                b'<h2>Dashboard temporarily unavailable</h2>'
+                b'<p>Please try again later.</p></body></html>'
             )
         try:
             self.send_response(200)
             self.send_header('Content-Type', 'text/html; charset=utf-8')
             self.send_header('Content-Length', len(body))
             self.send_header('Cache-Control', 'no-store')
-            self.send_header('Access-Control-Allow-Origin', '*')
             self.end_headers()
             self.wfile.write(body)
             print('[SENTINEL] _serve_fleet: sent OK', flush=True)
@@ -6781,7 +6809,8 @@ body{{background:#0d1117;color:#e6edf3;font-family:-apple-system,BlinkMacSystemF
         self.send_response(code)
         self.send_header('Content-Type', ct)
         self.send_header('Content-Length', len(body))
-        self.send_header('Access-Control-Allow-Origin', '*')
+        if ct.split(';', 1)[0].strip().lower() == 'application/json':
+            self.send_header('Cache-Control', 'no-store')
         self.end_headers()
         self.wfile.write(body)
 
@@ -9305,6 +9334,7 @@ async function discoverNetworkAssets(all, btn) {{
   const device = document.getElementById('network-asset-device')?.value;
   if (!all && !device) {{ alert('Select an agent first.'); return; }}
   const label = btn.textContent;
+  let queued = false;
   btn.disabled = true; btn.textContent = 'Queuing…';
   try {{
     const path = all ? '/api/fleet/network-assets/discover/all' :
@@ -9312,10 +9342,12 @@ async function discoverNetworkAssets(all, btn) {{
     const resp = await fetch(path, {{method: 'POST'}});
     const data = await resp.json();
     if (!resp.ok) throw new Error(data.error || 'request failed');
-    btn.textContent = 'Queued (' + (data.count || 1) + ')';
+    queued = true;
+    btn.textContent = 'Queued (' + (data.count || 1) + ') - collecting…';
+    setTimeout(loadNetworkAssetScans, 3000);
     setTimeout(() => location.reload(), 30000);
   }} catch (e) {{ alert('Passive collection failed: ' + e.message); btn.textContent = label; }}
-  finally {{ setTimeout(() => {{ btn.disabled = false; btn.textContent = label; }}, 3000); }}
+  finally {{ setTimeout(() => {{ btn.disabled = false; if (!queued) btn.textContent = label; }}, 3000); }}
 }}
 
 async function discoverNetworkAssetsActive(btn) {{
@@ -12389,6 +12421,9 @@ def main():
         format='%(asctime)s %(levelname)s %(name)s %(message)s',
         handlers=_handlers,
     )
+
+    from crypto import _load_master_key
+    _load_master_key()  # Fail before any monitors or background workers start.
 
     try:
         _load_license()

@@ -19,6 +19,7 @@ from db import init_db, get_conn
 from auth import hash_password, verify_password, create_token, get_current_user, require_super_admin
 from monitor import start_monitor
 from aws_marketplace import get_entitlement, resolve_customer
+from browser_security import browser_mutation_allowed, safe_return_url
 
 app = FastAPI(docs_url=None, redoc_url=None)
 templates = Jinja2Templates(directory="templates")
@@ -202,6 +203,14 @@ PUBLIC_DASHBOARD_URL = os.environ.get("PUBLIC_DASHBOARD_URL", "").rstrip("/")
 PUBLIC_DASHBOARD_PORT = int(os.environ.get("PUBLIC_DASHBOARD_PORT", "80"))
 AUTH_COOKIE_DOMAIN = os.environ.get("AUTH_COOKIE_DOMAIN", "").strip() or None
 
+
+@app.middleware("http")
+async def enforce_browser_provenance(request: Request, call_next):
+    if not browser_mutation_allowed(request, (PUBLIC_ADMIN_URL, PUBLIC_DASHBOARD_URL)):
+        return JSONResponse({"error": "untrusted_browser_origin"}, status_code=403)
+    return await call_next(request)
+
+
 _WEAK_PASSWORDS = frozenset({'changeme', 'password', 'admin', 'secret', ''})
 
 
@@ -324,7 +333,8 @@ async def root():
 
 @app.get("/login", response_class=HTMLResponse)
 async def login_page(request: Request):
-    next_url = request.query_params.get("next", "")
+    next_url = safe_return_url(request.query_params.get("next", ""),
+                               (PUBLIC_ADMIN_URL, PUBLIC_DASHBOARD_URL))
     try:
         user = get_current_user(request)
         # An unscoped super-admin cannot be routed through the shared customer
@@ -332,8 +342,7 @@ async def login_page(request: Request):
         # instead of showing another login form.
         if user.get("role") == "super_admin" and not user.get("customer_id"):
             return RedirectResponse("/dashboard", status_code=303)
-        if (PUBLIC_DASHBOARD_URL and
-                next_url.startswith(f"{PUBLIC_DASHBOARD_URL}/")):
+        if next_url:
             return RedirectResponse(next_url, status_code=303)
     except HTTPException:
         pass
@@ -347,6 +356,7 @@ async def login(
     password: str = Form(...),
     next: str = Form(""),
 ):
+    next = safe_return_url(next, (PUBLIC_ADMIN_URL, PUBLIC_DASHBOARD_URL))
     client_ip = request.client.host if request.client else "unknown"
     if not _check_rate_limit(client_ip):
         return templates.TemplateResponse("login.html", {
@@ -388,7 +398,8 @@ async def login(
 
 @app.get("/logout")
 async def logout(request: Request, next: str = None):
-    if next and next.startswith('http'):
+    next = safe_return_url(next, (PUBLIC_ADMIN_URL, PUBLIC_DASHBOARD_URL))
+    if next:
         dest = next
     else:
         try:

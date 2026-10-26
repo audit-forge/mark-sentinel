@@ -13,7 +13,7 @@ from pathlib import Path, PurePosixPath
 _RUNTIME_DIRECTORIES = ('profiles',)
 _SOURCE_FILES = (
     'agent.py', 'audit.py', 'arckon_version.py', 'discovery.py', 'network_inventory.py',
-    'storage.py', 'aibom_generator.py', 'eu_ai_act_report.py',
+    'storage.py', 'aibom_generator.py', 'eu_ai_act_report.py', 'outbound_http.py',
     'requirements.txt', 'install.sh', 'install.ps1',
 )
 _SOURCE_DIRECTORIES = ('checks', 'connectors', 'profiles', 'output')
@@ -87,6 +87,9 @@ def _build_nuitka_binary(
         '--include-package=checks',
         '--include-package=connectors',
         '--include-package=output',
+        '--include-module=outbound_http',
+        '--include-module=crypto',
+        '--include-package=monitors',
         # AI session tracking imports psutil lazily so scan-only deployments do
         # not pay its startup cost; explicitly include it in onefile releases.
         '--include-package=psutil',

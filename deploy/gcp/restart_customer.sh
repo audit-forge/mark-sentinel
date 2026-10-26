@@ -6,18 +6,30 @@ set -euo pipefail
 
 CUSTOMER_ID="$1"
 CONTAINER_NAME="sentinel-${CUSTOMER_ID}"
-DATA_DIR="/opt/sentinel-data/${CUSTOMER_ID}"
+DATA_DIR="${SENTINEL_DATA_ROOT:-/opt/sentinel-data}/${CUSTOMER_ID}"
 NGINX_PROXY_TOKEN_DIR="${NGINX_PROXY_TOKEN_DIR:-/opt/sentinel-nginx/proxy-tokens}"
 PUBLIC_ADMIN_URL="${PUBLIC_ADMIN_URL:-https://admin.riskraven.ai}"
-SPEND_SECRET_DIR="${SENTINEL_SPEND_SECRET_ROOT:-/opt/sentinel-data/.spend-secrets}/${CUSTOMER_ID}/spend"
+PUBLIC_DASHBOARD_URL="${PUBLIC_DASHBOARD_URL:-https://arckon.riskraven.ai}"
+SPEND_SECRET_DIR="${SENTINEL_SPEND_SECRET_ROOT:-${SENTINEL_DATA_ROOT:-/opt/sentinel-data}/.spend-secrets}/${CUSTOMER_ID}/spend"
 HOST_LICENSES_DIR="${HOST_LICENSES_DIR:-/opt/licenses}"
 LICENSE_FILE="${HOST_LICENSES_DIR}/${CUSTOMER_ID}/license.json"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+FIELD_SECRET_DIR="${SENTINEL_FIELD_SECRET_ROOT:-${SENTINEL_DATA_ROOT:-/opt/sentinel-data}/.field-secrets}/${CUSTOMER_ID}"
 
 if [ ! -d "$DATA_DIR" ]; then
   echo "ERROR: data dir $DATA_DIR not found" >&2
   exit 1
 fi
+
+# Missing/invalid keys must leave the running container untouched. Never generate
+# or migrate a key during restart, even for an empty tenant directory.
+python3 "$SCRIPT_DIR/prepare_customer_security.py" "$CUSTOMER_ID"
+
+# Resolve an explicit deployment/rollback override before removing the container.
+if [ -n "${SENTINEL_IMAGE:-}" ]; then
+  docker image inspect "$SENTINEL_IMAGE" >/dev/null
+fi
+SENTINEL_IMAGE="${SENTINEL_IMAGE:-mark-sentinel:latest}"
 
 # Persist spend-provider keys outside the customer data mount. Each customer
 # receives only its own directory; the container never sees another tenant's
@@ -37,6 +49,8 @@ if [ -z "$PROXY_TOKEN" ]; then
   umask 077
   printf '%s\n' "$PROXY_TOKEN" > "$PROXY_TOKEN_FILE"
 fi
+chown 999:999 "$PROXY_TOKEN_FILE"
+chmod 0400 "$PROXY_TOKEN_FILE"
 install -d -o 101 -g 101 -m 0750 "$NGINX_PROXY_TOKEN_DIR"
 umask 077
 printf 'proxy_set_header X-Sentinel-Proxy-Token %s;\n' "$PROXY_TOKEN" \
@@ -68,32 +82,49 @@ docker run -d \
    -v "${PROXY_TOKEN_FILE}:/run/secrets/proxy_token:ro" \
    -e "SENTINEL_TRUSTED_PROXY_TOKEN_FILE=/run/secrets/proxy_token" \
    -e "SENTINEL_ADMIN_LOGOUT_URL=${PUBLIC_ADMIN_URL}/logout" \
+   -e "PUBLIC_ADMIN_URL=${PUBLIC_ADMIN_URL}" \
+   -e "PUBLIC_DASHBOARD_URL=${PUBLIC_DASHBOARD_URL}" \
+   --env-file "${FIELD_SECRET_DIR}/runtime.env" \
+   --mount "type=bind,src=${FIELD_SECRET_DIR}/master-key,dst=/run/secrets/arckon_master_key,readonly" \
+   -e "ARCKON_MASTER_KEY_FILE=/run/secrets/arckon_master_key" \
   ${LICENSE_MOUNT} \
    -v "${DATA_DIR}:/app/data" \
    -v "${SPEND_SECRET_DIR}:/opt/sentinel-secrets/spend" \
    -v /opt/sentinel/releases:/app/releases:ro \
-   mark-sentinel:latest \
+    --pull never \
+    "$SENTINEL_IMAGE" \
   python3 server.py --no-browser --port 7331
 
 docker network connect arckon-net "$CONTAINER_NAME"
 
 # Wait up to 15s for server to be healthy.
-# 401 Unauthorized = server is up and enforcing auth (healthy); any HTTP response counts.
+# Require health 200 AND unauthenticated status 401 (auth enforcement).
+READY=false
 for i in $(seq 1 15); do
   if docker exec "$CONTAINER_NAME" python3 -c \
       "import urllib.request, urllib.error, sys
 try:
+    assert urllib.request.urlopen('http://localhost:7331/health', timeout=2).status == 200
+except Exception:
+    sys.exit(1)
+try:
     urllib.request.urlopen('http://localhost:7331/api/status', timeout=2)
+    sys.exit(1)
 except urllib.error.HTTPError as e:
     sys.exit(0 if e.code == 401 else 1)
 except Exception:
     sys.exit(1)" \
       2>/dev/null; then
     echo "  healthy after ${i}s"
+    READY=true
     break
   fi
   sleep 1
 done
+if [ "$READY" != true ]; then
+  echo "ERROR: ${CONTAINER_NAME} readiness exhausted" >&2
+  exit 1
+fi
 
 # Regenerate the gateway proxy-token map (in case the token changed).
 bash "$SCRIPT_DIR/regenerate_proxy_token_map.sh"

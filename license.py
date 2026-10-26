@@ -1,7 +1,8 @@
 """
 RiskRaven Arckon — License enforcement, telemetry, and device monitoring
 
-License file (license.json) sits next to server.py.
+License file: data/license.json locally, or license.json next to server.py
+for deployed customer mounts (which take precedence).
 Fields:
   customer_id          — unique slug (e.g. "acme-corp")
   licensed_to          — display name

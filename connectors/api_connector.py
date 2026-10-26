@@ -5,6 +5,7 @@ Connects to any OpenAI-compatible endpoint for live adversarial probe checks.
 import json
 import urllib.request
 import urllib.error
+import outbound_http
 from dataclasses import dataclass, field
 
 from connectors.config_connector import scan_directory, ScanContext
@@ -300,9 +301,9 @@ def _chat_request(endpoint: str, api_key: str, model: str, system_prompt: str, u
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
 
-    req = urllib.request.Request(url, data=payload, headers=headers, method="POST")
+    req = outbound_http.Request(url, data=payload, headers=headers, method="POST")
     try:
-        with urllib.request.urlopen(req, timeout=PROBE_TIMEOUT) as resp:
+        with outbound_http.urlopen(req, timeout=PROBE_TIMEOUT) as resp:
             body = json.loads(resp.read().decode())
             text = body["choices"][0]["message"]["content"]
             return text, ""

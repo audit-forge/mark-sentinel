@@ -1,5 +1,7 @@
 # Never bake per-install license into the image — mounted per-customer at runtime
 license.json
+data/license.json
+data/siem_config.json
 
 # Runtime credentials are mounted or injected at deploy time, never copied into images.
 agent_config.json
@@ -8,6 +10,16 @@ agent_token.txt
 .env.*
 *.env
 deploy/gcp/.env
+.field-secrets/
+.spend-secrets/
+master-key
+master-key.*
+runtime.env
+outbound-private-origins.json
+siem_config.json
+*.db
+*.db-wal
+*.db-shm
 
 # Signed agent releases are mounted from the release host at runtime. Keeping
 # historical archives out of the server image avoids exhausting Docker storage.
@@ -16,7 +28,7 @@ releases/
 # Source-control metadata, local backups, and interpreter caches do not belong
 # in runtime images and can make a build context unexpectedly large.
 .git/
-*.bak
+*.bak*
 __pycache__/
 **/__pycache__/
 

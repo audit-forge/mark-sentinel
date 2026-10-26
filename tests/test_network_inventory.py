@@ -69,6 +69,14 @@ def test_network_assets_upsert_and_scope_through_reporting_device(tmp_path):
     assert len(store.list_network_assets()) == 2
 
 
+def test_get_device_returns_metadata_or_none(tmp_path):
+    store = AgentStore(tmp_path / 'agents.db')
+    store.upsert_report('a', 'agent-a', _report(), client_org_id='org-a')
+
+    assert store.get_device('a')['hostname'] == 'agent-a'
+    assert store.get_device('missing') is None
+
+
 def test_removing_reporter_removes_its_network_assets(tmp_path):
     store = AgentStore(tmp_path / 'agents.db')
     store.upsert_report('a', 'agent-a', _report(), client_org_id='org-a')

@@ -1,0 +1,11 @@
+[Unit]
+Description=Poll signed Arckon deployment pointer (operator-enabled only)
+
+[Timer]
+OnBootSec=2min
+OnUnitInactiveSec=60s
+RandomizedDelaySec=15s
+Unit=arckon-deploy.service
+
+[Install]
+WantedBy=timers.target

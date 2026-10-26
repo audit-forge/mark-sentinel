@@ -10,12 +10,18 @@ RUN pip install --no-cache-dir --upgrade pip setuptools wheel && \
     pip install --no-cache-dir -r requirements.txt && \
     pip install --no-cache-dir "nuitka[onefile]" ordered-set zstandard
 
-COPY audit.py ./
+COPY audit.py arckon_version.py outbound_http.py crypto.py ./
 COPY checks/ ./checks/
 COPY profiles/ ./profiles/
 COPY output/ ./output/
 COPY connectors/ ./connectors/
 RUN python -m nuitka --onefile --assume-yes-for-downloads \
+    --include-module=arckon_version \
+    --include-module=outbound_http \
+    --include-module=crypto \
+    --include-package=checks \
+    --include-package=connectors \
+    --include-package=output \
     --output-dir=/out --output-filename=audit audit.py
 
 FROM scratch

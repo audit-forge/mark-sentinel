@@ -13,6 +13,7 @@ import os
 import time
 import urllib.request
 import urllib.error
+import outbound_http
 
 from connectors.config_connector import scan_directory, ScanContext
 from connectors.api_connector import PROBES, _evaluate, ProbeResult
@@ -45,9 +46,9 @@ def _chat_request(host: str, token: str, session_id: str, message: str) -> tuple
     if token:
         headers["Authorization"] = f"Bearer {token}"
 
-    req = urllib.request.Request(url, data=payload, headers=headers, method="POST")
+    req = outbound_http.Request(url, data=payload, headers=headers, method="POST")
     try:
-        with urllib.request.urlopen(req, timeout=PROBE_TIMEOUT) as resp:
+        with outbound_http.urlopen(req, timeout=PROBE_TIMEOUT) as resp:
             body = json.loads(resp.read().decode())
             text = body.get("response", "")
             return text, ""

@@ -549,7 +549,7 @@ def _apply_token_update(config: dict, new_token: str) -> None:
         existing['token'] = new_token
         config_path.write_text(json.dumps(existing, indent=2), encoding='utf-8')
         config['token'] = new_token
-        log.info('Token rotated: config updated with new token (first 8 chars: %s…)', new_token[:8])
+        log.info('Token rotated: config updated')
     except Exception as e:
         log.error('Failed to persist token update: %s', e)
 

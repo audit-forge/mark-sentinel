@@ -1,0 +1,23 @@
+[Unit]
+Description=Verify signed Arckon images and perform health-gated deployment
+Wants=network-online.target
+After=network-online.target docker.service
+Requires=docker.service
+ConditionPathIsExecutable=/opt/sentinel/venv/bin/python
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+WorkingDirectory=/opt/sentinel
+UMask=0077
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+ExecStart=/bin/bash /opt/sentinel/scripts/arckon-deploy.sh --poll
+TimeoutStartSec=3h
+NoNewPrivileges=true
+PrivateTmp=true
+
+# Requirements: root-owned trusted checkout, venv with cryptography, gsutil
+# bucket-read credentials, Docker Compose, migrated customer secrets, and
+# verified deploy_images.py preflights. Install units and daemon-reload only
+# after review. Do not enable/start the timer until manually approved.

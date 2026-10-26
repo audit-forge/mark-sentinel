@@ -1,67 +1,9 @@
 #!/bin/bash
-# /opt/arckon-deploy/deploy.sh on the production VM (mark-sentinel).
-# Polls gs://arckon-deploy-artifacts/latest/manifest.json for new deployments,
-# run every 60s by the arckon-deploy.timer systemd unit.
-#
-# This is the source of truth for that VM-side script — after changing it
-# here, copy it up to /opt/arckon-deploy/deploy.sh on the box (it is not
-# fetched automatically; there is no bootstrap step that pulls it from git).
+# Installed host code only. Never fetch or execute deployment scripts from GCS.
 set -euo pipefail
-
-BUCKET="gs://arckon-deploy-artifacts/latest"
-STATE_FILE="/opt/arckon-deploy/last_sha"
-TMP="/tmp/arckon-deploy-$$"
-mkdir -p "$TMP"
-trap "rm -rf $TMP" EXIT
-
-# Fetch manifest
-gsutil cp "$BUCKET/manifest.json" "$TMP/manifest.json" 2>/dev/null || exit 0
-NEW_SHA=$(python3 -c "import json; print(json.load(open('$TMP/manifest.json'))['sha'])")
-
-# Compare with last deployed SHA
-LAST_SHA=""
-[ -f "$STATE_FILE" ] && LAST_SHA=$(cat "$STATE_FILE")
-
-if [ "$NEW_SHA" = "$LAST_SHA" ]; then
-  exit 0
+if [[ "${1:-}" != "--poll" || "$#" != 1 ]]; then
+  echo "Deployment disabled without explicit --poll. Run upgrade_customer_security.py and manually approve host readiness first. No files copied or containers restarted." >&2
+  exit 1
 fi
-
-echo "[arckon-deploy] New deployment: $NEW_SHA (was: ${LAST_SHA:-none})"
-
-# Download artifacts — compiled binaries plus a tarball of the full
-# application source (all top-level *.py, connectors/, checks/, profiles/).
-# A hand-picked file list here previously missed alerts.py, storage.py,
-# connectors/, and several other lazily-imported modules, so anything
-# changed in those files silently never reached production.
-gsutil cp "$BUCKET/agent"       "$TMP/agent"
-gsutil cp "$BUCKET/audit"       "$TMP/audit"
-gsutil cp "$BUCKET/app.tar.gz"  "$TMP/app.tar.gz"
-
-chmod +x "$TMP/agent" "$TMP/audit"
-mkdir -p "$TMP/app"
-tar xzf "$TMP/app.tar.gz" -C "$TMP/app"
-
-# license.json is a per-customer bind mount inside the running container. It
-# must never be delivered by a generic application release or docker cp will
-# fail trying to replace the mounted file.
-rm -f "$TMP/app/license.json"
-
-# releases/ is a read-only bind mount of the signed release catalog. Copying
-# into it fails with "read-only file system", so strip it from the app bundle
-# before docker cp. The mounted copy is the source of truth for agent updates.
-rm -rf "$TMP/app/releases"
-
-# Deploy into the running container
-docker cp "$TMP/agent"   sentinel-mfdynamicsllc:/app/agent
-docker cp "$TMP/audit"   sentinel-mfdynamicsllc:/app/audit
-docker cp "$TMP/app/."   sentinel-mfdynamicsllc:/app/
-# The GCS deployment updates source files in-place rather than rebuilding the
-# image. Refresh declared dependencies before restart so security-pinned
-# requirements (and new server-only integrations) apply to every deployment.
-docker exec -u root sentinel-mfdynamicsllc \
-  python3 -m pip install --no-cache-dir --upgrade -r /app/requirements.txt
-docker restart sentinel-mfdynamicsllc
-
-# Record deployed SHA
-echo "$NEW_SHA" > "$STATE_FILE"
-echo "[arckon-deploy] Deployed $NEW_SHA successfully"
+exec /opt/sentinel/venv/bin/python /opt/sentinel/scripts/promote_deployment.py poll \
+  --bucket gs://arckon-deploy-artifacts --state-dir /opt/arckon-deploy
