@@ -346,7 +346,7 @@ async def login_page(request: Request):
             return RedirectResponse(next_url, status_code=303)
     except HTTPException:
         pass
-    return templates.TemplateResponse("login.html", {"request": request, "error": None, "next": next_url})
+    return templates.TemplateResponse(request=request, name="login.html", context={"request": request, "error": None, "next": next_url})
 
 
 @app.post("/login")
@@ -359,7 +359,7 @@ async def login(
     next = safe_return_url(next, (PUBLIC_ADMIN_URL, PUBLIC_DASHBOARD_URL))
     client_ip = request.client.host if request.client else "unknown"
     if not _check_rate_limit(client_ip):
-        return templates.TemplateResponse("login.html", {
+        return templates.TemplateResponse(request=request, name="login.html", context={
             "request": request,
             "error": "Too many failed attempts. Try again in 10 minutes.",
             "next": next,
@@ -370,7 +370,7 @@ async def login(
         ).fetchone()
     if not row or not verify_password(password, row["password_hash"]):
         _record_failed_login(client_ip)
-        return templates.TemplateResponse("login.html", {
+        return templates.TemplateResponse(request=request, name="login.html", context={
             "request": request, "error": "Invalid credentials", "next": next
         })
     token = create_token(row["id"], row["role"], row["customer_id"], row["email"],
@@ -526,7 +526,7 @@ async def dashboard(request: Request):
         ).fetchall()
     seats = [dict(r) for r in seat_rows]
     overages = sum(1 for s in seats if s["current_agents"] > s["max_seats"])
-    return templates.TemplateResponse("dashboard.html", {
+    return templates.TemplateResponse(request=request, name="dashboard.html", context={
         "request": request, "user": user,
         "customer_count": customer_count, "user_count": user_count,
         "admin_url": PUBLIC_ADMIN_URL,
@@ -623,7 +623,7 @@ async def communications_page(request: Request):
         customers = [dict(r) for r in conn.execute(
             "SELECT id, name, license_expires_at FROM customers WHERE active=1 ORDER BY name"
         ).fetchall()]
-    return templates.TemplateResponse("communications.html", {
+    return templates.TemplateResponse(request=request, name="communications.html", context={
         "request": request, "user": user, "customers": customers,
     })
 
@@ -766,7 +766,7 @@ async def customers_page(request: Request):
         customers.append(c)
     if parent_filter:
         customers = [c for c in customers if c.get("parent_customer_id") == parent_filter]
-    return templates.TemplateResponse("customers.html", {
+    return templates.TemplateResponse(request=request, name="customers.html", context={
         "request": request, "user": user,
         "customers": customers, "ip": PUBLIC_IP, "status": status,
         "public_dashboard_url": PUBLIC_DASHBOARD_URL,
@@ -1322,14 +1322,14 @@ async def get_active_maintenance_notice():
 
 @app.get("/forgot-password", response_class=HTMLResponse)
 async def forgot_password_page(request: Request):
-    return templates.TemplateResponse("forgot_password.html", {"request": request, "sent": False})
+    return templates.TemplateResponse(request=request, name="forgot_password.html", context={"request": request, "sent": False})
 
 
 @app.post("/forgot-password", response_class=HTMLResponse)
 async def forgot_password_submit(request: Request, email: str = Form(...)):
     client_ip = request.client.host if request.client else "unknown"
     if not _check_rate_limit(client_ip):
-        return templates.TemplateResponse("forgot_password.html", {
+        return templates.TemplateResponse(request=request, name="forgot_password.html", context={
             "request": request, "sent": True,
         }, status_code=429)
     _record_failed_login(client_ip)
@@ -1347,7 +1347,7 @@ async def forgot_password_submit(request: Request, email: str = Form(...)):
             reset_url = f"{PUBLIC_ADMIN_URL}/reset-password?token={token}"
             from mailer import send_password_reset_email
             send_password_reset_email(email.strip().lower(), reset_url)
-    return templates.TemplateResponse("forgot_password.html", {"request": request, "sent": True})
+    return templates.TemplateResponse(request=request, name="forgot_password.html", context={"request": request, "sent": True})
 
 
 @app.get("/reset-password", response_class=HTMLResponse)
@@ -1362,7 +1362,7 @@ async def reset_password_page(request: Request, token: str = ""):
                 expires = datetime.fromisoformat(row["expires_at"])
                 if expires > datetime.now(timezone.utc):
                     valid = True
-    return templates.TemplateResponse("reset_password.html", {
+    return templates.TemplateResponse(request=request, name="reset_password.html", context={
         "request": request, "token": token, "valid": valid, "done": False, "error": None
     })
 
@@ -1375,7 +1375,7 @@ async def reset_password_submit(
     confirm_password: str = Form(...),
 ):
     if new_password != confirm_password:
-        return templates.TemplateResponse("reset_password.html", {
+        return templates.TemplateResponse(request=request, name="reset_password.html", context={
             "request": request, "token": token, "valid": True,
             "done": False, "error": "Passwords do not match"
         })
@@ -1384,18 +1384,18 @@ async def reset_password_submit(
             "SELECT * FROM password_resets WHERE token=? AND used=0", (token,)
         ).fetchone()
         if not row:
-            return templates.TemplateResponse("reset_password.html", {
+            return templates.TemplateResponse(request=request, name="reset_password.html", context={
                 "request": request, "token": token, "valid": False, "done": False, "error": None
             })
         expires = datetime.fromisoformat(row["expires_at"])
         if expires <= datetime.now(timezone.utc):
-            return templates.TemplateResponse("reset_password.html", {
+            return templates.TemplateResponse(request=request, name="reset_password.html", context={
                 "request": request, "token": token, "valid": False, "done": False, "error": None
             })
         conn.execute("UPDATE users SET password_hash=? WHERE id=?",
                      (hash_password(new_password), row["user_id"]))
         conn.execute("UPDATE password_resets SET used=1 WHERE token=?", (token,))
-    return templates.TemplateResponse("reset_password.html", {
+    return templates.TemplateResponse(request=request, name="reset_password.html", context={
         "request": request, "token": "", "valid": False, "done": True, "error": None
     })
 
@@ -1408,7 +1408,7 @@ async def account_page(request: Request):
         user = get_current_user(request)
     except HTTPException:
         return RedirectResponse("/login")
-    return templates.TemplateResponse("account.html", {"request": request, "user": user})
+    return templates.TemplateResponse(request=request, name="account.html", context={"request": request, "user": user})
 
 
 @app.post("/account/password")
@@ -1496,7 +1496,7 @@ async def users_page(request: Request):
         d["client_org_name"] = org_names.get(d.get("client_org_id")) if d.get("client_org_id") else None
         all_users_out.append(d)
 
-    return templates.TemplateResponse("users.html", {
+    return templates.TemplateResponse(request=request, name="users.html", context={
         "request": request, "user": user,
         "current_user_id": user["sub"],
         "users": users_out,
@@ -1974,7 +1974,7 @@ async def audit_log_page(request: Request):
         except Exception:
             e["occurred_at_display"] = e.get("occurred_at", "")
         entries.append(e)
-    return templates.TemplateResponse("audit_log.html", {
+    return templates.TemplateResponse(request=request, name="audit_log.html", context={
         "request": request, "user": user,
         "entries": entries, "customers": customers,
         "actions": actions, "customer_id": customer_id, "action": action,
@@ -2023,7 +2023,7 @@ async def dns_inventory_page(request: Request):
         user = get_current_user(request)
     except HTTPException:
         return RedirectResponse("/login")
-    return templates.TemplateResponse("dns_inventory.html", {"request": request, "user": user})
+    return templates.TemplateResponse(request=request, name="dns_inventory.html", context={"request": request, "user": user})
 
 
 @app.post("/dns-inventory/analyze")

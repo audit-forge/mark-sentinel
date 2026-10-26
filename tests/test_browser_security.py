@@ -79,10 +79,84 @@ def test_login_redirects_and_shared_cookie_contract(admin):
     cookie = response.headers["set-cookie"]
     for part in ("token=", "Domain=.riskraven.ai", "HttpOnly", "Max-Age=28800", "Path=/", "SameSite=lax", "Secure"):
         assert part in cookie
+    verified = client.get("/auth/verify", headers={"X-Customer-ID": "tenant"})
+    assert verified.status_code == 200
+    assert verified.headers["X-Arckon-Customer-ID"] == "tenant"
+    assert verified.headers["X-Arckon-User-Email"] == "customer@example.test"
+    assert client.get("/auth/verify", headers={"X-Customer-ID": "other"}).status_code == 403
     assert client.get("/login", params={"next": DASHBOARD + "/devices"}).headers["location"] == DASHBOARD + "/devices"
     assert login(client, target="https://evil.test").headers["location"] == DASHBOARD
     assert login(client, user="operator", target=DASHBOARD + "/devices").headers["location"] == "/dashboard"
     assert client.get("/login", params={"next": DASHBOARD}).headers["location"] == "/dashboard"
+
+
+@pytest.mark.parametrize("path,template", [
+    ("/login", "login.html"),
+    ("/forgot-password", "forgot_password.html"),
+    ("/reset-password?token=invalid", "reset_password.html"),
+])
+def test_public_templates_render_with_real_starlette(admin, path, template):
+    response = admin[1].get(path)
+    assert response.status_code == 200
+    assert response.template.name == template
+    assert response.context["request"].url.path == path.split("?")[0]
+
+
+@pytest.mark.parametrize("path,template", [
+    ("/dashboard", "dashboard.html"), ("/communications", "communications.html"),
+    ("/customers", "customers.html"), ("/account", "account.html"),
+    ("/users", "users.html"), ("/audit-log", "audit_log.html"),
+    ("/dns-inventory", "dns_inventory.html"),
+])
+def test_authenticated_templates_render_with_real_starlette(admin, path, template):
+    _, client, _ = admin
+    assert login(client, user="operator").status_code == 303
+    response = client.get(path)
+    assert response.status_code == 200
+    assert response.template.name == template
+    assert response.context["user"]["role"] == "super_admin"
+
+
+def test_password_reset_form_templates_with_real_multipart(admin):
+    app, client, _ = admin
+    headers = {"Origin": ADMIN}
+    response = client.post("/forgot-password", data={"email": "missing@example.test"}, headers=headers)
+    assert response.status_code == 200
+    assert response.context["sent"] is True
+    data = {"token": "invalid", "new_password": "new-password", "confirm_password": "mismatch"}
+    response = client.post("/reset-password", data=data, headers=headers)
+    assert response.status_code == 200
+    assert response.context["error"] == "Passwords do not match"
+    data["confirm_password"] = data["new_password"]
+    response = client.post("/reset-password", data=data, headers=headers)
+    assert response.status_code == 200
+    assert response.context["valid"] is False
+    app._login_attempts["testclient"] = [app.time.time()] * app._LOGIN_MAX
+    assert client.post("/forgot-password", data={"email": "missing@example.test"}, headers=headers).status_code == 429
+    response = login(client)
+    assert response.status_code == 429
+    assert response.template.name == "login.html"
+
+
+@pytest.mark.parametrize("kind", ["expired", "wrong-key", "unsigned", "wrong-algorithm"])
+def test_real_pyjwt_rejects_invalid_session_tokens(admin, kind):
+    import jwt
+
+    _, client, _ = admin
+    claims = {"sub": "customer", "role": "customer_admin", "customer_id": "tenant", "exp": 4102444800}
+    key = "browser-security-test-key-not-for-production"
+    algorithm = "HS256"
+    if kind == "expired":
+        claims["exp"] = 1
+    elif kind == "wrong-key":
+        key = "different-test-key-not-for-production"
+    elif kind == "unsigned":
+        key, algorithm = "", "none"
+    else:
+        algorithm = "HS384"
+        key = key * 2
+    client.cookies.set("token", jwt.encode(claims, key, algorithm=algorithm), domain=".riskraven.ai", path="/")
+    assert client.get("/auth/verify").status_code == 401
 
 
 def test_login_get_post_and_logout_sanitize_return_targets(admin):
