@@ -11,7 +11,7 @@ User=root
 Group=root
 WorkingDirectory=/opt/sentinel
 UMask=0077
-Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/snap/bin
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/snap/google-cloud-cli/current/bin:/snap/bin
 ExecStart=/bin/bash /opt/sentinel/scripts/arckon-deploy.sh --poll
 TimeoutStartSec=3h
 NoNewPrivileges=true

@@ -602,3 +602,6 @@ def test_host_service_uses_supported_executable_condition():
     source = (root / 'deploy/gcp/arckon-deploy.service').read_text()
     assert 'ConditionFileIsExecutable=/opt/sentinel/venv/bin/python' in source
     assert 'ConditionPathIsExecutable' not in source
+    assert 'NoNewPrivileges=true' in source
+    assert 'PrivateTmp=true' in source
+    assert source.index('/snap/google-cloud-cli/current/bin') < source.index(':/snap/bin')
