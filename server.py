@@ -1586,6 +1586,8 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             '/api/spend/by-api-key':       self._api_spend_by_api_key,
             '/api/spend/keys':             self._api_spend_keys_list,
             '/api/ai-sessions':            self._api_get_ai_sessions,
+            '/api/fleet/ai-inventory':     self._api_get_fleet_ai_inventory,
+            '/api/fleet/ai-inventory/summary': self._api_get_fleet_ai_inventory_summary,
             '/download/shortcut': self._serve_shortcut,
         }
         if path in static:
@@ -1696,6 +1698,12 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                 self._send(401, b'Unauthorized', 'text/plain')
                 return
             self._api_agent_ai_sessions()
+            return
+        if path == '/api/agent/ai-inventory':
+            if not self._check_agent_bearer():
+                self._send(401, b'Unauthorized', 'text/plain')
+                return
+            self._api_agent_ai_inventory()
             return
         # CloudTrail forwarders use a dedicated ingest token. Never reuse an
         # endpoint-agent token for an external cloud integration.
@@ -5899,6 +5907,153 @@ load();
         days = int(qs.get('days', ['30'])[0])
         try:
             summary = self._store().get_ai_sessions_summary(days=days)
+            self._json(summary)
+        except Exception as e:
+            self._json({'error': str(e)}, 500)
+
+    def _api_agent_ai_inventory(self):
+        """POST /api/agent/ai-inventory — ingest endpoint shadow AI inventory from an agent.
+
+        Agent-bearer auth is already verified by the caller. Payload:
+        {device_id, hostname, platform, entries: [{tool_name, tool_category,
+         governance_status, install_path, source, running, risk_score,
+         risk_band, risk_dimensions}]}
+
+        Security: all agent-supplied fields are validated server-side. The
+        agent is treated as untrusted — governance_status, risk_score, and
+        risk_band must be in allowed ranges and consistent with each other.
+        String fields are length-limited to prevent stored XSS and DB bloat.
+        """
+        length = _content_length(self.headers)
+        if not length:
+            self._send(400, b'Empty body', 'text/plain')
+            return
+        if length > 524_288:
+            self._send(413, b'Payload too large', 'text/plain')
+            return
+        try:
+            body = json.loads(self.rfile.read(length))
+        except json.JSONDecodeError:
+            self._send(400, b'Invalid JSON', 'text/plain')
+            return
+        device_id = body.get('device_id', '').strip()
+        hostname  = body.get('hostname', '').strip()
+        entries   = body.get('entries', [])
+        if not device_id:
+            self._send(400, b'Missing device_id', 'text/plain')
+            return
+        if not isinstance(entries, list):
+            self._send(400, b'Invalid entries array', 'text/plain')
+            return
+        if len(entries) > 500:
+            self._send(413, b'Too many entries (max 500)', 'text/plain')
+            return
+
+        validated = self._validate_ai_inventory_entries(entries)
+        if validated is None:
+            self._send(400, b'Invalid entry structure or values', 'text/plain')
+            return
+
+        try:
+            cust = self._get_agent_customer()
+            store = _get_store(cust['id']) if cust else self._store()
+            store.upsert_endpoint_ai_inventory(device_id, hostname, validated)
+            self._json({'ok': True, 'count': len(validated)})
+        except Exception as e:
+            log.error('Endpoint AI inventory ingest error: %s', e)
+            self._json({'ok': False, 'error': str(e)}, 500)
+
+    _AI_INV_VALID_GOVS = frozenset(('sanctioned', 'tolerated', 'shadow', 'restricted'))
+    _AI_INV_VALID_BANDS = frozenset(('CRITICAL', 'HIGH', 'MEDIUM', 'LOW'))
+    _AI_INV_VALID_DIMS = frozenset((
+        'data_sensitivity', 'validation_status', 'regulatory_impact',
+        'human_oversight', 'change_control',
+    ))
+    _AI_INV_MAX_STR = {
+        'tool_name': 255, 'hostname': 255, 'install_path': 1024,
+        'source': 50, 'tool_category': 50, 'risk_band': 20,
+    }
+
+    def _validate_ai_inventory_entries(self, entries: list) -> list[dict] | None:
+        """Validate and sanitize agent-supplied inventory entries.
+
+        Returns a list of clean entries, or None if any entry is invalid.
+        Rejects: non-dict entries, missing/empty tool_name, out-of-range
+        risk_score, inconsistent risk_band, invalid governance_status,
+        non-boolean running, oversized strings, unexpected risk dimensions.
+        """
+        clean = []
+        for e in entries:
+            if not isinstance(e, dict):
+                return None
+            tool_name = e.get('tool_name', '')
+            if not isinstance(tool_name, str) or not tool_name.strip() or len(tool_name) > 255:
+                return None
+            gov = e.get('governance_status', 'shadow')
+            if gov not in self._AI_INV_VALID_GOVS:
+                return None
+            risk_score = e.get('risk_score', 0)
+            if not isinstance(risk_score, int) or risk_score < 0 or risk_score > 100:
+                return None
+            band = e.get('risk_band', '')
+            if band not in self._AI_INV_VALID_BANDS:
+                return None
+            # Verify risk_band is consistent with risk_score
+            expected_band = 'CRITICAL' if risk_score >= 75 else 'HIGH' if risk_score >= 50 else 'MEDIUM' if risk_score >= 25 else 'LOW'
+            if band != expected_band:
+                return None
+            running = e.get('running', False)
+            if not isinstance(running, bool):
+                return None
+            dims = e.get('risk_dimensions', {})
+            if not isinstance(dims, dict):
+                return None
+            if set(dims.keys()) != self._AI_INV_VALID_DIMS:
+                # Allow empty dims dict (for backward compat) but reject unexpected keys
+                if dims and not set(dims.keys()).issubset(self._AI_INV_VALID_DIMS):
+                    return None
+            else:
+                for v in dims.values():
+                    if not isinstance(v, int) or v < 0 or v > 20:
+                        return None
+            # Length-limit string fields
+            sanitized = {
+                'tool_name': tool_name.strip()[:255],
+                'tool_category': str(e.get('tool_category', ''))[:50],
+                'governance_status': gov,
+                'install_path': str(e.get('install_path', ''))[:1024],
+                'source': str(e.get('source', ''))[:50],
+                'running': running,
+                'risk_score': risk_score,
+                'risk_band': band,
+                'risk_dimensions': dims,
+            }
+            clean.append(sanitized)
+        return clean
+
+    def _api_get_fleet_ai_inventory(self):
+        """GET /api/fleet/ai-inventory — return endpoint AI inventory for the dashboard.
+
+        Supports pagination via ?limit=200&offset=0. Maximum limit is 500.
+        """
+        import urllib.parse as _up
+        try:
+            qs = _up.parse_qs(_up.urlparse(self.path).query)
+            limit = int(qs.get('limit', ['200'])[0])
+            offset = int(qs.get('offset', ['0'])[0])
+            client_org = self._scoped_client_org()
+            rows = self._store().list_endpoint_ai_inventory(client_org_id=client_org,
+                                                             limit=limit, offset=offset)
+            total = self._store().count_endpoint_ai_inventory(client_org_id=client_org)
+            self._json({'entries': rows, 'count': len(rows), 'total': total,
+                        'limit': limit, 'offset': offset})
+        except Exception as e:
+            self._json({'error': str(e)}, 500)
+
+    def _api_get_fleet_ai_inventory_summary(self):
+        """GET /api/fleet/ai-inventory/summary — return governance and risk-band counts."""
+        try:
+            summary = self._store().list_endpoint_ai_inventory_summary(client_org_id=self._scoped_client_org())
             self._json(summary)
         except Exception as e:
             self._json({'error': str(e)}, 500)

@@ -1605,6 +1605,62 @@ def _report_ai_sessions(sessions: list, config: dict) -> bool:
         return False
 
 
+# ── Endpoint shadow AI inventory ─────────────────────────────────────────────
+
+def run_endpoint_inventory_cycle(config: dict) -> bool:
+    """Discover installed and running AI tools, categorize, score, and report.
+
+    Tier 1 capability: endpoint-based shadow AI inventory with governance
+    categorization (Sanctioned / Shadow / Tolerated / Restricted) and GxP-specific
+    risk scoring across five dimensions.
+    """
+    device_id = _device_id()
+    hostname  = os.environ.get('SENTINEL_HOSTNAME', '').strip() or socket.gethostname()
+
+    try:
+        from shadow_ai_inventory import build_inventory_snapshot
+        entries = build_inventory_snapshot(config)
+    except Exception as e:
+        log.warning('Endpoint AI inventory scan error (non-fatal): %s', e)
+        return True
+
+    if not entries:
+        log.info('Endpoint AI inventory: no AI tools detected')
+        # Still report an empty snapshot so the server marks tools as not running
+        _report_ai_inventory([], config, device_id, hostname)
+        return True
+
+    log.info('Endpoint AI inventory: %d tool(s) detected', len(entries))
+    _report_ai_inventory(entries, config, device_id, hostname)
+    return True
+
+
+def _report_ai_inventory(entries: list, config: dict,
+                         device_id: str, hostname: str) -> bool:
+    """POST endpoint AI inventory snapshot to the server."""
+    server = config.get('server', '').rstrip('/')
+    token = config.get('token', '')
+    if not server or not token:
+        return False
+    url = server + '/api/agent/ai-inventory'
+    payload = json.dumps({
+        'device_id': device_id,
+        'hostname': hostname,
+        'platform': platform.platform(),
+        'entries': entries,
+    }).encode()
+    req = _urlreq.Request(url, data=payload, method='POST')
+    req.add_header('Content-Type', 'application/json')
+    req.add_header('Authorization', f'Bearer {token}')
+    req.add_header('User-Agent', f'sentinel-agent/{VERSION}')
+    try:
+        with _urlopen(req, timeout=20) as resp:
+            return resp.status == 200
+    except Exception as e:
+        log.warning('Endpoint AI inventory report failed (non-fatal): %s', e)
+        return False
+
+
 def _merge_reports(reports: list[dict]) -> dict:
     """Merge multiple profile scan reports into one combined report."""
     if len(reports) == 1:
@@ -2016,6 +2072,7 @@ def main() -> None:
         POLL_JITTER   = 5     # ±5 s per poll — agents drift apart over time
         SCAN_JITTER   = 120   # ±2 min per scan — prevents thundering herd on large fleets
         AI_SESSION_INTERVAL = 30  # lightweight process-only session check
+        ENDPOINT_INVENTORY_INTERVAL = 300  # 5 min — shadow AI inventory + risk scoring
 
         device_id = _device_id()
         hostname  = os.environ.get('SENTINEL_HOSTNAME', '').strip() or socket.gethostname()
@@ -2041,6 +2098,7 @@ def main() -> None:
         last_success = 0.0
         last_update_check = 0.0
         last_ai_session_check = 0.0
+        last_endpoint_inventory = 0.0
 
         # Stuck-update detector (Windows): if agent.exe.new exists from a
         # previous failed activation, retry the swap via a SYSTEM scheduled
@@ -2079,6 +2137,12 @@ def main() -> None:
                     run_ai_session_cycle(cfg)
                 except Exception as e:
                     log.warning('AI session tracking cycle error (non-fatal): %s', e)
+            if now - last_endpoint_inventory >= ENDPOINT_INVENTORY_INTERVAL:
+                last_endpoint_inventory = now
+                try:
+                    run_endpoint_inventory_cycle(cfg)
+                except Exception as e:
+                    log.warning('Endpoint AI inventory cycle error (non-fatal): %s', e)
             # Apply per-scan jitter so the effective interval drifts ± SCAN_JITTER
             effective_interval = interval + _random.uniform(-SCAN_JITTER, SCAN_JITTER)
             due = (now - last_scan >= effective_interval) or (last_success < last_scan and now - last_scan >= RETRY_INTERVAL)

@@ -372,6 +372,28 @@ class AgentStore:
                 CREATE INDEX IF NOT EXISTS idx_cloud_assets_audit_ts
                     ON protected_cloud_assets_audit(ts DESC);
 
+                CREATE TABLE IF NOT EXISTS endpoint_ai_inventory (
+                    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+                    device_id           TEXT NOT NULL,
+                    hostname            TEXT NOT NULL DEFAULT '',
+                    tool_name           TEXT NOT NULL,
+                    tool_category       TEXT NOT NULL DEFAULT '',
+                    governance_status   TEXT NOT NULL DEFAULT 'shadow',
+                    install_path        TEXT NOT NULL DEFAULT '',
+                    source              TEXT NOT NULL DEFAULT '',
+                    running             INTEGER NOT NULL DEFAULT 0,
+                    risk_score          INTEGER NOT NULL DEFAULT 0,
+                    risk_band           TEXT NOT NULL DEFAULT '',
+                    risk_dimensions_json TEXT NOT NULL DEFAULT '{}',
+                    first_seen          INTEGER NOT NULL,
+                    last_seen           INTEGER NOT NULL,
+                    UNIQUE(device_id, tool_name)
+                );
+                CREATE INDEX IF NOT EXISTS idx_endpoint_ai_inventory_last_seen
+                    ON endpoint_ai_inventory(last_seen DESC);
+                CREATE INDEX IF NOT EXISTS idx_endpoint_ai_inventory_gov
+                    ON endpoint_ai_inventory(governance_status);
+
             """)
             # Migrations
             cols = {r[1] for r in conn.execute("PRAGMA table_info(devices)")}
@@ -989,6 +1011,7 @@ class AgentStore:
             cur = conn.execute("DELETE FROM reports WHERE device_id = ?", (device_id,))
             conn.execute("DELETE FROM commands WHERE device_id = ?", (device_id,))
             conn.execute("DELETE FROM network_assets WHERE reporter_device_id = ?", (device_id,))
+            conn.execute("DELETE FROM endpoint_ai_inventory WHERE device_id = ?", (device_id,))
             conn.execute("DELETE FROM devices WHERE device_id = ?", (device_id,))
             return cur.rowcount > 0
 
@@ -1039,6 +1062,147 @@ class AgentStore:
         query += ' ORDER BY s.completed_at DESC LIMIT 50'
         with self._lock, self._conn() as conn:
             return [dict(r) for r in conn.execute(query, params).fetchall()]
+
+    # ── Endpoint AI inventory (shadow AI discovery + GxP risk scoring) ──────
+
+    def upsert_endpoint_ai_inventory(self, device_id: str, hostname: str,
+                                     entries: list[dict]) -> None:
+        """Upsert a batch of endpoint AI inventory entries for a device.
+
+        Each entry must contain: tool_name, tool_category, governance_status,
+        install_path, source, running, risk_score, risk_band, risk_dimensions.
+        Tools no longer present in the snapshot are marked running=0 but retained
+        for historical audit trail.
+        """
+        now = int(time.time())
+        with self._lock, self._conn() as conn:
+            seen_names = set()
+            for e in entries:
+                tool_name = e['tool_name']
+                seen_names.add(tool_name)
+                dims_json = json.dumps(e.get('risk_dimensions', {}))
+                conn.execute("""INSERT INTO endpoint_ai_inventory
+                    (device_id, hostname, tool_name, tool_category, governance_status,
+                     install_path, source, running, risk_score, risk_band,
+                     risk_dimensions_json, first_seen, last_seen)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(device_id, tool_name) DO UPDATE SET
+                        hostname=excluded.hostname,
+                        tool_category=excluded.tool_category,
+                        governance_status=excluded.governance_status,
+                        install_path=excluded.install_path,
+                        source=excluded.source,
+                        running=excluded.running,
+                        risk_score=excluded.risk_score,
+                        risk_band=excluded.risk_band,
+                        risk_dimensions_json=excluded.risk_dimensions_json,
+                        last_seen=excluded.last_seen""",
+                    (device_id, hostname, tool_name,
+                     e.get('tool_category', ''), e.get('governance_status', 'shadow'),
+                     e.get('install_path', ''), e.get('source', ''),
+                     1 if e.get('running') else 0,
+                     e.get('risk_score', 0), e.get('risk_band', ''),
+                     dims_json, now, now))
+            # Mark tools not in this snapshot as not running
+            if seen_names:
+                placeholders = ','.join('?' * len(seen_names))
+                conn.execute(
+                    f"UPDATE endpoint_ai_inventory SET running=0 WHERE device_id=? AND tool_name NOT IN ({placeholders})",
+                    (device_id, *seen_names))
+            else:
+                conn.execute(
+                    "UPDATE endpoint_ai_inventory SET running=0 WHERE device_id=?",
+                    (device_id,))
+
+    def list_endpoint_ai_inventory(self, client_org_id: str | None = None,
+                                   limit: int = 200, offset: int = 0) -> list[dict]:
+        """List endpoint AI inventory entries, scoped by reporting device's client org.
+
+        Pagination is enforced with a default limit of 200 rows to prevent
+        unbounded response sizes. The maximum allowed limit is 500.
+        """
+        limit = max(1, min(limit, 500))
+        offset = max(0, offset)
+        query = """SELECT e.id, e.device_id, e.hostname, e.tool_name, e.tool_category,
+                          e.governance_status, e.install_path, e.source, e.running,
+                          e.risk_score, e.risk_band, e.risk_dimensions_json,
+                          e.first_seen, e.last_seen,
+                          d.client_org_id, d.platform
+                   FROM endpoint_ai_inventory e
+                   JOIN devices d ON d.device_id=e.device_id"""
+        params: list = []
+        if client_org_id == '':
+            query += ' WHERE d.client_org_id IS NULL'
+        elif client_org_id is not None:
+            query += ' WHERE d.client_org_id = ?'
+            params.append(client_org_id)
+        query += ' ORDER BY e.risk_score DESC, e.last_seen DESC LIMIT ? OFFSET ?'
+        params.extend([limit, offset])
+        with self._lock, self._conn() as conn:
+            return [dict(r) for r in conn.execute(query, tuple(params)).fetchall()]
+
+    def count_endpoint_ai_inventory(self, client_org_id: str | None = None) -> int:
+        """Return total count of endpoint AI inventory entries (for pagination)."""
+        query = """SELECT COUNT(*) FROM endpoint_ai_inventory e
+                   JOIN devices d ON d.device_id=e.device_id"""
+        params: tuple = ()
+        if client_org_id == '':
+            query += ' WHERE d.client_org_id IS NULL'
+        elif client_org_id is not None:
+            query += ' WHERE d.client_org_id = ?'
+            params = (client_org_id,)
+        with self._lock, self._conn() as conn:
+            return conn.execute(query, params).fetchone()[0]
+
+    def list_endpoint_ai_inventory_summary(self, client_org_id: str | None = None) -> dict:
+        """Return summary counts by governance status and risk band.
+
+        Uses SQL aggregation to avoid loading all rows into memory and to
+        ensure a consistent snapshot under the lock.
+        """
+        where = ""
+        params: tuple = ()
+        if client_org_id == '':
+            where = ' WHERE d.client_org_id IS NULL'
+        elif client_org_id is not None:
+            where = ' WHERE d.client_org_id = ?'
+            params = (client_org_id,)
+        query = f"""SELECT
+                        COUNT(*) AS total,
+                        SUM(CASE WHEN e.running=1 THEN 1 ELSE 0 END) AS running,
+                        SUM(CASE WHEN e.governance_status='sanctioned' THEN 1 ELSE 0 END) AS sanctioned,
+                        SUM(CASE WHEN e.governance_status='tolerated' THEN 1 ELSE 0 END) AS tolerated,
+                        SUM(CASE WHEN e.governance_status='shadow' THEN 1 ELSE 0 END) AS shadow,
+                        SUM(CASE WHEN e.governance_status='restricted' THEN 1 ELSE 0 END) AS restricted,
+                        SUM(CASE WHEN e.risk_band='CRITICAL' THEN 1 ELSE 0 END) AS critical,
+                        SUM(CASE WHEN e.risk_band='HIGH' THEN 1 ELSE 0 END) AS high,
+                        SUM(CASE WHEN e.risk_band='MEDIUM' THEN 1 ELSE 0 END) AS medium,
+                        SUM(CASE WHEN e.risk_band='LOW' THEN 1 ELSE 0 END) AS low
+                   FROM endpoint_ai_inventory e
+                   JOIN devices d ON d.device_id=e.device_id{where}"""
+        with self._lock, self._conn() as conn:
+            row = conn.execute(query, params).fetchone()
+            return {
+                'total': row['total'] or 0,
+                'running': row['running'] or 0,
+                'by_governance': {
+                    'sanctioned': row['sanctioned'] or 0,
+                    'tolerated': row['tolerated'] or 0,
+                    'shadow': row['shadow'] or 0,
+                    'restricted': row['restricted'] or 0,
+                },
+                'by_risk_band': {
+                    'CRITICAL': row['critical'] or 0,
+                    'HIGH': row['high'] or 0,
+                    'MEDIUM': row['medium'] or 0,
+                    'LOW': row['low'] or 0,
+                },
+            }
+
+    def delete_device_endpoint_ai_inventory(self, device_id: str) -> None:
+        """Delete all endpoint AI inventory entries for a device (used on device removal)."""
+        with self._lock, self._conn() as conn:
+            conn.execute("DELETE FROM endpoint_ai_inventory WHERE device_id=?", (device_id,))
 
     def upsert_shadow_device(self, reporter_device_id: str, reporter_hostname: str,
                              host: str, port: int, service: str, models: list,
