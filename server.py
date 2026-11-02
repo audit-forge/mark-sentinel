@@ -1618,6 +1618,8 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self._api_rr_overrides_list()
         elif path == '/api/fleet/shadow/csv':
             self._api_shadow_csv()
+        elif path == '/api/fleet/ai-inventory/csv':
+            self._api_ai_inventory_csv()
         elif path == '/api/fleet/inventory':
             self._api_inventory()
         elif path.startswith('/api/fleet/inventory/history/'):
@@ -4137,6 +4139,62 @@ load();
             log.error('shadow CSV error: %s', e, exc_info=True)
             self._json({'error': str(e)}, 500)
 
+    def _api_ai_inventory_csv(self):
+        """GET /api/fleet/ai-inventory/csv — download Endpoint AI inventory as CSV.
+
+        Available to all signed-in dashboard roles, scoped to the caller's
+        client org. Replaces the former raw-JSON feed on this page."""
+        import csv as _csv
+        import io
+        from datetime import datetime as _dt
+        try:
+            store = self._store()
+            org = self._scoped_client_org()
+            rows: list = []
+            offset = 0
+            while True:  # storage caps limit at 500 — page through
+                batch = store.list_endpoint_ai_inventory(
+                    client_org_id=org, limit=500, offset=offset)
+                rows.extend(batch)
+                if len(batch) < 500:
+                    break
+                offset += 500
+            buf = io.StringIO()
+            writer = _csv.writer(buf)
+            writer.writerow(['Tool', 'Category', 'Governance', 'Risk Score', 'Risk Band',
+                             'Running', 'Endpoint', 'Platform', 'Source', 'Install Path',
+                             'First Seen', 'Last Seen'])
+            def _fmt(ts):
+                return _dt.utcfromtimestamp(ts).strftime('%Y-%m-%d %H:%M UTC') if ts else ''
+            for r in rows:
+                writer.writerow([
+                    r.get('tool_name', ''),
+                    r.get('tool_category', ''),
+                    r.get('governance_status', ''),
+                    r.get('risk_score', 0),
+                    r.get('risk_band', ''),
+                    'yes' if r.get('running') else 'no',
+                    r.get('hostname', ''),
+                    r.get('platform', ''),
+                    r.get('source', ''),
+                    r.get('install_path', ''),
+                    _fmt(r.get('first_seen')),
+                    _fmt(r.get('last_seen')),
+                ])
+            data = buf.getvalue().encode('utf-8')
+            fname = f'endpoint_ai_inventory_{_dt.utcnow().strftime("%Y%m%d")}.csv'
+            self.send_response(200)
+            self.send_header('Content-Type', 'text/csv; charset=utf-8')
+            self.send_header('Content-Disposition', f'attachment; filename="{fname}"')
+            self.send_header('Content-Length', str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+        except _TenantScopeError:
+            self._json({'error': 'invalid client-org scope'}, 403)
+        except Exception as e:
+            log.error('ai-inventory CSV error: %s', e, exc_info=True)
+            self._json({'error': str(e)}, 500)
+
     # ── AI spend tracking API ─────────────────────────────────────────────────
 
     def _api_spend_summary(self):
@@ -6041,7 +6099,13 @@ load();
         """GET /api/fleet/ai-inventory — return endpoint AI inventory for the dashboard.
 
         Supports pagination via ?limit=200&offset=0. Maximum limit is 500.
+        Raw records are operator tooling and are restricted to privileged roles;
+        customers see the rendered dashboard tables instead.
         """
+        me = self._session_user()
+        if not me or me.get('role') not in ('customer_admin', 'super_admin'):
+            self._json({'error': 'forbidden'}, 403)
+            return
         import urllib.parse as _up
         try:
             qs = _up.parse_qs(_up.urlparse(self.path).query)
@@ -6064,7 +6128,13 @@ load();
             self._json({'error': 'internal server error'}, 500)
 
     def _api_get_fleet_ai_inventory_summary(self):
-        """GET /api/fleet/ai-inventory/summary — return governance and risk-band counts."""
+        """GET /api/fleet/ai-inventory/summary — return governance and risk-band counts.
+
+        Restricted to privileged roles, same as the raw inventory feed."""
+        me = self._session_user()
+        if not me or me.get('role') not in ('customer_admin', 'super_admin'):
+            self._json({'error': 'forbidden'}, 403)
+            return
         try:
             summary = self._store().list_endpoint_ai_inventory_summary(client_org_id=self._scoped_client_org())
             self._json(summary)
@@ -7894,7 +7964,7 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
   <div id="endpoint-ai-section" style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:8px">
     <div>
       <div class="sec-hdr" style="margin:0;padding:0;display:flex;align-items:center;gap:10px">Endpoint AI Inventory
-    <a href="/api/fleet/ai-inventory" target="_blank" style="font-size:12px;color:#4F46E5;text-decoration:none;border:1px solid #C7D2FE;border-radius:4px;padding:3px 10px;font-weight:400;margin-left:auto">JSON API</a>
+    <a href="/api/fleet/ai-inventory/csv" download style="font-size:12px;color:#16A34A;text-decoration:none;border:1px solid #238636;border-radius:4px;padding:3px 10px;font-weight:400;margin-left:auto">&#8659; Export CSV</a>
   </div>
       <div style="font-size:12px;color:#6B7280;margin-top:4px">AI tools discovered on enrolled endpoints with governance categorization and GxP risk scoring</div>
     </div>
