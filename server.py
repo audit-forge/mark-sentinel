@@ -7033,7 +7033,7 @@ def _build_endpoint_ai_rows(entries: list[dict], ts_now: int) -> str:
                 path=_html.escape(e.get('install_path', '')[:80], quote=True),
                 host=_html.escape(e.get('hostname', '')),
                 source=_html.escape(e.get('source', '').replace('_', ' ').title()),
-                age=_age(ts_now, e.get('last_seen', 0)),
+                age=_age(e.get('last_seen', 0)),
             )
         )
     return ''.join(rows)

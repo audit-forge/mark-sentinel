@@ -198,6 +198,9 @@ class Engine:
         if info['Image'] != image or not info['State']['Running']:
             raise DeploymentError('Tenant image/running verification failed: ' + tenant)
         self.runtime('sentinel-' + tenant)
+        # Brief pause after tenant restart so nginx/Cloudflare reconnection
+        # completes before the public smoke check runs.
+        time.sleep(5)
 
     def smoke(self, tenants):
         code = PUBLIC_CHECK + (ROOT / 'scripts/smoke_live_single_login.py').read_text()
