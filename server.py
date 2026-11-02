@@ -6479,7 +6479,9 @@ async function moveSelectedDevices(){
             shadow  = store.list_shadow_devices() if org_scope is None else []
             mcp     = store.list_mcp_servers() if org_scope is None else []
             network_assets = store.list_network_assets(client_org_id=org_scope)
-            print(f'[SENTINEL] _serve_fleet: got {len(devices)} devices, {len(shadow)} shadow, {len(mcp)} mcp', flush=True)
+            ai_inventory = store.list_endpoint_ai_inventory(client_org_id=org_scope)
+            ai_inventory_summary = store.list_endpoint_ai_inventory_summary(client_org_id=org_scope)
+            print(f'[SENTINEL] _serve_fleet: got {len(devices)} devices, {len(shadow)} shadow, {len(mcp)} mcp, {len(ai_inventory)} endpoint AI tools', flush=True)
         except Exception as _e:
             print(f'[SENTINEL] _serve_fleet: store error: {_e}', flush=True)
             log.error('_serve_fleet: store error: %s', _e, exc_info=True)
@@ -6487,6 +6489,8 @@ async function moveSelectedDevices(){
             shadow  = []
             mcp     = []
             network_assets = []
+            ai_inventory = []
+            ai_inventory_summary = {'total': 0, 'running': 0, 'by_governance': {}, 'by_risk_band': {}}
         try:
             user = self._session_user()
             deployment_token = ''
@@ -6518,6 +6522,8 @@ async function moveSelectedDevices(){
                 deployment_macos_command=deployment_macos,
                 deployment_mdm_command=deployment_mdm,
                 store=store,
+                ai_inventory=ai_inventory,
+                ai_inventory_summary=ai_inventory_summary,
             ).encode('utf-8')
             print(f'[SENTINEL] _serve_fleet: body built {len(body)} bytes', flush=True)
         except Exception as _e:
@@ -6973,6 +6979,66 @@ body{{background:#0d1117;color:#e6edf3;font-family:-apple-system,BlinkMacSystemF
         self._send(code, json.dumps(data).encode(), 'application/json')
 
 
+_GOV_COLORS = {
+    'sanctioned':  ('#16A34A', 'Sanctioned'),
+    'tolerated':   ('#F59E0B', 'Tolerated'),
+    'shadow':      ('#DC2626', 'Shadow'),
+    'restricted':  ('#991B1B', 'Restricted'),
+}
+
+_BAND_COLORS = {
+    'CRITICAL': '#991B1B',
+    'HIGH':     '#DC2626',
+    'MEDIUM':   '#F59E0B',
+    'LOW':      '#16A34A',
+}
+
+
+def _build_endpoint_ai_rows(entries: list[dict], ts_now: int) -> str:
+    import html as _html
+    def _age(ts):
+        if not ts:
+            return 'never'
+        secs = ts_now - ts
+        if secs < 120:
+            return f'{secs}s ago'
+        if secs < 3600:
+            return f'{secs // 60}m ago'
+        if secs < 86400:
+            return f'{secs // 3600}h ago'
+        return f'{secs // 86400}d ago'
+    if not entries:
+        return '<tr><td colspan="9" class="empty" style="padding:20px;text-align:center;color:#9CA3AF">No endpoint AI tools discovered yet. Enroll agents to begin automatic inventory collection.</td></tr>'
+    rows = []
+    for e in entries:
+        gov = e.get('governance_status', 'shadow')
+        gov_color, gov_label = _GOV_COLORS.get(gov, ('#6B7280', gov.title()))
+        band = e.get('risk_band', '')
+        band_color = _BAND_COLORS.get(band, '#6B7280')
+        score = e.get('risk_score', 0)
+        running = e.get('running', 0)
+        running_html = '<span style="color:#16A34A;font-weight:600">Yes</span>' if running else '<span style="color:#9CA3AF">No</span>'
+        rows.append(
+            '<tr><td style="font-weight:600">{tool}</td><td>{cat}</td>'
+            '<td><span style="background:{gov_bg};color:#fff;border-radius:10px;padding:2px 10px;font-size:11px;font-weight:600">{gov_label}</span></td>'
+            '<td><div style="display:flex;align-items:center;gap:6px"><div style="width:60px;height:8px;background:#F3F4F6;border-radius:4px;overflow:hidden"><div style="width:{pct}%;height:100%;background:{band_color}"></div></div><span style="font-weight:600;color:{band_color}">{score}</span></div></td>'
+            '<td><span style="color:{band_color};font-weight:600">{band}</span></td>'
+            '<td>{running}</td><td title="{path}">{host}</td><td>{source}</td><td>{age}</td></tr>'.format(
+                tool=_html.escape(e.get('tool_name', '')),
+                cat=_html.escape(e.get('tool_category', '').replace('_', ' ').title()),
+                gov_bg=gov_color, gov_label=gov_label,
+                pct=min(100, max(0, score)), band_color=band_color,
+                score=score, band=_html.escape(band),
+                running=running_html,
+                path=_html.escape(e.get('install_path', '')[:80], quote=True),
+                host=_html.escape(e.get('hostname', '')),
+                source=_html.escape(e.get('source', '').replace('_', ' ').title()),
+                age=_age(ts_now, e.get('last_seen', 0)),
+            )
+        )
+    return ''.join(rows)
+
+
 def _build_shadow_section(shadow: list[dict], ts_now: int) -> str:
     _SOURCE_META = {
         'network':   ('&#127760;', '#a371f7', 'Network',   'AI service running on an unmanaged device'),
@@ -7362,10 +7428,14 @@ def _build_fleet_html(devices: list[dict], shadow: list[dict] | None = None,
                        deployment_linux_command: str = '',
                        deployment_macos_command: str = '',
                        deployment_mdm_command: str = '',
-                       store=None) -> str:
+                       store=None,
+                       ai_inventory: list[dict] | None = None,
+                       ai_inventory_summary: dict | None = None) -> str:
     shadow = shadow or []
     mcp    = mcp    or []
     network_assets = network_assets or []
+    ai_inventory = ai_inventory or []
+    ai_inventory_summary = ai_inventory_summary or {}
     ts_now = int(time.time())
     import html as _html
     deployment_agent_token = _html.escape(deployment_agent_token, quote=True)
@@ -7645,6 +7715,7 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
       {'<button class="sb-item" id="nav-reseller" onclick="navTo(\'reseller\')">&#127970; MSP View</button>' if current_user_is_reseller else ''}
       <div class="sb-group">Fleet</div>
       <button class="sb-item" id="nav-shadow" onclick="navTo('shadow')">&#9888; Shadow AI</button>
+       <button class="sb-item" id="nav-endpoint-ai" onclick="navTo('endpoint-ai')">&#129302; Endpoint AI</button>
        <button class="sb-item" id="nav-network-assets" onclick="navTo('network-assets')">&#127760; Network Inventory</button>
       <button class="sb-item" id="nav-inventory" onclick="navTo('inventory')">&#129302; AI Asset Inventory</button>
       <button class="sb-item" id="nav-spend" onclick="navTo('spend')">&#128176; AI Spend</button>
@@ -7688,6 +7759,8 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
       <div class="scard-n c-blue" id="sc-pass">{_dash_li}</div><div class="scard-l">Low / Info</div></div>
     <div class="scard" id="sf-shadow" onclick="document.getElementById('shadow-section').scrollIntoView({{behavior:'smooth'}})" title="Unmanaged AI devices discovered on your network — click to view">
       <div class="scard-n" id="sc-shadow" style="color:#a371f7">{len(shadow)}</div><div class="scard-l">Shadow AI</div></div>
+    <div class="scard" id="sf-endpoint-ai" onclick="document.getElementById('endpoint-ai-section').scrollIntoView({{behavior:'smooth'}})" title="AI tools discovered on endpoints — click to view">
+      <div class="scard-n" id="sc-endpoint-ai" style="color:#DC2626">{ai_inventory_summary.get('total', 0)}</div><div class="scard-l">Endpoint AI Tools</div></div>
     <div class="scard" id="sf-mcp" onclick="window.open('/api/fleet/mcp/report?tier=ciso','_blank')" title="MCP servers and AI agent tool call exposure — click to open report">
       <div class="scard-n" id="sc-mcp" style="color:#4F46E5">{len(mcp)}</div><div class="scard-l">MCP Servers</div></div>
   </div>
@@ -7786,6 +7859,41 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
     </div>
   </div>
   {_build_shadow_section(shadow, ts_now)}
+  </div>
+
+  <div class="page" id="page-endpoint-ai">
+  <div id="endpoint-ai-section" style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:8px">
+    <div>
+      <div class="sec-hdr" style="margin:0;padding:0;display:flex;align-items:center;gap:10px">Endpoint AI Inventory
+    <a href="/api/fleet/ai-inventory" target="_blank" style="font-size:12px;color:#4F46E5;text-decoration:none;border:1px solid #C7D2FE;border-radius:4px;padding:3px 10px;font-weight:400;margin-left:auto">JSON API</a>
+  </div>
+      <div style="font-size:12px;color:#6B7280;margin-top:4px">AI tools discovered on enrolled endpoints with governance categorization and GxP risk scoring</div>
+    </div>
+  </div>
+
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-bottom:18px">
+    <div style="background:#fff;border:1px solid #E5E7EB;border-radius:7px;padding:13px 15px"><div style="font-size:23px;font-weight:700;color:#111827">{ai_inventory_summary.get('total', 0)}</div><div style="font-size:11px;color:#6B7280;text-transform:uppercase;letter-spacing:.06em;margin-top:3px">Total Tools</div></div>
+    <div style="background:#fff;border:1px solid #E5E7EB;border-radius:7px;padding:13px 15px"><div style="font-size:23px;font-weight:700;color:#16A34A">{ai_inventory_summary.get('by_governance', {{}}).get('sanctioned', 0)}</div><div style="font-size:11px;color:#6B7280;text-transform:uppercase;letter-spacing:.06em;margin-top:3px">Sanctioned</div></div>
+    <div style="background:#fff;border:1px solid #E5E7EB;border-radius:7px;padding:13px 15px"><div style="font-size:23px;font-weight:700;color:#F59E0B">{ai_inventory_summary.get('by_governance', {{}}).get('tolerated', 0)}</div><div style="font-size:11px;color:#6B7280;text-transform:uppercase;letter-spacing:.06em;margin-top:3px">Tolerated</div></div>
+    <div style="background:#fff;border:1px solid #E5E7EB;border-radius:7px;padding:13px 15px"><div style="font-size:23px;font-weight:700;color:#DC2626">{ai_inventory_summary.get('by_governance', {{}}).get('shadow', 0)}</div><div style="font-size:11px;color:#6B7280;text-transform:uppercase;letter-spacing:.06em;margin-top:3px">Shadow</div></div>
+    <div style="background:#fff;border:1px solid #E5E7EB;border-radius:7px;padding:13px 15px"><div style="font-size:23px;font-weight:700;color:#991B1B">{ai_inventory_summary.get('by_governance', {{}}).get('restricted', 0)}</div><div style="font-size:11px;color:#6B7280;text-transform:uppercase;letter-spacing:.06em;margin-top:3px">Restricted</div></div>
+    <div style="background:#fff;border:1px solid #E5E7EB;border-radius:7px;padding:13px 15px"><div style="font-size:23px;font-weight:700;color:#4F46E5">{ai_inventory_summary.get('running', 0)}</div><div style="font-size:11px;color:#6B7280;text-transform:uppercase;letter-spacing:.06em;margin-top:3px">Currently Running</div></div>
+  </div>
+
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px;margin-bottom:18px">
+    <div style="background:#fff;border:1px solid #E5E7EB;border-radius:7px;padding:10px 14px"><div style="font-size:18px;font-weight:700;color:#991B1B">{ai_inventory_summary.get('by_risk_band', {{}}).get('CRITICAL', 0)}</div><div style="font-size:11px;color:#6B7280;text-transform:uppercase;letter-spacing:.06em">Critical Risk</div></div>
+    <div style="background:#fff;border:1px solid #E5E7EB;border-radius:7px;padding:10px 14px"><div style="font-size:18px;font-weight:700;color:#DC2626">{ai_inventory_summary.get('by_risk_band', {{}}).get('HIGH', 0)}</div><div style="font-size:11px;color:#6B7280;text-transform:uppercase;letter-spacing:.06em">High Risk</div></div>
+    <div style="background:#fff;border:1px solid #E5E7EB;border-radius:7px;padding:10px 14px"><div style="font-size:18px;font-weight:700;color:#F59E0B">{ai_inventory_summary.get('by_risk_band', {{}}).get('MEDIUM', 0)}</div><div style="font-size:11px;color:#6B7280;text-transform:uppercase;letter-spacing:.06em">Medium Risk</div></div>
+    <div style="background:#fff;border:1px solid #E5E7EB;border-radius:7px;padding:10px 14px"><div style="font-size:18px;font-weight:700;color:#16A34A">{ai_inventory_summary.get('by_risk_band', {{}}).get('LOW', 0)}</div><div style="font-size:11px;color:#6B7280;text-transform:uppercase;letter-spacing:.06em">Low Risk</div></div>
+  </div>
+
+  <div class="sec-hdr" style="margin-bottom:8px">Discovered Tools <span style="font-size:11px;font-weight:500;color:#9CA3AF">Sorted by risk score (highest first)</span></div>
+  <div style="overflow-x:auto">
+    <table class="dev-table" style="min-width:900px">
+      <thead><tr><th>Tool</th><th>Category</th><th>Governance</th><th>Risk Score</th><th>Risk Band</th><th>Running</th><th>Endpoint</th><th>Source</th><th>Last Seen</th></tr></thead>
+      <tbody>{_build_endpoint_ai_rows(ai_inventory, ts_now)}</tbody>
+    </table>
+  </div>
   </div>
 
   <div class="page" id="page-network-assets">
