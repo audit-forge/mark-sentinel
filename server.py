@@ -7443,6 +7443,21 @@ def _build_fleet_html(devices: list[dict], shadow: list[dict] | None = None,
     deployment_macos_command = _html.escape(deployment_macos_command)
     deployment_mdm_command = _html.escape(deployment_mdm_command)
 
+    # Pre-compute endpoint AI inventory summary values for the f-string template
+    # (can't use dict literals {} inside f-string expression fields)
+    _ai_total = ai_inventory_summary.get('total', 0)
+    _ai_running = ai_inventory_summary.get('running', 0)
+    _ai_gov = ai_inventory_summary.get('by_governance', {})
+    _ai_bands = ai_inventory_summary.get('by_risk_band', {})
+    _ai_sanctioned = _ai_gov.get('sanctioned', 0)
+    _ai_tolerated = _ai_gov.get('tolerated', 0)
+    _ai_shadow = _ai_gov.get('shadow', 0)
+    _ai_restricted = _ai_gov.get('restricted', 0)
+    _ai_critical = _ai_bands.get('CRITICAL', 0)
+    _ai_high = _ai_bands.get('HIGH', 0)
+    _ai_medium = _ai_bands.get('MEDIUM', 0)
+    _ai_low = _ai_bands.get('LOW', 0)
+
     def _age(ts: int | None) -> str:
         if not ts:
             return 'never'
@@ -7760,7 +7775,7 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
     <div class="scard" id="sf-shadow" onclick="document.getElementById('shadow-section').scrollIntoView({{behavior:'smooth'}})" title="Unmanaged AI devices discovered on your network — click to view">
       <div class="scard-n" id="sc-shadow" style="color:#a371f7">{len(shadow)}</div><div class="scard-l">Shadow AI</div></div>
     <div class="scard" id="sf-endpoint-ai" onclick="document.getElementById('endpoint-ai-section').scrollIntoView({{behavior:'smooth'}})" title="AI tools discovered on endpoints — click to view">
-      <div class="scard-n" id="sc-endpoint-ai" style="color:#DC2626">{ai_inventory_summary.get('total', 0)}</div><div class="scard-l">Endpoint AI Tools</div></div>
+      <div class="scard-n" id="sc-endpoint-ai" style="color:#DC2626">{_ai_total}</div><div class="scard-l">Endpoint AI Tools</div></div>
     <div class="scard" id="sf-mcp" onclick="window.open('/api/fleet/mcp/report?tier=ciso','_blank')" title="MCP servers and AI agent tool call exposure — click to open report">
       <div class="scard-n" id="sc-mcp" style="color:#4F46E5">{len(mcp)}</div><div class="scard-l">MCP Servers</div></div>
   </div>
@@ -7872,19 +7887,19 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
   </div>
 
   <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-bottom:18px">
-    <div style="background:#fff;border:1px solid #E5E7EB;border-radius:7px;padding:13px 15px"><div style="font-size:23px;font-weight:700;color:#111827">{ai_inventory_summary.get('total', 0)}</div><div style="font-size:11px;color:#6B7280;text-transform:uppercase;letter-spacing:.06em;margin-top:3px">Total Tools</div></div>
-    <div style="background:#fff;border:1px solid #E5E7EB;border-radius:7px;padding:13px 15px"><div style="font-size:23px;font-weight:700;color:#16A34A">{ai_inventory_summary.get('by_governance', {{}}).get('sanctioned', 0)}</div><div style="font-size:11px;color:#6B7280;text-transform:uppercase;letter-spacing:.06em;margin-top:3px">Sanctioned</div></div>
-    <div style="background:#fff;border:1px solid #E5E7EB;border-radius:7px;padding:13px 15px"><div style="font-size:23px;font-weight:700;color:#F59E0B">{ai_inventory_summary.get('by_governance', {{}}).get('tolerated', 0)}</div><div style="font-size:11px;color:#6B7280;text-transform:uppercase;letter-spacing:.06em;margin-top:3px">Tolerated</div></div>
-    <div style="background:#fff;border:1px solid #E5E7EB;border-radius:7px;padding:13px 15px"><div style="font-size:23px;font-weight:700;color:#DC2626">{ai_inventory_summary.get('by_governance', {{}}).get('shadow', 0)}</div><div style="font-size:11px;color:#6B7280;text-transform:uppercase;letter-spacing:.06em;margin-top:3px">Shadow</div></div>
-    <div style="background:#fff;border:1px solid #E5E7EB;border-radius:7px;padding:13px 15px"><div style="font-size:23px;font-weight:700;color:#991B1B">{ai_inventory_summary.get('by_governance', {{}}).get('restricted', 0)}</div><div style="font-size:11px;color:#6B7280;text-transform:uppercase;letter-spacing:.06em;margin-top:3px">Restricted</div></div>
-    <div style="background:#fff;border:1px solid #E5E7EB;border-radius:7px;padding:13px 15px"><div style="font-size:23px;font-weight:700;color:#4F46E5">{ai_inventory_summary.get('running', 0)}</div><div style="font-size:11px;color:#6B7280;text-transform:uppercase;letter-spacing:.06em;margin-top:3px">Currently Running</div></div>
+    <div style="background:#fff;border:1px solid #E5E7EB;border-radius:7px;padding:13px 15px"><div style="font-size:23px;font-weight:700;color:#111827">{_ai_total}</div><div style="font-size:11px;color:#6B7280;text-transform:uppercase;letter-spacing:.06em;margin-top:3px">Total Tools</div></div>
+    <div style="background:#fff;border:1px solid #E5E7EB;border-radius:7px;padding:13px 15px"><div style="font-size:23px;font-weight:700;color:#16A34A">{_ai_sanctioned}</div><div style="font-size:11px;color:#6B7280;text-transform:uppercase;letter-spacing:.06em;margin-top:3px">Sanctioned</div></div>
+    <div style="background:#fff;border:1px solid #E5E7EB;border-radius:7px;padding:13px 15px"><div style="font-size:23px;font-weight:700;color:#F59E0B">{_ai_tolerated}</div><div style="font-size:11px;color:#6B7280;text-transform:uppercase;letter-spacing:.06em;margin-top:3px">Tolerated</div></div>
+    <div style="background:#fff;border:1px solid #E5E7EB;border-radius:7px;padding:13px 15px"><div style="font-size:23px;font-weight:700;color:#DC2626">{_ai_shadow}</div><div style="font-size:11px;color:#6B7280;text-transform:uppercase;letter-spacing:.06em;margin-top:3px">Shadow</div></div>
+    <div style="background:#fff;border:1px solid #E5E7EB;border-radius:7px;padding:13px 15px"><div style="font-size:23px;font-weight:700;color:#991B1B">{_ai_restricted}</div><div style="font-size:11px;color:#6B7280;text-transform:uppercase;letter-spacing:.06em;margin-top:3px">Restricted</div></div>
+    <div style="background:#fff;border:1px solid #E5E7EB;border-radius:7px;padding:13px 15px"><div style="font-size:23px;font-weight:700;color:#4F46E5">{_ai_running}</div><div style="font-size:11px;color:#6B7280;text-transform:uppercase;letter-spacing:.06em;margin-top:3px">Currently Running</div></div>
   </div>
 
   <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px;margin-bottom:18px">
-    <div style="background:#fff;border:1px solid #E5E7EB;border-radius:7px;padding:10px 14px"><div style="font-size:18px;font-weight:700;color:#991B1B">{ai_inventory_summary.get('by_risk_band', {{}}).get('CRITICAL', 0)}</div><div style="font-size:11px;color:#6B7280;text-transform:uppercase;letter-spacing:.06em">Critical Risk</div></div>
-    <div style="background:#fff;border:1px solid #E5E7EB;border-radius:7px;padding:10px 14px"><div style="font-size:18px;font-weight:700;color:#DC2626">{ai_inventory_summary.get('by_risk_band', {{}}).get('HIGH', 0)}</div><div style="font-size:11px;color:#6B7280;text-transform:uppercase;letter-spacing:.06em">High Risk</div></div>
-    <div style="background:#fff;border:1px solid #E5E7EB;border-radius:7px;padding:10px 14px"><div style="font-size:18px;font-weight:700;color:#F59E0B">{ai_inventory_summary.get('by_risk_band', {{}}).get('MEDIUM', 0)}</div><div style="font-size:11px;color:#6B7280;text-transform:uppercase;letter-spacing:.06em">Medium Risk</div></div>
-    <div style="background:#fff;border:1px solid #E5E7EB;border-radius:7px;padding:10px 14px"><div style="font-size:18px;font-weight:700;color:#16A34A">{ai_inventory_summary.get('by_risk_band', {{}}).get('LOW', 0)}</div><div style="font-size:11px;color:#6B7280;text-transform:uppercase;letter-spacing:.06em">Low Risk</div></div>
+    <div style="background:#fff;border:1px solid #E5E7EB;border-radius:7px;padding:10px 14px"><div style="font-size:18px;font-weight:700;color:#991B1B">{_ai_critical}</div><div style="font-size:11px;color:#6B7280;text-transform:uppercase;letter-spacing:.06em">Critical Risk</div></div>
+    <div style="background:#fff;border:1px solid #E5E7EB;border-radius:7px;padding:10px 14px"><div style="font-size:18px;font-weight:700;color:#DC2626">{_ai_high}</div><div style="font-size:11px;color:#6B7280;text-transform:uppercase;letter-spacing:.06em">High Risk</div></div>
+    <div style="background:#fff;border:1px solid #E5E7EB;border-radius:7px;padding:10px 14px"><div style="font-size:18px;font-weight:700;color:#F59E0B">{_ai_medium}</div><div style="font-size:11px;color:#6B7280;text-transform:uppercase;letter-spacing:.06em">Medium Risk</div></div>
+    <div style="background:#fff;border:1px solid #E5E7EB;border-radius:7px;padding:10px 14px"><div style="font-size:18px;font-weight:700;color:#16A34A">{_ai_low}</div><div style="font-size:11px;color:#6B7280;text-transform:uppercase;letter-spacing:.06em">Low Risk</div></div>
   </div>
 
   <div class="sec-hdr" style="margin-bottom:8px">Discovered Tools <span style="font-size:11px;font-weight:500;color:#9CA3AF">Sorted by risk score (highest first)</span></div>
