@@ -8887,10 +8887,11 @@ setInterval(function() {{
   refreshAlertsPage();
 }}, 30000);
 (function() {{
+  // Restore the current page after refresh via URL hash. Match against the
+  // DOM itself so newly added pages restore automatically — a whitelist here
+  // silently sent users back to home whenever a page was missing from it.
   const hash = window.location.hash.replace('#', '');
-  const valid = ['overview','shadow','alerts','mcp','riskregister','inventory','spend','schedules',
-                 'discovery','findings','reports','siem','settings','users','probe','reseller','protected-files'];
-  if (hash && valid.includes(hash)) {{ navTo(hash); }}
+  if (hash && document.getElementById('page-' + hash)) {{ navTo(hash); }}
 }})();
 
 function _syncFindingsSelector() {{
@@ -11984,7 +11985,7 @@ async function runLiveScan(btn) {{
     }});
     const d = await r.json();
     if (d.error) {{ alert(d.error); }}
-    else {{ navTo('scan'); }}
+    else {{ navTo('reports'); }}
   }} catch (e) {{ alert('Failed to start scan: ' + e); }}
   finally {{ btn.disabled = false; btn.textContent = orig; }}
 }}
