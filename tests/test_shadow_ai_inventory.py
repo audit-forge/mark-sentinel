@@ -453,3 +453,43 @@ class TestServerValidation:
         assert result is not None
         assert result[0]['risk_score'] == 0
         assert result[0]['risk_band'] == 'LOW'
+
+    def test_non_string_governance_status_rejected(self):
+        """governance_status as list/dict must not cause TypeError."""
+        from server import _Handler
+        h = _Handler.__new__(_Handler)
+        entry = self._valid_entry()
+        entry['governance_status'] = ['sanctioned']
+        assert h._validate_ai_inventory_entries([entry]) is None
+
+    def test_non_string_risk_band_rejected(self):
+        """risk_band as list/dict must not cause TypeError."""
+        from server import _Handler
+        h = _Handler.__new__(_Handler)
+        entry = self._valid_entry()
+        entry['risk_band'] = {'band': 'LOW'}
+        assert h._validate_ai_inventory_entries([entry]) is None
+
+    def test_bool_risk_score_rejected(self):
+        """Boolean must not be accepted as integer risk_score."""
+        from server import _Handler
+        h = _Handler.__new__(_Handler)
+        entry = self._valid_entry()
+        entry['risk_score'] = True
+        assert h._validate_ai_inventory_entries([entry]) is None
+
+    def test_bool_risk_dimension_rejected(self):
+        """Boolean must not be accepted as integer dimension value."""
+        from server import _Handler
+        h = _Handler.__new__(_Handler)
+        entry = self._valid_entry()
+        entry['risk_dimensions']['data_sensitivity'] = True
+        assert h._validate_ai_inventory_entries([entry]) is None
+
+    def test_partial_risk_dimensions_rejected(self):
+        """Partial dims dict (subset of keys) must be rejected, not silently accepted."""
+        from server import _Handler
+        h = _Handler.__new__(_Handler)
+        entry = self._valid_entry()
+        entry['risk_dimensions'] = {'data_sensitivity': 15}
+        assert h._validate_ai_inventory_entries([entry]) is None

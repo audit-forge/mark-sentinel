@@ -5936,12 +5936,20 @@ load();
         except json.JSONDecodeError:
             self._send(400, b'Invalid JSON', 'text/plain')
             return
-        device_id = body.get('device_id', '').strip()
-        hostname  = body.get('hostname', '').strip()
-        entries   = body.get('entries', [])
-        if not device_id:
-            self._send(400, b'Missing device_id', 'text/plain')
+        if not isinstance(body, dict):
+            self._send(400, b'Invalid JSON body', 'text/plain')
             return
+        device_id = body.get('device_id')
+        hostname  = body.get('hostname')
+        if not isinstance(device_id, str) or not isinstance(hostname, str):
+            self._send(400, b'Invalid device_id or hostname type', 'text/plain')
+            return
+        device_id = device_id.strip()
+        hostname  = hostname.strip()
+        if not device_id or len(device_id) > 255 or len(hostname) > 255:
+            self._send(400, b'Invalid device_id or hostname length', 'text/plain')
+            return
+        entries   = body.get('entries', [])
         if not isinstance(entries, list):
             self._send(400, b'Invalid entries array', 'text/plain')
             return
@@ -5961,7 +5969,7 @@ load();
             self._json({'ok': True, 'count': len(validated)})
         except Exception as e:
             log.error('Endpoint AI inventory ingest error: %s', e)
-            self._json({'ok': False, 'error': str(e)}, 500)
+            self._json({'ok': False, 'error': 'internal server error'}, 500)
 
     _AI_INV_VALID_GOVS = frozenset(('sanctioned', 'tolerated', 'shadow', 'restricted'))
     _AI_INV_VALID_BANDS = frozenset(('CRITICAL', 'HIGH', 'MEDIUM', 'LOW'))
@@ -5990,13 +5998,13 @@ load();
             if not isinstance(tool_name, str) or not tool_name.strip() or len(tool_name) > 255:
                 return None
             gov = e.get('governance_status', 'shadow')
-            if gov not in self._AI_INV_VALID_GOVS:
+            if not isinstance(gov, str) or gov not in self._AI_INV_VALID_GOVS:
                 return None
             risk_score = e.get('risk_score', 0)
-            if not isinstance(risk_score, int) or risk_score < 0 or risk_score > 100:
+            if type(risk_score) is not int or risk_score < 0 or risk_score > 100:
                 return None
             band = e.get('risk_band', '')
-            if band not in self._AI_INV_VALID_BANDS:
+            if not isinstance(band, str) or band not in self._AI_INV_VALID_BANDS:
                 return None
             # Verify risk_band is consistent with risk_score
             expected_band = 'CRITICAL' if risk_score >= 75 else 'HIGH' if risk_score >= 50 else 'MEDIUM' if risk_score >= 25 else 'LOW'
@@ -6008,13 +6016,11 @@ load();
             dims = e.get('risk_dimensions', {})
             if not isinstance(dims, dict):
                 return None
-            if set(dims.keys()) != self._AI_INV_VALID_DIMS:
-                # Allow empty dims dict (for backward compat) but reject unexpected keys
-                if dims and not set(dims.keys()).issubset(self._AI_INV_VALID_DIMS):
+            if dims:
+                if set(dims.keys()) != self._AI_INV_VALID_DIMS:
                     return None
-            else:
                 for v in dims.values():
-                    if not isinstance(v, int) or v < 0 or v > 20:
+                    if type(v) is not int or v < 0 or v > 20:
                         return None
             # Length-limit string fields
             sanitized = {
@@ -6041,6 +6047,12 @@ load();
             qs = _up.parse_qs(_up.urlparse(self.path).query)
             limit = int(qs.get('limit', ['200'])[0])
             offset = int(qs.get('offset', ['0'])[0])
+        except (TypeError, ValueError):
+            self._json({'error': 'Invalid limit or offset'}, 400)
+            return
+        limit = max(1, min(limit, 500))
+        offset = max(0, min(offset, 10_000_000))
+        try:
             client_org = self._scoped_client_org()
             rows = self._store().list_endpoint_ai_inventory(client_org_id=client_org,
                                                              limit=limit, offset=offset)
@@ -6048,7 +6060,8 @@ load();
             self._json({'entries': rows, 'count': len(rows), 'total': total,
                         'limit': limit, 'offset': offset})
         except Exception as e:
-            self._json({'error': str(e)}, 500)
+            log.error('Endpoint AI inventory query error: %s', e)
+            self._json({'error': 'internal server error'}, 500)
 
     def _api_get_fleet_ai_inventory_summary(self):
         """GET /api/fleet/ai-inventory/summary — return governance and risk-band counts."""
@@ -6056,7 +6069,8 @@ load();
             summary = self._store().list_endpoint_ai_inventory_summary(client_org_id=self._scoped_client_org())
             self._json(summary)
         except Exception as e:
-            self._json({'error': str(e)}, 500)
+            log.error('Endpoint AI inventory summary error: %s', e)
+            self._json({'error': 'internal server error'}, 500)
         """POST /api/agent/access-events — ingest a batch of access events
         from an agent. Agent-bearer auth is already verified by the caller.
         Rate limited to 100 events per batch. Fires alerts for each event."""
