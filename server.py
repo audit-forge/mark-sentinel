@@ -72,7 +72,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from urllib.parse import unquote, urlparse
 from arckon_version import INSTALLER_VERSION
-from admin.browser_security import browser_mutation_allowed
+from admin.browser_security import browser_mutation_allowed, safe_return_url
 
 PORT = 7001
 
@@ -484,6 +484,11 @@ def _get_cookie(headers, name: str) -> str:
         if k.strip() == name:
             return v.strip()
     return ''
+
+
+def _proxy_auth_configured() -> bool:
+    return bool(os.environ.get('SENTINEL_TRUSTED_PROXY_TOKEN')
+                or os.environ.get('SENTINEL_TRUSTED_PROXY_TOKEN_FILE'))
 
 
 def _trusted_proxy_token() -> str:
@@ -1297,7 +1302,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             return proxy
         # Behind the trusted proxy, the admin-domain JWT is the only dashboard
         # session authority. Do not revive a stale host-only legacy session after logout.
-        if _trusted_proxy_token():
+        if _trusted_proxy_token() or _proxy_auth_configured():
             return None
         token = _get_session_cookie(self.headers)
         return _get_registry().get_session(token) if token else None
@@ -1413,6 +1418,8 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self._json({'error': 'unauthorized'}, 401)
         else:
             from urllib.parse import quote
+            if self._handoff_login(self._login_next(self.path)):
+                return False
             if not _get_registry().has_customers():
                 self.send_response(302)
                 self.send_header('Location', '/setup')
@@ -1917,25 +1924,69 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         '.brand{color:#58a6ff;font-size:12px;text-align:center;margin-top:20px}'
     )
 
+    @staticmethod
+    def _login_next(value: str) -> str:
+        target = safe_return_url(value, ())
+        if not target:
+            return '/'
+        # Check auth loops at the same decoding depth as the shared URL validator.
+        decoded = target
+        for _ in range(6):
+            decoded = unquote(decoded)
+        if urlparse(decoded).path.lower().split('/')[1].split(';')[0] in {'login', 'logout', 'setup'}:
+            return '/'
+        return target
+
+    def _handoff_login(self, next_url: str, status: int = 302) -> bool:
+        """Handle cloud login without touching local credentials or sessions."""
+        if not _trusted_proxy_token():
+            if _proxy_auth_configured():
+                self._send(503, b'Login temporarily unavailable', 'text/plain')
+                return True
+            return False
+        if status == 302 and self._proxy_session_user():
+            location = next_url
+        else:
+            from urllib.parse import urlencode
+            urls = []
+            for name, default in (('PUBLIC_ADMIN_URL', 'https://admin.riskraven.ai'),
+                                  ('PUBLIC_DASHBOARD_URL', 'https://arckon.riskraven.ai')):
+                value = os.environ.get(name, default)
+                try:
+                    parts = urlparse(value)
+                    valid = (safe_return_url(value, (value,)) and parts.scheme == 'https'
+                             and parts.path in ('', '/') and not parts.params
+                             and '?' not in value and '#' not in value)
+                except ValueError:
+                    valid = False
+                if not valid:
+                    self._send(503, b'Login temporarily unavailable', 'text/plain')
+                    return True
+                urls.append(value.rstrip('/'))
+            location = urls[0] + '/login?' + urlencode({'next': urls[1] + next_url})
+        self.send_response(status)
+        self.send_header('Location', location)
+        self.send_header('Content-Length', '0')
+        self.end_headers()
+        return True
+
     def _serve_login(self):
         import html as _html
         from urllib.parse import parse_qs
+        qs = parse_qs(urlparse(self.path).query)
+        next_url = self._login_next(qs.get('next', ['/'])[0])
+        if self._handoff_login(next_url):
+            return
+        if self._session_user():
+            self.send_response(302)
+            self.send_header('Location', next_url)
+            self.end_headers()
+            return
         if not _get_registry().has_customers():
             self.send_response(302)
             self.send_header('Location', '/setup')
             self.end_headers()
             return
-        # In trusted-proxy mode the user is already authenticated by nginx —
-        # skip the login form and go straight to the dashboard.
-        if self._proxy_session_user():
-            self.send_response(302)
-            self.send_header('Location', '/')
-            self.end_headers()
-            return
-        qs = parse_qs(urlparse(self.path).query)
-        next_url = qs.get('next', ['/'])[0]
-        if not next_url.startswith('/') or '//' in next_url:
-            next_url = '/'
         safe_next = _html.escape(next_url, quote=True)
         err_html = '<p class="err">Incorrect email or password.</p>' if qs.get('error') else ''
         body = (
@@ -1965,6 +2016,10 @@ class _Handler(http.server.BaseHTTPRequestHandler):
 
     def _handle_login_post(self):
         from urllib.parse import parse_qs, quote
+        # Cloud credentials belong only to the central login, never this registry.
+        next_url = self._login_next(parse_qs(urlparse(self.path).query).get('next', ['/'])[0])
+        if self._handoff_login(next_url, status=303):
+            return
         length = _content_length(self.headers)
         if length > 4096:
             self._send(400, b'Bad request', 'text/plain')
@@ -1978,9 +2033,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         params = parse_qs(self.rfile.read(length).decode(errors='ignore'))
         email = params.get('email', [''])[0].strip()
         password = params.get('password', [''])[0]
-        next_url = params.get('next', ['/'])[0]
-        if not next_url.startswith('/') or '//' in next_url:
-            next_url = '/'
+        next_url = self._login_next(params.get('next', ['/'])[0])
         reg = _get_registry()
         user = reg.authenticate_user(email, password)
         if user:
@@ -2014,6 +2067,8 @@ class _Handler(http.server.BaseHTTPRequestHandler):
 
     def _serve_setup(self):
         from urllib.parse import parse_qs
+        if self._handoff_login('/'):
+            return
         if _get_registry().has_customers():
             self.send_response(302)
             self.send_header('Location', '/login')
@@ -2059,6 +2114,8 @@ class _Handler(http.server.BaseHTTPRequestHandler):
 
     def _handle_setup_post(self):
         from urllib.parse import parse_qs
+        if self._handoff_login('/', status=303):
+            return
         reg = _get_registry()
         if reg.has_customers():
             self.send_response(302)
