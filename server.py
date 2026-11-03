@@ -1378,7 +1378,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
     _CLIENT_VIEWER_ALLOWED_EXACT = frozenset({'/', '/api/status', '/api/devices', '/api/maintenance-notice',
                                               '/api/fleet/network-assets', '/api/spend/summary',
                                               '/api/spend/by-model', '/api/spend/by-provider',
-                                              '/api/spend/daily'})
+                                              '/api/spend/daily', '/api/fleet/ai-inventory/csv'})
     _CLIENT_VIEWER_ALLOWED_PREFIX = ('/api/fleet/report',)
 
     def _client_viewer_gate(self, path: str) -> bool:
@@ -1749,7 +1749,9 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self._send(403, b'Forbidden: this account is not scoped to a valid client.', 'text/plain')
             return
 
-        if path == '/api/scan':
+        if path == '/api/fleet/ai-inventory/governance':
+            self._api_set_endpoint_ai_governance()
+        elif path == '/api/scan':
             self._api_scan()
         elif path == '/api/live-scan-config':
             self._api_set_live_scan_config()
@@ -4197,49 +4199,41 @@ load();
             self._json({'error': str(e)}, 500)
 
     def _api_ai_inventory_csv(self):
-        """GET /api/fleet/ai-inventory/csv — download Endpoint AI inventory as CSV.
-
-        Available to all signed-in dashboard roles, scoped to the caller's
-        client org. Replaces the former raw-JSON feed on this page."""
-        import csv as _csv
+        """Export the documented inventory columns for the caller's org scope."""
+        import csv
         import io
-        from datetime import datetime as _dt
+
+        def safe_cell(value):
+            # Quoting alone does not prevent spreadsheets from executing formulas.
+            if isinstance(value, str):
+                stripped = value.lstrip()
+                leading = value[:len(value) - len(stripped)]
+                if stripped.startswith(('=', '+', '-', '@')) or '\t' in leading or '\r' in leading:
+                    return "'" + value
+            return value
+
+        def fmt(ts):
+            return datetime.fromtimestamp(ts, timezone.utc).strftime('%Y-%m-%d %H:%M UTC') if ts else ''
+
         try:
-            store = self._store()
             org = self._scoped_client_org()
-            rows: list = []
-            offset = 0
-            while True:  # storage caps limit at 500 — page through
-                batch = store.list_endpoint_ai_inventory(
-                    client_org_id=org, limit=500, offset=offset)
-                rows.extend(batch)
-                if len(batch) < 500:
-                    break
-                offset += 500
-            buf = io.StringIO()
-            writer = _csv.writer(buf)
+            store = self._store()
+            buf = io.StringIO(newline='')
+            writer = csv.writer(buf)
             writer.writerow(['Tool', 'Category', 'Governance', 'Risk Score', 'Risk Band',
                              'Running', 'Endpoint', 'Platform', 'Source', 'Install Path',
                              'First Seen', 'Last Seen'])
-            def _fmt(ts):
-                return _dt.utcfromtimestamp(ts).strftime('%Y-%m-%d %H:%M UTC') if ts else ''
-            for r in rows:
-                writer.writerow([
-                    r.get('tool_name', ''),
-                    r.get('tool_category', ''),
-                    r.get('governance_status', ''),
-                    r.get('risk_score', 0),
-                    r.get('risk_band', ''),
-                    'yes' if r.get('running') else 'no',
-                    r.get('hostname', ''),
-                    r.get('platform', ''),
-                    r.get('source', ''),
-                    r.get('install_path', ''),
-                    _fmt(r.get('first_seen')),
-                    _fmt(r.get('last_seen')),
-                ])
+            for row in store.list_endpoint_ai_inventory(client_org_id=org, limit=None):
+                writer.writerow(map(safe_cell, [
+                    row.get('tool_name', ''), row.get('tool_category', ''),
+                    row.get('governance_status', ''), row.get('risk_score', 0),
+                    row.get('risk_band', ''), 'yes' if row.get('running') else 'no',
+                    row.get('hostname', ''), row.get('platform', ''),
+                    row.get('source', ''), row.get('install_path', ''),
+                    fmt(row.get('first_seen')), fmt(row.get('last_seen')),
+                ]))
             data = buf.getvalue().encode('utf-8')
-            fname = f'endpoint_ai_inventory_{_dt.utcnow().strftime("%Y%m%d")}.csv'
+            fname = f'endpoint_ai_inventory_{datetime.now(timezone.utc).strftime("%Y%m%d")}.csv'
             self.send_response(200)
             self.send_header('Content-Type', 'text/csv; charset=utf-8')
             self.send_header('Content-Disposition', f'attachment; filename="{fname}"')
@@ -4248,9 +4242,9 @@ load();
             self.wfile.write(data)
         except _TenantScopeError:
             self._json({'error': 'invalid client-org scope'}, 403)
-        except Exception as e:
-            log.error('ai-inventory CSV error: %s', e, exc_info=True)
-            self._json({'error': str(e)}, 500)
+        except Exception:
+            log.exception('Endpoint AI inventory CSV error')
+            self._json({'error': 'internal server error'}, 500)
 
     # ── AI spend tracking API ─────────────────────────────────────────────────
 
@@ -6152,12 +6146,55 @@ load();
             clean.append(sanitized)
         return clean
 
+    def _api_set_endpoint_ai_governance(self):
+        """Save an audited policy for this tool in its device's client org."""
+        user = self._session_user()
+        if not user or user.get('role') not in ('admin', 'customer_admin', 'super_admin'):
+            self._json({'error': 'forbidden'}, 403)
+            return
+        try:
+            scope = self._scoped_client_org()
+            if scope:
+                org = _get_registry().get_client_org(scope)
+                if not org or not org.get('active') or org.get('customer_id') != user.get('customer_id'):
+                    raise _TenantScopeError('invalid client org')
+            length = int(self.headers.get('Content-Length', '0'))
+            if not 0 < length <= 4096:
+                self._json({'error': 'Invalid request size'}, 400)
+                return
+            body = json.loads(self.rfile.read(length))
+            if not isinstance(body, dict) or set(body) != {'id', 'governance_status'}:
+                self._json({'error': 'Expected id and governance_status'}, 400)
+                return
+            row_id = body['id']
+            status = body['governance_status']
+            if (type(row_id) is not int or row_id <= 0
+                    or (status is not None and (not isinstance(status, str)
+                        or status not in self._AI_INV_VALID_GOVS))):
+                self._json({'error': 'Invalid tool or governance status'}, 400)
+                return
+            actor = user.get('email') or str(user.get('id', 'unknown'))
+            if user.get('impersonated_by'):
+                actor += ' (impersonated by ' + str(user['impersonated_by']) + ')'
+            updated = self._store().set_endpoint_ai_governance(
+                row_id, status, changed_by=actor, actor_role=user['role'], client_org_id=scope)
+            if not updated:
+                self._json({'error': 'Tool not found'}, 404)
+                return
+            self._json({'ok': True})
+        except _TenantScopeError:
+            self._json({'error': 'invalid client-org scope'}, 403)
+        except (ValueError, TypeError):
+            self._json({'error': 'Invalid governance request'}, 400)
+        except Exception:
+            log.exception('Endpoint AI governance update failed')
+            self._json({'error': 'internal server error'}, 500)
+
     def _api_get_fleet_ai_inventory(self):
         """GET /api/fleet/ai-inventory — return endpoint AI inventory for the dashboard.
 
         Supports pagination via ?limit=200&offset=0. Maximum limit is 500.
-        Raw records are operator tooling and are restricted to privileged roles;
-        customers see the rendered dashboard tables instead.
+        Raw records are restricted to customer_admin and super_admin roles.
         """
         me = self._session_user()
         if not me or me.get('role') not in ('customer_admin', 'super_admin'):
@@ -6185,9 +6222,7 @@ load();
             self._json({'error': 'internal server error'}, 500)
 
     def _api_get_fleet_ai_inventory_summary(self):
-        """GET /api/fleet/ai-inventory/summary — return governance and risk-band counts.
-
-        Restricted to privileged roles, same as the raw inventory feed."""
+        """GET /api/fleet/ai-inventory/summary — return governance and risk-band counts."""
         me = self._session_user()
         if not me or me.get('role') not in ('customer_admin', 'super_admin'):
             self._json({'error': 'forbidden'}, 403)
@@ -6198,39 +6233,6 @@ load();
         except Exception as e:
             log.error('Endpoint AI inventory summary error: %s', e)
             self._json({'error': 'internal server error'}, 500)
-        """POST /api/agent/access-events — ingest a batch of access events
-        from an agent. Agent-bearer auth is already verified by the caller.
-        Rate limited to 100 events per batch. Fires alerts for each event."""
-        try:
-            body = self._read_json_body()
-            events = body.get('events', [])
-            if not isinstance(events, list) or not events:
-                self._json({'ok': True, 'stored': 0})
-                return
-            if len(events) > 100:
-                events = events[:100]
-            cust = self._get_agent_customer()
-            store = self._store() if not cust else _get_store(cust.get('id', 'default'))
-            stored = store.ingest_access_events(events)
-            from alerts import load_alert_config, fire_access_alert
-            alert_cfg = load_alert_config(ROOT / 'data' / 'alerts_config.json') or {}
-            for evt in events:
-                try:
-                    fire_access_alert(
-                        device_id=evt.get('device_id', ''),
-                        hostname=evt.get('hostname', evt.get('device_id', '')),
-                        process=evt.get('process', ''),
-                        path=evt.get('path', ''),
-                        action=evt.get('action', ''),
-                        platform=evt.get('platform', ''),
-                        alert_cfg=alert_cfg,
-                        store=store)
-                except Exception as ae:
-                    log.error('access alert fire error: %s', ae)
-            self._json({'ok': True, 'stored': stored})
-        except Exception as e:
-            log.error('agent access-events ingest error: %s', e, exc_info=True)
-            self._json({'error': str(e)}, 500)
 
     # ── SIEM config API ───────────────────────────────────────────────────────
 
@@ -6622,6 +6624,10 @@ async function moveSelectedDevices(){
             network_assets = store.list_network_assets(client_org_id=org_scope)
             ai_inventory = store.list_endpoint_ai_inventory(client_org_id=org_scope)
             ai_inventory_summary = store.list_endpoint_ai_inventory_summary(client_org_id=org_scope)
+            user = self._session_user()
+            ai_governance_audit = (store.list_endpoint_ai_governance_audit(
+                client_org_id=org_scope, limit=50)
+                if user and user.get('role') in ('admin', 'customer_admin', 'super_admin') else [])
             print(f'[SENTINEL] _serve_fleet: got {len(devices)} devices, {len(shadow)} shadow, {len(mcp)} mcp, {len(ai_inventory)} endpoint AI tools', flush=True)
         except Exception as _e:
             print(f'[SENTINEL] _serve_fleet: store error: {_e}', flush=True)
@@ -6631,6 +6637,7 @@ async function moveSelectedDevices(){
             mcp     = []
             network_assets = []
             ai_inventory = []
+            ai_governance_audit = []
             ai_inventory_summary = {'total': 0, 'running': 0, 'by_governance': {}, 'by_risk_band': {}}
         try:
             user = self._session_user()
@@ -6665,6 +6672,7 @@ async function moveSelectedDevices(){
                 store=store,
                 ai_inventory=ai_inventory,
                 ai_inventory_summary=ai_inventory_summary,
+                ai_governance_audit=ai_governance_audit,
             ).encode('utf-8')
             print(f'[SENTINEL] _serve_fleet: body built {len(body)} bytes', flush=True)
         except Exception as _e:
@@ -7135,7 +7143,8 @@ _BAND_COLORS = {
 }
 
 
-def _build_endpoint_ai_rows(entries: list[dict], ts_now: int) -> str:
+def _build_endpoint_ai_rows(entries: list[dict], ts_now: int,
+                            can_manage_governance: bool = False) -> str:
     import html as _html
     def _age(ts):
         if not ts:
@@ -7159,15 +7168,31 @@ def _build_endpoint_ai_rows(entries: list[dict], ts_now: int) -> str:
         score = e.get('risk_score', 0)
         running = e.get('running', 0)
         running_html = '<span style="color:#16A34A;font-weight:600">Yes</span>' if running else '<span style="color:#9CA3AF">No</span>'
+        controls = ''
+        if can_manage_governance and type(e.get('id')) is int:
+            selected = e.get('governance_override') or ''
+            options = ''.join(
+                '<option value="' + value + '"' + (' selected' if selected == value else '')
+                + '>' + label + '</option>'
+                for value, label in (('', 'Use Agent Default'), ('sanctioned', 'Sanctioned'),
+                                     ('tolerated', 'Tolerated'), ('shadow', 'Shadow'),
+                                     ('restricted', 'Restricted')))
+            controls = (
+                '<div style="display:flex;gap:4px;margin-top:6px">'
+                '<select aria-label="Governance policy" class="form-select">' + options
+                + '</select><button type="button" class="scan-btn" '
+                'onclick="saveEndpointGovernance(this,' + str(e['id']) + ')">Save</button></div>')
+        if e.get('governance_override'):
+            controls += '<div style="font-size:11px;color:#6B7280">Organization policy</div>'
         rows.append(
             '<tr><td style="font-weight:600">{tool}</td><td>{cat}</td>'
-            '<td><span style="background:{gov_bg};color:#fff;border-radius:10px;padding:2px 10px;font-size:11px;font-weight:600">{gov_label}</span></td>'
+            '<td><span style="background:{gov_bg};color:#fff;border-radius:10px;padding:2px 10px;font-size:11px;font-weight:600">{gov_label}</span>{controls}</td>'
             '<td><div style="display:flex;align-items:center;gap:6px"><div style="width:60px;height:8px;background:#F3F4F6;border-radius:4px;overflow:hidden"><div style="width:{pct}%;height:100%;background:{band_color}"></div></div><span style="font-weight:600;color:{band_color}">{score}</span></div></td>'
             '<td><span style="color:{band_color};font-weight:600">{band}</span></td>'
             '<td>{running}</td><td title="{path}">{host}</td><td>{source}</td><td>{age}</td></tr>'.format(
                 tool=_html.escape(e.get('tool_name', '')),
                 cat=_html.escape(e.get('tool_category', '').replace('_', ' ').title()),
-                gov_bg=gov_color, gov_label=gov_label,
+                gov_bg=gov_color, gov_label=_html.escape(gov_label), controls=controls,
                 pct=min(100, max(0, score)), band_color=band_color,
                 score=score, band=_html.escape(band),
                 running=running_html,
@@ -7571,7 +7596,8 @@ def _build_fleet_html(devices: list[dict], shadow: list[dict] | None = None,
                        deployment_mdm_command: str = '',
                        store=None,
                        ai_inventory: list[dict] | None = None,
-                       ai_inventory_summary: dict | None = None) -> str:
+                       ai_inventory_summary: dict | None = None,
+                       ai_governance_audit: list[dict] | None = None) -> str:
     shadow = shadow or []
     mcp    = mcp    or []
     network_assets = network_assets or []
@@ -7579,6 +7605,19 @@ def _build_fleet_html(devices: list[dict], shadow: list[dict] | None = None,
     ai_inventory_summary = ai_inventory_summary or {}
     ts_now = int(time.time())
     import html as _html
+    governance_audit_html = ''
+    if current_user_role in ('admin', 'customer_admin', 'super_admin') and ai_governance_audit:
+        audit_rows = ''.join(
+            '<tr>' + ''.join('<td>' + _html.escape(str(value)) + '</td>' for value in (
+                datetime.fromtimestamp(event['changed_at'], timezone.utc).strftime('%Y-%m-%d %H:%M UTC'),
+                event['tool_name'], event['client_org_id'] or 'Unassigned',
+                event['old_status'] or 'Agent default', event['new_status'] or 'Agent default',
+                event['changed_by'])) + '</tr>' for event in ai_governance_audit)
+        governance_audit_html = (
+            '<details style="margin-top:18px"><summary>Recent Governance Changes (latest 50)</summary>'
+            '<div style="overflow-x:auto"><table class="dev-table"><thead><tr>'
+            '<th>Time</th><th>Tool</th><th>Client Organization</th><th>From</th><th>To</th><th>Changed By</th>'
+            '</tr></thead><tbody>' + audit_rows + '</tbody></table></div></details>')
     deployment_agent_token = _html.escape(deployment_agent_token, quote=True)
     deployment_linux_command = _html.escape(deployment_linux_command)
     deployment_macos_command = _html.escape(deployment_macos_command)
@@ -8021,7 +8060,7 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
   <div id="endpoint-ai-section" style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:8px">
     <div>
       <div class="sec-hdr" style="margin:0;padding:0;display:flex;align-items:center;gap:10px">Endpoint AI Inventory
-    <a href="/api/fleet/ai-inventory/csv" download style="font-size:12px;color:#16A34A;text-decoration:none;border:1px solid #238636;border-radius:4px;padding:3px 10px;font-weight:400;margin-left:auto">&#8659; Export CSV</a>
+    <a href="/api/fleet/ai-inventory/csv" download onclick="this.search=window.location.search" style="font-size:12px;color:#16A34A;text-decoration:none;border:1px solid #238636;border-radius:4px;padding:3px 10px;font-weight:400;margin-left:auto">&#8659; Export CSV</a>
   </div>
       <div style="font-size:12px;color:#6B7280;margin-top:4px">AI tools discovered on enrolled endpoints with governance categorization and GxP risk scoring</div>
     </div>
@@ -8047,9 +8086,11 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
   <div style="overflow-x:auto">
     <table class="dev-table" style="min-width:900px">
       <thead><tr><th>Tool</th><th>Category</th><th>Governance</th><th>Risk Score</th><th>Risk Band</th><th>Running</th><th>Endpoint</th><th>Source</th><th>Last Seen</th></tr></thead>
-      <tbody>{_build_endpoint_ai_rows(ai_inventory, ts_now)}</tbody>
+      <tbody>{_build_endpoint_ai_rows(ai_inventory, ts_now, current_user_role in ('admin', 'customer_admin', 'super_admin'))}</tbody>
     </table>
   </div>
+  <p style="font-size:12px;color:#6B7280">Governance policies apply to the exact tool name across this client organization. Restricted is a classification, not an execution block. Risk scores remain agent-reported.</p>
+  {governance_audit_html}
   </div>
 
   <div class="page" id="page-network-assets">
@@ -9003,6 +9044,30 @@ _applyTheme(localStorage.getItem('sentinel_theme') === 'light');
 window.addEventListener('storage', function(e) {{
   if (e.key === 'sentinel_theme') _applyTheme(e.newValue === 'light');
 }});
+
+async function saveEndpointGovernance(button, id) {{
+  const select = button.parentElement.querySelector('select');
+  if (!confirm('Apply this policy to all tools with this exact name in this client organization? Restricted is a classification, not an execution block.')) return;
+  button.disabled = true;
+  select.disabled = true;
+  try {{
+    const url = new URL('/api/fleet/ai-inventory/governance', window.location.origin);
+    const org = new URLSearchParams(window.location.search).get('client_org');
+    if (org) url.searchParams.set('client_org', org);
+    const response = await fetch(url, {{
+      method: 'POST', headers: {{'Content-Type': 'application/json'}},
+      body: JSON.stringify({{id: id, governance_status: select.value || null}})
+    }});
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || 'Save failed');
+    window.location.hash = 'endpoint-ai';
+    window.location.reload();
+  }} catch (error) {{
+    alert('Governance policy was not saved: ' + error.message);
+    button.disabled = false;
+    select.disabled = false;
+  }}
+}}
 
 function navTo(page) {{
   document.querySelectorAll('.page').forEach(function(n) {{ n.classList.remove('active'); }});
