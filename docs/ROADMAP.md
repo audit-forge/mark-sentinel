@@ -222,6 +222,20 @@ and a core positioning theme for next-generation AI governance platforms.
 
 ---
 
+## Version 2
+
+### 30-Minute Inactivity Logout
+Deferred to a future version and not enabled in the current release. Enforce
+logout server-side after 30 minutes of real user inactivity for both admin
+and customer sessions. Background polling and session probes must not count
+as user activity. The browser must log out and redirect to login on expiry.
+
+Retain the existing eight-hour absolute session cap and the shorter support
+impersonation cap. Include session revocation and regression tests for browser
+wake/resume and multiple tabs before enabling this policy.
+
+---
+
 ## Under Consideration
 
 ### Browser Extension (Shadow AI in the browser)
@@ -245,6 +259,6 @@ surfacing them as new findings automatically without a manual trigger.
 
 ---
 
-*Roadmap updated May 2026. Priorities adjusted based on competitive landscape
+*Roadmap updated November 2026. Priorities adjusted based on competitive landscape
 analysis and customer deployment feedback. Phase 1 items are low-lift builds
 on existing infrastructure. Phase 2 and 3 items require new development cycles.*

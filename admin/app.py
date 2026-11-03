@@ -412,6 +412,18 @@ async def logout(request: Request, next: str = None):
     return resp
 
 
+@app.get("/api/auth/session")
+async def auth_session(request: Request):
+    try:
+        get_current_user(request)
+    except HTTPException as exc:
+        if exc.status_code != 401:
+            raise
+        return JSONResponse({"authenticated": False}, status_code=401,
+                            headers={"Cache-Control": "no-store"})
+    return JSONResponse({"authenticated": True}, headers={"Cache-Control": "no-store"})
+
+
 @app.get("/auth/verify")
 async def auth_verify(request: Request):
     from fastapi.responses import Response
