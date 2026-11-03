@@ -7727,7 +7727,7 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
 ::-webkit-scrollbar-thumb{{background:#D1D5DB;border-radius:3px}}
 </style>
 </head>
-<body>
+<body data-session-login-url="{'https://admin.riskraven.ai/login?next=' if _trusted_proxy_token() else '/login?next='}">
 <script>if(localStorage.getItem('sentinel_theme')==='dark')document.documentElement.classList.add('dark');</script>
 <div id="maintenance-banner" style="display:none;background:#4a3b0d;border-bottom:1px solid #d29922;color:#d29922;padding:10px 20px;font-size:13px;text-align:center;position:relative;z-index:1000"></div>
 {f'<div id="impersonation-banner" style="background:#4a1d0d;border-bottom:1px solid #d97706;color:#fbbf24;padding:10px 20px;font-size:13px;text-align:center;position:relative;z-index:1000">Support session — logged in as <strong>{current_user_impersonated_by}</strong>&nbsp;&nbsp;<button onclick="endImpersonation()" style="background:#d97706;color:#1a1400;border:none;padding:4px 12px;border-radius:4px;cursor:pointer;font-size:12px;font-weight:600">Return to my account</button></div>' if current_user_impersonated_by else ''}
@@ -8762,25 +8762,53 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
 </div>
 
 <script>
-// Force reload when restored from bfcache so nginx re-checks auth
-window.addEventListener('pageshow', function(e) {{
-  if (e.persisted) window.location.reload();
-}});
 // The gateway returns 401 to API calls after the shared dashboard session
 // expires. Turn that background failure into the same login flow as a page
 // navigation instead of leaving the single-page UI in an error state.
 const _dashboardFetch = window.fetch.bind(window);
 let _sessionRedirecting = false;
+let _sessionChecking = false;
+function _redirectExpiredDashboardSession() {{
+  if (_sessionRedirecting) return;
+  _sessionRedirecting = true;
+  const login = document.body.dataset.sessionLoginUrl + encodeURIComponent(window.location.href);
+  window.location.replace(login);
+}}
 window.fetch = async function(...args) {{
   const response = await _dashboardFetch(...args);
-  if (response.status === 401 && !_sessionRedirecting) {{
-    _sessionRedirecting = true;
-    const login = 'https://admin.riskraven.ai/login?next=' + encodeURIComponent(window.location.href);
-    window.location.replace(login);
+  const input = args[0];
+  const url = new URL(input && typeof input.url === 'string' ? input.url : input, window.location.href);
+  if (response.status === 401 && url.origin === window.location.origin && !_sessionRedirecting) {{
+    _redirectExpiredDashboardSession();
     throw new Error('Dashboard session expired');
   }}
   return response;
 }};
+async function _checkDashboardSession() {{
+  if (_sessionChecking || _sessionRedirecting) return;
+  _sessionChecking = true;
+  const controller = new AbortController();
+  const timeout = window.setTimeout(function() {{ controller.abort(); }}, 10000);
+  try {{
+    const response = await _dashboardFetch('/api/auth/me', {{
+      credentials: 'same-origin', cache: 'no-store', signal: controller.signal
+    }});
+    if (response.status === 401) _redirectExpiredDashboardSession();
+  }} catch (_) {{
+    // Offline or unreachable does not prove that the session expired.
+  }} finally {{
+    window.clearTimeout(timeout);
+    _sessionChecking = false;
+  }}
+}}
+window.addEventListener('focus', _checkDashboardSession);
+window.addEventListener('online', _checkDashboardSession);
+window.addEventListener('pageshow', _checkDashboardSession);
+document.addEventListener('visibilitychange', function() {{
+  if (!document.hidden) _checkDashboardSession();
+}});
+window.setInterval(_checkDashboardSession, 60000);
+_checkDashboardSession();
 // ── Theme ──
 function _applyTheme(light) {{
   document.documentElement.classList.toggle('light', light);
