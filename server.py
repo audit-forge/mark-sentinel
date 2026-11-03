@@ -72,7 +72,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from urllib.parse import unquote, urlparse
 from arckon_version import INSTALLER_VERSION
-from admin.browser_security import browser_mutation_allowed
+from admin.browser_security import browser_mutation_allowed, safe_return_url
 
 PORT = 7001
 
@@ -484,6 +484,11 @@ def _get_cookie(headers, name: str) -> str:
         if k.strip() == name:
             return v.strip()
     return ''
+
+
+def _proxy_auth_configured() -> bool:
+    return bool(os.environ.get('SENTINEL_TRUSTED_PROXY_TOKEN')
+                or os.environ.get('SENTINEL_TRUSTED_PROXY_TOKEN_FILE'))
 
 
 def _trusted_proxy_token() -> str:
@@ -1297,7 +1302,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             return proxy
         # Behind the trusted proxy, the admin-domain JWT is the only dashboard
         # session authority. Do not revive a stale host-only legacy session after logout.
-        if _trusted_proxy_token():
+        if _trusted_proxy_token() or _proxy_auth_configured():
             return None
         token = _get_session_cookie(self.headers)
         return _get_registry().get_session(token) if token else None
@@ -1373,7 +1378,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
     _CLIENT_VIEWER_ALLOWED_EXACT = frozenset({'/', '/api/status', '/api/devices', '/api/maintenance-notice',
                                               '/api/fleet/network-assets', '/api/spend/summary',
                                               '/api/spend/by-model', '/api/spend/by-provider',
-                                              '/api/spend/daily'})
+                                              '/api/spend/daily', '/api/fleet/ai-inventory/csv'})
     _CLIENT_VIEWER_ALLOWED_PREFIX = ('/api/fleet/report',)
 
     def _client_viewer_gate(self, path: str) -> bool:
@@ -1413,6 +1418,8 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self._json({'error': 'unauthorized'}, 401)
         else:
             from urllib.parse import quote
+            if self._handoff_login(self._login_next(self.path)):
+                return False
             if not _get_registry().has_customers():
                 self.send_response(302)
                 self.send_header('Location', '/setup')
@@ -1618,6 +1625,8 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self._api_rr_overrides_list()
         elif path == '/api/fleet/shadow/csv':
             self._api_shadow_csv()
+        elif path == '/api/fleet/ai-inventory/csv':
+            self._api_ai_inventory_csv()
         elif path == '/api/fleet/inventory':
             self._api_inventory()
         elif path.startswith('/api/fleet/inventory/history/'):
@@ -1740,7 +1749,9 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self._send(403, b'Forbidden: this account is not scoped to a valid client.', 'text/plain')
             return
 
-        if path == '/api/scan':
+        if path == '/api/fleet/ai-inventory/governance':
+            self._api_set_endpoint_ai_governance()
+        elif path == '/api/scan':
             self._api_scan()
         elif path == '/api/live-scan-config':
             self._api_set_live_scan_config()
@@ -1917,25 +1928,69 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         '.brand{color:#58a6ff;font-size:12px;text-align:center;margin-top:20px}'
     )
 
+    @staticmethod
+    def _login_next(value: str) -> str:
+        target = safe_return_url(value, ())
+        if not target:
+            return '/'
+        # Check auth loops at the same decoding depth as the shared URL validator.
+        decoded = target
+        for _ in range(6):
+            decoded = unquote(decoded)
+        if urlparse(decoded).path.lower().split('/')[1].split(';')[0] in {'login', 'logout', 'setup'}:
+            return '/'
+        return target
+
+    def _handoff_login(self, next_url: str, status: int = 302) -> bool:
+        """Handle cloud login without touching local credentials or sessions."""
+        if not _trusted_proxy_token():
+            if _proxy_auth_configured():
+                self._send(503, b'Login temporarily unavailable', 'text/plain')
+                return True
+            return False
+        if status == 302 and self._proxy_session_user():
+            location = next_url
+        else:
+            from urllib.parse import urlencode
+            urls = []
+            for name, default in (('PUBLIC_ADMIN_URL', 'https://admin.riskraven.ai'),
+                                  ('PUBLIC_DASHBOARD_URL', 'https://arckon.riskraven.ai')):
+                value = os.environ.get(name, default)
+                try:
+                    parts = urlparse(value)
+                    valid = (safe_return_url(value, (value,)) and parts.scheme == 'https'
+                             and parts.path in ('', '/') and not parts.params
+                             and '?' not in value and '#' not in value)
+                except ValueError:
+                    valid = False
+                if not valid:
+                    self._send(503, b'Login temporarily unavailable', 'text/plain')
+                    return True
+                urls.append(value.rstrip('/'))
+            location = urls[0] + '/login?' + urlencode({'next': urls[1] + next_url})
+        self.send_response(status)
+        self.send_header('Location', location)
+        self.send_header('Content-Length', '0')
+        self.end_headers()
+        return True
+
     def _serve_login(self):
         import html as _html
         from urllib.parse import parse_qs
+        qs = parse_qs(urlparse(self.path).query)
+        next_url = self._login_next(qs.get('next', ['/'])[0])
+        if self._handoff_login(next_url):
+            return
+        if self._session_user():
+            self.send_response(302)
+            self.send_header('Location', next_url)
+            self.end_headers()
+            return
         if not _get_registry().has_customers():
             self.send_response(302)
             self.send_header('Location', '/setup')
             self.end_headers()
             return
-        # In trusted-proxy mode the user is already authenticated by nginx —
-        # skip the login form and go straight to the dashboard.
-        if self._proxy_session_user():
-            self.send_response(302)
-            self.send_header('Location', '/')
-            self.end_headers()
-            return
-        qs = parse_qs(urlparse(self.path).query)
-        next_url = qs.get('next', ['/'])[0]
-        if not next_url.startswith('/') or '//' in next_url:
-            next_url = '/'
         safe_next = _html.escape(next_url, quote=True)
         err_html = '<p class="err">Incorrect email or password.</p>' if qs.get('error') else ''
         body = (
@@ -1965,6 +2020,10 @@ class _Handler(http.server.BaseHTTPRequestHandler):
 
     def _handle_login_post(self):
         from urllib.parse import parse_qs, quote
+        # Cloud credentials belong only to the central login, never this registry.
+        next_url = self._login_next(parse_qs(urlparse(self.path).query).get('next', ['/'])[0])
+        if self._handoff_login(next_url, status=303):
+            return
         length = _content_length(self.headers)
         if length > 4096:
             self._send(400, b'Bad request', 'text/plain')
@@ -1978,9 +2037,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         params = parse_qs(self.rfile.read(length).decode(errors='ignore'))
         email = params.get('email', [''])[0].strip()
         password = params.get('password', [''])[0]
-        next_url = params.get('next', ['/'])[0]
-        if not next_url.startswith('/') or '//' in next_url:
-            next_url = '/'
+        next_url = self._login_next(params.get('next', ['/'])[0])
         reg = _get_registry()
         user = reg.authenticate_user(email, password)
         if user:
@@ -2014,6 +2071,8 @@ class _Handler(http.server.BaseHTTPRequestHandler):
 
     def _serve_setup(self):
         from urllib.parse import parse_qs
+        if self._handoff_login('/'):
+            return
         if _get_registry().has_customers():
             self.send_response(302)
             self.send_header('Location', '/login')
@@ -2059,6 +2118,8 @@ class _Handler(http.server.BaseHTTPRequestHandler):
 
     def _handle_setup_post(self):
         from urllib.parse import parse_qs
+        if self._handoff_login('/', status=303):
+            return
         reg = _get_registry()
         if reg.has_customers():
             self.send_response(302)
@@ -4137,6 +4198,54 @@ load();
             log.error('shadow CSV error: %s', e, exc_info=True)
             self._json({'error': str(e)}, 500)
 
+    def _api_ai_inventory_csv(self):
+        """Export the documented inventory columns for the caller's org scope."""
+        import csv
+        import io
+
+        def safe_cell(value):
+            # Quoting alone does not prevent spreadsheets from executing formulas.
+            if isinstance(value, str):
+                stripped = value.lstrip()
+                leading = value[:len(value) - len(stripped)]
+                if stripped.startswith(('=', '+', '-', '@')) or '\t' in leading or '\r' in leading:
+                    return "'" + value
+            return value
+
+        def fmt(ts):
+            return datetime.fromtimestamp(ts, timezone.utc).strftime('%Y-%m-%d %H:%M UTC') if ts else ''
+
+        try:
+            org = self._scoped_client_org()
+            store = self._store()
+            buf = io.StringIO(newline='')
+            writer = csv.writer(buf)
+            writer.writerow(['Tool', 'Category', 'Governance', 'Risk Score', 'Risk Band',
+                             'Running', 'Endpoint', 'Platform', 'Source', 'Install Path',
+                             'First Seen', 'Last Seen'])
+            for row in store.list_endpoint_ai_inventory(client_org_id=org, limit=None):
+                writer.writerow(map(safe_cell, [
+                    row.get('tool_name', ''), row.get('tool_category', ''),
+                    row.get('governance_status', ''), row.get('risk_score', 0),
+                    row.get('risk_band', ''), 'yes' if row.get('running') else 'no',
+                    row.get('hostname', ''), row.get('platform', ''),
+                    row.get('source', ''), row.get('install_path', ''),
+                    fmt(row.get('first_seen')), fmt(row.get('last_seen')),
+                ]))
+            data = buf.getvalue().encode('utf-8')
+            fname = f'endpoint_ai_inventory_{datetime.now(timezone.utc).strftime("%Y%m%d")}.csv'
+            self.send_response(200)
+            self.send_header('Content-Type', 'text/csv; charset=utf-8')
+            self.send_header('Content-Disposition', f'attachment; filename="{fname}"')
+            self.send_header('Content-Length', str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+        except _TenantScopeError:
+            self._json({'error': 'invalid client-org scope'}, 403)
+        except Exception:
+            log.exception('Endpoint AI inventory CSV error')
+            self._json({'error': 'internal server error'}, 500)
+
     # ── AI spend tracking API ─────────────────────────────────────────────────
 
     def _api_spend_summary(self):
@@ -6037,11 +6146,60 @@ load();
             clean.append(sanitized)
         return clean
 
+    def _api_set_endpoint_ai_governance(self):
+        """Save an audited policy for this tool in its device's client org."""
+        user = self._session_user()
+        if not user or user.get('role') not in ('admin', 'customer_admin', 'super_admin'):
+            self._json({'error': 'forbidden'}, 403)
+            return
+        try:
+            scope = self._scoped_client_org()
+            if scope:
+                org = _get_registry().get_client_org(scope)
+                if not org or not org.get('active') or org.get('customer_id') != user.get('customer_id'):
+                    raise _TenantScopeError('invalid client org')
+            length = int(self.headers.get('Content-Length', '0'))
+            if not 0 < length <= 4096:
+                self._json({'error': 'Invalid request size'}, 400)
+                return
+            body = json.loads(self.rfile.read(length))
+            if not isinstance(body, dict) or set(body) != {'id', 'governance_status'}:
+                self._json({'error': 'Expected id and governance_status'}, 400)
+                return
+            row_id = body['id']
+            status = body['governance_status']
+            if (type(row_id) is not int or row_id <= 0
+                    or (status is not None and (not isinstance(status, str)
+                        or status not in self._AI_INV_VALID_GOVS))):
+                self._json({'error': 'Invalid tool or governance status'}, 400)
+                return
+            actor = user.get('email') or str(user.get('id', 'unknown'))
+            if user.get('impersonated_by'):
+                actor += ' (impersonated by ' + str(user['impersonated_by']) + ')'
+            updated = self._store().set_endpoint_ai_governance(
+                row_id, status, changed_by=actor, actor_role=user['role'], client_org_id=scope)
+            if not updated:
+                self._json({'error': 'Tool not found'}, 404)
+                return
+            self._json({'ok': True})
+        except _TenantScopeError:
+            self._json({'error': 'invalid client-org scope'}, 403)
+        except (ValueError, TypeError):
+            self._json({'error': 'Invalid governance request'}, 400)
+        except Exception:
+            log.exception('Endpoint AI governance update failed')
+            self._json({'error': 'internal server error'}, 500)
+
     def _api_get_fleet_ai_inventory(self):
         """GET /api/fleet/ai-inventory — return endpoint AI inventory for the dashboard.
 
         Supports pagination via ?limit=200&offset=0. Maximum limit is 500.
+        Raw records are restricted to customer_admin and super_admin roles.
         """
+        me = self._session_user()
+        if not me or me.get('role') not in ('customer_admin', 'super_admin'):
+            self._json({'error': 'forbidden'}, 403)
+            return
         import urllib.parse as _up
         try:
             qs = _up.parse_qs(_up.urlparse(self.path).query)
@@ -6065,45 +6223,16 @@ load();
 
     def _api_get_fleet_ai_inventory_summary(self):
         """GET /api/fleet/ai-inventory/summary — return governance and risk-band counts."""
+        me = self._session_user()
+        if not me or me.get('role') not in ('customer_admin', 'super_admin'):
+            self._json({'error': 'forbidden'}, 403)
+            return
         try:
             summary = self._store().list_endpoint_ai_inventory_summary(client_org_id=self._scoped_client_org())
             self._json(summary)
         except Exception as e:
             log.error('Endpoint AI inventory summary error: %s', e)
             self._json({'error': 'internal server error'}, 500)
-        """POST /api/agent/access-events — ingest a batch of access events
-        from an agent. Agent-bearer auth is already verified by the caller.
-        Rate limited to 100 events per batch. Fires alerts for each event."""
-        try:
-            body = self._read_json_body()
-            events = body.get('events', [])
-            if not isinstance(events, list) or not events:
-                self._json({'ok': True, 'stored': 0})
-                return
-            if len(events) > 100:
-                events = events[:100]
-            cust = self._get_agent_customer()
-            store = self._store() if not cust else _get_store(cust.get('id', 'default'))
-            stored = store.ingest_access_events(events)
-            from alerts import load_alert_config, fire_access_alert
-            alert_cfg = load_alert_config(ROOT / 'data' / 'alerts_config.json') or {}
-            for evt in events:
-                try:
-                    fire_access_alert(
-                        device_id=evt.get('device_id', ''),
-                        hostname=evt.get('hostname', evt.get('device_id', '')),
-                        process=evt.get('process', ''),
-                        path=evt.get('path', ''),
-                        action=evt.get('action', ''),
-                        platform=evt.get('platform', ''),
-                        alert_cfg=alert_cfg,
-                        store=store)
-                except Exception as ae:
-                    log.error('access alert fire error: %s', ae)
-            self._json({'ok': True, 'stored': stored})
-        except Exception as e:
-            log.error('agent access-events ingest error: %s', e, exc_info=True)
-            self._json({'error': str(e)}, 500)
 
     # ── SIEM config API ───────────────────────────────────────────────────────
 
@@ -6495,6 +6624,10 @@ async function moveSelectedDevices(){
             network_assets = store.list_network_assets(client_org_id=org_scope)
             ai_inventory = store.list_endpoint_ai_inventory(client_org_id=org_scope)
             ai_inventory_summary = store.list_endpoint_ai_inventory_summary(client_org_id=org_scope)
+            user = self._session_user()
+            ai_governance_audit = (store.list_endpoint_ai_governance_audit(
+                client_org_id=org_scope, limit=50)
+                if user and user.get('role') in ('admin', 'customer_admin', 'super_admin') else [])
             print(f'[SENTINEL] _serve_fleet: got {len(devices)} devices, {len(shadow)} shadow, {len(mcp)} mcp, {len(ai_inventory)} endpoint AI tools', flush=True)
         except Exception as _e:
             print(f'[SENTINEL] _serve_fleet: store error: {_e}', flush=True)
@@ -6504,6 +6637,7 @@ async function moveSelectedDevices(){
             mcp     = []
             network_assets = []
             ai_inventory = []
+            ai_governance_audit = []
             ai_inventory_summary = {'total': 0, 'running': 0, 'by_governance': {}, 'by_risk_band': {}}
         try:
             user = self._session_user()
@@ -6538,6 +6672,7 @@ async function moveSelectedDevices(){
                 store=store,
                 ai_inventory=ai_inventory,
                 ai_inventory_summary=ai_inventory_summary,
+                ai_governance_audit=ai_governance_audit,
             ).encode('utf-8')
             print(f'[SENTINEL] _serve_fleet: body built {len(body)} bytes', flush=True)
         except Exception as _e:
@@ -7008,7 +7143,8 @@ _BAND_COLORS = {
 }
 
 
-def _build_endpoint_ai_rows(entries: list[dict], ts_now: int) -> str:
+def _build_endpoint_ai_rows(entries: list[dict], ts_now: int,
+                            can_manage_governance: bool = False) -> str:
     import html as _html
     def _age(ts):
         if not ts:
@@ -7032,15 +7168,31 @@ def _build_endpoint_ai_rows(entries: list[dict], ts_now: int) -> str:
         score = e.get('risk_score', 0)
         running = e.get('running', 0)
         running_html = '<span style="color:#16A34A;font-weight:600">Yes</span>' if running else '<span style="color:#9CA3AF">No</span>'
+        controls = ''
+        if can_manage_governance and type(e.get('id')) is int:
+            selected = e.get('governance_override') or ''
+            options = ''.join(
+                '<option value="' + value + '"' + (' selected' if selected == value else '')
+                + '>' + label + '</option>'
+                for value, label in (('', 'Use Agent Default'), ('sanctioned', 'Sanctioned'),
+                                     ('tolerated', 'Tolerated'), ('shadow', 'Shadow'),
+                                     ('restricted', 'Restricted')))
+            controls = (
+                '<div style="display:flex;gap:4px;margin-top:6px">'
+                '<select aria-label="Governance policy" class="form-select">' + options
+                + '</select><button type="button" class="scan-btn" '
+                'onclick="saveEndpointGovernance(this,' + str(e['id']) + ')">Save</button></div>')
+        if e.get('governance_override'):
+            controls += '<div style="font-size:11px;color:#6B7280">Organization policy</div>'
         rows.append(
             '<tr><td style="font-weight:600">{tool}</td><td>{cat}</td>'
-            '<td><span style="background:{gov_bg};color:#fff;border-radius:10px;padding:2px 10px;font-size:11px;font-weight:600">{gov_label}</span></td>'
+            '<td><span style="background:{gov_bg};color:#fff;border-radius:10px;padding:2px 10px;font-size:11px;font-weight:600">{gov_label}</span>{controls}</td>'
             '<td><div style="display:flex;align-items:center;gap:6px"><div style="width:60px;height:8px;background:#F3F4F6;border-radius:4px;overflow:hidden"><div style="width:{pct}%;height:100%;background:{band_color}"></div></div><span style="font-weight:600;color:{band_color}">{score}</span></div></td>'
             '<td><span style="color:{band_color};font-weight:600">{band}</span></td>'
             '<td>{running}</td><td title="{path}">{host}</td><td>{source}</td><td>{age}</td></tr>'.format(
                 tool=_html.escape(e.get('tool_name', '')),
                 cat=_html.escape(e.get('tool_category', '').replace('_', ' ').title()),
-                gov_bg=gov_color, gov_label=gov_label,
+                gov_bg=gov_color, gov_label=_html.escape(gov_label), controls=controls,
                 pct=min(100, max(0, score)), band_color=band_color,
                 score=score, band=_html.escape(band),
                 running=running_html,
@@ -7444,7 +7596,8 @@ def _build_fleet_html(devices: list[dict], shadow: list[dict] | None = None,
                        deployment_mdm_command: str = '',
                        store=None,
                        ai_inventory: list[dict] | None = None,
-                       ai_inventory_summary: dict | None = None) -> str:
+                       ai_inventory_summary: dict | None = None,
+                       ai_governance_audit: list[dict] | None = None) -> str:
     shadow = shadow or []
     mcp    = mcp    or []
     network_assets = network_assets or []
@@ -7452,6 +7605,19 @@ def _build_fleet_html(devices: list[dict], shadow: list[dict] | None = None,
     ai_inventory_summary = ai_inventory_summary or {}
     ts_now = int(time.time())
     import html as _html
+    governance_audit_html = ''
+    if current_user_role in ('admin', 'customer_admin', 'super_admin') and ai_governance_audit:
+        audit_rows = ''.join(
+            '<tr>' + ''.join('<td>' + _html.escape(str(value)) + '</td>' for value in (
+                datetime.fromtimestamp(event['changed_at'], timezone.utc).strftime('%Y-%m-%d %H:%M UTC'),
+                event['tool_name'], event['client_org_id'] or 'Unassigned',
+                event['old_status'] or 'Agent default', event['new_status'] or 'Agent default',
+                event['changed_by'])) + '</tr>' for event in ai_governance_audit)
+        governance_audit_html = (
+            '<details style="margin-top:18px"><summary>Recent Governance Changes (latest 50)</summary>'
+            '<div style="overflow-x:auto"><table class="dev-table"><thead><tr>'
+            '<th>Time</th><th>Tool</th><th>Client Organization</th><th>From</th><th>To</th><th>Changed By</th>'
+            '</tr></thead><tbody>' + audit_rows + '</tbody></table></div></details>')
     deployment_agent_token = _html.escape(deployment_agent_token, quote=True)
     deployment_linux_command = _html.escape(deployment_linux_command)
     deployment_macos_command = _html.escape(deployment_macos_command)
@@ -7727,7 +7893,7 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
 ::-webkit-scrollbar-thumb{{background:#D1D5DB;border-radius:3px}}
 </style>
 </head>
-<body>
+<body data-session-login-url="{'https://admin.riskraven.ai/login?next=' if _trusted_proxy_token() else '/login?next='}">
 <script>if(localStorage.getItem('sentinel_theme')==='dark')document.documentElement.classList.add('dark');</script>
 <div id="maintenance-banner" style="display:none;background:#4a3b0d;border-bottom:1px solid #d29922;color:#d29922;padding:10px 20px;font-size:13px;text-align:center;position:relative;z-index:1000"></div>
 {f'<div id="impersonation-banner" style="background:#4a1d0d;border-bottom:1px solid #d97706;color:#fbbf24;padding:10px 20px;font-size:13px;text-align:center;position:relative;z-index:1000">Support session — logged in as <strong>{current_user_impersonated_by}</strong>&nbsp;&nbsp;<button onclick="endImpersonation()" style="background:#d97706;color:#1a1400;border:none;padding:4px 12px;border-radius:4px;cursor:pointer;font-size:12px;font-weight:600">Return to my account</button></div>' if current_user_impersonated_by else ''}
@@ -7894,7 +8060,7 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
   <div id="endpoint-ai-section" style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:8px">
     <div>
       <div class="sec-hdr" style="margin:0;padding:0;display:flex;align-items:center;gap:10px">Endpoint AI Inventory
-    <a href="/api/fleet/ai-inventory" target="_blank" style="font-size:12px;color:#4F46E5;text-decoration:none;border:1px solid #C7D2FE;border-radius:4px;padding:3px 10px;font-weight:400;margin-left:auto">JSON API</a>
+    <a href="/api/fleet/ai-inventory/csv" download onclick="this.search=window.location.search" style="font-size:12px;color:#16A34A;text-decoration:none;border:1px solid #238636;border-radius:4px;padding:3px 10px;font-weight:400;margin-left:auto">&#8659; Export CSV</a>
   </div>
       <div style="font-size:12px;color:#6B7280;margin-top:4px">AI tools discovered on enrolled endpoints with governance categorization and GxP risk scoring</div>
     </div>
@@ -7920,9 +8086,11 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
   <div style="overflow-x:auto">
     <table class="dev-table" style="min-width:900px">
       <thead><tr><th>Tool</th><th>Category</th><th>Governance</th><th>Risk Score</th><th>Risk Band</th><th>Running</th><th>Endpoint</th><th>Source</th><th>Last Seen</th></tr></thead>
-      <tbody>{_build_endpoint_ai_rows(ai_inventory, ts_now)}</tbody>
+      <tbody>{_build_endpoint_ai_rows(ai_inventory, ts_now, current_user_role in ('admin', 'customer_admin', 'super_admin'))}</tbody>
     </table>
   </div>
+  <p style="font-size:12px;color:#6B7280">Governance policies apply to the exact tool name across this client organization. Restricted is a classification, not an execution block. Risk scores remain agent-reported.</p>
+  {governance_audit_html}
   </div>
 
   <div class="page" id="page-network-assets">
@@ -8762,25 +8930,53 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
 </div>
 
 <script>
-// Force reload when restored from bfcache so nginx re-checks auth
-window.addEventListener('pageshow', function(e) {{
-  if (e.persisted) window.location.reload();
-}});
 // The gateway returns 401 to API calls after the shared dashboard session
 // expires. Turn that background failure into the same login flow as a page
 // navigation instead of leaving the single-page UI in an error state.
 const _dashboardFetch = window.fetch.bind(window);
 let _sessionRedirecting = false;
+let _sessionChecking = false;
+function _redirectExpiredDashboardSession() {{
+  if (_sessionRedirecting) return;
+  _sessionRedirecting = true;
+  const login = document.body.dataset.sessionLoginUrl + encodeURIComponent(window.location.href);
+  window.location.replace(login);
+}}
 window.fetch = async function(...args) {{
   const response = await _dashboardFetch(...args);
-  if (response.status === 401 && !_sessionRedirecting) {{
-    _sessionRedirecting = true;
-    const login = 'https://admin.riskraven.ai/login?next=' + encodeURIComponent(window.location.href);
-    window.location.replace(login);
+  const input = args[0];
+  const url = new URL(input && typeof input.url === 'string' ? input.url : input, window.location.href);
+  if (response.status === 401 && url.origin === window.location.origin && !_sessionRedirecting) {{
+    _redirectExpiredDashboardSession();
     throw new Error('Dashboard session expired');
   }}
   return response;
 }};
+async function _checkDashboardSession() {{
+  if (_sessionChecking || _sessionRedirecting) return;
+  _sessionChecking = true;
+  const controller = new AbortController();
+  const timeout = window.setTimeout(function() {{ controller.abort(); }}, 10000);
+  try {{
+    const response = await _dashboardFetch('/api/auth/me', {{
+      credentials: 'same-origin', cache: 'no-store', signal: controller.signal
+    }});
+    if (response.status === 401) _redirectExpiredDashboardSession();
+  }} catch (_) {{
+    // Offline or unreachable does not prove that the session expired.
+  }} finally {{
+    window.clearTimeout(timeout);
+    _sessionChecking = false;
+  }}
+}}
+window.addEventListener('focus', _checkDashboardSession);
+window.addEventListener('online', _checkDashboardSession);
+window.addEventListener('pageshow', _checkDashboardSession);
+document.addEventListener('visibilitychange', function() {{
+  if (!document.hidden) _checkDashboardSession();
+}});
+window.setInterval(_checkDashboardSession, 60000);
+_checkDashboardSession();
 // ── Theme ──
 function _applyTheme(light) {{
   document.documentElement.classList.toggle('light', light);
@@ -8849,6 +9045,30 @@ window.addEventListener('storage', function(e) {{
   if (e.key === 'sentinel_theme') _applyTheme(e.newValue === 'light');
 }});
 
+async function saveEndpointGovernance(button, id) {{
+  const select = button.parentElement.querySelector('select');
+  if (!confirm('Apply this policy to all tools with this exact name in this client organization? Restricted is a classification, not an execution block.')) return;
+  button.disabled = true;
+  select.disabled = true;
+  try {{
+    const url = new URL('/api/fleet/ai-inventory/governance', window.location.origin);
+    const org = new URLSearchParams(window.location.search).get('client_org');
+    if (org) url.searchParams.set('client_org', org);
+    const response = await fetch(url, {{
+      method: 'POST', headers: {{'Content-Type': 'application/json'}},
+      body: JSON.stringify({{id: id, governance_status: select.value || null}})
+    }});
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || 'Save failed');
+    window.location.hash = 'endpoint-ai';
+    window.location.reload();
+  }} catch (error) {{
+    alert('Governance policy was not saved: ' + error.message);
+    button.disabled = false;
+    select.disabled = false;
+  }}
+}}
+
 function navTo(page) {{
   document.querySelectorAll('.page').forEach(function(n) {{ n.classList.remove('active'); }});
   document.querySelectorAll('.sb-item').forEach(function(n) {{ n.classList.remove('sb-active'); }});
@@ -8888,9 +9108,7 @@ setInterval(function() {{
 }}, 30000);
 (function() {{
   const hash = window.location.hash.replace('#', '');
-  const valid = ['overview','shadow','alerts','mcp','riskregister','inventory','spend','schedules',
-                 'discovery','findings','reports','siem','settings','users','probe','reseller','protected-files'];
-  if (hash && valid.includes(hash)) {{ navTo(hash); }}
+  if (hash && document.getElementById('page-' + hash)) {{ navTo(hash); }}
 }})();
 
 function _syncFindingsSelector() {{
@@ -11984,7 +12202,7 @@ async function runLiveScan(btn) {{
     }});
     const d = await r.json();
     if (d.error) {{ alert(d.error); }}
-    else {{ navTo('scan'); }}
+    else {{ navTo('reports'); }}
   }} catch (e) {{ alert('Failed to start scan: ' + e); }}
   finally {{ btn.disabled = false; btn.textContent = orig; }}
 }}

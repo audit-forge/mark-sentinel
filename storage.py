@@ -394,6 +394,27 @@ class AgentStore:
                 CREATE INDEX IF NOT EXISTS idx_endpoint_ai_inventory_gov
                     ON endpoint_ai_inventory(governance_status);
 
+                CREATE TABLE IF NOT EXISTS endpoint_ai_governance_overrides (
+                    client_org_id TEXT NOT NULL,
+                    tool_name TEXT NOT NULL,
+                    governance_status TEXT NOT NULL CHECK (
+                        governance_status IN ('sanctioned', 'tolerated', 'shadow', 'restricted')),
+                    PRIMARY KEY (client_org_id, tool_name)
+                );
+                CREATE TABLE IF NOT EXISTS endpoint_ai_governance_audit (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    inventory_id INTEGER NOT NULL,
+                    client_org_id TEXT NOT NULL,
+                    tool_name TEXT NOT NULL,
+                    old_status TEXT,
+                    new_status TEXT,
+                    changed_by TEXT NOT NULL,
+                    actor_role TEXT NOT NULL DEFAULT '',
+                    changed_at INTEGER NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_endpoint_ai_governance_audit_org
+                    ON endpoint_ai_governance_audit(client_org_id, id DESC);
+
             """)
             # Migrations
             cols = {r[1] for r in conn.execute("PRAGMA table_info(devices)")}
@@ -1114,30 +1135,94 @@ class AgentStore:
                     "UPDATE endpoint_ai_inventory SET running=0 WHERE device_id=?",
                     (device_id,))
 
+    def set_endpoint_ai_governance(self, inventory_id: int, status: str | None,
+                                   changed_by: str, actor_role: str = '',
+                                   client_org_id: str | None = None) -> bool:
+        """Set exact-name policy in the selected row's org, within read scope.
+
+        None status removes policy; audit old/new statuses describe overrides,
+        not potentially differing agent classifications on individual devices.
+        """
+        if type(inventory_id) is not int or not 0 < inventory_id <= 9223372036854775807:
+            raise ValueError('inventory_id must be a positive SQLite integer')
+        if status is not None and status not in ('sanctioned', 'tolerated', 'shadow', 'restricted'):
+            raise ValueError('invalid endpoint AI governance status')
+        query = """SELECT e.tool_name, COALESCE(d.client_org_id, '') AS client_org_id
+                   FROM endpoint_ai_inventory e
+                   JOIN devices d ON d.device_id=e.device_id
+                   WHERE e.id=?"""
+        params: list = [inventory_id]
+        if client_org_id is not None:
+            query += " AND COALESCE(d.client_org_id, '')=?"
+            params.append(client_org_id)
+        with self._lock, self._conn() as conn:
+            # Lock before resolving the device's org, including across store instances.
+            conn.execute('BEGIN IMMEDIATE')
+            row = conn.execute(query, params).fetchone()
+            if row is None:
+                return False
+            target = (row['client_org_id'], row['tool_name'])
+            old = conn.execute("""SELECT governance_status
+                FROM endpoint_ai_governance_overrides
+                WHERE client_org_id=? AND tool_name=?""", target).fetchone()
+            if status is None:
+                conn.execute("""DELETE FROM endpoint_ai_governance_overrides
+                    WHERE client_org_id=? AND tool_name=?""", target)
+            else:
+                conn.execute("""INSERT INTO endpoint_ai_governance_overrides
+                    (client_org_id, tool_name, governance_status) VALUES (?, ?, ?)
+                    ON CONFLICT(client_org_id, tool_name) DO UPDATE SET
+                        governance_status=excluded.governance_status""", (*target, status))
+            conn.execute("""INSERT INTO endpoint_ai_governance_audit
+                (inventory_id, client_org_id, tool_name, old_status, new_status,
+                 changed_by, actor_role, changed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                (inventory_id, *target, old['governance_status'] if old else None,
+                 status, changed_by, actor_role, int(time.time())))
+        return True
+
+    def list_endpoint_ai_governance_audit(self, client_org_id: str | None = None,
+                                         limit: int = 100) -> list[dict]:
+        """List newest policy changes, with None meaning all orgs and '' unassigned."""
+        query = 'SELECT * FROM endpoint_ai_governance_audit'
+        params: list = []
+        if client_org_id is not None:
+            query += ' WHERE client_org_id=?'
+            params.append(client_org_id)
+        query += ' ORDER BY id DESC LIMIT ?'
+        params.append(max(1, min(limit, 500)))
+        with self._lock, self._conn() as conn:
+            return [dict(r) for r in conn.execute(query, params).fetchall()]
+
     def list_endpoint_ai_inventory(self, client_org_id: str | None = None,
-                                   limit: int = 200, offset: int = 0) -> list[dict]:
+                                   limit: int | None = 200, offset: int = 0) -> list[dict]:
         """List endpoint AI inventory entries, scoped by reporting device's client org.
 
-        Pagination is enforced with a default limit of 200 rows to prevent
-        unbounded response sizes. The maximum allowed limit is 500.
+        Integer limits default to 200 and are capped at 500 rows. Explicit None
+        returns a full snapshot for internal exports, ignoring offset.
         """
-        limit = max(1, min(limit, 500))
-        offset = max(0, offset)
         query = """SELECT e.id, e.device_id, e.hostname, e.tool_name, e.tool_category,
-                          e.governance_status, e.install_path, e.source, e.running,
+                          COALESCE(o.governance_status, e.governance_status) AS governance_status,
+                          e.governance_status AS reported_governance_status,
+                          o.governance_status AS governance_override,
+                          e.install_path, e.source, e.running,
                           e.risk_score, e.risk_band, e.risk_dimensions_json,
                           e.first_seen, e.last_seen,
                           d.client_org_id, d.platform
                    FROM endpoint_ai_inventory e
-                   JOIN devices d ON d.device_id=e.device_id"""
+                   JOIN devices d ON d.device_id=e.device_id
+                   LEFT JOIN endpoint_ai_governance_overrides o
+                     ON o.client_org_id=COALESCE(d.client_org_id, '')
+                     AND o.tool_name=e.tool_name"""
         params: list = []
         if client_org_id == '':
-            query += ' WHERE d.client_org_id IS NULL'
+            query += " WHERE COALESCE(d.client_org_id, '')=''"
         elif client_org_id is not None:
             query += ' WHERE d.client_org_id = ?'
             params.append(client_org_id)
-        query += ' ORDER BY e.risk_score DESC, e.last_seen DESC LIMIT ? OFFSET ?'
-        params.extend([limit, offset])
+        query += ' ORDER BY e.risk_score DESC, e.last_seen DESC, e.id ASC'
+        if limit is not None:
+            query += ' LIMIT ? OFFSET ?'
+            params.extend([max(1, min(limit, 500)), max(0, offset)])
         with self._lock, self._conn() as conn:
             return [dict(r) for r in conn.execute(query, tuple(params)).fetchall()]
 
@@ -1147,7 +1232,7 @@ class AgentStore:
                    JOIN devices d ON d.device_id=e.device_id"""
         params: tuple = ()
         if client_org_id == '':
-            query += ' WHERE d.client_org_id IS NULL'
+            query += " WHERE COALESCE(d.client_org_id, '')=''"
         elif client_org_id is not None:
             query += ' WHERE d.client_org_id = ?'
             params = (client_org_id,)
@@ -1163,23 +1248,26 @@ class AgentStore:
         where = ""
         params: tuple = ()
         if client_org_id == '':
-            where = ' WHERE d.client_org_id IS NULL'
+            where = " WHERE COALESCE(d.client_org_id, '')=''"
         elif client_org_id is not None:
             where = ' WHERE d.client_org_id = ?'
             params = (client_org_id,)
         query = f"""SELECT
                         COUNT(*) AS total,
                         SUM(CASE WHEN e.running=1 THEN 1 ELSE 0 END) AS running,
-                        SUM(CASE WHEN e.governance_status='sanctioned' THEN 1 ELSE 0 END) AS sanctioned,
-                        SUM(CASE WHEN e.governance_status='tolerated' THEN 1 ELSE 0 END) AS tolerated,
-                        SUM(CASE WHEN e.governance_status='shadow' THEN 1 ELSE 0 END) AS shadow,
-                        SUM(CASE WHEN e.governance_status='restricted' THEN 1 ELSE 0 END) AS restricted,
+                        SUM(CASE WHEN COALESCE(o.governance_status, e.governance_status)='sanctioned' THEN 1 ELSE 0 END) AS sanctioned,
+                        SUM(CASE WHEN COALESCE(o.governance_status, e.governance_status)='tolerated' THEN 1 ELSE 0 END) AS tolerated,
+                        SUM(CASE WHEN COALESCE(o.governance_status, e.governance_status)='shadow' THEN 1 ELSE 0 END) AS shadow,
+                        SUM(CASE WHEN COALESCE(o.governance_status, e.governance_status)='restricted' THEN 1 ELSE 0 END) AS restricted,
                         SUM(CASE WHEN e.risk_band='CRITICAL' THEN 1 ELSE 0 END) AS critical,
                         SUM(CASE WHEN e.risk_band='HIGH' THEN 1 ELSE 0 END) AS high,
                         SUM(CASE WHEN e.risk_band='MEDIUM' THEN 1 ELSE 0 END) AS medium,
                         SUM(CASE WHEN e.risk_band='LOW' THEN 1 ELSE 0 END) AS low
                    FROM endpoint_ai_inventory e
-                   JOIN devices d ON d.device_id=e.device_id{where}"""
+                   JOIN devices d ON d.device_id=e.device_id
+                   LEFT JOIN endpoint_ai_governance_overrides o
+                     ON o.client_org_id=COALESCE(d.client_org_id, '')
+                     AND o.tool_name=e.tool_name{where}"""
         with self._lock, self._conn() as conn:
             row = conn.execute(query, params).fetchone()
             return {

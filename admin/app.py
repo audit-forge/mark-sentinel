@@ -9,6 +9,7 @@ import subprocess
 import time
 import urllib.request
 import urllib.error
+from urllib.parse import unquote, urlsplit
 from collections import defaultdict
 from datetime import datetime, date, timezone, timedelta
 from fastapi import FastAPI, Request, Form, HTTPException
@@ -331,10 +332,20 @@ async def root():
     return RedirectResponse("/dashboard")
 
 
+def _login_return_url(value: str) -> str:
+    target = safe_return_url(value, (PUBLIC_ADMIN_URL, PUBLIC_DASHBOARD_URL))
+    decoded = target
+    for _ in range(6):
+        decoded = unquote(decoded)
+    # Auth pages are valid same-origin URLs, but not post-login destinations.
+    if urlsplit(decoded).path.rstrip('/') in ('/login', '/logout', '/setup'):
+        return ''
+    return target
+
+
 @app.get("/login", response_class=HTMLResponse)
 async def login_page(request: Request):
-    next_url = safe_return_url(request.query_params.get("next", ""),
-                               (PUBLIC_ADMIN_URL, PUBLIC_DASHBOARD_URL))
+    next_url = _login_return_url(request.query_params.get("next", ""))
     try:
         user = get_current_user(request)
         # An unscoped super-admin cannot be routed through the shared customer
@@ -342,8 +353,9 @@ async def login_page(request: Request):
         # instead of showing another login form.
         if user.get("role") == "super_admin" and not user.get("customer_id"):
             return RedirectResponse("/dashboard", status_code=303)
-        if next_url:
-            return RedirectResponse(next_url, status_code=303)
+        destination = next_url or ("/dashboard" if user.get("role") == "super_admin"
+                                   else _sentinel_url(user.get("customer_id")))
+        return RedirectResponse(destination, status_code=303)
     except HTTPException:
         pass
     return templates.TemplateResponse(request=request, name="login.html", context={"request": request, "error": None, "next": next_url})
@@ -356,7 +368,7 @@ async def login(
     password: str = Form(...),
     next: str = Form(""),
 ):
-    next = safe_return_url(next, (PUBLIC_ADMIN_URL, PUBLIC_DASHBOARD_URL))
+    next = _login_return_url(next)
     client_ip = request.client.host if request.client else "unknown"
     if not _check_rate_limit(client_ip):
         return templates.TemplateResponse(request=request, name="login.html", context={
@@ -410,6 +422,18 @@ async def logout(request: Request, next: str = None):
     resp = RedirectResponse(dest, status_code=303)
     resp.delete_cookie("token", secure=bool(AUTH_COOKIE_DOMAIN), domain=AUTH_COOKIE_DOMAIN)
     return resp
+
+
+@app.get("/api/auth/session")
+async def auth_session(request: Request):
+    try:
+        get_current_user(request)
+    except HTTPException as exc:
+        if exc.status_code != 401:
+            raise
+        return JSONResponse({"authenticated": False}, status_code=401,
+                            headers={"Cache-Control": "no-store"})
+    return JSONResponse({"authenticated": True}, headers={"Cache-Control": "no-store"})
 
 
 @app.get("/auth/verify")
