@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## 1.0.75 - 2026-11-12
+
+### Fixed
+- Recover the signed deployment promotion after removing stale, exited backup containers with duplicate customer labels.
+
 ## 1.0.74 - 2026-11-12
 
 ### Fixed
