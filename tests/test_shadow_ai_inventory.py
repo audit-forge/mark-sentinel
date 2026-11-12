@@ -11,6 +11,7 @@ from shadow_ai_inventory import (
     score_gxp_risk,
     risk_band,
     discover_installed_ai_tools,
+    _discover_cli_tools,
     SANCTIONED,
     TOLERATED,
     SHADOW,
@@ -112,6 +113,19 @@ class TestRiskScoring:
 # ── Discovery tests ──────────────────────────────────────────────────────────
 
 class TestDiscovery:
+    def test_discovers_codex_cli(self, monkeypatch):
+        monkeypatch.setattr(
+            'shadow_ai_inventory.shutil.which',
+            lambda binary: '/opt/homebrew/bin/codex' if binary == 'codex' else None,
+        )
+
+        assert _discover_cli_tools() == [{
+            'tool_name': 'OpenAI Codex',
+            'tool_category': 'coding_assistant',
+            'install_path': '/opt/homebrew/bin/codex',
+            'source': 'cli_tool',
+        }]
+
     def test_discover_installed_ai_tools_returns_list(self):
         tools = discover_installed_ai_tools()
         assert isinstance(tools, list)

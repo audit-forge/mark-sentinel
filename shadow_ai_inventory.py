@@ -61,6 +61,7 @@ _WIN_AI_APP_NAMES: dict[str, tuple[str, str]] = {
 # CLI tools / binaries to look for on PATH
 _CLI_AI_TOOLS: dict[str, tuple[str, str]] = {
     'claude':    ('Claude Code', 'coding_assistant'),
+    'codex':     ('OpenAI Codex', 'coding_assistant'),
     'cursor':    ('Cursor', 'coding_assistant'),
     'aider':     ('Aider', 'coding_assistant'),
     'copilot':   ('GitHub Copilot CLI', 'coding_assistant'),
@@ -89,6 +90,7 @@ _LOCAL_MODEL_DIRS: list[str] = [
 # Process-name substrings for running-process detection (mirrors agent.py)
 _PROC_SIGS: dict[str, tuple[str, str]] = {
     'claude':         ('Claude Code', 'coding_assistant'),
+    'codex':          ('OpenAI Codex', 'coding_assistant'),
     'cursor':         ('Cursor', 'coding_assistant'),
     'aider':          ('Aider', 'coding_assistant'),
     'copilot':        ('GitHub Copilot', 'coding_assistant'),

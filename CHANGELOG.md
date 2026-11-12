@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## 1.0.74 - 2026-11-12
+
+### Fixed
+- Detect the OpenAI Codex CLI and process in Endpoint AI inventory and AI session tracking.
+
 ## 1.0.60 - 2026-09-11
 
 ### Fixed

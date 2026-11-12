@@ -1459,6 +1459,7 @@ def run_ai_connections_cycle(config: dict) -> bool:
 _AI_TOOL_PROCESSES = {
     # process name (lowercase): (tool_name, category)
     'claude':         ('Claude Code', 'coding_assistant'),
+    'codex':          ('OpenAI Codex', 'coding_assistant'),
     'cursor':         ('Cursor', 'coding_assistant'),
     'aider':          ('Aider', 'coding_assistant'),
     'copilot':        ('GitHub Copilot', 'coding_assistant'),
