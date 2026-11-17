@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## 1.0.77 - 2026-11-17
+
+### Added
+- **Actor-aware alert routing** for Protected Cloud Assets: replace the binary "AI only" checkbox with a clear three-option alert-mode selector (All access, Automation only, Human only). Backward compatible — existing `ai_only` policies migrate automatically.
+- **Multi-domain Google Workspace Drive forwarding**: support multiple Workspace domains per tenant. Each domain gets its own forwarder instance with independent polling, service account, and state file. New `add_workspace_domain.sh` helper script for adding domains to existing tenants.
+
+### Fixed
+- Duplicated timestamp in cloud-asset alert titles.
+
 ## 1.0.76 - 2026-11-17
 
 ### Fixed
