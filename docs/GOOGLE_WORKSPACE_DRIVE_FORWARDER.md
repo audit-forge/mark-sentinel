@@ -131,7 +131,45 @@ with these non-secret values before enabling the timer:
 ```text
 ADMIN_EMAIL=workspace-admin@example.com
 WORKSPACE_DOMAIN=example.com
+ARCKON_URL=http://sentinel-CUSTOMER_ID:7331
 ```
+
+The `ARCKON_URL` points to the tenant's Arckon container on the private
+Docker network. The provisioning script pre-fills this value automatically.
+
+## 4b. Add an additional Workspace domain
+
+A tenant may monitor multiple Google Workspace domains (for example, separate
+secondary domains or subsidiary tenants). Each domain needs its own service
+account, delegated admin, and state file, but shares the tenant's ingest
+token.
+
+Use the bundled helper script on the Arckon host:
+
+```sh
+deploy/gcp/add_workspace_domain.sh \
+  CUSTOMER_ID \
+  WORKSPACE_DOMAIN \
+  ADMIN_EMAIL \
+  /path/to/service-account-key.json
+```
+
+Example:
+
+```sh
+deploy/gcp/add_workspace_domain.sh \
+  mfdynamicsllc \
+  riskraven.ai \
+  admin@riskraven.ai \
+  ./sa-riskraven.json
+```
+
+This creates a new systemd timer instance named
+`arckon-gworkspace-drive-forwarder@CUSTOMER_ID-DOMAIN.timer` that polls
+the additional domain independently and forwards events to the same tenant.
+
+Repeat for each additional domain. Each domain's service account must have
+domain-wide delegation in its own Google Workspace Admin Console.
 
 ## 5. Verify alerts end to end
 

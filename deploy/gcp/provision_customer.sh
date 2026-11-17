@@ -125,9 +125,22 @@ docker exec sentinel-nginx nginx -s reload
 # Enable the Google Workspace Drive forwarder timer for every customer.
 # The service has ConditionPathExists=/etc/arckon-drive-forwarder/%i.env,
 # so the timer is a no-op until the customer creates that env file with
-# their ADMIN_EMAIL and WORKSPACE_DOMAIN. When they do, polling starts
-# automatically without any further systemd action.
+# their ADMIN_EMAIL, WORKSPACE_DOMAIN, and ARCKON_URL. When they do,
+# polling starts automatically without any further systemd action.
 mkdir -p /etc/arckon-drive-forwarder
+# Write a template env file if one does not already exist. The customer
+# fills in ADMIN_EMAIL and WORKSPACE_DOMAIN; ARCKON_URL is pre-filled.
+ENV_FILE="/etc/arckon-drive-forwarder/${CUSTOMER_ID}.env"
+if [ ! -f "$ENV_FILE" ]; then
+    cat > "$ENV_FILE" <<EOF
+# Google Workspace Drive audit forwarder for ${CUSTOMER_ID}
+# Fill in these values, then the timer will start automatically.
+ADMIN_EMAIL=
+WORKSPACE_DOMAIN=
+ARCKON_URL=http://sentinel-${CUSTOMER_ID}:7331
+EOF
+    chmod 600 "$ENV_FILE"
+fi
 systemctl enable arckon-gworkspace-drive-forwarder@${CUSTOMER_ID}.timer
 systemctl start arckon-gworkspace-drive-forwarder@${CUSTOMER_ID}.timer
 
