@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## 1.0.76 - 2026-11-17
+
+### Fixed
+- Republish the verified Codex detection release after a transient tenant restart failure caused the prior signed deployment to roll back and quarantine.
+
 ## 1.0.75 - 2026-11-12
 
 ### Fixed
