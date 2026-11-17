@@ -1,0 +1,266 @@
+{
+  "name": "DIA TMF Reference Model (Simplified)",
+  "version": "3.0.0",
+  "description": "A simplified DIA TMF Reference Model for eTMF completeness assessment. Customers can customize this profile to match their study-specific TMF requirements. Each artifact maps to ALCOA+ data integrity dimensions.",
+  "zones": [
+    {
+      "id": "01",
+      "name": "Trial Management",
+      "sections": [
+        {
+          "id": "01.01",
+          "name": "Trial Master File",
+          "artifacts": [
+            {
+              "id": "01.01.01",
+              "name": "TMF Index",
+              "required_phases": ["setup", "conduct", "closeout"],
+              "alcoa_dimensions": ["complete", "consistent", "enduring"],
+              "require_signature": false,
+              "require_version_control": true
+            },
+            {
+              "id": "01.01.02",
+              "name": "TMF Quality Control Records",
+              "required_phases": ["conduct", "closeout"],
+              "alcoa_dimensions": ["attributable", "contemporaneous", "accurate"],
+              "require_signature": true,
+              "require_version_control": true
+            }
+          ]
+        },
+        {
+          "id": "01.02",
+          "name": "Trial Management",
+          "artifacts": [
+            {
+              "id": "01.02.01",
+              "name": "Trial Status Reports",
+              "required_phases": ["conduct"],
+              "alcoa_dimensions": ["attributable", "contemporaneous", "legible"],
+              "require_signature": false,
+              "require_version_control": false
+            },
+            {
+              "id": "01.02.02",
+              "name": "Trial Monitoring Plan",
+              "required_phases": ["setup"],
+              "alcoa_dimensions": ["attributable", "original", "accurate"],
+              "require_signature": true,
+              "require_version_control": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "02",
+      "name": "Trial Setup",
+      "sections": [
+        {
+          "id": "02.01",
+          "name": "Protocol",
+          "artifacts": [
+            {
+              "id": "02.01.01",
+              "name": "Protocol and Amendments",
+              "required_phases": ["setup", "conduct"],
+              "alcoa_dimensions": ["attributable", "original", "accurate", "enduring"],
+              "require_signature": true,
+              "require_version_control": true
+            },
+            {
+              "id": "02.01.02",
+              "name": "Protocol Deviations",
+              "required_phases": ["conduct"],
+              "alcoa_dimensions": ["attributable", "contemporaneous", "complete"],
+              "require_signature": true,
+              "require_version_control": false
+            }
+          ]
+        },
+        {
+          "id": "02.02",
+          "name": "Informed Consent",
+          "artifacts": [
+            {
+              "id": "02.02.01",
+              "name": "Informed Consent Form",
+              "required_phases": ["setup", "conduct"],
+              "alcoa_dimensions": ["attributable", "original", "legible", "enduring"],
+              "require_signature": true,
+              "require_version_control": true
+            },
+            {
+              "id": "02.02.02",
+              "name": "Subject Consent Documentation",
+              "required_phases": ["conduct"],
+              "alcoa_dimensions": ["attributable", "contemporaneous", "original", "legible"],
+              "require_signature": true,
+              "require_version_control": false
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "03",
+      "name": "IRB/IEC",
+      "sections": [
+        {
+          "id": "03.01",
+          "name": "IRB/IEC Approvals",
+          "artifacts": [
+            {
+              "id": "03.01.01",
+              "name": "IRB/IEC Approval Letter",
+              "required_phases": ["setup", "conduct"],
+              "alcoa_dimensions": ["attributable", "original", "accurate", "enduring"],
+              "require_signature": true,
+              "require_version_control": true
+            },
+            {
+              "id": "03.01.02",
+              "name": "IRB/IEC Membership Roster",
+              "required_phases": ["setup"],
+              "alcoa_dimensions": ["attributable", "complete"],
+              "require_signature": false,
+              "require_version_control": false
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "04",
+      "name": "Regulatory",
+      "sections": [
+        {
+          "id": "04.01",
+          "name": "Regulatory Submissions",
+          "artifacts": [
+            {
+              "id": "04.01.01",
+              "name": "Regulatory Authority Approvals",
+              "required_phases": ["setup"],
+              "alcoa_dimensions": ["attributable", "original", "accurate", "enduring"],
+              "require_signature": true,
+              "require_version_control": true
+            },
+            {
+              "id": "04.01.02",
+              "name": "Investigational New Drug Application",
+              "required_phases": ["setup"],
+              "alcoa_dimensions": ["attributable", "original", "accurate", "enduring"],
+              "require_signature": true,
+              "require_version_control": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "05",
+      "name": "Trial Conduct",
+      "sections": [
+        {
+          "id": "05.01",
+          "name": "Subject Data",
+          "artifacts": [
+            {
+              "id": "05.01.01",
+              "name": "Case Report Forms",
+              "required_phases": ["conduct"],
+              "alcoa_dimensions": ["attributable", "contemporaneous", "original", "accurate", "complete", "legible", "consistent", "enduring", "available"],
+              "require_signature": false,
+              "require_version_control": true
+            },
+            {
+              "id": "05.01.02",
+              "name": "Source Documents",
+              "required_phases": ["conduct"],
+              "alcoa_dimensions": ["attributable", "contemporaneous", "original", "accurate", "legible", "enduring"],
+              "require_signature": false,
+              "require_version_control": false
+            }
+          ]
+        },
+        {
+          "id": "05.02",
+          "name": "Safety Reporting",
+          "artifacts": [
+            {
+              "id": "05.02.01",
+              "name": "Adverse Event Reports",
+              "required_phases": ["conduct"],
+              "alcoa_dimensions": ["attributable", "contemporaneous", "complete", "accurate"],
+              "require_signature": true,
+              "require_version_control": false
+            },
+            {
+              "id": "05.02.02",
+              "name": "Serious Adverse Event Narratives",
+              "required_phases": ["conduct"],
+              "alcoa_dimensions": ["attributable", "contemporaneous", "accurate", "legible"],
+              "require_signature": true,
+              "require_version_control": false
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "06",
+      "name": "Trial Closeout",
+      "sections": [
+        {
+          "id": "06.01",
+          "name": "Database Lock",
+          "artifacts": [
+            {
+              "id": "06.01.01",
+              "name": "Database Lock Documentation",
+              "required_phases": ["closeout"],
+              "alcoa_dimensions": ["attributable", "contemporaneous", "accurate", "enduring"],
+              "require_signature": true,
+              "require_version_control": true
+            },
+            {
+              "id": "06.01.02",
+              "name": "Statistical Analysis Plan",
+              "required_phases": ["conduct", "closeout"],
+              "alcoa_dimensions": ["attributable", "original", "accurate"],
+              "require_signature": true,
+              "require_version_control": true
+            }
+          ]
+        },
+        {
+          "id": "06.02",
+          "name": "Final Study Report",
+          "artifacts": [
+            {
+              "id": "06.02.01",
+              "name": "Clinical Study Report",
+              "required_phases": ["closeout"],
+              "alcoa_dimensions": ["attributable", "original", "accurate", "complete", "enduring"],
+              "require_signature": true,
+              "require_version_control": true
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "alcoa_plus_dimensions": {
+    "attributable": "The identity of the person or system that created or modified data is known and recorded.",
+    "legible": "Data is readable and understandable by humans, permanently retained, and not obscured or overwritten.",
+    "contemporaneous": "Data is recorded at the time it is generated or observed, not backdated or delayed.",
+    "original": "The first capture of data or a certified true copy, with source clearly identified.",
+    "accurate": "Data is correct, complete, valid, and free from error or unexplained discrepancy.",
+    "complete": "All data and metadata are present, including repeats, retests, and audit trails.",
+    "consistent": "Data is logically coherent across records, systems, and time, with no contradictions.",
+    "enduring": "Data is retained in a durable form for the required retention period, resistant to loss or degradation.",
+    "available": "Data can be accessed and retrieved by authorized users when needed throughout the retention period."
+  }
+}
