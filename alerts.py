@@ -532,8 +532,6 @@ def fire_cloud_asset_alert(event: dict, alert_cfg: dict, store=None) -> None:
         title += f" on {device_name}"
     elif source_ip:
         title += f" from {source_ip}"
-    if accessed_at:
-        title += f" at {accessed_at}"
     payload = {
         'event': 'protected_cloud_asset_access', 'severity': 'CRITICAL',
         'device': device_label, 'host': account, 'service': actor,

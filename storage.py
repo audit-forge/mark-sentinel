@@ -336,6 +336,7 @@ class AgentStore:
                     tag_key         TEXT NOT NULL DEFAULT '',
                     tag_value       TEXT NOT NULL DEFAULT '',
                     ai_only         INTEGER NOT NULL DEFAULT 0,
+                    alert_mode      TEXT NOT NULL DEFAULT 'all',
                     created_by      TEXT NOT NULL DEFAULT '',
                     created_at      INTEGER NOT NULL,
                     updated_at      INTEGER NOT NULL,
@@ -430,6 +431,9 @@ class AgentStore:
             pca_cols = {r[1] for r in conn.execute("PRAGMA table_info(protected_cloud_assets)")}
             if 'ai_only' not in pca_cols:
                 conn.execute("ALTER TABLE protected_cloud_assets ADD COLUMN ai_only INTEGER NOT NULL DEFAULT 0")
+            if 'alert_mode' not in pca_cols:
+                conn.execute("ALTER TABLE protected_cloud_assets ADD COLUMN alert_mode TEXT NOT NULL DEFAULT 'all'")
+                conn.execute("UPDATE protected_cloud_assets SET alert_mode='automation_only' WHERE ai_only=1")
             # ai_spend: add client_org_id to pre-existing tables (nullable→default '')
             spend_cols = {r[1] for r in conn.execute("PRAGMA table_info(ai_spend)")}
             if 'client_org_id' not in spend_cols:
@@ -1838,30 +1842,45 @@ class AgentStore:
 
     # ── Protected Cloud Assets ────────────────────────────────────────────────
 
+    _VALID_ALERT_MODES = frozenset(('all', 'automation_only', 'human_only'))
+
     def add_protected_cloud_asset(self, provider: str, resource_type: str,
                                   account_id: str, resource_scope: str,
                                   tag_key: str = '', tag_value: str = '',
                                   created_by: str = '',
-                                  ai_only: bool = False) -> int:
+                                  ai_only: bool = False,
+                                  alert_mode: str = '') -> int:
         """Add an explicit cloud-resource scope, optionally requiring a tag.
 
         Wildcards are rejected by the API before reaching this method. The
         audit record deliberately contains only policy metadata, never a cloud
-        access token or a provider event payload. When ai_only is True, only
-        events from AI/automated actors will trigger alerts.
+        access token or a provider event payload.
+
+        alert_mode controls which actor types trigger alerts:
+          'all'              — alert on every matching access event
+          'automation_only'  — alert only when the actor is AI/automated
+          'human_only'       — alert only when the actor is human
+
+        For backward compatibility, ai_only=True maps to
+        'automation_only' when alert_mode is not supplied.
         """
+        if not alert_mode:
+            alert_mode = 'automation_only' if ai_only else 'all'
+        if alert_mode not in self._VALID_ALERT_MODES:
+            raise ValueError(f'invalid alert_mode: {alert_mode}')
         now = int(time.time())
+        ai_only_val = 1 if alert_mode == 'automation_only' else 0
         with self._lock, self._conn() as conn:
             cur = conn.execute(
                 """INSERT INTO protected_cloud_assets
                    (provider, resource_type, account_id, resource_scope, tag_key,
-                    tag_value, ai_only, created_by, created_at, updated_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    tag_value, ai_only, alert_mode, created_by, created_at, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                    ON CONFLICT(provider, resource_type, account_id, resource_scope, tag_key, tag_value)
                    DO UPDATE SET updated_at=excluded.updated_at, created_by=excluded.created_by,
-                                 ai_only=excluded.ai_only""",
+                                 ai_only=excluded.ai_only, alert_mode=excluded.alert_mode""",
                 (provider, resource_type, account_id, resource_scope, tag_key,
-                 tag_value, 1 if ai_only else 0, created_by, now, now))
+                 tag_value, ai_only_val, alert_mode, created_by, now, now))
             policy_id = cur.lastrowid
             if not policy_id:
                 row = conn.execute(

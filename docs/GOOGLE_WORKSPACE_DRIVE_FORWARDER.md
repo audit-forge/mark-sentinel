@@ -36,8 +36,9 @@ instant or predictable. Drive log event data is retained for 6 months.
    URL. For example, `https://docs.google.com/document/d/1aB2cD3e/edit` becomes
    `gworkspace://1aB2cD3e`.
 4. Enter the Workspace domain in the **Workspace domain** field.
-5. Leave **AI only** off unless only automated identities should generate an
-   alert, then save the policy.
+5. Set **Alert mode** to **All access** to alert on all matching access events,
+   **Automation only** to alert only on AI/automated identities, or **Human only**
+   to alert only on human access, then save the policy.
 6. Select **Show Cloud Ingest Token** and store the displayed token in the
    customer's secret manager or a root-owned local file. Treat it as a password.
 

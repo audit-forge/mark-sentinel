@@ -5674,6 +5674,7 @@ load();
             tag_key = str(body.get('tag_key', '')).strip()
             tag_value = str(body.get('tag_value', '')).strip()
             ai_only = bool(body.get('ai_only', False))
+            alert_mode = str(body.get('alert_mode', '')).strip().lower()
             allowed = {
                 ('aws', 's3_object'): 's3://',
                 ('gcp', 'gcs_object'): 'gs://',
@@ -5697,7 +5698,8 @@ load();
             user = self._session_user()
             policy_id = self._store().add_protected_cloud_asset(
                 provider, resource_type, account_id, scope, tag_key, tag_value,
-                user['email'] if user else 'Dashboard user', ai_only=ai_only)
+                user['email'] if user else 'Dashboard user',
+                ai_only=ai_only, alert_mode=alert_mode)
             self._json({'ok': True, 'id': policy_id})
         except Exception as e:
             log.error('add protected cloud asset: %s', e, exc_info=True)
@@ -5765,15 +5767,20 @@ load();
             stored = store.ingest_protected_cloud_event(event, policy['id'])
             if stored:
                 from alerts import load_alert_config, fire_cloud_asset_alert
-                # If the policy has ai_only set, only fire the alert when
-                # the actor is classified as AI/automated. The event is
-                # still stored regardless.
-                is_ai_only = bool(policy.get('ai_only', 0))
+                # Determine whether this event should trigger an alert based
+                # on the policy's alert_mode. The event is stored regardless.
+                alert_mode = policy.get('alert_mode') or ('automation_only' if policy.get('ai_only') else 'all')
                 actor_type = event.get('actor_type', 'human')
-                if not is_ai_only or actor_type == 'ai':
+                should_alert = (
+                    alert_mode == 'all'
+                    or (alert_mode == 'automation_only' and actor_type == 'ai')
+                    or (alert_mode == 'human_only' and actor_type == 'human')
+                )
+                if should_alert:
                     fire_cloud_asset_alert(event, load_alert_config(ROOT / 'data' / 'alerts_config.json') or {}, store)
                 else:
-                    log.info('cloud asset alert suppressed (ai_only policy, human actor): %s', event.get('actor', ''))
+                    log.info('cloud asset alert suppressed (%s policy, %s actor): %s',
+                             alert_mode, actor_type, event.get('actor', ''))
             self._json({'ok': True, 'stored': int(stored)})
         except Exception as e:
             log.error('cloud asset event ingest: %s', e, exc_info=True)
@@ -8301,7 +8308,7 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
       <div><label id="ca-account-label" style="font-size:11px;color:#6B7280;display:block;margin-bottom:3px">AWS account ID</label><input id="ca-account" maxlength="128" placeholder="123456789012" style="width:130px;padding:6px 10px;border:1px solid #D1D5DB;border-radius:4px;font-size:13px"></div>
       <div><label style="font-size:11px;color:#6B7280;display:block;margin-bottom:3px">Optional tag key</label><input id="ca-tag-key" placeholder="Criticality" style="width:110px;padding:6px 10px;border:1px solid #D1D5DB;border-radius:4px;font-size:13px"></div>
       <div><label style="font-size:11px;color:#6B7280;display:block;margin-bottom:3px">Optional tag value</label><input id="ca-tag-value" placeholder="Critical" style="width:100px;padding:6px 10px;border:1px solid #D1D5DB;border-radius:4px;font-size:13px"></div>
-      <label style="font-size:12px;display:flex;align-items:center;gap:4px;cursor:pointer" title="Only alert when an AI/automated identity accesses the asset"><input type="checkbox" id="ca-ai-only"> AI only</label>
+      <div><label style="font-size:11px;color:#6B7280;display:block;margin-bottom:3px">Alert mode</label><select id="ca-alert-mode" style="padding:6px 10px;border:1px solid #D1D5DB;border-radius:4px;font-size:13px" title="Choose which actor types trigger alerts"><option value="all">All access</option><option value="automation_only">Automation only</option><option value="human_only">Human only</option></select></div>
       <button onclick="addCloudAssetPolicy()" style="background:#16A34A;color:#fff;border:none;border-radius:4px;padding:6px 16px;cursor:pointer;font-size:13px">Add</button>
     </div>
     <div id="ca-scope-help" style="display:none;margin-top:10px;font-size:12px;line-height:1.5;color:#374151"></div>
@@ -12641,7 +12648,7 @@ async function loadProtectedCloudAssets() {{
     const r = await fetch('/api/protected-cloud-assets'); const d = await r.json();
     const policies = d.policies || [];
     if (!policies.length) {{ list.innerHTML = '<div style="color:#6B7280">No cloud policies yet. Add an explicit S3 bucket or prefix to start monitoring.</div>'; return; }}
-    list.innerHTML = policies.map(p => `<div style="background:#fff;border:1px solid #E5E7EB;border-left:3px solid #4F46E5;border-radius:6px;padding:11px 14px;display:flex;gap:12px;align-items:center;margin-bottom:8px"><div style="flex:1"><strong style="font-size:13px">${{cloudEsc(p.provider)}} ${{cloudEsc(p.resource_type)}}</strong> <code style="font-size:12px">${{cloudEsc(p.resource_scope)}}</code>${{p.ai_only ? '<span style="font-size:10px;background:#EEF2FF;color:#4F46E5;border-radius:4px;padding:1px 6px;margin-left:6px">AI only</span>' : ''}}<div style="font-size:11px;color:#6B7280;margin-top:4px">Account/project: ${{cloudEsc(p.account_id || 'any')}}${{p.tag_key ? ' · Require tag/label: ' + cloudEsc(p.tag_key) + '=' + cloudEsc(p.tag_value) : ''}}</div></div><button onclick="removeCloudAssetPolicy(${{p.id}})" class="scan-btn" style="font-size:11px;color:#DC2626;border-color:#FECACA">Remove</button></div>`).join('');
+    list.innerHTML = policies.map(p => `<div style="background:#fff;border:1px solid #E5E7EB;border-left:3px solid #4F46E5;border-radius:6px;padding:11px 14px;display:flex;gap:12px;align-items:center;margin-bottom:8px"><div style="flex:1"><strong style="font-size:13px">${{cloudEsc(p.provider)}} ${{cloudEsc(p.resource_type)}}</strong> <code style="font-size:12px">${{cloudEsc(p.resource_scope)}}</code>${{(p.alert_mode || (p.ai_only ? 'automation_only' : 'all')) === 'automation_only' ? '<span style="font-size:10px;background:#EEF2FF;color:#4F46E5;border-radius:4px;padding:1px 6px;margin-left:6px">Automation only</span>' : (p.alert_mode === 'human_only' ? '<span style="font-size:10px;background:#FEF3C7;color:#92400E;border-radius:4px;padding:1px 6px;margin-left:6px">Human only</span>' : '')}}<div style="font-size:11px;color:#6B7280;margin-top:4px">Account/project: ${{cloudEsc(p.account_id || 'any')}}${{p.tag_key ? ' · Require tag/label: ' + cloudEsc(p.tag_key) + '=' + cloudEsc(p.tag_value) : ''}}</div></div><button onclick="removeCloudAssetPolicy(${{p.id}})" class="scan-btn" style="font-size:11px;color:#DC2626;border-color:#FECACA">Remove</button></div>`).join('');
   }} catch (e) {{ list.innerHTML = '<div style="color:#DC2626">Failed to load cloud policies.</div>'; }}
 }}
 async function showCloudIngestToken() {{
@@ -12659,7 +12666,8 @@ async function addCloudAssetPolicy() {{
   const tagValue = document.getElementById('ca-tag-value').value.trim();
   const type = {{aws:'s3_object',azure:'azure_blob',gcp:'gcs_object',gworkspace:'drive_file'}}[provider];
   const aiOnly = document.getElementById('ca-ai-only')?.checked || false;
-  const r = await fetch('/api/protected-cloud-assets', {{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{provider,resource_type:type,account_id:account,resource_scope:scope,tag_key:tagKey,tag_value:tagValue,ai_only:aiOnly}})}});
+  const alertMode = document.getElementById('ca-alert-mode')?.value || 'all';
+  const r = await fetch('/api/protected-cloud-assets', {{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{provider,resource_type:type,account_id:account,resource_scope:scope,tag_key:tagKey,tag_value:tagValue,ai_only:aiOnly,alert_mode:alertMode}})}});
   if (!r.ok) {{ const d = await r.json(); alert(d.error || 'Could not save policy'); return; }}
   document.getElementById('cloud-asset-form').style.display = 'none'; loadProtectedCloudAssets();
 }}

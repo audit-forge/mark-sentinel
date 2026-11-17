@@ -142,3 +142,58 @@ def test_detects_ai_vs_human_actors():
     assert detect_actor_type('keith@mfdynamics.ai') == 'human'
     assert detect_actor_type('user@company.com') == 'human'
     assert detect_actor_type('') == 'human'
+
+
+def test_alert_mode_all_is_default():
+    with tempfile.TemporaryDirectory() as tmp:
+        store = AgentStore(Path(tmp) / 'agents.db')
+        pid = store.add_protected_cloud_asset(
+            'aws', 's3_object', '', 's3://records/data', '', '', 'test')
+        policies = store.get_protected_cloud_assets()
+        assert policies[0]['alert_mode'] == 'all'
+
+
+def test_alert_mode_backward_compat_ai_only():
+    with tempfile.TemporaryDirectory() as tmp:
+        store = AgentStore(Path(tmp) / 'agents.db')
+        pid = store.add_protected_cloud_asset(
+            'aws', 's3_object', '', 's3://records/data', '', '', 'test',
+            ai_only=True)
+        policies = store.get_protected_cloud_assets()
+        assert policies[0]['alert_mode'] == 'automation_only'
+
+
+def test_alert_mode_human_only():
+    with tempfile.TemporaryDirectory() as tmp:
+        store = AgentStore(Path(tmp) / 'agents.db')
+        pid = store.add_protected_cloud_asset(
+            'aws', 's3_object', '', 's3://records/data', '', '', 'test',
+            alert_mode='human_only')
+        policies = store.get_protected_cloud_assets()
+        assert policies[0]['alert_mode'] == 'human_only'
+
+
+def test_alert_mode_rejects_invalid():
+    with tempfile.TemporaryDirectory() as tmp:
+        store = AgentStore(Path(tmp) / 'agents.db')
+        try:
+            store.add_protected_cloud_asset(
+                'aws', 's3_object', '', 's3://records/data', '', '', 'test',
+                alert_mode='bogus')
+            assert False, 'should have raised'
+        except ValueError:
+            pass
+
+
+def test_alert_mode_upsert_updates_existing():
+    with tempfile.TemporaryDirectory() as tmp:
+        store = AgentStore(Path(tmp) / 'agents.db')
+        store.add_protected_cloud_asset(
+            'aws', 's3_object', '', 's3://records/data', '', '', 'test',
+            alert_mode='all')
+        store.add_protected_cloud_asset(
+            'aws', 's3_object', '', 's3://records/data', '', '', 'test',
+            alert_mode='human_only')
+        policies = store.get_protected_cloud_assets()
+        assert len(policies) == 1
+        assert policies[0]['alert_mode'] == 'human_only'
