@@ -116,6 +116,7 @@ jobs:
       - name: Sign and verify complete deployment
         env:
           ARCKON_RELEASE_SIGNING_KEY: ${{ secrets.ARCKON_RELEASE_SIGNING_KEY }}
+          ARCKON_DEBUG_DEPLOY: '1'
         run: |
           python scripts/promote_deployment.py create --directory "$RUNNER_TEMP/deployment" \
             --revision "$(git rev-parse HEAD)" \

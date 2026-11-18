@@ -477,6 +477,9 @@ def main(argv=None):
         else:
             poll(args)
     except Exception:
+        if os.environ.get('ARCKON_DEBUG_DEPLOY'):
+            import traceback
+            traceback.print_exc()
         print('Deployment promotion failed; check trusted configuration, metadata, and host readiness.', file=sys.stderr)
         return 1
     return 0
