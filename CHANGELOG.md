@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## 1.0.80 - 2026-11-19
+
+### Added
+- **Model monitoring integration**: model registry connector, runtime metric drift detection, threshold breach alerts, version drift detection, missing monitoring gap analysis, and unapproved model detection. API endpoints for ingest and status assessment.
+- **Training-data provenance**: dataset registry connector, pipeline event normalization, checksum mismatch detection, unapproved training data detection, lineage break detection, and schema/distribution anomaly flagging. API endpoints for ingest and status assessment.
+
 ## 1.0.79 - 2026-11-19
 
 ### Fixed
