@@ -8018,7 +8018,8 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
       {'<button class="sb-item" id="nav-reseller" onclick="navTo(\'reseller\')">&#127970; MSP View</button>' if current_user_is_reseller else ''}
       <div class="sb-group">Fleet</div>
       <button class="sb-item" id="nav-shadow" onclick="navTo('shadow')">&#9888; Shadow AI</button>
-       <button class="sb-item" id="nav-endpoint-ai" onclick="navTo('endpoint-ai')">&#129302; Endpoint AI</button>
+        <button class="sb-item" id="nav-endpoint-ai" onclick="navTo('endpoint-ai')">&#129302; Endpoint AI</button>
+        <button class="sb-item" id="nav-etmf" onclick="navTo('etmf')">&#128203; eTMF Completeness</button>
        <button class="sb-item" id="nav-network-assets" onclick="navTo('network-assets')">&#127760; Network Inventory</button>
       <button class="sb-item" id="nav-inventory" onclick="navTo('inventory')">&#129302; AI Asset Inventory</button>
       <button class="sb-item" id="nav-spend" onclick="navTo('spend')">&#128176; AI Spend</button>
@@ -8199,9 +8200,50 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
   </div>
   <p style="font-size:12px;color:#6B7280">Governance policies apply to the exact tool name across this client organization. Restricted is a classification, not an execution block. Risk scores remain agent-reported.</p>
   {governance_audit_html}
-  </div>
+   </div>
 
-  <div class="page" id="page-network-assets">
+   <div class="page" id="page-etmf">
+   <div id="etmf-section" style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:8px">
+     <div>
+       <div class="sec-hdr" style="margin:0;padding:0;display:flex;align-items:center;gap:10px">eTMF Completeness Assessment</div>
+       <div style="font-size:12px;color:#6B7280;margin-top:4px">DIA TMF Reference Model assessment with ALCOA+ data integrity scoring. Provides evidence inputs for qualified QA/CSV review.</div>
+     </div>
+     <div style="display:flex;gap:8px;align-items:end">
+       <div><label style="font-size:11px;color:#6B7280;display:block;margin-bottom:3px">Study</label><select id="etmf-study-select" onchange="loadETMFStatus()" style="padding:6px 10px;border:1px solid #D1D5DB;border-radius:4px;font-size:13px"><option value="">Select study...</option></select></div>
+       <div><label style="font-size:11px;color:#6B7280;display:block;margin-bottom:3px">Phase</label><select id="etmf-phase-select" onchange="loadETMFStatus()" style="padding:6px 10px;border:1px solid #D1D5DB;border-radius:4px;font-size:13px"><option value="setup">Setup</option><option value="conduct" selected>Conduct</option><option value="closeout">Closeout</option></select></div>
+       <button onclick="loadETMFStatus()" class="scan-btn" style="font-size:12px">&#128260; Refresh</button>
+     </div>
+   </div>
+
+   <div id="etmf-empty" style="color:#6B7280;font-size:13px;padding:24px 0">No studies with ingested eTMF metadata. Forward eTMF document metadata to the ingest endpoint to begin assessment.</div>
+
+   <div id="etmf-content" style="display:none">
+     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-bottom:18px">
+       <div style="background:#fff;border:1px solid #E5E7EB;border-radius:7px;padding:13px 15px"><div id="etmf-score" style="font-size:23px;font-weight:700;color:#111827">--</div><div style="font-size:11px;color:#6B7280;text-transform:uppercase;letter-spacing:.06em;margin-top:3px">Completeness Score</div></div>
+       <div style="background:#fff;border:1px solid #E5E7EB;border-radius:7px;padding:13px 15px"><div id="etmf-total" style="font-size:23px;font-weight:700;color:#111827">--</div><div style="font-size:11px;color:#6B7280;text-transform:uppercase;letter-spacing:.06em;margin-top:3px">Required Artifacts</div></div>
+       <div style="background:#fff;border:1px solid #E5E7EB;border-radius:7px;padding:13px 15px"><div id="etmf-present" style="font-size:23px;font-weight:700;color:#16A34A">--</div><div style="font-size:11px;color:#6B7280;text-transform:uppercase;letter-spacing:.06em;margin-top:3px">Present</div></div>
+       <div style="background:#fff;border:1px solid #E5E7EB;border-radius:7px;padding:13px 15px"><div id="etmf-missing" style="font-size:23px;font-weight:700;color:#DC2626">--</div><div style="font-size:11px;color:#6B7280;text-transform:uppercase;letter-spacing:.06em;margin-top:3px">Missing</div></div>
+       <div style="background:#fff;border:1px solid #E5E7EB;border-radius:7px;padding:13px 15px"><div id="etmf-ai-prov" style="font-size:23px;font-weight:700;color:#4F46E5">--</div><div style="font-size:11px;color:#6B7280;text-transform:uppercase;letter-spacing:.06em;margin-top:3px">AI Provenance</div></div>
+     </div>
+
+     <div class="sec-hdr" style="margin-bottom:8px">ALCOA+ Dimension Summary</div>
+     <div id="etmf-alcoa" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px;margin-bottom:18px"></div>
+
+     <div class="sec-hdr" style="margin-bottom:8px">Missing Required Artifacts</div>
+     <div id="etmf-missing-list" style="margin-bottom:18px"></div>
+
+     <div class="sec-hdr" style="margin-bottom:8px">Present Artifacts</div>
+     <div id="etmf-present-list" style="margin-bottom:18px"></div>
+
+     <div class="sec-hdr" style="margin-bottom:8px">Findings <span id="etmf-finding-count" style="font-size:11px;font-weight:500;color:#9CA3AF"></span></div>
+     <div id="etmf-findings" style="margin-bottom:18px"></div>
+
+     <div class="sec-hdr" style="margin-bottom:8px">AI Provenance Gaps</div>
+     <div id="etmf-ai-gaps"></div>
+   </div>
+   </div>
+
+   <div class="page" id="page-network-assets">
     <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:18px;flex-wrap:wrap;gap:14px">
       <div>
         <div class="sec-hdr" style="margin:0;padding:0">Network Inventory</div>
@@ -9193,7 +9235,8 @@ function navTo(page) {{
    if (page === 'network-assets') {{ loadNetworkAssetScans(); }}
    if (page === 'spend') {{ loadSpend(); }}
     if (page === 'protected-files') {{ loadProtectedPaths(); loadAccessEvents(); loadPFAuditLog(); loadPFChainStatus(); }}
-   if (page === 'protected-cloud-assets') {{ loadProtectedCloudAssets(); loadProtectedCloudEvents(); }}
+    if (page === 'protected-cloud-assets') {{ loadProtectedCloudAssets(); loadProtectedCloudEvents(); }}
+   if (page === 'etmf') {{ loadETMFStudies(); }}
   if (page === 'probe') {{
     const fr = document.getElementById('probe-iframe');
     if (fr && fr.getAttribute('data-loaded') === '0') {{
@@ -12782,7 +12825,96 @@ async function loadProtectedCloudEvents() {{
     const r = await fetch('/api/protected-cloud-assets/events'); const d = await r.json(); const events = d.events || [];
     if (!events.length) {{ list.innerHTML = '<div style="color:#6B7280">No protected cloud-asset access events yet.</div>'; return; }}
     list.innerHTML = events.map(e => `<div style="background:#fff;border:1px solid #FECACA;border-left:3px solid #DC2626;border-radius:6px;padding:11px 14px;margin-bottom:8px"><div style="font-size:13px"><strong>CRITICAL</strong> · ${{cloudEsc(e.action)}} <code>${{cloudEsc(e.resource)}}</code></div><div style="font-size:11px;color:#6B7280;margin-top:5px">${{cloudEsc(e.provider)}} · account ${{cloudEsc(e.account_id)}} · <strong>provider audit actor</strong> ${{cloudEsc(e.actor)}}${{e.actor_type === 'ai' ? ' <span style="color:#4F46E5;font-weight:600">[AI]</span>' : ' <span style="color:#6B7280">[User]</span>'}} · ${{new Date(e.ts * 1000).toLocaleString()}}</div></div>`).join('');
-  }} catch (e) {{ list.innerHTML = '<div style="color:#DC2626">Failed to load cloud events.</div>'; }}
+   }} catch (e) {{ list.innerHTML = '<div style="color:#DC2626">Failed to load cloud events.</div>'; }}
+}}
+
+// ── eTMF Completeness ──────────────────────────────────────────────────────
+
+async function loadETMFStudies() {{
+  try {{
+    const r = await fetch('/api/etmf/studies'); const d = await r.json();
+    const sel = document.getElementById('etmf-study-select');
+    const studies = d.studies || [];
+    sel.innerHTML = studies.length
+      ? studies.map(s => `<option value="${{s}}">${{s}}</option>`).join('')
+      : '<option value="">No studies yet</option>';
+    if (studies.length) {{
+      document.getElementById('etmf-empty').style.display = 'none';
+      document.getElementById('etmf-content').style.display = 'block';
+      loadETMFStatus();
+    }} else {{
+      document.getElementById('etmf-empty').style.display = 'block';
+      document.getElementById('etmf-content').style.display = 'none';
+    }}
+  }} catch (e) {{
+    console.error('eTMF studies load error:', e);
+  }}
+}}
+
+async function loadETMFStatus() {{
+  const studyId = document.getElementById('etmf-study-select')?.value;
+  const phase = document.getElementById('etmf-phase-select')?.value || 'conduct';
+  if (!studyId) return;
+  try {{
+    const r = await fetch(`/api/etmf/status?study_id=${{encodeURIComponent(studyId)}}&phase=${{encodeURIComponent(phase)}}`);
+    if (!r.ok) throw new Error(r.status);
+    const d = await r.json();
+    renderETMFStatus(d);
+  }} catch (e) {{
+    console.error('eTMF status load error:', e);
+  }}
+}}
+
+function renderETMFStatus(d) {{
+  const score = Math.round((d.completeness_score || 0) * 100);
+  const scoreColor = score >= 80 ? '#16A34A' : score >= 50 ? '#F59E0B' : '#DC2626';
+  document.getElementById('etmf-score').textContent = score + '%';
+  document.getElementById('etmf-score').style.color = scoreColor;
+  document.getElementById('etmf-total').textContent = d.total_required || 0;
+  document.getElementById('etmf-present').textContent = d.present_count || 0;
+  document.getElementById('etmf-missing').textContent = d.missing_count || 0;
+  document.getElementById('etmf-ai-prov').textContent = d.ai_provenance_count || 0;
+
+  // ALCOA+ dimensions
+  const alcoaEl = document.getElementById('etmf-alcoa');
+  const alcoaData = d.alcoa_summary || {{}};
+  const dimLabels = ['attributable','legible','contemporaneous','original','accurate','complete','consistent','enduring','available'];
+  alcoaEl.innerHTML = dimLabels.map(dim => {{
+    const count = alcoaData[dim] || 0;
+    const total = d.present_count || 1;
+    const pct = Math.round((count / total) * 100);
+    const color = pct >= 80 ? '#16A34A' : pct >= 50 ? '#F59E0B' : '#DC2626';
+    return `<div style="background:#fff;border:1px solid #E5E7EB;border-radius:6px;padding:10px 12px"><div style="font-size:14px;font-weight:700;color:${{color}}">${{count}}/${{total}}</div><div style="font-size:10px;color:#6B7280;text-transform:capitalize;margin-top:2px">${{dim}}</div></div>`;
+  }}).join('');
+
+  // Missing artifacts
+  const missingEl = document.getElementById('etmf-missing-list');
+  const missing = d.missing_artifacts || [];
+  missingEl.innerHTML = missing.length
+    ? missing.map(m => `<div style="background:#fff;border:1px solid #FECACA;border-left:3px solid #DC2626;border-radius:6px;padding:10px 14px;margin-bottom:6px"><strong style="font-size:13px">${{esc(m.artifact_name)}}</strong> <span style="font-size:11px;color:#6B7280">${{esc(m.zone)}} > ${{esc(m.section)}}</span> <span style="font-size:10px;background:#FEE2E2;color:#991B1B;border-radius:4px;padding:1px 6px;margin-left:4px">${{esc(m.issue)}}</span></div>`).join('')
+    : '<div style="color:#16A34A;font-size:13px">All required artifacts present.</div>';
+
+  // Present artifacts
+  const presentEl = document.getElementById('etmf-present-list');
+  const present = d.present_artifacts || [];
+  presentEl.innerHTML = present.length
+    ? present.map(p => `<div style="background:#fff;border:1px solid #E5E7EB;border-left:3px solid #16A34A;border-radius:6px;padding:10px 14px;margin-bottom:6px"><strong style="font-size:13px">${{esc(p.artifact_name)}}</strong> <span style="font-size:11px;color:#6B7280">v${{esc(p.version)}} · ${{esc(p.status)}} · ${{p.doc_count}} doc(s)</span></div>`).join('')
+    : '<div style="color:#6B7280;font-size:13px">No artifacts present.</div>';
+
+  // Findings
+  const findingsEl = document.getElementById('etmf-findings');
+  const findings = d.findings || [];
+  document.getElementById('etmf-finding-count').textContent = `(${{findings.length}})`;
+  findingsEl.innerHTML = findings.length
+    ? findings.map(f => `<div style="background:#fff;border:1px solid #E5E7EB;border-left:3px solid ${{f.severity==='HIGH'?'#DC2626':f.severity==='MEDIUM'?'#F59E0B':'#6B7280'}};border-radius:6px;padding:10px 14px;margin-bottom:6px"><div style="font-size:13px;font-weight:600">${{esc(f.title)}}</div><div style="font-size:11px;color:#6B7280;margin-top:4px">${{esc(f.detail)}}</div></div>`).join('')
+    : '<div style="color:#16A34A;font-size:13px">No findings.</div>';
+
+  // AI provenance gaps
+  const gapsEl = document.getElementById('etmf-ai-gaps');
+  const gaps = d.ai_provenance_gaps || [];
+  gapsEl.innerHTML = gaps.length
+    ? gaps.map(g => `<div style="background:#fff;border:1px solid #E5E7EB;border-left:3px solid #4F46E5;border-radius:6px;padding:10px 14px;margin-bottom:6px"><strong style="font-size:13px">${{esc(g.artifact_name)}}</strong> <span style="font-size:11px;color:#6B7280">${{esc(g.issue)}}</span></div>`).join('')
+    : '<div style="color:#6B7280;font-size:13px">No AI provenance gaps detected.</div>';
 }}
 
 // ── Protected Files monitoring ──────────────────────────────────────────────
