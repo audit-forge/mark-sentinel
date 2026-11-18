@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## 1.0.78 - 2026-11-17
+
+### Added
+- **eTMF completeness assessment**: DIA TMF Reference Model profile, document metadata connector with AI provenance support, ALCOA+ dimension scoring engine (all 9 dimensions), completeness check engine with findings and framework citations, storage tables and methods, API endpoints (ingest, studies, documents, status), and dashboard UI with study/phase selectors, score cards, ALCOA+ grid, missing/present artifact lists, findings, and AI provenance gaps.
+
 ## 1.0.77 - 2026-11-17
 
 ### Added
