@@ -449,6 +449,74 @@ class AgentStore:
                 CREATE INDEX IF NOT EXISTS idx_etmf_assessments_study
                     ON etmf_assessments(study_id, assessed_at DESC);
 
+                CREATE TABLE IF NOT EXISTS model_registry (
+                    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                    model_id        TEXT NOT NULL,
+                    version         TEXT NOT NULL,
+                    intended_use    TEXT NOT NULL,
+                    approval_status TEXT NOT NULL DEFAULT 'draft',
+                    approved_by     TEXT NOT NULL DEFAULT '',
+                    approved_at     TEXT NOT NULL DEFAULT '',
+                    baseline_json   TEXT NOT NULL DEFAULT '{}',
+                    metadata_json   TEXT NOT NULL DEFAULT '{}',
+                    ingested_at     INTEGER NOT NULL,
+                    UNIQUE(model_id, version)
+                );
+                CREATE INDEX IF NOT EXISTS idx_model_registry_id
+                    ON model_registry(model_id, approval_status);
+
+                CREATE TABLE IF NOT EXISTS model_metrics (
+                    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                    model_id        TEXT NOT NULL,
+                    version         TEXT NOT NULL DEFAULT '',
+                    metric_name     TEXT NOT NULL,
+                    metric_value    REAL NOT NULL,
+                    threshold       REAL,
+                    baseline_value  REAL,
+                    status          TEXT NOT NULL DEFAULT 'normal',
+                    unit            TEXT NOT NULL DEFAULT '',
+                    observed_at     TEXT NOT NULL,
+                    details         TEXT NOT NULL DEFAULT '',
+                    ingested_at     INTEGER NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_model_metrics_model
+                    ON model_metrics(model_id, observed_at DESC);
+
+                CREATE TABLE IF NOT EXISTS dataset_registry (
+                    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                    dataset_id      TEXT NOT NULL,
+                    source          TEXT NOT NULL,
+                    owner           TEXT NOT NULL DEFAULT '',
+                    version         TEXT NOT NULL,
+                    checksum        TEXT NOT NULL DEFAULT '',
+                    checksum_algorithm TEXT NOT NULL DEFAULT 'sha256',
+                    lineage_json    TEXT NOT NULL DEFAULT '[]',
+                    access_policy   TEXT NOT NULL DEFAULT '',
+                    approved        INTEGER NOT NULL DEFAULT 0,
+                    registered_at   TEXT NOT NULL DEFAULT '',
+                    metadata_json   TEXT NOT NULL DEFAULT '{}',
+                    ingested_at     INTEGER NOT NULL,
+                    UNIQUE(dataset_id, version)
+                );
+                CREATE INDEX IF NOT EXISTS idx_dataset_registry_id
+                    ON dataset_registry(dataset_id, approved);
+
+                CREATE TABLE IF NOT EXISTS data_pipeline_events (
+                    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                    dataset_id      TEXT NOT NULL,
+                    event_type      TEXT NOT NULL,
+                    occurred_at     TEXT NOT NULL,
+                    version         TEXT NOT NULL DEFAULT '',
+                    actor           TEXT NOT NULL DEFAULT '',
+                    checksum        TEXT NOT NULL DEFAULT '',
+                    integrity_status TEXT NOT NULL DEFAULT 'unknown',
+                    model_id        TEXT NOT NULL DEFAULT '',
+                    details         TEXT NOT NULL DEFAULT '',
+                    ingested_at     INTEGER NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_data_pipeline_events_dataset
+                    ON data_pipeline_events(dataset_id, occurred_at DESC);
+
             """)
             # Migrations
             cols = {r[1] for r in conn.execute("PRAGMA table_info(devices)")}
@@ -2105,6 +2173,133 @@ class AgentStore:
                 "DELETE FROM etmf_documents WHERE study_id=?", (study_id,)).rowcount
             conn.execute("DELETE FROM etmf_assessments WHERE study_id=?", (study_id,))
             return doc_count
+
+    # ── Model monitoring ─────────────────────────────────────────────────────
+
+    def upsert_model_registry_entry(self, entry: dict) -> None:
+        import json as _json
+        now = int(time.time())
+        baseline = _json.dumps(entry.get('validation_baseline') or {})
+        metadata = _json.dumps(entry.get('metadata') or {})
+        with self._lock, self._conn() as conn:
+            conn.execute(
+                """INSERT INTO model_registry
+                   (model_id, version, intended_use, approval_status,
+                    approved_by, approved_at, baseline_json, metadata_json, ingested_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                   ON CONFLICT(model_id, version) DO UPDATE SET
+                    intended_use=excluded.intended_use,
+                    approval_status=excluded.approval_status,
+                    approved_by=excluded.approved_by,
+                    approved_at=excluded.approved_at,
+                    baseline_json=excluded.baseline_json,
+                    metadata_json=excluded.metadata_json,
+                    ingested_at=excluded.ingested_at""",
+                (entry['model_id'], entry['version'], entry['intended_use'],
+                 entry.get('approval_status', 'draft'), entry.get('approved_by', ''),
+                 entry.get('approved_at', ''), baseline, metadata, now))
+
+    def get_model_registry_entries(self) -> list[dict]:
+        import json as _json
+        with self._lock, self._conn() as conn:
+            rows = conn.execute(
+                "SELECT * FROM model_registry ORDER BY model_id, version DESC").fetchall()
+        result = []
+        for r in rows:
+            d = dict(r)
+            d['validation_baseline'] = _json.loads(d.pop('baseline_json', '{}'))
+            d['metadata'] = _json.loads(d.pop('metadata_json', '{}'))
+            result.append(d)
+        return result
+
+    def add_model_metric(self, metric: dict) -> None:
+        now = int(time.time())
+        with self._lock, self._conn() as conn:
+            conn.execute(
+                """INSERT INTO model_metrics
+                   (model_id, version, metric_name, metric_value, threshold,
+                    baseline_value, status, unit, observed_at, details, ingested_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (metric['model_id'], metric.get('version', ''), metric['metric_name'],
+                 metric['metric_value'], metric.get('threshold'),
+                 metric.get('baseline_value'), metric.get('status', 'normal'),
+                 metric.get('unit', ''), metric['observed_at'],
+                 metric.get('details', ''), now))
+
+    def get_model_metrics(self, model_id: str = '', limit: int = 500) -> list[dict]:
+        with self._lock, self._conn() as conn:
+            if model_id:
+                rows = conn.execute(
+                    "SELECT * FROM model_metrics WHERE model_id=? ORDER BY observed_at DESC LIMIT ?",
+                    (model_id, limit)).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT * FROM model_metrics ORDER BY observed_at DESC LIMIT ?",
+                    (limit,)).fetchall()
+        return [dict(r) for r in rows]
+
+    # ── Data provenance ──────────────────────────────────────────────────────
+
+    def upsert_dataset_registry_entry(self, entry: dict) -> None:
+        import json as _json
+        now = int(time.time())
+        lineage = _json.dumps(entry.get('lineage') or [])
+        metadata = _json.dumps(entry.get('metadata') or {})
+        with self._lock, self._conn() as conn:
+            conn.execute(
+                """INSERT INTO dataset_registry
+                   (dataset_id, source, owner, version, checksum, checksum_algorithm,
+                    lineage_json, access_policy, approved, registered_at, metadata_json, ingested_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                   ON CONFLICT(dataset_id, version) DO UPDATE SET
+                    source=excluded.source, owner=excluded.owner,
+                    checksum=excluded.checksum, checksum_algorithm=excluded.checksum_algorithm,
+                    lineage_json=excluded.lineage_json, access_policy=excluded.access_policy,
+                    approved=excluded.approved, registered_at=excluded.registered_at,
+                    metadata_json=excluded.metadata_json, ingested_at=excluded.ingested_at""",
+                (entry['dataset_id'], entry['source'], entry.get('owner', ''),
+                 entry['version'], entry.get('checksum', ''), entry.get('checksum_algorithm', 'sha256'),
+                 lineage, entry.get('access_policy', ''), 1 if entry.get('approved') else 0,
+                 entry.get('registered_at', ''), metadata, now))
+
+    def get_dataset_registry_entries(self) -> list[dict]:
+        import json as _json
+        with self._lock, self._conn() as conn:
+            rows = conn.execute(
+                "SELECT * FROM dataset_registry ORDER BY dataset_id, version DESC").fetchall()
+        result = []
+        for r in rows:
+            d = dict(r)
+            d['lineage'] = _json.loads(d.pop('lineage_json', '[]'))
+            d['metadata'] = _json.loads(d.pop('metadata_json', '{}'))
+            d['approved'] = bool(d.pop('approved', 0))
+            result.append(d)
+        return result
+
+    def add_data_pipeline_event(self, event: dict) -> None:
+        now = int(time.time())
+        with self._lock, self._conn() as conn:
+            conn.execute(
+                """INSERT INTO data_pipeline_events
+                   (dataset_id, event_type, occurred_at, version, actor,
+                    checksum, integrity_status, model_id, details, ingested_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (event['dataset_id'], event['event_type'], event['occurred_at'],
+                 event.get('version', ''), event.get('actor', ''), event.get('checksum', ''),
+                 event.get('integrity_status', 'unknown'), event.get('model_id', ''),
+                 event.get('details', ''), now))
+
+    def get_data_pipeline_events(self, dataset_id: str = '', limit: int = 500) -> list[dict]:
+        with self._lock, self._conn() as conn:
+            if dataset_id:
+                rows = conn.execute(
+                    "SELECT * FROM data_pipeline_events WHERE dataset_id=? ORDER BY occurred_at DESC LIMIT ?",
+                    (dataset_id, limit)).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT * FROM data_pipeline_events ORDER BY occurred_at DESC LIMIT ?",
+                    (limit,)).fetchall()
+        return [dict(r) for r in rows]
 
     # ── AI spend tracking ─────────────────────────────────────────────────────
 

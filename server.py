@@ -1570,6 +1570,8 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             '/api/etmf/studies': self._api_get_etmf_studies,
             '/api/etmf/documents': self._api_get_etmf_documents,
             '/api/etmf/status': self._api_get_etmf_status,
+            '/api/model-monitoring/status': self._api_get_model_monitoring_status,
+            '/api/data-provenance/status': self._api_get_data_provenance_status,
             '/api/siem/config':      self._api_get_siem_config,
             '/api/live-scan-config': self._api_get_live_scan_config,
             '/api/fleet/live-stats': self._api_fleet_live_stats,
@@ -1725,6 +1727,12 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         # eTMF forwarders use the same cloud-ingest or agent token.
         if path == '/api/etmf/events':
             self._api_etmf_events()
+            return
+        if path == '/api/model-monitoring/events':
+            self._api_model_monitoring_events()
+            return
+        if path == '/api/data-provenance/events':
+            self._api_data_provenance_events()
             return
 
         # All other POST endpoints require dashboard auth
@@ -5884,6 +5892,116 @@ load();
             self._json(result)
         except Exception as e:
             log.error('eTMF status: %s', e, exc_info=True)
+            self._json({'error': str(e)}, 500)
+
+    def _api_model_monitoring_events(self):
+        """POST /api/model-monitoring/events — ingest model registry entries and metrics."""
+        supplied = self.headers.get('Authorization', '').removeprefix('Bearer ').strip()
+        if not supplied:
+            self._send(401, b'Unauthorized', 'text/plain')
+            return
+        cloud_token = _cloud_ingest_token()
+        if not (cloud_token and hmac.compare_digest(supplied, cloud_token)):
+            if not self._check_agent_bearer():
+                self._send(401, b'Unauthorized', 'text/plain')
+                return
+        if _content_length(self.headers) > 1024 * 1024:
+            self._send(413, b'Payload too large', 'text/plain')
+            return
+        body = self._read_json_body(default=None)
+        if body is None:
+            self._send(400, b'Empty or invalid body', 'text/plain')
+            return
+        try:
+            from connectors.model_monitoring_connector import (
+                normalize_model_registry_entry, normalize_model_metric)
+            cust = self._get_agent_customer()
+            store = _get_store(cust['id']) if cust else self._store()
+            registry = body.get('registry', []) if isinstance(body, dict) else []
+            metrics = body.get('metrics', []) if isinstance(body, dict) else []
+            stored_reg = 0
+            stored_met = 0
+            for raw in registry[:200]:
+                entry = normalize_model_registry_entry(raw)
+                if entry:
+                    store.upsert_model_registry_entry(entry)
+                    stored_reg += 1
+            for raw in metrics[:500]:
+                metric = normalize_model_metric(raw)
+                if metric:
+                    store.add_model_metric(metric)
+                    stored_met += 1
+            self._json({'ok': True, 'registry_stored': stored_reg, 'metrics_stored': stored_met})
+        except Exception as e:
+            log.error('model monitoring ingest: %s', e, exc_info=True)
+            self._json({'error': 'model monitoring ingest failed'}, 500)
+
+    def _api_get_model_monitoring_status(self):
+        """GET /api/model-monitoring/status — model monitoring assessment."""
+        try:
+            store = self._store()
+            from checks.model_monitoring import assess_model_monitoring
+            registry = store.get_model_registry_entries()
+            metrics = store.get_model_metrics(limit=1000)
+            result = assess_model_monitoring(registry, metrics)
+            self._json(result)
+        except Exception as e:
+            log.error('model monitoring status: %s', e, exc_info=True)
+            self._json({'error': str(e)}, 500)
+
+    def _api_data_provenance_events(self):
+        """POST /api/data-provenance/events — ingest dataset registry and pipeline events."""
+        supplied = self.headers.get('Authorization', '').removeprefix('Bearer ').strip()
+        if not supplied:
+            self._send(401, b'Unauthorized', 'text/plain')
+            return
+        cloud_token = _cloud_ingest_token()
+        if not (cloud_token and hmac.compare_digest(supplied, cloud_token)):
+            if not self._check_agent_bearer():
+                self._send(401, b'Unauthorized', 'text/plain')
+                return
+        if _content_length(self.headers) > 1024 * 1024:
+            self._send(413, b'Payload too large', 'text/plain')
+            return
+        body = self._read_json_body(default=None)
+        if body is None:
+            self._send(400, b'Empty or invalid body', 'text/plain')
+            return
+        try:
+            from connectors.data_provenance_connector import (
+                normalize_dataset_registry, normalize_pipeline_event)
+            cust = self._get_agent_customer()
+            store = _get_store(cust['id']) if cust else self._store()
+            datasets = body.get('datasets', []) if isinstance(body, dict) else []
+            events = body.get('events', []) if isinstance(body, dict) else []
+            stored_ds = 0
+            stored_ev = 0
+            for raw in datasets[:200]:
+                ds = normalize_dataset_registry(raw)
+                if ds:
+                    store.upsert_dataset_registry_entry(ds)
+                    stored_ds += 1
+            for raw in events[:500]:
+                ev = normalize_pipeline_event(raw)
+                if ev:
+                    store.add_data_pipeline_event(ev)
+                    stored_ev += 1
+            self._json({'ok': True, 'datasets_stored': stored_ds, 'events_stored': stored_ev})
+        except Exception as e:
+            log.error('data provenance ingest: %s', e, exc_info=True)
+            self._json({'error': 'data provenance ingest failed'}, 500)
+
+    def _api_get_data_provenance_status(self):
+        """GET /api/data-provenance/status — data provenance assessment."""
+        try:
+            store = self._store()
+            from checks.data_provenance import assess_data_provenance
+            datasets = store.get_dataset_registry_entries()
+            events = store.get_data_pipeline_events(limit=1000)
+            result = assess_data_provenance(datasets, events)
+            self._json(result)
+        except Exception as e:
+            log.error('data provenance status: %s', e, exc_info=True)
             self._json({'error': str(e)}, 500)
 
     def _api_get_protected_paths(self):
