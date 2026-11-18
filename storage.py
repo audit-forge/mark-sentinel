@@ -416,6 +416,39 @@ class AgentStore:
                 CREATE INDEX IF NOT EXISTS idx_endpoint_ai_governance_audit_org
                     ON endpoint_ai_governance_audit(client_org_id, id DESC);
 
+                CREATE TABLE IF NOT EXISTS etmf_documents (
+                    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                    study_id        TEXT NOT NULL,
+                    document_id     TEXT NOT NULL,
+                    artifact_type   TEXT NOT NULL,
+                    site_id         TEXT NOT NULL DEFAULT '',
+                    version         TEXT NOT NULL DEFAULT '',
+                    author          TEXT NOT NULL DEFAULT '',
+                    approver        TEXT NOT NULL DEFAULT '',
+                    approved_at     TEXT NOT NULL DEFAULT '',
+                    created_at      TEXT NOT NULL,
+                    status          TEXT NOT NULL DEFAULT 'draft',
+                    signatures_json TEXT NOT NULL DEFAULT '[]',
+                    ai_provenance_json TEXT NOT NULL DEFAULT '',
+                    source_system   TEXT NOT NULL DEFAULT 'unknown',
+                    metadata_json   TEXT NOT NULL DEFAULT '{}',
+                    ingested_at     INTEGER NOT NULL,
+                    UNIQUE(study_id, document_id)
+                );
+                CREATE INDEX IF NOT EXISTS idx_etmf_documents_study
+                    ON etmf_documents(study_id, artifact_type);
+
+                CREATE TABLE IF NOT EXISTS etmf_assessments (
+                    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                    study_id        TEXT NOT NULL,
+                    phase           TEXT NOT NULL,
+                    result_json     TEXT NOT NULL,
+                    assessed_at     INTEGER NOT NULL,
+                    UNIQUE(study_id, phase)
+                );
+                CREATE INDEX IF NOT EXISTS idx_etmf_assessments_study
+                    ON etmf_assessments(study_id, assessed_at DESC);
+
             """)
             # Migrations
             cols = {r[1] for r in conn.execute("PRAGMA table_info(devices)")}
@@ -1971,6 +2004,107 @@ class AgentStore:
                 return False
             prev_hash = d['event_hash']
         return True
+
+    # ── eTMF document metadata and completeness assessments ─────────────────
+
+    def upsert_etmf_document(self, doc: dict) -> bool:
+        """Upsert a normalized eTMF document metadata record.
+
+        Returns True if a new row was inserted, False if an existing row
+        was updated.
+        """
+        import json as _json
+        now = int(time.time())
+        sigs_json = _json.dumps(doc.get('signatures', []))
+        ai_prov = doc.get('ai_provenance')
+        ai_json = _json.dumps(ai_prov) if ai_prov else ''
+        meta_json = _json.dumps(doc.get('metadata', {}))
+        with self._lock, self._conn() as conn:
+            cur = conn.execute(
+                """INSERT INTO etmf_documents
+                   (study_id, document_id, artifact_type, site_id, version,
+                    author, approver, approved_at, created_at, status,
+                    signatures_json, ai_provenance_json, source_system,
+                    metadata_json, ingested_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                   ON CONFLICT(study_id, document_id) DO UPDATE SET
+                    artifact_type=excluded.artifact_type,
+                    site_id=excluded.site_id,
+                    version=excluded.version,
+                    author=excluded.author,
+                    approver=excluded.approver,
+                    approved_at=excluded.approved_at,
+                    status=excluded.status,
+                    signatures_json=excluded.signatures_json,
+                    ai_provenance_json=excluded.ai_provenance_json,
+                    source_system=excluded.source_system,
+                    metadata_json=excluded.metadata_json,
+                    ingested_at=excluded.ingested_at""",
+                (doc['study_id'], doc['document_id'], doc['artifact_type'],
+                 doc.get('site_id', ''), doc.get('version', ''),
+                 doc.get('author', ''), doc.get('approver', ''),
+                 doc.get('approved_at', ''), doc['created_at'],
+                 doc.get('status', 'draft'),
+                 sigs_json, ai_json, doc.get('source_system', 'unknown'),
+                 meta_json, now))
+            return cur.rowcount > 0
+
+    def get_etmf_documents(self, study_id: str, limit: int = 500) -> list[dict]:
+        """Return eTMF document metadata for a study, newest first."""
+        import json as _json
+        with self._lock, self._conn() as conn:
+            rows = conn.execute(
+                "SELECT * FROM etmf_documents WHERE study_id=? ORDER BY ingested_at DESC LIMIT ?",
+                (study_id, limit)).fetchall()
+        result = []
+        for r in rows:
+            d = dict(r)
+            d['signatures'] = _json.loads(d.pop('signatures_json', '[]'))
+            ai = d.pop('ai_provenance_json', '')
+            d['ai_provenance'] = _json.loads(ai) if ai else None
+            d['metadata'] = _json.loads(d.pop('metadata_json', '{}'))
+            result.append(d)
+        return result
+
+    def save_etmf_assessment(self, study_id: str, phase: str, result: dict) -> None:
+        """Save a completeness assessment result for a study and phase."""
+        import json as _json
+        now = int(time.time())
+        with self._lock, self._conn() as conn:
+            conn.execute(
+                """INSERT INTO etmf_assessments
+                   (study_id, phase, result_json, assessed_at)
+                   VALUES (?, ?, ?, ?)
+                   ON CONFLICT(study_id, phase) DO UPDATE SET
+                    result_json=excluded.result_json,
+                    assessed_at=excluded.assessed_at""",
+                (study_id, phase, _json.dumps(result), now))
+
+    def get_etmf_assessment(self, study_id: str, phase: str) -> dict | None:
+        """Return the latest completeness assessment for a study and phase."""
+        import json as _json
+        with self._lock, self._conn() as conn:
+            row = conn.execute(
+                "SELECT result_json FROM etmf_assessments WHERE study_id=? AND phase=?",
+                (study_id, phase)).fetchone()
+        if not row:
+            return None
+        return _json.loads(row['result_json'])
+
+    def get_etmf_studies(self) -> list[str]:
+        """Return distinct study IDs that have ingested eTMF metadata."""
+        with self._lock, self._conn() as conn:
+            rows = conn.execute(
+                "SELECT DISTINCT study_id FROM etmf_documents ORDER BY study_id").fetchall()
+        return [r['study_id'] for r in rows]
+
+    def delete_etmf_study(self, study_id: str) -> int:
+        """Delete all eTMF documents and assessments for a study. Returns deleted count."""
+        with self._lock, self._conn() as conn:
+            doc_count = conn.execute(
+                "DELETE FROM etmf_documents WHERE study_id=?", (study_id,)).rowcount
+            conn.execute("DELETE FROM etmf_assessments WHERE study_id=?", (study_id,))
+            return doc_count
 
     # ── AI spend tracking ─────────────────────────────────────────────────────
 

@@ -1,4 +1,6 @@
 """Tests for eTMF completeness assessment and ALCOA+ dimension evaluation."""
+import json
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -9,6 +11,7 @@ from checks.etmf_completeness import (
     get_required_artifacts,
     assess_completeness,
 )
+from storage import AgentStore
 
 
 # ── Reference model tests ────────────────────────────────────────────────────
@@ -278,3 +281,89 @@ class TestCompleteness:
         result = assess_completeness([], phase='closeout')
         assert result['phase'] == 'closeout'
         assert result['total_required'] > 0
+
+
+# ── Storage tests ────────────────────────────────────────────────────────────
+
+class TestETMFStorage:
+    def _doc(self, **overrides):
+        doc = {
+            'document_id': 'DOC-001',
+            'artifact_type': 'Protocol and Amendments',
+            'study_id': 'STUDY-001',
+            'status': 'approved',
+            'created_at': '2026-01-15T10:00:00Z',
+            'version': '1.0',
+            'author': 'researcher@company.com',
+            'signatures': [{'signer': 'pi@site.com', 'signed_at': '2026-01-15T11:00:00Z', 'role': 'PI'}],
+            'source_system': 'veeva-vault',
+        }
+        doc.update(overrides)
+        return doc
+
+    def test_upsert_and_retrieve(self, tmp_path):
+        store = AgentStore(tmp_path / 'agents.db')
+        doc = self._doc()
+        store.upsert_etmf_document(doc)
+        docs = store.get_etmf_documents('STUDY-001')
+        assert len(docs) == 1
+        assert docs[0]['document_id'] == 'DOC-001'
+        assert docs[0]['artifact_type'] == 'Protocol and Amendments'
+        assert docs[0]['author'] == 'researcher@company.com'
+
+    def test_upsert_updates_existing(self, tmp_path):
+        store = AgentStore(tmp_path / 'agents.db')
+        store.upsert_etmf_document(self._doc(status='draft'))
+        store.upsert_etmf_document(self._doc(status='approved', version='2.0'))
+        docs = store.get_etmf_documents('STUDY-001')
+        assert len(docs) == 1
+        assert docs[0]['status'] == 'approved'
+        assert docs[0]['version'] == '2.0'
+
+    def test_retrieves_signatures_and_ai_provenance(self, tmp_path):
+        store = AgentStore(tmp_path / 'agents.db')
+        doc = self._doc(
+            ai_provenance={
+                'ai_tool_name': 'Claude',
+                'human_reviewer': 'qa@co.com',
+            }
+        )
+        store.upsert_etmf_document(doc)
+        docs = store.get_etmf_documents('STUDY-001')
+        assert len(docs[0]['signatures']) == 1
+        assert docs[0]['signatures'][0]['signer'] == 'pi@site.com'
+        assert docs[0]['ai_provenance'] is not None
+        assert docs[0]['ai_provenance']['ai_tool_name'] == 'Claude'
+
+    def test_get_studies(self, tmp_path):
+        store = AgentStore(tmp_path / 'agents.db')
+        store.upsert_etmf_document(self._doc(study_id='STUDY-A'))
+        store.upsert_etmf_document(self._doc(study_id='STUDY-B', document_id='DOC-B'))
+        studies = store.get_etmf_studies()
+        assert set(studies) == {'STUDY-A', 'STUDY-B'}
+
+    def test_save_and_get_assessment(self, tmp_path):
+        store = AgentStore(tmp_path / 'agents.db')
+        result = assess_completeness([], phase='conduct')
+        store.save_etmf_assessment('STUDY-001', 'conduct', result)
+        cached = store.get_etmf_assessment('STUDY-001', 'conduct')
+        assert cached is not None
+        assert cached['phase'] == 'conduct'
+        assert cached['completeness_score'] == 0.0
+
+    def test_delete_study(self, tmp_path):
+        store = AgentStore(tmp_path / 'agents.db')
+        store.upsert_etmf_document(self._doc())
+        store.save_etmf_assessment('STUDY-001', 'conduct', {'phase': 'conduct'})
+        count = store.delete_etmf_study('STUDY-001')
+        assert count == 1
+        assert store.get_etmf_documents('STUDY-001') == []
+        assert store.get_etmf_assessment('STUDY-001', 'conduct') is None
+
+    def test_multiple_documents_same_study(self, tmp_path):
+        store = AgentStore(tmp_path / 'agents.db')
+        store.upsert_etmf_document(self._doc(document_id='DOC-1', artifact_type='Protocol and Amendments'))
+        store.upsert_etmf_document(self._doc(document_id='DOC-2', artifact_type='Case Report Forms'))
+        store.upsert_etmf_document(self._doc(document_id='DOC-3', artifact_type='Adverse Event Reports'))
+        docs = store.get_etmf_documents('STUDY-001')
+        assert len(docs) == 3

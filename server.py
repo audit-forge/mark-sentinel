@@ -1567,6 +1567,9 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             '/api/protected-cloud-assets/events': self._api_get_protected_cloud_asset_events,
             '/api/protected-cloud-assets/audit': self._api_get_protected_cloud_assets_audit,
             '/api/protected-cloud-assets/ingest-token': self._api_get_cloud_ingest_token,
+            '/api/etmf/studies': self._api_get_etmf_studies,
+            '/api/etmf/documents': self._api_get_etmf_documents,
+            '/api/etmf/status': self._api_get_etmf_status,
             '/api/siem/config':      self._api_get_siem_config,
             '/api/live-scan-config': self._api_get_live_scan_config,
             '/api/fleet/live-stats': self._api_fleet_live_stats,
@@ -1718,6 +1721,10 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         # endpoint-agent token for an external cloud integration.
         if path == '/api/cloud-assets/events':
             self._api_cloud_asset_events()
+            return
+        # eTMF forwarders use the same cloud-ingest or agent token.
+        if path == '/api/etmf/events':
+            self._api_etmf_events()
             return
 
         # All other POST endpoints require dashboard auth
@@ -5785,6 +5792,100 @@ load();
         except Exception as e:
             log.error('cloud asset event ingest: %s', e, exc_info=True)
             self._json({'error': 'cloud event ingest failed'}, 500)
+
+    def _api_etmf_events(self):
+        """POST /api/etmf/events — ingest eTMF document metadata from a forwarder.
+
+        Uses the same authentication as cloud-asset events (cloud-ingest token
+        or agent token). Accepts a single document or a batch.
+        """
+        supplied = self.headers.get('Authorization', '').removeprefix('Bearer ').strip()
+        if not supplied:
+            self._send(401, b'Unauthorized', 'text/plain')
+            return
+        cloud_token = _cloud_ingest_token()
+        is_cloud_token = cloud_token and hmac.compare_digest(supplied, cloud_token)
+        if not is_cloud_token:
+            if not self._check_agent_bearer():
+                self._send(401, b'Unauthorized', 'text/plain')
+                return
+        if _content_length(self.headers) > 1024 * 1024:
+            self._send(413, b'Payload too large', 'text/plain')
+            return
+        try:
+            body = json.loads(self._read_json_body())
+        except (json.JSONDecodeError, ValueError):
+            self._send(400, b'Invalid JSON', 'text/plain')
+            return
+        try:
+            from connectors.etmf_connector import normalize_etmf_document
+            docs_raw = body if isinstance(body, list) else [body]
+            if len(docs_raw) > 500:
+                self._send(413, b'Too many documents (max 500)', 'text/plain')
+                return
+            cust = self._get_agent_customer()
+            store = _get_store(cust['id']) if cust else self._store()
+            stored = 0
+            failed = 0
+            for raw in docs_raw:
+                doc = normalize_etmf_document(raw)
+                if doc is None:
+                    failed += 1
+                    continue
+                store.upsert_etmf_document(doc)
+                stored += 1
+            self._json({'ok': True, 'stored': stored, 'failed': failed})
+        except Exception as e:
+            log.error('eTMF event ingest: %s', e, exc_info=True)
+            self._json({'error': 'etmf ingest failed'}, 500)
+
+    def _api_get_etmf_studies(self):
+        """GET /api/etmf/studies — list studies with ingested eTMF metadata."""
+        try:
+            studies = self._store().get_etmf_studies()
+            self._json({'studies': studies})
+        except Exception as e:
+            self._json({'studies': [], 'error': str(e)}, 500)
+
+    def _api_get_etmf_documents(self):
+        """GET /api/etmf/documents?study_id=...— list eTMF documents for a study."""
+        import urllib.parse as _up
+        qs = _up.parse_qs(_up.urlparse(self.path).query)
+        study_id = qs.get('study_id', [''])[0]
+        if not study_id:
+            self._json({'error': 'study_id is required'}, 400)
+            return
+        try:
+            docs = self._store().get_etmf_documents(study_id)
+            self._json({'documents': docs, 'count': len(docs)})
+        except Exception as e:
+            self._json({'documents': [], 'error': str(e)}, 500)
+
+    def _api_get_etmf_status(self):
+        """GET /api/etmf/status?study_id=...&phase=...— completeness assessment."""
+        import urllib.parse as _up
+        qs = _up.parse_qs(_up.urlparse(self.path).query)
+        study_id = qs.get('study_id', [''])[0]
+        phase = qs.get('phase', ['conduct'])[0]
+        if not study_id:
+            self._json({'error': 'study_id is required'}, 400)
+            return
+        try:
+            store = self._store()
+            # Check for a cached assessment first
+            cached = store.get_etmf_assessment(study_id, phase)
+            if cached:
+                self._json(cached)
+                return
+            # Run a fresh assessment
+            from checks.etmf_completeness import assess_completeness
+            docs = store.get_etmf_documents(study_id)
+            result = assess_completeness(docs, phase=phase)
+            store.save_etmf_assessment(study_id, phase, result)
+            self._json(result)
+        except Exception as e:
+            log.error('eTMF status: %s', e, exc_info=True)
+            self._json({'error': str(e)}, 500)
 
     def _api_get_protected_paths(self):
         store = self._store()
