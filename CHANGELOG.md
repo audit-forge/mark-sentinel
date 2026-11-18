@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## 1.0.79 - 2026-11-19
+
+### Fixed
+- eTMF ingest endpoint double-parse bug: `_read_json_body` already returns a parsed dict/list; the handler was calling `json.loads()` on it again, causing a TypeError on batch ingest.
+
 ## 1.0.78 - 2026-11-17
 
 ### Added
