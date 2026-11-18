@@ -5812,10 +5812,9 @@ load();
         if _content_length(self.headers) > 1024 * 1024:
             self._send(413, b'Payload too large', 'text/plain')
             return
-        try:
-            body = json.loads(self._read_json_body())
-        except (json.JSONDecodeError, ValueError):
-            self._send(400, b'Invalid JSON', 'text/plain')
+        body = self._read_json_body(default=None)
+        if body is None:
+            self._send(400, b'Empty or invalid body', 'text/plain')
             return
         try:
             from connectors.etmf_connector import normalize_etmf_document
