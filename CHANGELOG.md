@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## 1.0.82 - 2026-11-19
+
+### Added
+- **Dashboard UI for model monitoring**: summary cards, version drift list, threshold breach list, monitoring gaps, and findings with severity color coding.
+- **Dashboard UI for data provenance**: summary cards, integrity violations, unapproved training, lineage breaks, anomalies, and findings.
+- **IP, geolocation, and Google AI-agent flag** in cloud-asset alert titles. Forwarder captures `ipAddress`, `isAgenticAction`, and `networkInfo` from Google's Admin SDK Reports API.
+- **eTMF HTTP ingest fix**: removed double-parse that caused TypeError on batch ingest.
+
 ## 1.0.80 - 2026-11-19
 
 ### Added
