@@ -149,7 +149,7 @@ def assess_completeness(
                     'check_id': CHECK_ID,
                     'severity': 'HIGH',
                     'title': f'Missing signatures: {req["artifact_name"]}',
-                    'detail': f'This artifact requires signatures per the TMF Reference Model, but none were found in the metadata',
+                    'detail': 'This artifact requires signatures per the TMF Reference Model, but none were found in the metadata',
                     'frameworks': {
                         'FDA 21 CFR Part 11': '§11.50',
                         'ICH E6(R2)': '§5.5.3',
