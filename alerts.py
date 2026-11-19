@@ -537,7 +537,10 @@ def fire_cloud_asset_alert(event: dict, alert_cfg: dict, store=None) -> None:
         title += f" from {source_ip}"
     # Add geolocation and network info if available
     if geo_subdivision:
-        title += f" ({geo_subdivision})"
+        title += f" ({geo_subdivision}"
+        if geo_asn:
+            title += f", ASN {geo_asn}"
+        title += ")"
     # Add Google's AI-agent classification if available
     if is_agentic:
         title += " [Google AI agent: Yes]"

@@ -87,3 +87,5 @@ output/.device_id
 dist/
 *.provisionprofile
 ArckonESCollector.app/
+nuitka-crash-report.xml
+releases/
