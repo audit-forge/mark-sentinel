@@ -81,7 +81,6 @@ def assess_completeness(
         model = load_reference_model()
 
     required = get_required_artifacts(model, phase)
-    required_by_name = {a['artifact_name'].lower(): a for a in required}
 
     # Group documents by artifact type (case-insensitive match)
     docs_by_type: dict[str, list[dict]] = {}
