@@ -8137,6 +8137,8 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
       <button class="sb-item" id="nav-shadow" onclick="navTo('shadow')">&#9888; Shadow AI</button>
         <button class="sb-item" id="nav-endpoint-ai" onclick="navTo('endpoint-ai')">&#129302; Endpoint AI</button>
         <button class="sb-item" id="nav-etmf" onclick="navTo('etmf')">&#128203; eTMF Completeness</button>
+        <button class="sb-item" id="nav-model-monitoring" onclick="navTo('model-monitoring')">&#128202; Model Monitoring</button>
+        <button class="sb-item" id="nav-data-provenance" onclick="navTo('data-provenance')">&#128279; Data Provenance</button>
        <button class="sb-item" id="nav-network-assets" onclick="navTo('network-assets')">&#127760; Network Inventory</button>
       <button class="sb-item" id="nav-inventory" onclick="navTo('inventory')">&#129302; AI Asset Inventory</button>
       <button class="sb-item" id="nav-spend" onclick="navTo('spend')">&#128176; AI Spend</button>
@@ -8356,7 +8358,67 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
      <div id="etmf-findings" style="margin-bottom:18px"></div>
 
      <div class="sec-hdr" style="margin-bottom:8px">AI Provenance Gaps</div>
-     <div id="etmf-ai-gaps"></div>
+      <div id="etmf-ai-gaps"></div>
+    </div>
+    </div>
+
+   <div class="page" id="page-model-monitoring">
+   <div id="model-monitoring-section" style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:8px">
+     <div>
+       <div class="sec-hdr" style="margin:0;padding:0;display:flex;align-items:center;gap:10px">Model Monitoring</div>
+       <div style="font-size:12px;color:#6B7280;margin-top:4px">Model registry drift detection, metric threshold monitoring, and approval gap analysis. Provides evidence inputs for QA/CSV review.</div>
+     </div>
+     <button onclick="loadModelMonitoringStatus()" class="scan-btn" style="font-size:12px">&#128260; Refresh</button>
+   </div>
+   <div id="model-monitoring-empty" style="color:#6B7280;font-size:13px;padding:24px 0">No model registry entries. Ingest model metadata through the API to begin monitoring.</div>
+   <div id="model-monitoring-content" style="display:none">
+     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-bottom:18px">
+       <div style="background:#fff;border:1px solid #E5E7EB;border-radius:7px;padding:13px 15px"><div id="mm-score" style="font-size:23px;font-weight:700;color:#111827">--</div><div style="font-size:11px;color:#6B7280;text-transform:uppercase;letter-spacing:.06em;margin-top:3px">Monitoring Score</div></div>
+       <div style="background:#fff;border:1px solid #E5E7EB;border-radius:7px;padding:13px 15px"><div id="mm-total" style="font-size:23px;font-weight:700;color:#111827">--</div><div style="font-size:11px;color:#6B7280;text-transform:uppercase;letter-spacing:.06em;margin-top:3px">Total Models</div></div>
+       <div style="background:#fff;border:1px solid #E5E7EB;border-radius:7px;padding:13px 15px"><div id="mm-approved" style="font-size:23px;font-weight:700;color:#16A34A">--</div><div style="font-size:11px;color:#6B7280;text-transform:uppercase;letter-spacing:.06em;margin-top:3px">Approved</div></div>
+       <div style="background:#fff;border:1px solid #E5E7EB;border-radius:7px;padding:13px 15px"><div id="mm-monitored" style="font-size:23px;font-weight:700;color:#4F46E5">--</div><div style="font-size:11px;color:#6B7280;text-transform:uppercase;letter-spacing:.06em;margin-top:3px">Monitored</div></div>
+       <div style="background:#fff;border:1px solid #E5E7EB;border-radius:7px;padding:13px 15px"><div id="mm-drifts" style="font-size:23px;font-weight:700;color:#DC2626">--</div><div style="font-size:11px;color:#6B7280;text-transform:uppercase;letter-spacing:.06em;margin-top:3px">Version Drifts</div></div>
+       <div style="background:#fff;border:1px solid #E5E7EB;border-radius:7px;padding:13px 15px"><div id="mm-breaches" style="font-size:23px;font-weight:700;color:#991B1B">--</div><div style="font-size:11px;color:#6B7280;text-transform:uppercase;letter-spacing:.06em;margin-top:3px">Threshold Breaches</div></div>
+     </div>
+     <div class="sec-hdr" style="margin-bottom:8px">Version Drifts</div>
+     <div id="mm-drift-list" style="margin-bottom:18px"></div>
+     <div class="sec-hdr" style="margin-bottom:8px">Threshold Breaches</div>
+     <div id="mm-breach-list" style="margin-bottom:18px"></div>
+     <div class="sec-hdr" style="margin-bottom:8px">Monitoring Gaps</div>
+     <div id="mm-gap-list" style="margin-bottom:18px"></div>
+     <div class="sec-hdr" style="margin-bottom:8px">Findings <span id="mm-finding-count" style="font-size:11px;font-weight:500;color:#9CA3AF"></span></div>
+     <div id="mm-findings"></div>
+   </div>
+   </div>
+
+   <div class="page" id="page-data-provenance">
+   <div id="data-provenance-section" style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:8px">
+     <div>
+       <div class="sec-hdr" style="margin:0;padding:0;display:flex;align-items:center;gap:10px">Training-Data Provenance</div>
+       <div style="font-size:12px;color:#6B7280;margin-top:4px">Dataset integrity, lineage verification, and unapproved training detection. Provides evidence inputs for QA/CSV review.</div>
+     </div>
+     <button onclick="loadDataProvenanceStatus()" class="scan-btn" style="font-size:12px">&#128260; Refresh</button>
+   </div>
+   <div id="data-provenance-empty" style="color:#6B7280;font-size:13px;padding:24px 0">No dataset registry entries. Ingest dataset metadata through the API to begin assessment.</div>
+   <div id="data-provenance-content" style="display:none">
+     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-bottom:18px">
+       <div style="background:#fff;border:1px solid #E5E7EB;border-radius:7px;padding:13px 15px"><div id="dp-score" style="font-size:23px;font-weight:700;color:#111827">--</div><div style="font-size:11px;color:#6B7280;text-transform:uppercase;letter-spacing:.06em;margin-top:3px">Integrity Score</div></div>
+       <div style="background:#fff;border:1px solid #E5E7EB;border-radius:7px;padding:13px 15px"><div id="dp-total" style="font-size:23px;font-weight:700;color:#111827">--</div><div style="font-size:11px;color:#6B7280;text-transform:uppercase;letter-spacing:.06em;margin-top:3px">Total Datasets</div></div>
+       <div style="background:#fff;border:1px solid #E5E7EB;border-radius:7px;padding:13px 15px"><div id="dp-approved" style="font-size:23px;font-weight:700;color:#16A34A">--</div><div style="font-size:11px;color:#6B7280;text-transform:uppercase;letter-spacing:.06em;margin-top:3px">Approved</div></div>
+       <div style="background:#fff;border:1px solid #E5E7EB;border-radius:7px;padding:13px 15px"><div id="dp-violations" style="font-size:23px;font-weight:700;color:#DC2626">--</div><div style="font-size:11px;color:#6B7280;text-transform:uppercase;letter-spacing:.06em;margin-top:3px">Integrity Violations</div></div>
+       <div style="background:#fff;border:1px solid #E5E7EB;border-radius:7px;padding:13px 15px"><div id="dp-unapproved" style="font-size:23px;font-weight:700;color:#991B1B">--</div><div style="font-size:11px;color:#6B7280;text-transform:uppercase;letter-spacing:.06em;margin-top:3px">Unapproved Training</div></div>
+       <div style="background:#fff;border:1px solid #E5E7EB;border-radius:7px;padding:13px 15px"><div id="dp-lineage" style="font-size:23px;font-weight:700;color:#F59E0B">--</div><div style="font-size:11px;color:#6B7280;text-transform:uppercase;letter-spacing:.06em;margin-top:3px">Lineage Breaks</div></div>
+     </div>
+     <div class="sec-hdr" style="margin-bottom:8px">Integrity Violations</div>
+     <div id="dp-violation-list" style="margin-bottom:18px"></div>
+     <div class="sec-hdr" style="margin-bottom:8px">Unapproved Training</div>
+     <div id="dp-unapproved-list" style="margin-bottom:18px"></div>
+     <div class="sec-hdr" style="margin-bottom:8px">Lineage Breaks</div>
+     <div id="dp-lineage-list" style="margin-bottom:18px"></div>
+     <div class="sec-hdr" style="margin-bottom:8px">Anomalies</div>
+     <div id="dp-anomaly-list" style="margin-bottom:18px"></div>
+     <div class="sec-hdr" style="margin-bottom:8px">Findings <span id="dp-finding-count" style="font-size:11px;font-weight:500;color:#9CA3AF"></span></div>
+     <div id="dp-findings"></div>
    </div>
    </div>
 
@@ -9354,6 +9416,8 @@ function navTo(page) {{
     if (page === 'protected-files') {{ loadProtectedPaths(); loadAccessEvents(); loadPFAuditLog(); loadPFChainStatus(); }}
     if (page === 'protected-cloud-assets') {{ loadProtectedCloudAssets(); loadProtectedCloudEvents(); }}
    if (page === 'etmf') {{ loadETMFStudies(); }}
+   if (page === 'model-monitoring') {{ loadModelMonitoringStatus(); }}
+   if (page === 'data-provenance') {{ loadDataProvenanceStatus(); }}
   if (page === 'probe') {{
     const fr = document.getElementById('probe-iframe');
     if (fr && fr.getAttribute('data-loaded') === '0') {{
@@ -13031,7 +13095,119 @@ function renderETMFStatus(d) {{
   const gaps = d.ai_provenance_gaps || [];
   gapsEl.innerHTML = gaps.length
     ? gaps.map(g => `<div style="background:#fff;border:1px solid #E5E7EB;border-left:3px solid #4F46E5;border-radius:6px;padding:10px 14px;margin-bottom:6px"><strong style="font-size:13px">${{esc(g.artifact_name)}}</strong> <span style="font-size:11px;color:#6B7280">${{esc(g.issue)}}</span></div>`).join('')
-    : '<div style="color:#6B7280;font-size:13px">No AI provenance gaps detected.</div>';
+     : '<div style="color:#6B7280;font-size:13px">No AI provenance gaps detected.</div>';
+}}
+
+// ── Model Monitoring ───────────────────────────────────────────────────────
+
+async function loadModelMonitoringStatus() {{
+  try {{
+    const r = await fetch('/api/model-monitoring/status');
+    if (!r.ok) throw new Error(r.status);
+    const d = await r.json();
+    renderModelMonitoringStatus(d);
+  }} catch (e) {{
+    console.error('Model monitoring load error:', e);
+  }}
+}}
+
+function renderModelMonitoringStatus(d) {{
+  if (!d || d.total_models === 0) {{
+    document.getElementById('model-monitoring-empty').style.display = 'block';
+    document.getElementById('model-monitoring-content').style.display = 'none';
+    return;
+  }}
+  document.getElementById('model-monitoring-empty').style.display = 'none';
+  document.getElementById('model-monitoring-content').style.display = 'block';
+
+  const score = Math.round((d.monitoring_score || 0) * 100);
+  const scoreColor = score >= 80 ? '#16A34A' : score >= 50 ? '#F59E0B' : '#DC2626';
+  document.getElementById('mm-score').textContent = score + '%';
+  document.getElementById('mm-score').style.color = scoreColor;
+  document.getElementById('mm-total').textContent = d.total_models || 0;
+  document.getElementById('mm-approved').textContent = d.approved_models || 0;
+  document.getElementById('mm-monitored').textContent = d.monitored_models || 0;
+  document.getElementById('mm-drifts').textContent = (d.version_drifts || []).length;
+  document.getElementById('mm-breaches').textContent = (d.threshold_breaches || []).length;
+
+  const renderList = (elId, items, emptyMsg, borderCol) => {{
+    const el = document.getElementById(elId);
+    if (!items || !items.length) {{ el.innerHTML = '<div style="color:#6B7280;font-size:13px">' + emptyMsg + '</div>'; return; }}
+    el.innerHTML = items.map(item => {{
+      let detail = item.detail || item.issue || '';
+      let title = item.model_id || item.dataset_id || '';
+      if (item.metric_name) title += ' ' + item.metric_name;
+      if (item.approved_version) title += ' (approved: v' + item.approved_version + ', observed: v' + item.observed_version + ')';
+      return '<div style="background:#fff;border:1px solid #E5E7EB;border-left:3px solid ' + borderCol + ';border-radius:6px;padding:10px 14px;margin-bottom:6px"><strong style="font-size:13px">' + esc(title) + '</strong> <span style="font-size:11px;color:#6B7280">' + esc(detail) + '</span></div>';
+    }}).join('');
+  }};
+
+  renderList('mm-drift-list', d.version_drifts, 'No version drifts detected.', '#DC2626');
+  renderList('mm-breach-list', d.threshold_breaches, 'No threshold breaches detected.', '#991B1B');
+  renderList('mm-gap-list', d.monitoring_gaps, 'No monitoring gaps detected.', '#F59E0B');
+
+  const findings = d.findings || [];
+  document.getElementById('mm-finding-count').textContent = '(' + findings.length + ')';
+  const fEl = document.getElementById('mm-findings');
+  fEl.innerHTML = findings.length
+    ? findings.map(f => '<div style="background:#fff;border:1px solid #E5E7EB;border-left:3px solid ' + (f.severity==='CRITICAL'?'#991B1B':f.severity==='HIGH'?'#DC2626':f.severity==='MEDIUM'?'#F59E0B':'#6B7280') + ';border-radius:6px;padding:10px 14px;margin-bottom:6px"><div style="font-size:13px;font-weight:600">' + esc(f.title) + '</div><div style="font-size:11px;color:#6B7280;margin-top:4px">' + esc(f.detail) + '</div></div>').join('')
+    : '<div style="color:#16A34A;font-size:13px">No findings.</div>';
+}}
+
+// ── Data Provenance ─────────────────────────────────────────────────────────
+
+async function loadDataProvenanceStatus() {{
+  try {{
+    const r = await fetch('/api/data-provenance/status');
+    if (!r.ok) throw new Error(r.status);
+    const d = await r.json();
+    renderDataProvenanceStatus(d);
+  }} catch (e) {{
+    console.error('Data provenance load error:', e);
+  }}
+}}
+
+function renderDataProvenanceStatus(d) {{
+  if (!d || d.total_datasets === 0) {{
+    document.getElementById('data-provenance-empty').style.display = 'block';
+    document.getElementById('data-provenance-content').style.display = 'none';
+    return;
+  }}
+  document.getElementById('data-provenance-empty').style.display = 'none';
+  document.getElementById('data-provenance-content').style.display = 'block';
+
+  const score = Math.round((d.integrity_score || 0) * 100);
+  const scoreColor = score >= 80 ? '#16A34A' : score >= 50 ? '#F59E0B' : '#DC2626';
+  document.getElementById('dp-score').textContent = score + '%';
+  document.getElementById('dp-score').style.color = scoreColor;
+  document.getElementById('dp-total').textContent = d.total_datasets || 0;
+  document.getElementById('dp-approved').textContent = d.approved_datasets || 0;
+  document.getElementById('dp-violations').textContent = (d.integrity_violations || []).length;
+  document.getElementById('dp-unapproved').textContent = (d.unapproved_training || []).length;
+  document.getElementById('dp-lineage').textContent = (d.lineage_breaks || []).length;
+
+  const renderList = (elId, items, emptyMsg, borderCol) => {{
+    const el = document.getElementById(elId);
+    if (!items || !items.length) {{ el.innerHTML = '<div style="color:#6B7280;font-size:13px">' + emptyMsg + '</div>'; return; }}
+    el.innerHTML = items.map(item => {{
+      let title = item.dataset_id || '';
+      if (item.model_id) title += ' (model: ' + item.model_id + ')';
+      let detail = item.detail || item.issue || '';
+      return '<div style="background:#fff;border:1px solid #E5E7EB;border-left:3px solid ' + borderCol + ';border-radius:6px;padding:10px 14px;margin-bottom:6px"><strong style="font-size:13px">' + esc(title) + '</strong> <span style="font-size:11px;color:#6B7280">' + esc(detail) + '</span></div>';
+    }}).join('');
+  }};
+
+  renderList('dp-violation-list', d.integrity_violations, 'No integrity violations detected.', '#DC2626');
+  renderList('dp-unapproved-list', d.unapproved_training, 'No unapproved training detected.', '#991B1B');
+  renderList('dp-lineage-list', d.lineage_breaks, 'No lineage breaks detected.', '#F59E0B');
+  renderList('dp-anomaly-list', d.anomalies, 'No anomalies detected.', '#4F46E5');
+
+  const findings = d.findings || [];
+  document.getElementById('dp-finding-count').textContent = '(' + findings.length + ')';
+  const fEl = document.getElementById('dp-findings');
+  fEl.innerHTML = findings.length
+    ? findings.map(f => '<div style="background:#fff;border:1px solid #E5E7EB;border-left:3px solid ' + (f.severity==='CRITICAL'?'#991B1B':f.severity==='HIGH'?'#DC2626':f.severity==='MEDIUM'?'#F59E0B':'#6B7280') + ';border-radius:6px;padding:10px 14px;margin-bottom:6px"><div style="font-size:13px;font-weight:600">' + esc(f.title) + '</div><div style="font-size:11px;color:#6B7280;margin-top:4px">' + esc(f.detail) + '</div></div>').join('')
+    : '<div style="color:#16A34A;font-size:13px">No findings.</div>';
 }}
 
 // ── Protected Files monitoring ──────────────────────────────────────────────
