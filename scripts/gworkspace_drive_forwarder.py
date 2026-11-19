@@ -91,6 +91,12 @@ def _event_payloads(activity: dict, domain: str) -> list[dict]:
         str(activity_id.get('time', '')),
         str(activity_id.get('uniqQualifier', '')),
     )))
+    # Extract top-level enrichment fields from the activity
+    ip_address = str(activity.get('ipAddress', '')).strip()
+    is_agentic = bool(activity.get('isAgenticAction', False))
+    network_info = activity.get('networkInfo', {})
+    if not isinstance(network_info, dict):
+        network_info = {}
     payloads = []
     for index, event in enumerate(activity.get('events', [])):
         if not isinstance(event, dict):
@@ -101,6 +107,9 @@ def _event_payloads(activity: dict, domain: str) -> list[dict]:
             'actor': activity.get('actor', {}),
             'id': activity_id,
             'events': [event],
+            'arckonIpAddress': ip_address,
+            'arckonIsAgenticAction': is_agentic,
+            'arckonNetworkInfo': network_info,
         })
     return payloads
 

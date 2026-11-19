@@ -50,6 +50,35 @@ def test_each_domain_is_tagged_in_payload():
     assert payloads_b[0]['arckonDomain'] == 'b.com'
 
 
+def test_captures_ip_address_and_agentic_flag():
+    """The forwarder must capture ipAddress, isAgenticAction, and networkInfo."""
+    payloads = forwarder._event_payloads({
+        'id': {'time': '2026-11-19T12:38:04Z', 'uniqQualifier': 'q'},
+        'actor': {'email': 'user@example.com'},
+        'ipAddress': '192.168.1.50',
+        'isAgenticAction': True,
+        'networkInfo': {'regionCode': 'US', 'subdivisionCode': 'US-NC', 'ipAsn': [11426]},
+        'events': [{'name': 'view'}],
+    }, 'example.com')
+
+    assert payloads[0]['arckonIpAddress'] == '192.168.1.50'
+    assert payloads[0]['arckonIsAgenticAction'] is True
+    assert payloads[0]['arckonNetworkInfo']['subdivisionCode'] == 'US-NC'
+
+
+def test_missing_enrichment_fields_default_empty():
+    """Activities without enrichment fields should not crash the forwarder."""
+    payloads = forwarder._event_payloads({
+        'id': {'time': '2026-11-19T12:38:04Z', 'uniqQualifier': 'q'},
+        'actor': {'email': 'user@example.com'},
+        'events': [{'name': 'view'}],
+    }, 'example.com')
+
+    assert payloads[0]['arckonIpAddress'] == ''
+    assert payloads[0]['arckonIsAgenticAction'] is False
+    assert payloads[0]['arckonNetworkInfo'] == {}
+
+
 def test_add_workspace_domain_script_exists_and_is_executable():
     """The multi-domain helper script must exist and be executable."""
     script = Path(__file__).parents[1] / 'deploy' / 'gcp' / 'add_workspace_domain.sh'

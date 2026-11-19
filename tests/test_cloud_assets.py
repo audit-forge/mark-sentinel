@@ -144,6 +144,36 @@ def test_detects_ai_vs_human_actors():
     assert detect_actor_type('') == 'human'
 
 
+def test_normalizes_gworkspace_enrichment_fields():
+    event = normalize_google_workspace_drive_event({
+        'arckonDomain': 'company.com', 'actor': {'email': 'user@company.com'},
+        'arckonIpAddress': '192.168.1.50',
+        'arckonIsAgenticAction': True,
+        'arckonNetworkInfo': {'regionCode': 'US', 'subdivisionCode': 'US-NC', 'ipAsn': [11426]},
+        'events': [{'name': 'view', 'parameters': [
+            {'name': 'doc_id', 'value': '1aB2cD'},
+            {'name': 'doc_title', 'value': 'Test Doc'},
+        ]}],
+    })
+    assert event['source_ip'] == '192.168.1.50'
+    assert event['is_agentic_action'] is True
+    assert event['geo_region'] == 'US'
+    assert event['geo_subdivision'] == 'US-NC'
+    assert event['geo_asn'] == '11426'
+
+
+def test_gworkspace_enrichment_defaults_when_missing():
+    event = normalize_google_workspace_drive_event({
+        'arckonDomain': 'company.com', 'actor': {'email': 'user@company.com'},
+        'events': [{'name': 'view', 'parameters': [
+            {'name': 'doc_id', 'value': '1aB2cD'},
+        ]}],
+    })
+    assert event['source_ip'] == ''
+    assert event['is_agentic_action'] is False
+    assert event['geo_subdivision'] == ''
+
+
 def test_alert_mode_all_is_default():
     with tempfile.TemporaryDirectory() as tmp:
         store = AgentStore(Path(tmp) / 'agents.db')

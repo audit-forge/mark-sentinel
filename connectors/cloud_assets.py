@@ -245,15 +245,33 @@ def normalize_google_workspace_drive_event(payload: dict[str, Any]) -> dict[str,
     # Device name: the forwarder can enrich events with the device hostname
     # (e.g., by correlating the source IP with the endpoint inventory).
     device_name = str(payload.get('arckonDeviceName', ''))[:128]
+    # Extract enrichment fields from the forwarder
+    source_ip = str(payload.get('arckonIpAddress', ''))[:64]
+    is_agentic = bool(payload.get('arckonIsAgenticAction', False))
+    network_info = payload.get('arckonNetworkInfo', {})
+    if not isinstance(network_info, dict):
+        network_info = {}
+    region_code = str(network_info.get('regionCode', ''))[:8]
+    subdivision = str(network_info.get('subdivisionCode', ''))[:16]
+    asn = ''
+    ip_asn = network_info.get('ipAsn', [])
+    if isinstance(ip_asn, list) and ip_asn:
+        asn = str(ip_asn[0])[:16]
+    elif isinstance(ip_asn, (int, str)):
+        asn = str(ip_asn)[:16]
     return {
         'provider': 'gworkspace', 'resource_type': 'drive_file',
-        'account_id': domain, 'region': '',
+        'account_id': domain, 'region': region_code,
         'resource': resource, 'actor': actor_email,
         'actor_type': detect_actor_type(actor_email),
         'action': action, 'event_name': name,
         'event_id': event_id[:256],
         'accessed_at': accessed_at,
-        'source_ip': '', 'device_name': device_name,
+        'source_ip': source_ip, 'device_name': device_name,
+        'is_agentic_action': is_agentic,
+        'geo_region': region_code,
+        'geo_subdivision': subdivision,
+        'geo_asn': asn,
         'resource_tags': payload.get('arckonResourceTags', {}) if isinstance(
             payload.get('arckonResourceTags', {}), dict) else {},
         'doc_title': doc_title[:256],

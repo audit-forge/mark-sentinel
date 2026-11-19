@@ -41,6 +41,51 @@ class TestProtectedCloudAlerts(unittest.TestCase):
         title = dispatch.call_args.args[1]['title']
         self.assertIn('at 10/13/2026 4:19:00 PM EDT', title)
 
+    @patch('alerts._dispatch', return_value=[])
+    def test_includes_ip_and_geolocation(self, dispatch):
+        fire_cloud_asset_alert({
+            'provider': 'gworkspace', 'resource': 'gworkspace://document-id',
+            'actor': 'user@example.com', 'action': 'read',
+            'source_ip': '192.168.1.50',
+            'geo_subdivision': 'US-NC',
+        }, {})
+
+        title = dispatch.call_args.args[1]['title']
+        self.assertIn('from 192.168.1.50', title)
+        self.assertIn('(US-NC)', title)
+
+    @patch('alerts._dispatch', return_value=[])
+    def test_includes_google_ai_agent_flag(self, dispatch):
+        fire_cloud_asset_alert({
+            'provider': 'gworkspace', 'resource': 'gworkspace://document-id',
+            'actor': 'user@example.com', 'action': 'read',
+            'is_agentic_action': True,
+        }, {})
+
+        title = dispatch.call_args.args[1]['title']
+        self.assertIn('[Google AI agent: Yes]', title)
+
+    @patch('alerts._dispatch', return_value=[])
+    def test_includes_google_ai_agent_no_flag(self, dispatch):
+        fire_cloud_asset_alert({
+            'provider': 'gworkspace', 'resource': 'gworkspace://document-id',
+            'actor': 'user@example.com', 'action': 'read',
+            'is_agentic_action': False,
+        }, {})
+
+        title = dispatch.call_args.args[1]['title']
+        self.assertIn('[Google AI agent: No]', title)
+
+    @patch('alerts._dispatch', return_value=[])
+    def test_no_ai_agent_flag_when_absent(self, dispatch):
+        fire_cloud_asset_alert({
+            'provider': 'gworkspace', 'resource': 'gworkspace://document-id',
+            'actor': 'user@example.com', 'action': 'read',
+        }, {})
+
+        title = dispatch.call_args.args[1]['title']
+        self.assertNotIn('Google AI agent', title)
+
 
 class TestAcademyTemplateRemediation(unittest.TestCase):
     def test_governance_alert_uses_academy_template_link(self):

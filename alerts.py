@@ -512,6 +512,9 @@ def fire_cloud_asset_alert(event: dict, alert_cfg: dict, store=None) -> None:
     device_name = event.get('device_name', '')
     source_ip = event.get('source_ip', '')
     accessed_at = str(event.get('accessed_at', '')).strip()
+    is_agentic = event.get('is_agentic_action', False)
+    geo_subdivision = event.get('geo_subdivision', '')
+    geo_asn = event.get('geo_asn', '')
     # Build a device label that shows the actor's email + device name + IP
     # so the alert recipient can immediately see who accessed the asset and
     # from which machine.
@@ -532,6 +535,14 @@ def fire_cloud_asset_alert(event: dict, alert_cfg: dict, store=None) -> None:
         title += f" on {device_name}"
     elif source_ip:
         title += f" from {source_ip}"
+    # Add geolocation and network info if available
+    if geo_subdivision:
+        title += f" ({geo_subdivision})"
+    # Add Google's AI-agent classification if available
+    if is_agentic:
+        title += " [Google AI agent: Yes]"
+    elif 'is_agentic_action' in event:
+        title += " [Google AI agent: No]"
     payload = {
         'event': 'protected_cloud_asset_access', 'severity': 'CRITICAL',
         'device': device_label, 'host': account, 'service': actor,
