@@ -8321,18 +8321,27 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
   {governance_audit_html}
    </div>
 
-   <div class="page" id="page-etmf">
-   <div id="etmf-section" style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:8px">
-     <div>
-       <div class="sec-hdr" style="margin:0;padding:0;display:flex;align-items:center;gap:10px">eTMF Completeness Assessment</div>
-       <div style="font-size:12px;color:#6B7280;margin-top:4px">DIA TMF Reference Model assessment with ALCOA+ data integrity scoring. Provides evidence inputs for qualified QA/CSV review.</div>
-     </div>
-     <div style="display:flex;gap:8px;align-items:end">
-       <div><label style="font-size:11px;color:#6B7280;display:block;margin-bottom:3px">Study</label><select id="etmf-study-select" onchange="loadETMFStatus()" style="padding:6px 10px;border:1px solid #D1D5DB;border-radius:4px;font-size:13px"><option value="">Select study...</option></select></div>
-       <div><label style="font-size:11px;color:#6B7280;display:block;margin-bottom:3px">Phase</label><select id="etmf-phase-select" onchange="loadETMFStatus()" style="padding:6px 10px;border:1px solid #D1D5DB;border-radius:4px;font-size:13px"><option value="setup">Setup</option><option value="conduct" selected>Conduct</option><option value="closeout">Closeout</option></select></div>
-       <button onclick="loadETMFStatus()" class="scan-btn" style="font-size:12px">&#128260; Refresh</button>
-     </div>
-   </div>
+    <div class="page" id="page-etmf">
+    <div id="etmf-section" style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:8px">
+      <div>
+        <div class="sec-hdr" style="margin:0;padding:0;display:flex;align-items:center;gap:10px">eTMF Completeness Assessment</div>
+        <div style="font-size:12px;color:#6B7280;margin-top:4px">Assesses whether required Trial Master File documents are present, approved, and meet ALCOA+ data integrity standards for the current study phase.</div>
+      </div>
+      <div style="display:flex;gap:8px;align-items:end">
+        <div><label style="font-size:11px;color:#6B7280;display:block;margin-bottom:3px">Study</label><select id="etmf-study-select" onchange="loadETMFStatus()" style="padding:6px 10px;border:1px solid #D1D5DB;border-radius:4px;font-size:13px"><option value="">Select study...</option></select></div>
+        <div><label style="font-size:11px;color:#6B7280;display:block;margin-bottom:3px">Phase</label><select id="etmf-phase-select" onchange="loadETMFStatus()" style="padding:6px 10px;border:1px solid #D1D5DB;border-radius:4px;font-size:13px" title="Setup = trial initiation and approvals | Conduct = active trial operations | Closeout = trial completion and database lock"><option value="setup">Setup (trial initiation)</option><option value="conduct" selected>Conduct (active trial)</option><option value="closeout">Closeout (trial completion)</option></select></div>
+        <button onclick="loadETMFStatus()" class="scan-btn" style="font-size:12px">&#128260; Refresh</button>
+      </div>
+    </div>
+    <div style="background:#f0f4ff;border:1px solid #c7d2fe;border-radius:6px;padding:12px 14px;margin-bottom:14px;font-size:12px;color:#374151;line-height:1.6">
+      <strong>What this page shows:</strong> The Trial Master File (TMF) is the collection of all essential documents required for a clinical trial.
+      This assessment checks your eTMF metadata against the <a href="https://www.diaglobal.org/" target="_blank" style="color:#4F46E5">DIA TMF Reference Model</a> to identify
+      missing documents, unsigned approvals, version control gaps, and AI-generated content without human review.
+      The <strong>completeness score</strong> shows what percentage of required documents are present for the selected phase.
+      <strong>ALCOA+</strong> is the FDA/EMA data integrity standard: Attributable, Legible, Contemporaneous, Original, Accurate, Complete, Consistent, Enduring, Available.
+      <br><br>
+      <strong>How data gets here:</strong> Your eTMF system (e.g., Veeva Vault, PhlexElection) sends document metadata to Arckon's ingest API. Arckon does not access your eTMF directly or receive document contents.
+    </div>
 
    <div id="etmf-empty" style="color:#6B7280;font-size:13px;padding:24px 0">No studies with ingested eTMF metadata. Forward eTMF document metadata to the ingest endpoint to begin assessment.</div>
 
@@ -8366,10 +8375,20 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
    <div id="model-monitoring-section" style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:8px">
      <div>
        <div class="sec-hdr" style="margin:0;padding:0;display:flex;align-items:center;gap:10px">Model Monitoring</div>
-       <div style="font-size:12px;color:#6B7280;margin-top:4px">Model registry drift detection, metric threshold monitoring, and approval gap analysis. Provides evidence inputs for QA/CSV review.</div>
-     </div>
-     <button onclick="loadModelMonitoringStatus()" class="scan-btn" style="font-size:12px">&#128260; Refresh</button>
-   </div>
+        <div style="font-size:12px;color:#6B7280;margin-top:4px">Monitors approved AI/ML models for version drift, performance threshold breaches, and missing runtime observations.</div>
+      </div>
+      <button onclick="loadModelMonitoringStatus()" class="scan-btn" style="font-size:12px">&#128260; Refresh</button>
+    </div>
+    <div style="background:#f0f4ff;border:1px solid #c7d2fe;border-radius:6px;padding:12px 14px;margin-bottom:14px;font-size:12px;color:#374151;line-height:1.6">
+      <strong>What this page shows:</strong> AI models used in regulated environments must be monitored after validation to ensure they continue
+      performing as approved. This page tracks your model registry entries and their runtime metrics to detect:
+      <strong>version drift</strong> (running a different version than approved),
+      <strong>threshold breaches</strong> (performance or error rate exceeding approved limits),
+      <strong>monitoring gaps</strong> (approved models with no recent metrics), and
+      <strong>approval gaps</strong> (models in use without recorded approval).
+      <br><br>
+      <strong>How data gets here:</strong> Your model registry and monitoring system send model metadata and metric observations to Arckon's ingest API. Arckon does not access your models directly or receive model weights.
+    </div>
    <div id="model-monitoring-empty" style="color:#6B7280;font-size:13px;padding:24px 0">No model registry entries. Ingest model metadata through the API to begin monitoring.</div>
    <div id="model-monitoring-content" style="display:none">
      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-bottom:18px">
@@ -8395,10 +8414,20 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
    <div id="data-provenance-section" style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:8px">
      <div>
        <div class="sec-hdr" style="margin:0;padding:0;display:flex;align-items:center;gap:10px">Training-Data Provenance</div>
-       <div style="font-size:12px;color:#6B7280;margin-top:4px">Dataset integrity, lineage verification, and unapproved training detection. Provides evidence inputs for QA/CSV review.</div>
-     </div>
-     <button onclick="loadDataProvenanceStatus()" class="scan-btn" style="font-size:12px">&#128260; Refresh</button>
-   </div>
+        <div style="font-size:12px;color:#6B7280;margin-top:4px">Tracks training datasets for integrity, lineage, and unapproved use in AI model training.</div>
+      </div>
+      <button onclick="loadDataProvenanceStatus()" class="scan-btn" style="font-size:12px">&#128260; Refresh</button>
+    </div>
+    <div style="background:#f0f4ff;border:1px solid #c7d2fe;border-radius:6px;padding:12px 14px;margin-bottom:14px;font-size:12px;color:#374151;line-height:1.6">
+      <strong>What this page shows:</strong> AI models are only as reliable as the data they were trained on. This page tracks your training
+      datasets to detect: <strong>integrity violations</strong> (checksum mismatches, unapproved modifications),
+      <strong>unapproved training</strong> (models trained on datasets that haven't been approved),
+      <strong>lineage breaks</strong> (training runs referencing unregistered datasets), and
+      <strong>data anomalies</strong> (schema changes, distribution shifts).
+      The <strong>integrity score</strong> reflects the percentage of datasets without violations.
+      <br><br>
+      <strong>How data gets here:</strong> Your ML platform or data pipeline sends dataset registry entries and pipeline events to Arckon's ingest API. Arckon does not access your data directly or receive dataset contents.
+    </div>
    <div id="data-provenance-empty" style="color:#6B7280;font-size:13px;padding:24px 0">No dataset registry entries. Ingest dataset metadata through the API to begin assessment.</div>
    <div id="data-provenance-content" style="display:none">
      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-bottom:18px">
