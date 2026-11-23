@@ -8136,14 +8136,20 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
       <div class="sb-group">Fleet</div>
       <button class="sb-item" id="nav-shadow" onclick="navTo('shadow')">&#9888; Shadow AI</button>
         <button class="sb-item" id="nav-endpoint-ai" onclick="navTo('endpoint-ai')">&#129302; Endpoint AI</button>
-        <button class="sb-item" id="nav-etmf" onclick="navTo('etmf')">&#128203; eTMF Completeness</button>
-        <button class="sb-item" id="nav-model-monitoring" onclick="navTo('model-monitoring')">&#128202; Model Monitoring</button>
-        <button class="sb-item" id="nav-data-provenance" onclick="navTo('data-provenance')">&#128279; Data Provenance</button>
        <button class="sb-item" id="nav-network-assets" onclick="navTo('network-assets')">&#127760; Network Inventory</button>
       <button class="sb-item" id="nav-inventory" onclick="navTo('inventory')">&#129302; AI Asset Inventory</button>
       <button class="sb-item" id="nav-spend" onclick="navTo('spend')">&#128176; AI Spend</button>
       <button class="sb-item" id="nav-alerts" onclick="navTo('alerts')">&#128276; Alerts <span id="alert-badge" style="display:none;background:#DC2626;color:#fff;border-radius:10px;font-size:10px;padding:1px 6px;margin-left:4px;font-weight:700"></span></button>
       <button class="sb-item" id="nav-mcp" onclick="navTo('mcp')">&#128279; MCP Servers</button>
+      <div class="sb-group-collapse" onclick="toggleSbSection('regulated-ai')" style="cursor:pointer;user-select:none;display:flex;align-items:center;gap:4px;padding:8px 12px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#6B7280;border-radius:4px;margin-top:4px">
+        <span class="sb-chevron" id="chevron-regulated-ai" style="font-size:10px;transition:transform .2s;color:#9CA3AF">&#9654;</span>
+        Regulated AI
+      </div>
+      <div id="regulated-ai-section" style="display:none">
+        <button class="sb-item" id="nav-etmf" onclick="navTo('etmf')">&#128203; eTMF Completeness</button>
+        <button class="sb-item" id="nav-model-monitoring" onclick="navTo('model-monitoring')">&#128202; Model Monitoring</button>
+        <button class="sb-item" id="nav-data-provenance" onclick="navTo('data-provenance')">&#128279; Data Provenance</button>
+      </div>
       <div class="sb-group">Security</div>
       <button class="sb-item" id="nav-riskregister" onclick="navTo('riskregister')">&#128203; Risk Register</button>
        <button class="sb-item" id="nav-protected-files" onclick="navTo('protected-files')">&#128274; Protected Files <span id="pf-badge" style="display:none;background:#DC2626;color:#fff;border-radius:10px;font-size:10px;padding:1px 6px;margin-left:4px;font-weight:700"></span></button>
@@ -9424,6 +9430,16 @@ async function saveEndpointGovernance(button, id) {{
     alert('Governance policy was not saved: ' + error.message);
     button.disabled = false;
     select.disabled = false;
+  }}
+}}
+
+function toggleSbSection(id) {{
+  const section = document.getElementById(id + '-section');
+  const chevron = document.getElementById('chevron-' + id);
+  if (section && chevron) {{
+    const isOpen = section.style.display !== 'none';
+    section.style.display = isOpen ? 'none' : 'block';
+    chevron.style.transform = isOpen ? '' : 'rotate(90deg)';
   }}
 }}
 
