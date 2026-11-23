@@ -8129,18 +8129,28 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
       <div class="sb-logo-sub">{'<span style="color:#f0a500;font-weight:700;font-size:9px;letter-spacing:1px">⚠ DEMO MODE</span>' if _is_demo() else '<span style="color:#6366F1;font-size:9px;letter-spacing:1px;font-weight:700">by RiskRaven</span> &nbsp;·&nbsp; Command Center'}</div>
     </div>
     <nav class="sb-nav">
-      <div class="sb-group">Overview</div>
-      <button class="sb-item sb-active" id="nav-overview" onclick="navTo('overview')">&#8962; Home</button>
-      {'<button class="sb-item" id="nav-clients" onclick="window.location=\'/clients\'">&#127970; Clients</button>' if current_user_is_msp else ''}
-      {'<button class="sb-item" id="nav-reseller" onclick="navTo(\'reseller\')">&#127970; MSP View</button>' if current_user_is_reseller else ''}
-      <div class="sb-group">Fleet</div>
-      <button class="sb-item" id="nav-shadow" onclick="navTo('shadow')">&#9888; Shadow AI</button>
+      <div class="sb-group-collapse" onclick="toggleSbSection('overview')" style="cursor:pointer;user-select:none;display:flex;align-items:center;gap:4px;padding:8px 12px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#6B7280;border-radius:4px">
+        <span class="sb-chevron" id="chevron-overview" style="font-size:10px;transition:transform .2s;color:#9CA3AF;transform:rotate(90deg)">&#9654;</span>
+        Overview
+      </div>
+      <div id="overview-section" style="display:block">
+        <button class="sb-item sb-active" id="nav-overview" onclick="navTo('overview')">&#8962; Home</button>
+        {'<button class="sb-item" id="nav-clients" onclick="window.location=\'/clients\'">&#127970; Clients</button>' if current_user_is_msp else ''}
+        {'<button class="sb-item" id="nav-reseller" onclick="navTo(\'reseller\')">&#127970; MSP View</button>' if current_user_is_reseller else ''}
+      </div>
+      <div class="sb-group-collapse" onclick="toggleSbSection('fleet')" style="cursor:pointer;user-select:none;display:flex;align-items:center;gap:4px;padding:8px 12px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#6B7280;border-radius:4px;margin-top:4px">
+        <span class="sb-chevron" id="chevron-fleet" style="font-size:10px;transition:transform .2s;color:#9CA3AF;transform:rotate(90deg)">&#9654;</span>
+        Fleet
+      </div>
+      <div id="fleet-section" style="display:block">
+        <button class="sb-item" id="nav-shadow" onclick="navTo('shadow')">&#9888; Shadow AI</button>
         <button class="sb-item" id="nav-endpoint-ai" onclick="navTo('endpoint-ai')">&#129302; Endpoint AI</button>
-       <button class="sb-item" id="nav-network-assets" onclick="navTo('network-assets')">&#127760; Network Inventory</button>
-      <button class="sb-item" id="nav-inventory" onclick="navTo('inventory')">&#129302; AI Asset Inventory</button>
-      <button class="sb-item" id="nav-spend" onclick="navTo('spend')">&#128176; AI Spend</button>
-      <button class="sb-item" id="nav-alerts" onclick="navTo('alerts')">&#128276; Alerts <span id="alert-badge" style="display:none;background:#DC2626;color:#fff;border-radius:10px;font-size:10px;padding:1px 6px;margin-left:4px;font-weight:700"></span></button>
-      <button class="sb-item" id="nav-mcp" onclick="navTo('mcp')">&#128279; MCP Servers</button>
+        <button class="sb-item" id="nav-network-assets" onclick="navTo('network-assets')">&#127760; Network Inventory</button>
+        <button class="sb-item" id="nav-inventory" onclick="navTo('inventory')">&#129302; AI Asset Inventory</button>
+        <button class="sb-item" id="nav-spend" onclick="navTo('spend')">&#128176; AI Spend</button>
+        <button class="sb-item" id="nav-alerts" onclick="navTo('alerts')">&#128276; Alerts <span id="alert-badge" style="display:none;background:#DC2626;color:#fff;border-radius:10px;font-size:10px;padding:1px 6px;margin-left:4px;font-weight:700"></span></button>
+        <button class="sb-item" id="nav-mcp" onclick="navTo('mcp')">&#128279; MCP Servers</button>
+      </div>
       <div class="sb-group-collapse" onclick="toggleSbSection('regulated-ai')" style="cursor:pointer;user-select:none;display:flex;align-items:center;gap:4px;padding:8px 12px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#6B7280;border-radius:4px;margin-top:4px">
         <span class="sb-chevron" id="chevron-regulated-ai" style="font-size:10px;transition:transform .2s;color:#9CA3AF">&#9654;</span>
         Regulated AI
@@ -8150,23 +8160,47 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
         <button class="sb-item" id="nav-model-monitoring" onclick="navTo('model-monitoring')">&#128202; Model Monitoring</button>
         <button class="sb-item" id="nav-data-provenance" onclick="navTo('data-provenance')">&#128279; Data Provenance</button>
       </div>
-      <div class="sb-group">Security</div>
-      <button class="sb-item" id="nav-riskregister" onclick="navTo('riskregister')">&#128203; Risk Register</button>
-       <button class="sb-item" id="nav-protected-files" onclick="navTo('protected-files')">&#128274; Protected Files <span id="pf-badge" style="display:none;background:#DC2626;color:#fff;border-radius:10px;font-size:10px;padding:1px 6px;margin-left:4px;font-weight:700"></span></button>
-       <button class="sb-item" id="nav-protected-cloud-assets" onclick="navTo('protected-cloud-assets')">&#9729; Protected Cloud Assets</button>
-      <div class="sb-group">Operations</div>
-      <button class="sb-item" id="nav-schedules" onclick="navTo('schedules')">&#128337; Schedules</button>
-      <button class="sb-item" id="nav-discovery" onclick="navTo('discovery')">&#128270; Discovery</button>
-      <div class="sb-group">Device</div>
-      <button class="sb-item" id="nav-findings" onclick="navTo('findings')">&#128202; Findings</button>
-      <div class="sb-group">Export</div>
-      <button class="sb-item" id="nav-reports" onclick="navTo('reports')">&#128196; Reports</button>
-      <div class="sb-group">Integrations</div>
-      <button class="sb-item" id="nav-siem" onclick="navTo('siem')">&#128279; SIEM &amp; Tools</button>
-      <div class="sb-group"></div>
-      <button class="sb-item" id="nav-settings" onclick="navTo('settings')">&#9881; Settings</button>
-      <button class="sb-item" id="nav-users" onclick="navTo('users')">&#128100; Users</button>
-      {("<button class=\"sb-item\" id=\"nav-probe\" onclick=\"navTo('probe')\">&#128272; API Tester</button>") if _has_live_scan() else "<span style=\"display:block;padding:8px 16px;font-size:13px;color:#6B7280;cursor:default\" title=\"Upgrade to Pro to access the API Tester\">&#128274; API Tester</span>"}
+      <div class="sb-group-collapse" onclick="toggleSbSection('security')" style="cursor:pointer;user-select:none;display:flex;align-items:center;gap:4px;padding:8px 12px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#6B7280;border-radius:4px;margin-top:4px">
+        <span class="sb-chevron" id="chevron-security" style="font-size:10px;transition:transform .2s;color:#9CA3AF;transform:rotate(90deg)">&#9654;</span>
+        Security
+      </div>
+      <div id="security-section" style="display:block">
+        <button class="sb-item" id="nav-riskregister" onclick="navTo('riskregister')">&#128203; Risk Register</button>
+        <button class="sb-item" id="nav-protected-files" onclick="navTo('protected-files')">&#128274; Protected Files <span id="pf-badge" style="display:none;background:#DC2626;color:#fff;border-radius:10px;font-size:10px;padding:1px 6px;margin-left:4px;font-weight:700"></span></button>
+        <button class="sb-item" id="nav-protected-cloud-assets" onclick="navTo('protected-cloud-assets')">&#9729; Protected Cloud Assets</button>
+      </div>
+      <div class="sb-group-collapse" onclick="toggleSbSection('operations')" style="cursor:pointer;user-select:none;display:flex;align-items:center;gap:4px;padding:8px 12px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#6B7280;border-radius:4px;margin-top:4px">
+        <span class="sb-chevron" id="chevron-operations" style="font-size:10px;transition:transform .2s;color:#9CA3AF">&#9654;</span>
+        Operations
+      </div>
+      <div id="operations-section" style="display:none">
+        <button class="sb-item" id="nav-schedules" onclick="navTo('schedules')">&#128337; Schedules</button>
+        <button class="sb-item" id="nav-discovery" onclick="navTo('discovery')">&#128270; Discovery</button>
+      </div>
+      <div class="sb-group-collapse" onclick="toggleSbSection('device')" style="cursor:pointer;user-select:none;display:flex;align-items:center;gap:4px;padding:8px 12px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#6B7280;border-radius:4px;margin-top:4px">
+        <span class="sb-chevron" id="chevron-device" style="font-size:10px;transition:transform .2s;color:#9CA3AF">&#9654;</span>
+        Device
+      </div>
+      <div id="device-section" style="display:none">
+        <button class="sb-item" id="nav-findings" onclick="navTo('findings')">&#128202; Findings</button>
+      </div>
+      <div class="sb-group-collapse" onclick="toggleSbSection('export')" style="cursor:pointer;user-select:none;display:flex;align-items:center;gap:4px;padding:8px 12px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#6B7280;border-radius:4px;margin-top:4px">
+        <span class="sb-chevron" id="chevron-export" style="font-size:10px;transition:transform .2s;color:#9CA3AF">&#9654;</span>
+        Export
+      </div>
+      <div id="export-section" style="display:none">
+        <button class="sb-item" id="nav-reports" onclick="navTo('reports')">&#128196; Reports</button>
+      </div>
+      <div class="sb-group-collapse" onclick="toggleSbSection('integrations')" style="cursor:pointer;user-select:none;display:flex;align-items:center;gap:4px;padding:8px 12px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#6B7280;border-radius:4px;margin-top:4px">
+        <span class="sb-chevron" id="chevron-integrations" style="font-size:10px;transition:transform .2s;color:#9CA3AF">&#9654;</span>
+        Integrations
+      </div>
+      <div id="integrations-section" style="display:none">
+        <button class="sb-item" id="nav-siem" onclick="navTo('siem')">&#128279; SIEM &amp; Tools</button>
+        <button class="sb-item" id="nav-settings" onclick="navTo('settings')">&#9881; Settings</button>
+        <button class="sb-item" id="nav-users" onclick="navTo('users')">&#128100; Users</button>
+        {("<button class=\"sb-item\" id=\"nav-probe\" onclick=\"navTo('probe')\">&#128272; API Tester</button>") if _has_live_scan() else "<span style=\"display:block;padding:8px 16px;font-size:13px;color:#6B7280;cursor:default\" title=\"Upgrade to Pro to access the API Tester\">&#128274; API Tester</span>"}
+      </div>
     </nav>
     <div class="sb-footer">
       {f'<span style="font-size:11px;color:#9CA3AF;word-break:break-all">{current_user_email}</span>' if current_user_email else ''}
@@ -9450,6 +9484,14 @@ function navTo(page) {{
   if (p) p.classList.add('active');
   const b = document.getElementById('nav-' + page);
   if (b) b.classList.add('sb-active');
+  // Auto-expand the section containing this page
+  if (b) {{
+    const section = b.closest('[id$="-section"]');
+    if (section && section.style.display === 'none') {{
+      const sectionId = section.id.replace('-section', '');
+      toggleSbSection(sectionId);
+    }}
+  }}
   document.getElementById('main').scrollTop = 0;
   history.replaceState(null, '', '#' + page);
   if (page === 'settings') {{ loadLiveScanConfig(); loadBranding(); loadCustomerInfo(); }}
