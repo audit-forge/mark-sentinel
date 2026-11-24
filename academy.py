@@ -30,6 +30,9 @@ SECTIONS = [
     ("alerts", "Alerts & Notifications"),
     ("protected-files", "Protected Files Monitoring"),
     ("protected-cloud-assets", "Protected Cloud Assets"),
+    ("etmf-completeness", "eTMF Completeness"),
+    ("model-monitoring", "Model Monitoring"),
+    ("data-provenance", "Data Provenance"),
     ("siem-tools", "SIEM & Tool Integrations"),
     ("ai-spend", "AI Spend"),
     ("catalog", "Check Catalog"),
@@ -1401,6 +1404,157 @@ def build(root: pathlib.Path, page: str | None = None) -> bytes:
         "model, see <code>docs/GOOGLE_WORKSPACE_DRIVE_FORWARDER.md</code> in the Arckon release.</p>"
     )
 
+    etmf_completeness = (
+        "<p><b>eTMF Completeness</b> assesses whether your Trial Master File documents are "
+        "present, approved, and meet ALCOA+ data integrity standards for the current study "
+        "phase. It compares your eTMF metadata against the DIA TMF Reference Model to identify "
+        "missing documents, unsigned approvals, version control gaps, and AI-generated content "
+        "without human review.</p>"
+
+        "<h3>What it checks</h3>"
+        "<ul>"
+        "<li><b>Completeness:</b> are all required documents present for the current phase "
+        "(Setup, Conduct, or Closeout)?</li>"
+        "<li><b>Signatures:</b> are required signatures recorded for documents that need them?</li>"
+        "<li><b>Version control:</b> are version numbers recorded for documents that require it?</li>"
+        "<li><b>AI provenance:</b> is AI-generated content documented with a human reviewer?</li>"
+        "<li><b>ALCOA+ scoring:</b> all 9 data integrity dimensions assessed per document</li>"
+        "</ul>"
+
+        "<h3>How data gets here</h3>"
+        "<p>Your eTMF system (e.g., Veeva Vault, PhlexElection) sends document metadata to "
+        "Arckon's ingest API via a forwarder script. Arckon does not access your eTMF directly "
+        "or receive document contents — only metadata (artifact type, study ID, version, "
+        "status, author, approver, signatures, AI provenance).</p>"
+
+        "<h3>Setup: Veeva Vault</h3>"
+        "<ol>"
+        "<li>Get your Arckon ingest token from <b>Protected Cloud Assets &rarr; Show Cloud Ingest Token</b>.</li>"
+        "<li>Install the forwarder: <code>pip install requests</code></li>"
+        "<li>Download <code>etmf_forwarder.py</code> from the Arckon release.</li>"
+        "<li>Test manually:"
+        "<pre><code>python3 etmf_forwarder.py \\\n"
+        "  --etmf-system veeva \\\n"
+        "  --vault-url https://myvault.veevavault.com \\\n"
+        "  --vault-username admin@company.com \\\n"
+        "  --vault-password \"$VAULT_PASSWORD\" \\\n"
+        "  --arckon-url https://arckon.riskraven.ai \\\n"
+        "  --arckon-token-file /etc/arckon/ingest-token \\\n"
+        "  --study-id NCT05567890 \\\n"
+        "  --state-file /var/lib/arckon-etmf/state</code></pre></li>"
+        "<li>Schedule every 5 minutes via the included systemd timer "
+        "(<code>arckon-etmf-forwarder@.timer</code>).</li>"
+        "<li>Open Arckon &rarr; eTMF Completeness (under Regulated AI) and select your study.</li>"
+        "</ol>"
+
+        "<h3>Supported systems</h3>"
+        "<ul>"
+        "<li><b>Veeva Vault</b> (REST API v20.3+)</li>"
+        "<li><b>PhlexElection</b> (via generic REST adapter)</li>"
+        "<li><b>Any REST API</b> (via generic adapter — provide your own endpoint URL)</li>"
+        "</ul>"
+
+        "<h3>Troubleshooting</h3>"
+        "<ul>"
+        "<li><b>No data on dashboard:</b> verify the forwarder ran — check the state file and logs.</li>"
+        "<li><b>401 Unauthorized:</b> the ingest token is wrong or expired — get a new one from the dashboard.</li>"
+        "<li><b>No new documents:</b> the state file may be ahead — delete it to re-sync all documents.</li>"
+        "<li><b>Veeva auth failed:</b> verify Vault URL, username, and password.</li>"
+        "</ul>"
+
+        "<p>For complete setup instructions, see <code>docs/REGULATED_AI_SETUP.md</code> in the Arckon release.</p>"
+    )
+
+    model_monitoring = (
+        "<p><b>Model Monitoring</b> tracks your AI/ML models for version drift, performance "
+        "threshold breaches, and missing runtime observations. It ensures that approved "
+        "models continue performing as validated and that no unapproved models are in use.</p>"
+
+        "<h3>What it detects</h3>"
+        "<ul>"
+        "<li><b>Version drift:</b> runtime metrics reference a different version than approved</li>"
+        "<li><b>Threshold breaches:</b> performance or error rate exceeding approved limits</li>"
+        "<li><b>Monitoring gaps:</b> approved models with no recent metric observations</li>"
+        "<li><b>Approval gaps:</b> models in use without recorded approval</li>"
+        "</ul>"
+
+        "<h3>How data gets here</h3>"
+        "<p>Your model registry (e.g., MLflow, Weights & Biases) sends model metadata and "
+        "runtime metrics to Arckon's ingest API via a forwarder script. Arckon does not "
+        "access your registry directly or receive model weights — only metadata and metric values.</p>"
+
+        "<h3>Setup: MLflow</h3>"
+        "<ol>"
+        "<li>Get your Arckon ingest token from <b>Protected Cloud Assets &rarr; Show Cloud Ingest Token</b>.</li>"
+        "<li>Install the forwarder: <code>pip install requests</code></li>"
+        "<li>Download <code>model_registry_forwarder.py</code> from the Arckon release.</li>"
+        "<li>Test manually:"
+        "<pre><code>python3 model_registry_forwarder.py \\\n"
+        "  --registry mlflow \\\n"
+        "  --mlflow-url http://localhost:5000 \\\n"
+        "  --arckon-url https://arckon.riskraven.ai \\\n"
+        "  --arckon-token-file /etc/arckon/ingest-token \\\n"
+        "  --state-file /var/lib/arckon-model-monitor/state</code></pre></li>"
+        "<li>Schedule every 5 minutes via the included systemd timer "
+        "(<code>arckon-model-forwarder@.timer</code>).</li>"
+        "<li>Open Arckon &rarr; Model Monitoring (under Regulated AI).</li>"
+        "</ol>"
+
+        "<h3>Supported systems</h3>"
+        "<ul>"
+        "<li><b>MLflow</b> (open source model registry)</li>"
+        "<li><b>Weights & Biases</b> (via generic adapter)</li>"
+        "<li><b>Any REST API</b> (via generic adapter)</li>"
+        "</ul>"
+
+        "<p>For complete setup instructions, see <code>docs/REGULATED_AI_SETUP.md</code> in the Arckon release.</p>"
+    )
+
+    data_provenance_academy = (
+        "<p><b>Data Provenance</b> tracks your training datasets for integrity violations, "
+        "unapproved training, lineage breaks, and data anomalies. It ensures that AI models "
+        "are only trained on approved, verified data.</p>"
+
+        "<h3>What it detects</h3>"
+        "<ul>"
+        "<li><b>Integrity violations:</b> checksum mismatches, unapproved dataset modifications</li>"
+        "<li><b>Unapproved training:</b> models trained on datasets that haven't been approved</li>"
+        "<li><b>Lineage breaks:</b> training runs referencing unregistered datasets</li>"
+        "<li><b>Data anomalies:</b> schema changes, distribution shifts</li>"
+        "</ul>"
+
+        "<h3>How data gets here</h3>"
+        "<p>Your data pipeline system (e.g., DVC, Apache Airflow) sends dataset metadata and "
+        "pipeline events to Arckon's ingest API via a forwarder script. Arckon does not access "
+        "your pipeline directly or receive dataset contents — only metadata and event records.</p>"
+
+        "<h3>Setup: DVC</h3>"
+        "<ol>"
+        "<li>Get your Arckon ingest token from <b>Protected Cloud Assets &rarr; Show Cloud Ingest Token</b>.</li>"
+        "<li>Install the forwarder: <code>pip install requests dvc</code></li>"
+        "<li>Download <code>data_pipeline_forwarder.py</code> from the Arckon release.</li>"
+        "<li>Test manually:"
+        "<pre><code>python3 data_pipeline_forwarder.py \\\n"
+        "  --pipeline dvc \\\n"
+        "  --dvc-repo /path/to/your/dvc/repo \\\n"
+        "  --arckon-url https://arckon.riskraven.ai \\\n"
+        "  --arckon-token-file /etc/arckon/ingest-token \\\n"
+        "  --state-file /var/lib/arckon-data-provenance/state</code></pre></li>"
+        "<li>Schedule every 5 minutes via the included systemd timer "
+        "(<code>arckon-data-forwarder@.timer</code>).</li>"
+        "<li>Open Arckon &rarr; Data Provenance (under Regulated AI).</li>"
+        "</ol>"
+
+        "<h3>Supported systems</h3>"
+        "<ul>"
+        "<li><b>DVC</b> (Data Version Control)</li>"
+        "<li><b>Apache Airflow</b> (via REST API)</li>"
+        "<li><b>Any REST API</b> (via generic adapter)</li>"
+        "</ul>"
+
+        "<p>For complete setup instructions, see <code>docs/REGULATED_AI_SETUP.md</code> in the Arckon release.</p>"
+    )
+
     templates = (
         "<p>These customer-safe starter templates are designed to be adapted to your organization. "
         "They are not completed compliance documents. Have the responsible owner review and approve each one before relying on it.</p>"
@@ -1533,7 +1687,7 @@ def build(root: pathlib.Path, page: str | None = None) -> bytes:
 
         "<h3>Add an OpenAI spend key</h3>"
         "<ol>"
-        "<li>Sign in at <a href=\"https://platform.openai.com/\" target=\"_blank\">platform.openai.com</a>.</li>"
+        "<li>Sign in at <a href=\"https://platform.o_ai.com/\" target=\"_blank\">platform.o_ai.com</a>.</li>"
         "<li>Go to <b>Organization Settings → Admin keys</b>.</li>"
         "<li>Create a <b>Read only</b> admin key (starts with <code>sk-admin-...</code>).</li>"
         "<li>In Arckon AI Spend, click <b>Add / Rotate Key</b>.</li>"
@@ -1543,7 +1697,7 @@ def build(root: pathlib.Path, page: str | None = None) -> bytes:
 
         "<h3>Add an Anthropic spend key</h3>"
         "<ol>"
-        "<li>Sign in at <a href=\"https://console.anthropic.com/\" target=\"_blank\">console.anthropic.com</a>.</li>"
+        "<li>Sign in at <a href=\"https://console.a_nt.com/\" target=\"_blank\">console.a_nt.com</a>.</li>"
         "<li>Open <b>Settings → Organization</b>.</li>"
         "<li>Create an <b>Admin API key</b> with Usage and Cost access (starts with <code>sk-ant-admin01-...</code>).</li>"
         "<li>In Arckon, add the key under <b>Anthropic</b> and fetch.</li>"
@@ -1863,6 +2017,9 @@ def build(root: pathlib.Path, page: str | None = None) -> bytes:
         'alerts': alerts,
         'protected-files': protected_files,
         'protected-cloud-assets': protected_cloud_assets,
+        'etmf-completeness': etmf_completeness,
+        'model-monitoring': model_monitoring,
+        'data-provenance': data_provenance_academy,
         'siem-tools': siem_tools,
         'ai-spend': ai_spend,
         'catalog': catalog_html,

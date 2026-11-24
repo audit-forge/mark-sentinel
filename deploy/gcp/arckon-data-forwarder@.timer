@@ -1,0 +1,10 @@
+[Unit]
+Description=Run Arckon data provenance forwarder for %i every 5 minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=5min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

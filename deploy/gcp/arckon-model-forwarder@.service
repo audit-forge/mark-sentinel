@@ -1,0 +1,10 @@
+[Unit]
+Description=Arckon model monitoring forwarder for %i
+After=network-online.target
+Wants=network-online.target
+ConditionPathExists=/etc/arckon-regulated-ai/%i.env
+
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/arckon-regulated-ai/%i.env
+ExecStart=/usr/bin/docker run --rm --name arckon-model-forwarder-%i --network sentinel-net --read-only --tmpfs /tmp --cap-drop ALL --security-opt no-new-privileges --memory 256m --cpus 0.25 -v /opt/sentinel-secrets/%i/ingest-token:/run/secrets/arckon-ingest-token:ro -v /opt/arckon-regulated-ai/%i/model-state:/var/lib/arckon-model-monitor:rw arckon-regulated-ai-forwarder:latest python3 /app/model_registry_forwarder.py --registry ${REGISTRY_TYPE} ${REGISTRY_ARGS} --arckon-url http://sentinel-%i:7331 --arckon-token-file /run/secrets/arckon-ingest-token --state-file /var/lib/arckon-model-monitor/state
