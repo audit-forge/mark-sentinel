@@ -6010,20 +6010,33 @@ load();
         try:
             store = self._store()
             from checks.ai_optimization import assess_ai_optimization
-            sessions = store.get_ai_sessions_summary(days=30)
+            summary = store.get_ai_sessions_summary(days=30)
             sessions_list = []
-            if isinstance(sessions, dict) and 'tools' in sessions:
-                for t in sessions['tools']:
+            if isinstance(summary, dict):
+                by_tool = summary.get('by_tool', [])
+                for t in by_tool:
                     sessions_list.append({
                         'tool_name': t.get('tool_name', ''),
-                        'tool_category': t.get('tool_category', ''),
+                        'tool_category': '',
                         'duration_seconds': t.get('total_seconds', 0),
-                        'device_id': t.get('device_id', ''),
+                        'device_id': 'device',
                     })
-            elif isinstance(sessions, list):
-                sessions_list = sessions
-            spend = store.get_ai_spend_records(days=30) if hasattr(store, 'get_ai_spend_records') else []
+            # Get tool categories from endpoint inventory
             inventory = store.list_endpoint_ai_inventory(limit=500)
+            cat_map = {}
+            for inv in inventory:
+                cat_map[inv.get('tool_name', '').lower()] = inv.get('tool_category', '')
+            # Assign categories to sessions
+            for s in sessions_list:
+                s['tool_category'] = cat_map.get(s['tool_name'].lower(), 'unknown')
+            spend = []
+            try:
+                spend_rows = store.get_ai_spend_summary(days=30) if hasattr(store, 'get_ai_spend_summary') else None
+                if isinstance(spend_rows, dict):
+                    for provider, cost in spend_rows.get('by_provider', {}).items():
+                        spend.append({'provider': provider, 'model': '', 'total_cost': cost, 'total_tokens': 0})
+            except Exception:
+                pass
             governance = {}
             for inv in inventory:
                 governance[inv.get('tool_name', '').lower()] = inv.get('governance_status', 'shadow')
