@@ -1572,6 +1572,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             '/api/etmf/status': self._api_get_etmf_status,
             '/api/model-monitoring/status': self._api_get_model_monitoring_status,
             '/api/data-provenance/status': self._api_get_data_provenance_status,
+            '/api/ai-optimization/status': self._api_get_ai_optimization_status,
             '/api/siem/config':      self._api_get_siem_config,
             '/api/live-scan-config': self._api_get_live_scan_config,
             '/api/fleet/live-stats': self._api_fleet_live_stats,
@@ -6004,6 +6005,34 @@ load();
             log.error('data provenance status: %s', e, exc_info=True)
             self._json({'error': str(e)}, 500)
 
+    def _api_get_ai_optimization_status(self):
+        """GET /api/ai-optimization/status — AI usage optimization recommendations."""
+        try:
+            store = self._store()
+            from checks.ai_optimization import assess_ai_optimization
+            sessions = store.get_ai_sessions_summary(days=30)
+            sessions_list = []
+            if isinstance(sessions, dict) and 'tools' in sessions:
+                for t in sessions['tools']:
+                    sessions_list.append({
+                        'tool_name': t.get('tool_name', ''),
+                        'tool_category': t.get('tool_category', ''),
+                        'duration_seconds': t.get('total_seconds', 0),
+                        'device_id': t.get('device_id', ''),
+                    })
+            elif isinstance(sessions, list):
+                sessions_list = sessions
+            spend = store.get_ai_spend_records(days=30) if hasattr(store, 'get_ai_spend_records') else []
+            inventory = store.list_endpoint_ai_inventory(limit=500)
+            governance = {}
+            for inv in inventory:
+                governance[inv.get('tool_name', '').lower()] = inv.get('governance_status', 'shadow')
+            result = assess_ai_optimization(sessions_list, spend, inventory, governance)
+            self._json(result)
+        except Exception as e:
+            log.error('ai optimization status: %s', e, exc_info=True)
+            self._json({'error': str(e)}, 500)
+
     def _api_get_protected_paths(self):
         store = self._store()
         try:
@@ -8148,6 +8177,7 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
         <button class="sb-item" id="nav-network-assets" onclick="navTo('network-assets')">&#127760; Network Inventory</button>
         <button class="sb-item" id="nav-inventory" onclick="navTo('inventory')">&#129302; AI Asset Inventory</button>
         <button class="sb-item" id="nav-spend" onclick="navTo('spend')">&#128176; AI Spend</button>
+       <button class="sb-item" id="nav-ai-optimization" onclick="navTo('ai-optimization')">&#9889; AI Optimization</button>
         <button class="sb-item" id="nav-alerts" onclick="navTo('alerts')">&#128276; Alerts <span id="alert-badge" style="display:none;background:#DC2626;color:#fff;border-radius:10px;font-size:10px;padding:1px 6px;margin-left:4px;font-weight:700"></span></button>
         <button class="sb-item" id="nav-mcp" onclick="navTo('mcp')">&#128279; MCP Servers</button>
       </div>
@@ -8725,6 +8755,39 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
   </div>
   <div id="inv-body">
     <div style="color:#6B7280;font-size:13px;padding:16px 0">Loading inventory…</div>
+  </div>
+  </div>
+
+  <div class="page" id="page-ai-optimization">
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:8px">
+    <div>
+      <div class="sec-hdr" style="margin:0;padding:0">AI Optimization</div>
+      <div style="font-size:12px;color:#6B7280;margin-top:4px">Analyzes AI usage patterns and spend to recommend cost savings, eliminate redundant tools, and shepherd users toward optimal AI choices.</div>
+    </div>
+    <button onclick="loadAIOptimization()" class="scan-btn" style="font-size:12px">&#128260; Refresh</button>
+  </div>
+  <div style="background:#f0f4ff;border:1px solid #c7d2fe;border-radius:6px;padding:12px 14px;margin-bottom:14px;font-size:12px;color:#374151;line-height:1.6">
+    <strong>What this page shows:</strong> Recommendations for supervising and optimizing your organization's AI usage.
+    Includes model right-sizing (switching to cheaper models for simple tasks), redundant subscription detection,
+    local model opportunities, shadow AI cost alerts, and shepherding actions to guide users toward approved, cost-effective AI tools.
+    <br><br>
+    <strong>How data gets here:</strong> Arckon analyzes existing AI session tracking, spend data, and endpoint inventory — no additional integration required.
+  </div>
+  <div id="ai-opt-empty" style="color:#6B7280;font-size:13px;padding:24px 0">No AI usage data available. Ensure agents are reporting AI sessions and spend data is configured.</div>
+  <div id="ai-opt-content" style="display:none">
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-bottom:18px">
+      <div style="background:#fff;border:1px solid #E5E7EB;border-radius:7px;padding:13px 15px"><div id="opt-sessions" style="font-size:23px;font-weight:700;color:#111827">--</div><div style="font-size:11px;color:#6B7280;text-transform:uppercase;letter-spacing:.06em;margin-top:3px">Total Sessions</div></div>
+      <div style="background:#fff;border:1px solid #E5E7EB;border-radius:7px;padding:13px 15px"><div id="opt-tools" style="font-size:23px;font-weight:700;color:#111827">--</div><div style="font-size:11px;color:#6B7280;text-transform:uppercase;letter-spacing:.06em;margin-top:3px">AI Tools in Use</div></div>
+      <div style="background:#fff;border:1px solid #E5E7EB;border-radius:7px;padding:13px 15px"><div id="opt-cost" style="font-size:23px;font-weight:700;color:#111827">--</div><div style="font-size:11px;color:#6B7280;text-transform:uppercase;letter-spacing:.06em;margin-top:3px">Est. Monthly Cost</div></div>
+      <div style="background:#fff;border:1px solid #E5E7EB;border-radius:7px;padding:13px 15px"><div id="opt-savings" style="font-size:23px;font-weight:700;color:#16A34A">--</div><div style="font-size:11px;color:#6B7280;text-transform:uppercase;letter-spacing:.06em;margin-top:3px">Potential Savings</div></div>
+      <div style="background:#fff;border:1px solid #E5E7EB;border-radius:7px;padding:13px 15px"><div id="opt-recs" style="font-size:23px;font-weight:700;color:#F59E0B">--</div><div style="font-size:11px;color:#6B7280;text-transform:uppercase;letter-spacing:.06em;margin-top:3px">Recommendations</div></div>
+    </div>
+    <div class="sec-hdr" style="margin-bottom:8px">Recommendations</div>
+    <div id="opt-recommendations" style="margin-bottom:18px"></div>
+    <div class="sec-hdr" style="margin-bottom:8px">Shepherding Actions</div>
+    <div id="opt-shepherding" style="margin-bottom:18px"></div>
+    <div class="sec-hdr" style="margin-bottom:8px">Usage by Tool</div>
+    <div id="opt-usage" style="margin-bottom:18px"></div>
   </div>
   </div>
 
@@ -9500,6 +9563,7 @@ function navTo(page) {{
   if (page === 'alerts') {{ loadActiveIssues(); loadAlertEvents(); }}
    if (page === 'network-assets') {{ loadNetworkAssetScans(); }}
    if (page === 'spend') {{ loadSpend(); }}
+    if (page === 'ai-optimization') {{ loadAIOptimization(); }}
     if (page === 'protected-files') {{ loadProtectedPaths(); loadAccessEvents(); loadPFAuditLog(); loadPFChainStatus(); }}
     if (page === 'protected-cloud-assets') {{ loadProtectedCloudAssets(); loadProtectedCloudEvents(); }}
    if (page === 'etmf') {{ loadETMFStudies(); }}
@@ -13295,6 +13359,85 @@ function renderDataProvenanceStatus(d) {{
   fEl.innerHTML = findings.length
     ? findings.map(f => '<div style="background:#fff;border:1px solid #E5E7EB;border-left:3px solid ' + (f.severity==='CRITICAL'?'#991B1B':f.severity==='HIGH'?'#DC2626':f.severity==='MEDIUM'?'#F59E0B':'#6B7280') + ';border-radius:6px;padding:10px 14px;margin-bottom:6px"><div style="font-size:13px;font-weight:600">' + esc(f.title) + '</div><div style="font-size:11px;color:#6B7280;margin-top:4px">' + esc(f.detail) + '</div></div>').join('')
     : '<div style="color:#16A34A;font-size:13px">No findings.</div>';
+}}
+
+// ── AI Optimization ────────────────────────────────────────────────────────
+
+async function loadAIOptimization() {{
+  try {{
+    const r = await fetch('/api/ai-optimization/status');
+    if (!r.ok) throw new Error(r.status);
+    const d = await r.json();
+    renderAIOptimization(d);
+  }} catch (e) {{
+    console.error('AI optimization load error:', e);
+  }}
+}}
+
+function renderAIOptimization(d) {{
+  if (!d || d.total_sessions === 0) {{
+    document.getElementById('ai-opt-empty').style.display = 'none';
+    document.getElementById('ai-opt-content').style.display = 'block';
+    document.getElementById('opt-sessions').textContent = '0';
+    document.getElementById('opt-tools').textContent = '0';
+    document.getElementById('opt-cost').textContent = '$0';
+    document.getElementById('opt-savings').textContent = '$0';
+    document.getElementById('opt-recs').textContent = '0';
+    document.getElementById('opt-recommendations').innerHTML = '<div style="color:#6B7280;font-size:13px">No AI sessions detected in the last 30 days. Ensure agents are enrolled and reporting.</div>';
+    document.getElementById('opt-shepherding').innerHTML = '<div style="color:#6B7280;font-size:13px">No shepherding actions needed.</div>';
+    document.getElementById('opt-usage').innerHTML = '';
+    return;
+  }}
+  document.getElementById('ai-opt-empty').style.display = 'none';
+  document.getElementById('ai-opt-content').style.display = 'block';
+
+  document.getElementById('opt-sessions').textContent = d.total_sessions || 0;
+  document.getElementById('opt-tools').textContent = d.total_tools || 0;
+  document.getElementById('opt-cost').textContent = '$' + (d.estimated_monthly_cost || 0).toFixed(2);
+  const savings = d.potential_monthly_savings || 0;
+  const savingsEl = document.getElementById('opt-savings');
+  savingsEl.textContent = '$' + savings.toFixed(2);
+  savingsEl.style.color = savings > 0 ? '#16A34A' : '#6B7280';
+  document.getElementById('opt-recs').textContent = d.recommendation_count || 0;
+
+  // Render recommendations
+  const recs = d.recommendations || [];
+  const recsEl = document.getElementById('opt-recommendations');
+  recsEl.innerHTML = recs.length ? recs.map(r => {{
+    const sevColor = r.severity === 'HIGH' ? '#DC2626' : r.severity === 'MEDIUM' ? '#F59E0B' : '#6B7280';
+    const savingsText = r.potential_savings > 0 ? '<span style="font-size:11px;color:#16A34A;font-weight:600;margin-left:8px">Save $' + r.potential_savings.toFixed(2) + '/mo</span>' : '';
+    return '<div style="background:#fff;border:1px solid #E5E7EB;border-left:3px solid ' + sevColor + ';border-radius:6px;padding:10px 14px;margin-bottom:6px">' +
+      '<div style="font-size:13px;font-weight:600">' + esc(r.title) + savingsText + '</div>' +
+      '<div style="font-size:12px;color:#6B7280;margin-top:4px">' + esc(r.detail) + '</div>' +
+      '<div style="font-size:11px;color:#4F46E5;margin-top:6px"><b>Action:</b> ' + esc(r.action) + '</div>' +
+      '</div>';
+  }}).join('') : '<div style="color:#16A34A;font-size:13px">No optimization recommendations — your AI usage is well-optimized.</div>';
+
+  // Render shepherding actions
+  const actions = d.shepherding_actions || [];
+  const shepEl = document.getElementById('opt-shepherding');
+  shepEl.innerHTML = actions.length ? actions.map(a => {{
+    const savingsText = a.savings > 0 ? '<span style="font-size:11px;color:#16A34A;margin-left:8px">Save $' + a.savings.toFixed(2) + '/mo</span>' : '';
+    let detail = a.reason || '';
+    if (a.from && a.to) detail = 'From: ' + (Array.isArray(a.from) ? a.from.join(', ') : a.from) + ' &rarr; To: ' + (Array.isArray(a.to) ? a.to.join(', ') : a.to) + '. ' + detail;
+    if (a.tool) detail = 'Tool: ' + a.tool + '. ' + detail;
+    return '<div style="background:#fff;border:1px solid #E5E7EB;border-left:3px solid #4F46E5;border-radius:6px;padding:10px 14px;margin-bottom:6px">' +
+      '<div style="font-size:13px;font-weight:600">' + esc(a.action) + savingsText + '</div>' +
+      '<div style="font-size:12px;color:#6B7280;margin-top:4px">' + detail + '</div>' +
+      '</div>';
+  }}).join('') : '<div style="color:#6B7280;font-size:13px">No shepherding actions needed.</div>';
+
+  // Render usage by tool
+  const usage = d.usage_by_tool || {{}};
+  const usageEl = document.getElementById('opt-usage');
+  const sorted = Object.entries(usage).sort((a, b) => b[1].sessions - a[1].sessions);
+  usageEl.innerHTML = sorted.length ? sorted.map(([tool, u]) => {{
+    const hours = (u.total_duration / 3600).toFixed(1);
+    return '<div style="background:#fff;border:1px solid #E5E7EB;border-radius:6px;padding:8px 14px;margin-bottom:4px;display:flex;justify-content:space-between;align-items:center">' +
+      '<div><strong style="font-size:13px">' + esc(tool) + '</strong> <span style="font-size:11px;color:#6B7280">' + esc(u.category || '') + '</span></div>' +
+      '<div style="font-size:12px;color:#6B7280">' + u.sessions + ' sessions &middot; ' + hours + 'h &middot; ' + u.devices + ' device(s)</div>' +
+      '</div>';
+  }}).join('') : '';
 }}
 
 // ── Protected Files monitoring ──────────────────────────────────────────────
