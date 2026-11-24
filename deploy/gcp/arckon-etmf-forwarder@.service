@@ -1,0 +1,10 @@
+[Unit]
+Description=Arckon eTMF forwarder for %i
+After=network-online.target
+Wants=network-online.target
+ConditionPathExists=/etc/arckon-regulated-ai/%i.env
+
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/arckon-regulated-ai/%i.env
+ExecStart=/usr/bin/docker run --rm --name arckon-etmf-forwarder-%i --network sentinel-net --read-only --tmpfs /tmp --cap-drop ALL --security-opt no-new-privileges --memory 256m --cpus 0.25 -v /opt/sentinel-secrets/%i/ingest-token:/run/secrets/arckon-ingest-token:ro -v /opt/arckon-regulated-ai/%i/state:/var/lib/arckon-etmf:rw arckon-regulated-ai-forwarder:latest python3 /app/etmf_forwarder.py --etmf-system ${ETMF_SYSTEM} ${VAULT_ARGS} --arckon-url http://sentinel-%i:7331 --arckon-token-file /run/secrets/arckon-ingest-token --study-id ${STUDY_ID} --state-file /var/lib/arckon-etmf/state

@@ -1,0 +1,10 @@
+[Unit]
+Description=Arckon data provenance forwarder for %i
+After=network-online.target
+Wants=network-online.target
+ConditionPathExists=/etc/arckon-regulated-ai/%i.env
+
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/arckon-regulated-ai/%i.env
+ExecStart=/usr/bin/docker run --rm --name arckon-data-forwarder-%i --network sentinel-net --read-only --tmpfs /tmp --cap-drop ALL --security-opt no-new-privileges --memory 256m --cpus 0.25 -v /opt/sentinel-secrets/%i/ingest-token:/run/secrets/arckon-ingest-token:ro -v /opt/arckon-regulated-ai/%i/data-state:/var/lib/arckon-data-provenance:rw arckon-regulated-ai-forwarder:latest python3 /app/data_pipeline_forwarder.py --pipeline ${PIPELINE_TYPE} ${PIPELINE_ARGS} --arckon-url http://sentinel-%i:7331 --arckon-token-file /run/secrets/arckon-ingest-token --state-file /var/lib/arckon-data-provenance/state
