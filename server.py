@@ -417,7 +417,7 @@ def _agent_token() -> str:
 
 
 def _cloud_ingest_token() -> str:
-    """Return this customer's dedicated CloudTrail ingest token.
+    """Return this customer's dedicated cloud ingest token.
 
     Stored in the mounted customer data directory with mode 0600 rather than
     an environment variable, so Docker inspect and process listings cannot
@@ -1719,7 +1719,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                 return
             self._api_agent_ai_inventory()
             return
-        # CloudTrail forwarders use a dedicated ingest token. Never reuse an
+        # Cloud asset forwarders use a dedicated ingest token. Never reuse an
         # endpoint-agent token for an external cloud integration.
         if path == '/api/cloud-assets/events':
             self._api_cloud_asset_events()
@@ -8691,7 +8691,7 @@ body{{background:#F9FAFB;color:#111827;font-family:ui-sans-serif,system-ui,sans-
   <div class="sec-hdr" style="font-size:15px;margin-bottom:10px">Policies
     <button onclick="showCloudAssetForm()" style="margin-left:auto;font-size:12px;background:#4F46E5;color:#fff;border:none;border-radius:4px;padding:5px 14px;cursor:pointer">+ Add Cloud Policy</button>
   </div>
-  <button onclick="showCloudIngestToken()" class="scan-btn" style="font-size:12px;margin-bottom:12px">Show CloudTrail Forwarder Token</button><span id="ca-token" style="font-size:11px;font-family:monospace;word-break:break-all;margin-left:8px"></span>
+  <button onclick="showCloudIngestToken()" class="scan-btn" style="font-size:12px;margin-bottom:12px">Show Cloud Ingest Token</button><span id="ca-token" style="font-size:11px;font-family:monospace;word-break:break-all;margin-left:8px"></span>
   <div id="cloud-asset-form" style="display:none;background:#f0f4ff;border:1px solid #c7d2fe;border-radius:6px;padding:14px;margin-bottom:12px">
     <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:end">
       <div><label style="font-size:11px;color:#6B7280;display:block;margin-bottom:3px">Provider</label><select id="ca-provider" onchange="updateCloudScopeHint()" style="padding:6px 10px;border:1px solid #D1D5DB;border-radius:4px;font-size:13px"><option value="aws">AWS S3</option><option value="azure">Azure Blob</option><option value="gcp">GCP Cloud Storage</option><option value="gworkspace">Google Workspace Drive</option></select></div>
